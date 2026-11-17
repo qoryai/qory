@@ -1296,7 +1296,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			// The agent's session is the run's first join, so the gateway numbers it 1.
-			suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, extensions: extensions, said: said})
+			suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, fullSuite: fullSuiteOf(fromCode), inputs: inputsOf(fromCode), extensions: extensions, said: said})
 			closeRoute := route.open(1)
 			res, err := joinSession(run, ctx, spec.SessionSpec)
 			closeRoute()

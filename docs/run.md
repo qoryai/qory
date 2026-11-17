@@ -3293,10 +3293,9 @@ channel `qory_host`.
 ### The full suite
 
 qory runs the repository's full test suite after a session, in the session's after step, and
-posts the verdict of a red suite. A session runs the suite when all of these hold: the run has a
-wall, the run may write, Qory Apiary's next-session answer for the session is yes for the suite,
-and the work item's build plan has a `full` row with a command. With no such answer, a run runs
-no suite. A session of such a run that does not move HEAD runs none either.
+posts a verdict for a suite that did not pass. A session runs the suite when the run documents
+have `full_suite` true, the run has a wall, the run may write, and the work item's build plan has
+a `full` row with a command. A session of such a run that does not move HEAD runs none.
 
 **Command.** The command is the `full` row of the table under `## Commands` in the build plan
 of the artifact `build-plan`: the name `main`, or the one name the work item has, at its newest
@@ -3313,31 +3312,38 @@ egress policy, none of the run's variables and no route to qory. The container r
 of qory:
 
 1. It deletes `.git/qory-suite` in the workspace and makes it again.
-2. When HEAD is still the commit that the session started at, it writes `skipped` to
-   `.git/qory-suite/status` and exits 0. The suite is `skipped`: it runs no command, qory posts
-   nothing and prints `the full suite did not run: the session left HEAD at the commit it started at`.
-3. Otherwise it clones HEAD with `git clone --no-local --no-hardlinks -c core.hooksPath=/dev/null` into a new
-   folder of the container, checks out HEAD there, deletes the result file in the clone, writes
-   `ran <commit>` to the status file, and runs `sh -c <command>` in the clone with a home
-   folder that the command can write. A file that the agent left untracked or ignored in the
-   workspace is not in the clone, and a result file that a commit has does not count.
-4. It copies the result file of the clone, when the command wrote a regular file there, to
-   `.git/qory-suite/result`, and exits with the command's exit status.
+2. When git cannot read HEAD, or HEAD has no commit but the session started at one, it exits 72.
+3. When HEAD is still the commit that the session started at (or has no commit and the
+   session started at none), it writes `skipped` to `.git/qory-suite/status` and exits 0. The suite
+   is `skipped`: it runs no command, qory posts nothing and prints `the full suite did not run:
+   the session left HEAD at the commit it started at`.
+4. Otherwise it runs `git -c core.hooksPath=/dev/null -c protocol.file.allow=always clone
+   --no-local --no-hardlinks --no-checkout` of the workspace into a new folder of the container,
+   then checks out HEAD there. The setting `protocol.file.allow=always` is for that clone only:
+   the after step's environment sets `protocol.allow=never`, which refuses a clone from a path.
+   The clone does not copy the workspace's `.git/config`. A failure exits 71.
+5. It deletes the result file in the clone, writes `ran <commit>` to the status file, and runs
+   `sh -c <command>` in the clone with a home folder that the command can write, and with
+   `GIT_CONFIG_COUNT` unset, so the command's git has no limit on its transports. A file that the
+   agent left untracked or ignored in the workspace is not in the clone, and a result file that a
+   commit has does not count.
+6. It copies the result file of the clone, when the command wrote a regular file there, the last
+   64 KiB of the command's output and the seconds the command took to `.git/qory-suite`, and
+   exits with the command's exit status.
 
-The image needs `sh`, `git`, `mktemp` and `cp`. git runs as the container's user with no
-configuration file of the machine, and the clone does not copy the workspace's `.git/config`.
-The command and the result file are arguments of the script, not part of its text.
-
-The suite's code runs with the workspace mounted for writing, so it can write the files of
-`.git/qory-suite`, or move HEAD or a ref in the workspace. qory reads the files with a read that stays below the workspace, and removes the
-folder before the copy step and the push step.
+The image needs `sh`, `git`, `mktemp`, `cp`, `tee`, `tail` and `date`. The command and the result
+file are arguments of the script, not part of its text. The suite's code runs with the workspace
+mounted for writing, so it can write the files of `.git/qory-suite`, or move HEAD or a ref in the
+workspace. qory reads the files with a read that stays below the workspace, and removes the folder
+before the copy step and the push step.
 
 **Limit.** A suite may take 60 minutes. A repository sets another limit in `qory.yaml`, in
 `harness.extensions.software-factory.command_limits_minutes.full_suite`, a whole number from 1 to
 60; qory reads it from the harness composed at `target_version`, so a commit on the work item's
-branch does not change it. Any other value is read as 60. The limit is the after step's time
-limit. It starts when the agent's container is removed and adds to `--timeout`: a run can last
-`--timeout` plus the limit. A suite past the limit is cut and ends `timeout`.
+branch does not change it. Any other value is read as 60. The limit is the time limit of the
+after step, which includes starting the step. The run's `--timeout` covers the agent's runtime
+alone, so a run can last `--timeout` plus the limit. A step past the limit is cut and the suite
+ends `timeout`.
 
 **Result file.** qory reads the copy of the result file only when the command wrote it. It reads a
 regular file of at most 16 MiB, with no link on the way. The format is JUnit XML, the form that
@@ -3350,44 +3356,73 @@ states more tests, failures or skipped tests than its testcases have, or a `fail
 **State.** The suite is `failed` when the script ends before the command ran, when the command
 exits other than 0, when a test failed, and when it ran 0 tests. Skipped tests do not fail it.
 With exit status 0 and no readable result file, the suite is `passed` and has no counts.
-`timeout` is a step that the limit cut. A step that a stop of `qory run` cut is `stopped`: qory
-posts the verdict with the point `The full suite did not finish: the run was stopped.`, with
-one request that has 5 seconds, and closes the run `cancelled` with the reason `interrupted`
-and exit status 1, whether or not the post worked.
+`timeout` is a step that the limit cut. A step that a stop of `qory run` cut is `stopped`.
+
+**The file of `review.suite_result`.** When the run's inputs have `review.suite_result`, a clean
+absolute path, qory writes the suite's result there, mode 0644, before it posts a verdict, for
+every end and also after a session that did not succeed. The file is JSON with `commit`, `state`,
+`counts`, `minutes` and `output`. `state` is `passed`, `failed`, `timeout`, `stopped`, `skipped`
+or `did_not_run`, for a session whose after step did not run. `counts` and `minutes` are `null`
+when qory cannot read them, `minutes` is the cap for a `timeout`, and `output` is the last 64 KiB
+of the command's output with the run's secrets masked. The folder of the file must exist and be
+no link. A file that qory cannot write gives the line `Check the folder of review.suite_result,
+then run the stage again.` and nothing else changes. With no `review.suite_result`, qory writes
+nothing.
 
 **After the session.** When the session succeeded and the suite ended, qory prints `the full
 suite on <commit> is <state>` with the counts. A `passed` suite posts nothing, and the agent's
-verdict stands. A red suite (`failed` or `timeout`) makes qory post a verdict through the run API:
+verdict stands. A suite that did not pass makes qory post a verdict through the run API.
 
-| The run's newest verdict | What qory posts |
+A red suite, whose command ran (`failed` or `timeout`):
+
+| The agent's newest verdict in this run | What qory posts |
 |---|---|
 | none, or `passed` | `changes-requested` with one point |
 | `changes-requested` | nothing: the verdict stands |
 | `escalate` with up to 19 points | the same `escalate` and `track`, with that point added |
 | `escalate` with 20 points | nothing: the verdict stands |
 
+A suite that did not start, because the after step could not run or the script ended before the
+command (exit 70, 71, 72 or another status, or -1): a setup fault that no change to the code mends.
+
+| The agent's newest verdict in this run | What qory posts |
+|---|---|
+| none, or `passed` | `escalate` with one point |
+| `escalate` or `changes-requested` with up to 19 points | the same verdict and `track`, with that point added |
+| 20 points | nothing: the verdict stands |
+
 A red suite does not end the run `failed` and does not change its exit status: the run closes
 as its session did, and the verdict starts the next round in Qory Apiary. If qory cannot post
 the verdict, it closes the run `failed` and exits 1, so a verdict of `passed` that the agent
-posted does not stand over a red suite.
+posted does not stand over a suite that did not pass. A stop of `qory run` that cuts the step
+posts the red verdict with the point `The full suite did not finish: the run was stopped.`, with
+one request that has 5 seconds, and closes the run `cancelled` with the reason `interrupted` and
+exit status 1, whether or not the post worked. qory checks each verdict against the verdict format
+before it posts it.
 
-The point has a text and a fix, each on one line. The text is, in this order of preference:
+The point has a text and, for a red suite, sometimes a fix, each on one line. The text is, in this
+order of preference:
 
+- For a suite that did not start, `The full suite did not start: <cause>.` The cause is `the after
+  step could not run` (-1), `the script could not make a folder it needs` (70), `git could not
+  clone HEAD of the workspace` (71), `git could not read HEAD of the workspace` (72), or `its
+  script exited with status <n> before the command ran`.
 - With a host that the proxy refused while the after step ran, `Allow <host> in the run's policy, or
   change the suite: it failed after <host> was refused.` With more hosts, the first and `and N
-  more`. qory cuts a host that makes the line pass 100 characters, the second mention first, and
-  ends it with `...`. qory reads the hosts from `events.jsonl` in the run's folder: events
-  `dev.qory.run.egress` with the decision `denied` and no channel, between the after step's
-  `dev.qory.run.step_started` and `dev.qory.run.step_exited`. A host that is no name or address
-  is left out.
-- `The full suite did not finish within <n> minutes, and qory stopped it.` for `timeout`.
+  more`. The words leave about 22 characters for the host named twice, so qory keeps the first
+  host whole when it fits, cuts the second mention, and ends a cut host with `...`. qory reads the
+  hosts from `events.jsonl` in the run's folder: events `dev.qory.run.egress` with the decision
+  `denied` and no channel, between the after step's `dev.qory.run.step_started` and
+  `dev.qory.run.step_exited`. A host that is no name or address, or an address with a zone, is left
+  out.
+- `The full suite did not finish: the after step reached its limit of <n> minutes.` for `timeout`.
 - `The full suite ran 0 tests, so it proves nothing.`, `The full suite failed: <failed> of <tests>
-  tests failed.`, `The full suite failed: its command exited with status <n>.`, `The full suite
-  failed: the totals of its result file do not match its testcases.`, or `The full suite did not
-  start: its script exited with status <n> before the command ran.`
+  tests failed.`, `The full suite failed: its command exited with status <n>.`, or `The full suite
+  failed: the totals of its result file do not match its testcases.`
 
-The fix is `Refused connections: the run's Connections tab, Denied.` when the run's events are not
-in the run's folder, as with a separate gateway, or when the after step had a refused connection.
+The fix is `Refused connections: the run's Connections tab, Denied.` for a red suite, when the run's
+events are not in the run's folder, as with a separate gateway, or when the after step had a
+refused connection.
 
 ## Credentials the agent never has
 

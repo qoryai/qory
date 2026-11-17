@@ -81,10 +81,14 @@ func TestReadRefusedLeavesOutAHostThatIsNoNameOrAddress(t *testing.T) {
 		egress(4, "2001:db8::1", "denied", ""),
 		egress(5, "192.0.2.7", "denied", ""),
 		egress(6, strings.Repeat("a", 254), "denied", ""),
-		exited(7, 2),
+		egress(7, "fe80::1%eth0", "denied", ""),
+		egress(8, "fe80::1%a\nb", "denied", ""),
+		egress(9, "fe80::1%a b", "denied", ""),
+		egress(10, "fe80::1%<b>", "denied", ""),
+		exited(11, 2),
 	)
 	got := suite.ReadRefused(file, 2)
-	if got.Denied != 5 || !slices.Equal(got.Hosts, []string{"2001:db8::1", "192.0.2.7"}) {
+	if got.Denied != 9 || !slices.Equal(got.Hosts, []string{"2001:db8::1", "192.0.2.7"}) {
 		t.Errorf("ReadRefused = %+v", got)
 	}
 }

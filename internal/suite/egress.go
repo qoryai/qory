@@ -45,7 +45,7 @@ func validHost(host string) bool {
 		return true
 	}
 	addr, err := netip.ParseAddr(host)
-	return err == nil && addr.String() == host
+	return err == nil && addr.Zone() == "" && addr.String() == host
 }
 
 // eventLine is the members of a line of events.jsonl that ReadRefused reads. Data is read

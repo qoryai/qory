@@ -319,9 +319,7 @@ func TestTheFirstLineOfThePointFollowsHowTheSuiteEnded(t *testing.T) {
 		{"unreadable counts", "ran " + suiteSHA, "tests: 4 passed", session.AfterResult{State: event.StateFailed, ExitCode: 2}, "The full suite failed: its command exited with status 2."},
 		{"no result file", "ran " + suiteSHA, "", session.AfterResult{State: event.StateFailed, ExitCode: 5}, "The full suite failed: its command exited with status 5."},
 		{"totals that do not match", "ran " + suiteSHA, `<testsuite tests="9"><testcase/></testsuite>`, session.AfterResult{State: event.StateSucceeded}, "The full suite failed: the totals of its result file do not match its testcases."},
-		{"the cap", "ran " + suiteSHA, "", session.AfterResult{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 143}, "The full suite did not finish within 7 minutes, and qory stopped it."},
-		{"no start", "", "", session.AfterResult{State: event.StateFailed, ExitCode: 71}, "The full suite did not start: its script exited with status 71 before the command ran."},
-		{"the after step did not start", "", "", session.AfterResult{State: event.StateFailed, ExitCode: -1}, "The full suite did not start: its script exited with status -1 before the command ran."},
+		{"the cap", "ran " + suiteSHA, "", session.AfterResult{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: 143}, "The full suite did not finish: the after step reached its limit of 7 minutes."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHelper(t)
@@ -441,6 +439,87 @@ func TestTheHostLineHasAtMost100CharactersAndAValidVerdict(t *testing.T) {
 	}
 	if got := hostsLine([]string{long}); !strings.Contains(got, "...") {
 		t.Errorf("a long host is not shown cut: %q", got)
+	}
+}
+
+// TestASuiteThatCannotStartPostsAnEscalate: a suite whose command never ran is a setup fault that
+// no change to the code mends. Over no verdict and over passed, qory posts escalate with the one
+// point; over an escalate of the agent it adds the point; over a changes-requested of the agent
+// it keeps that verdict and adds the point; over 20 points it posts nothing. The run closes as
+// its session did.
+func TestASuiteThatCannotStartPostsAnEscalate(t *testing.T) {
+	point := func(i int) string { return fmt.Sprintf(`{"text":"Point %d.","action":"run_again"}`, i) }
+	twenty := make([]string, 20)
+	for i := range twenty {
+		twenty[i] = point(i + 1)
+	}
+	for _, c := range []struct {
+		name  string
+		agent string
+		end   session.AfterResult
+		want  string
+	}{
+		{"the after step could not run", "", session.AfterResult{State: event.StateFailed, ExitCode: -1}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: the after step could not run.","action":"run_again"}]}`},
+		{"no folder", "", session.AfterResult{State: event.StateFailed, ExitCode: 70}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: the script could not make a folder it needs.","action":"run_again"}]}`},
+		{"no clone", "", session.AfterResult{State: event.StateFailed, ExitCode: 71}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}]}`},
+		{"no HEAD", "", session.AfterResult{State: event.StateFailed, ExitCode: 72}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: git could not read HEAD of the workspace.","action":"run_again"}]}`},
+		{"no shell", "", session.AfterResult{State: event.StateFailed, ExitCode: 127}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: its script exited with status 127 before the command ran.","action":"run_again"}]}`},
+		{"over passed", `{"verdict":"passed"}`, session.AfterResult{State: event.StateFailed, ExitCode: 71}, `{"verdict":"escalate","points":[{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}]}`},
+		{"over an escalate", `{"verdict":"escalate","points":[{"text":"Pick one.","action":"answer","question":"q1"}]}`, session.AfterResult{State: event.StateFailed, ExitCode: 71},
+			`{"verdict":"escalate","points":[{"text":"Pick one.","action":"answer","question":"q1"},{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}]}`},
+		{"over a changes-requested", `{"verdict":"changes-requested","points":[` + point(1) + `]}`, session.AfterResult{State: event.StateFailed, ExitCode: 71},
+			`{"verdict":"changes-requested","points":[` + point(1) + `,{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}]}`},
+		{"over a changes-requested with 20 points", `{"verdict":"changes-requested","points":[` + strings.Join(twenty, ",") + `]}`, session.AfterResult{State: event.StateFailed, ExitCode: 71}, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHelper(t)
+			if c.agent != "" {
+				h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: c.agent})
+			}
+			end := c.end
+			end.Step = 2
+			got, err := h.after(&end, succeeded)
+			if err != nil || got != succeeded {
+				t.Errorf("outcome %+v, error %v, want the session's outcome", got, err)
+			}
+			posted := h.api.verdicts()
+			switch {
+			case c.want == "" && len(posted) != 0:
+				t.Errorf("posted %q, want nothing", posted)
+			case c.want != "" && (len(posted) != 1 || posted[0] != c.want):
+				t.Errorf("posted %q, want %s", posted, c.want)
+			}
+		})
+	}
+}
+
+// TestASuiteThatStartsAndFailsPostsChangesRequested: a command that ran and exited other than 0,
+// as `npm ci` does when it fails, is red, not a setup fault: it gets changes-requested.
+func TestASuiteThatStartsAndFailsPostsChangesRequested(t *testing.T) {
+	h := newHelper(t)
+	h.state(t, "ran "+suiteSHA, "")
+	writeEvents(t, h.runDir, afterStarted(3, 2), afterExited(4, 2))
+	if _, err := h.after(&session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 1}, succeeded); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"verdict":"changes-requested","points":[{"text":"The full suite failed: its command exited with status 1.","action":"run_again"}]}`
+	if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != want {
+		t.Errorf("posted %q, want %s", posted, want)
+	}
+}
+
+// TestAHostTextThatTheVerdictFormatRefusesIsLeftOut: a host text that makes the verdict invalid
+// is dropped from the line, and the point stays valid, so the post does not fail.
+func TestAHostTextThatTheVerdictFormatRefusesIsLeftOut(t *testing.T) {
+	got := suite.Outcome{State: suite.Failed, Started: true, ExitCode: 1, Counts: &suite.Counts{Tests: 2, Failed: 1}}
+	for _, host := range []string{"fe80::1%a\nb", "<b>x</b>\n", "x\u202ey", "a\tb"} {
+		p := suitePoint(got, suite.Refused{Local: true, Denied: 1, Hosts: []string{host}}, 60)
+		if strings.Contains(p.Text, "Allow") || p.Text != "The full suite failed: 1 of 2 tests failed." || !validPoint(p) {
+			t.Errorf("host %q: point %+v", host, p)
+		}
+	}
+	if p := suitePoint(got, suite.Refused{Local: true, Denied: 1, Hosts: []string{"registry.example"}}, 60); !strings.HasPrefix(p.Text, "Allow registry.example") {
+		t.Errorf("a valid host is left out: %+v", p)
 	}
 }
 
@@ -611,10 +690,8 @@ func TestTheSuiteCapIsTheTimeLimitOfTheAfterStep(t *testing.T) {
 			spec := &runSpec{}
 			spec.Dir = dir
 			var said []string
-			defer func(f func() *nextSession) { nextSessionAnswer = f }(nextSessionAnswer)
-			nextSessionAnswer = func() *nextSession { return &nextSession{RunsSuite: true} }
 			r := openSuites(context.Background(), suiteSetup{
-				run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true,
+				run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, fullSuite: true,
 				extensions: c.extensions, said: func(l string) { said = append(said, l) },
 			})
 			if r == nil {
@@ -641,14 +718,12 @@ func workspaceRepo(t *testing.T) string {
 	return dir
 }
 
-// TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite: with the answer yes, a walled write
-// run with a full row and a git folder gets After; each other case gets none, and the
-// answer decides: with no answer, or no, no run does.
+// TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite: with full_suite true, a walled
+// write run with a full row and a git folder gets After; each other case gets none.
 func TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite(t *testing.T) {
-	yes, no := &nextSession{RunsSuite: true}, &nextSession{}
 	for _, c := range []struct {
 		name      string
-		answer    *nextSession
+		fullSuite bool
 		walled    bool
 		readOnly  bool
 		plan      string
@@ -656,14 +731,13 @@ func TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite(t *testing.T)
 		wantAfter bool
 		line      string
 	}{
-		{"the answer says yes", yes, true, false, buildPlanText, false, true, ""},
-		{"no answer", nil, true, false, buildPlanText, false, false, ""},
-		{"the answer says no", no, true, false, buildPlanText, false, false, ""},
-		{"no wall", yes, false, false, buildPlanText, false, false, ""},
-		{"a read run", yes, true, true, buildPlanText, false, false, ""},
-		{"no full row", yes, true, false, "# Plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n", false, false, "Add a full row to the build plan"},
-		{"no build plan", yes, true, false, "", false, false, "Add a full row to the build plan"},
-		{"no git folder", yes, true, false, buildPlanText, true, false, "Run the session in the top folder"},
+		{"full_suite is true", true, true, false, buildPlanText, false, true, ""},
+		{"full_suite is false", false, true, false, buildPlanText, false, false, ""},
+		{"no wall", true, false, false, buildPlanText, false, false, ""},
+		{"a read run", true, true, true, buildPlanText, false, false, ""},
+		{"no full row", true, true, false, "# Plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n", false, false, "Add a full row to the build plan"},
+		{"no build plan", true, true, false, "", false, false, "Add a full row to the build plan"},
+		{"no git folder", true, true, false, buildPlanText, true, false, "Run the session in the top folder"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir := workspaceRepo(t)
@@ -679,10 +753,8 @@ func TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite(t *testing.T)
 			spec := &runSpec{}
 			spec.Dir = dir
 			var said []string
-			defer func(f func() *nextSession) { nextSessionAnswer = f }(nextSessionAnswer)
-			nextSessionAnswer = func() *nextSession { return c.answer }
 			r := openSuites(context.Background(), suiteSetup{
-				run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: c.walled, readOnly: c.readOnly,
+				run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: c.walled, readOnly: c.readOnly, fullSuite: c.fullSuite,
 				said: func(l string) { said = append(said, l) },
 			})
 			if (r != nil) != c.wantAfter || (len(spec.After) > 0) != c.wantAfter {
@@ -707,10 +779,8 @@ func TestTheAfterCommandHasTheLaunchPlansCommandNotAPushedOne(t *testing.T) {
 	api.withPlan(buildPlanText)
 	spec := &runSpec{}
 	spec.Dir = workspaceRepo(t)
-	defer func(f func() *nextSession) { nextSessionAnswer = f }(nextSessionAnswer)
-	nextSessionAnswer = func() *nextSession { return &nextSession{RunsSuite: true} }
 	r := openSuites(context.Background(), suiteSetup{
-		run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, said: func(string) {},
+		run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, fullSuite: true, said: func(string) {},
 	})
 	if r == nil {
 		t.Fatal("no suite")
@@ -778,7 +848,7 @@ func TestTheLinesOfTheSuiteStartWithTheFixInAtMost100Characters(t *testing.T) {
 		textSuiteGreen, textSuiteCut, fmt.Sprintf(textSuiteStands, "changes-requested"), fmt.Sprintf(textSuitePosted, "changes-requested"), textSuiteNoRoom,
 		fmt.Sprintf(textSuiteNoPost, "x"),
 		textPointDenied, fmt.Sprintf(textPointFailed, 100000, 100000), fmt.Sprintf(textPointExit, -1), textPointNoTests, textPointMismatch,
-		fmt.Sprintf(textPointNoStart, -1), fmt.Sprintf(textPointTimeout, 60),
+		fmt.Sprintf(textPointNoStartExit, -1), textPointNoStartStep, textPointNoStartFolder, textPointNoStartClone, textPointNoStartHead, fmt.Sprintf(textPointTimeout, 60),
 	} {
 		first, _, _ := strings.Cut(line, "\n")
 		if len(first) > 100 {

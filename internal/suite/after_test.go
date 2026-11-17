@@ -444,3 +444,84 @@ func TestAStateFolderThatIsALinkOutOfTheWorkspaceIsNotRead(t *testing.T) {
 		t.Errorf("Judge = %+v, want failed and not started, with no counts", got)
 	}
 }
+
+// TestAnUnreadableHeadStopsTheScript: git that cannot read HEAD, or a HEAD with no commit after a
+// session that started at one, ends the script with 72 and no status; a HEAD with no commit and
+// no start commit is skipped.
+func TestAnUnreadableHeadStopsTheScript(t *testing.T) {
+	_, first := workspace(t)
+	full := suite.Full{Command: "true"}
+	for _, c := range []struct {
+		name  string
+		start string
+		setup func(t *testing.T, dir string)
+		exit  int
+	}{
+		{"a HEAD that is garbage, no start commit", "", func(t *testing.T, dir string) { write(t, filepath.Join(dir, ".git/HEAD"), "garbage\n") }, suite.ExitNoHead},
+		{"a HEAD that is garbage, a start commit", first, func(t *testing.T, dir string) { write(t, filepath.Join(dir, ".git/HEAD"), "garbage\n") }, suite.ExitNoHead},
+		{"a branch with no commit after a start commit", first, func(t *testing.T, dir string) {
+			git(t, dir, "checkout", "--quiet", "--orphan", "empty")
+		}, suite.ExitNoHead},
+		{"a branch with no commit and no start commit", "", func(t *testing.T, dir string) {
+			git(t, dir, "checkout", "--quiet", "--orphan", "empty")
+		}, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir, _ := workspace(t)
+			c.setup(t, dir)
+			exit, log := runScript(t, dir, c.start, full)
+			if exit != c.exit {
+				t.Fatalf("exit %d, want %d\n%s", exit, c.exit, log)
+			}
+			if c.exit != 0 {
+				if !strings.Contains(log, "qory: git could not read HEAD of the workspace.") {
+					t.Errorf("the log has no line about HEAD:\n%s", log)
+				}
+				if got := suite.Judge(dir, full, suite.End{ExitCode: exit}); got.State != suite.Failed || got.Started {
+					t.Errorf("Judge = %+v, want failed and not started", got)
+				}
+			}
+		})
+	}
+}
+
+// TestTheCloneNeedsTheFileProtocolThatTheScriptAllowsForIt: with Forager's settings in the
+// environment, which allow no protocol but HTTPS, a plain clone of the workspace fails and the
+// script's clone works.
+func TestTheCloneNeedsTheFileProtocolThatTheScriptAllowsForIt(t *testing.T) {
+	dir, first := workspace(t)
+	commit(t, dir, "second.txt", "second\n")
+	plain := exec.Command("git", "clone", "--quiet", "--no-local", "--no-checkout", "--", dir, filepath.Join(t.TempDir(), "c"))
+	plain.Env = append(gitEnv(), "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=protocol.allow", "GIT_CONFIG_VALUE_0=never")
+	if out, err := plain.CombinedOutput(); err == nil || !strings.Contains(string(out), "transport 'file' not allowed") {
+		t.Fatalf("a plain clone under protocol.allow=never: %v\n%s", err, out)
+	}
+	if exit, log := runScript(t, dir, first, suite.Full{Command: "true"}); exit != 0 {
+		t.Fatalf("the script's clone failed: exit %d\n%s", exit, log)
+	}
+}
+
+// TestTheOutputAndTheSecondsOfTheCommandAreKept: the script keeps the last bytes of what the
+// command printed, and the seconds it took, for the result file of the reviewers.
+func TestTheOutputAndTheSecondsOfTheCommandAreKept(t *testing.T) {
+	dir, first := workspace(t)
+	commit(t, dir, "second.txt", "second\n")
+	full := suite.Full{Command: "echo out; echo err >&2; exit 4"}
+	exit, log := runScript(t, dir, first, full)
+	if exit != 4 {
+		t.Fatalf("exit %d, want 4\n%s", exit, log)
+	}
+	got := suite.Judge(dir, full, suite.End{ExitCode: exit})
+	if !strings.Contains(got.Output, "out\n") || !strings.Contains(got.Output, "err\n") || got.Seconds < 0 {
+		t.Errorf("Judge = output %q, seconds %d", got.Output, got.Seconds)
+	}
+	// A command that prints more than 64 KiB keeps the last bytes.
+	big := suite.Full{Command: "yes aaaaaaaaaaaaaaa | head -c 200000; echo END"}
+	if exit, log := runScript(t, dir, first, big); exit != 0 {
+		t.Fatalf("exit %d\n%s", exit, log)
+	}
+	got = suite.Judge(dir, big, suite.End{Succeeded: true})
+	if len(got.Output) > suite.MaxOutput || !strings.HasSuffix(got.Output, "END\n") {
+		t.Errorf("output of %d bytes ending %q", len(got.Output), got.Output[max(0, len(got.Output)-8):])
+	}
+}

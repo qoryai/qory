@@ -990,10 +990,18 @@ func SetInstanceAddress(f func(*config.Forager) string) func() {
 // InstanceAddress is instanceAddress.
 var InstanceAddress = instanceAddress
 
-// SetNextSessionAnswer makes the next-session answer of each run say whether its session
-// runs the full suite, and returns what restores the default: no answer.
-func SetNextSessionAnswer(runsSuite bool) func() {
-	before := nextSessionAnswer
-	nextSessionAnswer = func() *nextSession { return &nextSession{RunsSuite: runsSuite} }
-	return func() { nextSessionAnswer = before }
+// SetFullSuite makes every run's session run the full suite as the run documents' full_suite
+// does, and returns what restores the default.
+func SetFullSuite(yes bool) func() {
+	before := fullSuiteOf
+	fullSuiteOf = func(*codeRun) bool { return yes }
+	return func() { fullSuiteOf = before }
+}
+
+// SetRunInputs makes every run's inputs, as the suite reads review.suite_result from them, the
+// JSON inputs, and returns what restores the default.
+func SetRunInputs(inputs string) func() {
+	before := inputsOf
+	inputsOf = func(*codeRun) []byte { return []byte(inputs) }
+	return func() { inputsOf = before }
 }

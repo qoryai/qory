@@ -83,8 +83,8 @@ type suiteEnd struct {
 	// extensions are lines under harness.extensions in the checkout's qory.yaml, each
 	// indented 4 spaces or more.
 	extensions string
-	// noAnswer is whether qory has no next-session answer.
-	noAnswer bool
+	// noFullSuite is whether the run documents have full_suite false.
+	noFullSuite bool
 	// after, when not nil, is the end of the after step in place of the script's.
 	after *session.AfterResult
 	// events are lines that the run's events file has, after the after step's start and before its exit.
@@ -113,8 +113,8 @@ func suiteRun(t *testing.T, api *suiteAPI, e suiteEnd) (string, error, session.O
 	runDir := t.TempDir()
 	outcomes, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{RunAPI: api.srv.URL + "/v1/runs/r1", Dir: runDir})
 	t.Cleanup(restore)
-	if !e.noAnswer {
-		t.Cleanup(cmd.SetNextSessionAnswer(true))
+	if !e.noFullSuite {
+		t.Cleanup(cmd.SetFullSuite(true))
 	}
 	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
 		if spec.OnVariables != nil {
@@ -260,12 +260,11 @@ func TestASessionThatLeftHeadWhereItStartedPostsNothing(t *testing.T) {
 	wants(t, out, "the full suite did not run: the session left HEAD at the commit it started at")
 }
 
-// TestARunWithNoAnswerThatSaysYesRunsNoSuite: without a next-session answer, the session has no
-// after step and qory reads no build plan.
-func TestARunWithNoAnswerThatSaysYesRunsNoSuite(t *testing.T) {
+// TestARunWithFullSuiteFalseRunsNoSuite: with full_suite false, the session has no after step.
+func TestARunWithFullSuiteFalseRunsNoSuite(t *testing.T) {
 	api := newSuiteAPI(t, http.StatusCreated)
 	var seen session.SessionSpec
-	out, err, closed := suiteRun(t, api, suiteEnd{result: suiteRed, exit: 1, noAnswer: true, seen: &seen})
+	out, err, closed := suiteRun(t, api, suiteEnd{result: suiteRed, exit: 1, noFullSuite: true, seen: &seen})
 	if err != nil || closed.State != event.StateSucceeded {
 		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
 	}
@@ -285,7 +284,7 @@ func TestARunWhoseVerdictCannotBePostedDoesNotEndPassed(t *testing.T) {
 	if err == nil || cmd.ExitCode(err) != 1 {
 		t.Errorf("qory run returned %v, exit status %d, want 1", err, cmd.ExitCode(err))
 	}
-	wants(t, out, "Take the work item in again in Qory Apiary: qory could not post the verdict of the red full suite.")
+	wants(t, out, "Take the work item in again in Qory Apiary: qory could not post the verdict of the full suite.")
 }
 
 // TestTheRepositorysCapReplacesSixtyMinutes: the after step's time limit is the repository's
@@ -296,9 +295,9 @@ func TestTheRepositorysCapReplacesSixtyMinutes(t *testing.T) {
 		limit            time.Duration
 		minutes          string
 	}{
-		{"no setting", "", 60 * time.Minute, "within 60 minutes"},
-		{"a setting", "    software-factory:\n      command_limits_minutes: {full_suite: 2}\n", 2 * time.Minute, "within 2 minutes"},
-		{"a setting above 60", "    software-factory:\n      command_limits_minutes: {full_suite: 90}\n", 60 * time.Minute, "within 60 minutes"},
+		{"no setting", "", 60 * time.Minute, "its limit of 60 minutes."},
+		{"a setting", "    software-factory:\n      command_limits_minutes: {full_suite: 2}\n", 2 * time.Minute, "its limit of 2 minutes."},
+		{"a setting above 60", "    software-factory:\n      command_limits_minutes: {full_suite: 90}\n", 60 * time.Minute, "its limit of 60 minutes."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			api := newSuiteAPI(t, http.StatusCreated)
@@ -312,7 +311,7 @@ func TestTheRepositorysCapReplacesSixtyMinutes(t *testing.T) {
 				t.Errorf("AfterTimeout = %v, want %v", seen.AfterTimeout, c.limit)
 			}
 			posted := api.posted()
-			if len(posted) != 1 || !strings.Contains(posted[0], c.minutes+", and qory stopped it.") {
+			if len(posted) != 1 || !strings.Contains(posted[0], c.minutes) {
 				t.Errorf("posted %q, want a point with %q", posted, c.minutes)
 			}
 			wants(t, out, "is timeout")
@@ -353,5 +352,55 @@ func TestAStopDuringTheAfterStepDoesNotLeaveTheRunSucceeded(t *testing.T) {
 	}
 	if posted := api.posted(); len(posted) != 1 || !strings.Contains(posted[0], "The full suite did not finish: the run was stopped.") {
 		t.Errorf("posted %q", posted)
+	}
+}
+
+// TestTheFileOfReviewSuiteResultHasTheSuiteAfterTheSession: with review.suite_result in the run's
+// inputs, qory writes the suite's result there for a red suite, and state skipped for a session
+// that left HEAD where it started, and the file has the command's output.
+func TestTheFileOfReviewSuiteResultHasTheSuiteAfterTheSession(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		end   suiteEnd
+		state string
+	}{
+		{"red", suiteEnd{result: suiteRed, exit: 1}, "failed"},
+		{"green", suiteEnd{result: suiteGreen}, "passed"},
+		{"skipped", suiteEnd{result: suiteRed, exit: 1, stay: true}, "skipped"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), "suite.json")
+			t.Cleanup(cmd.SetRunInputs(`{"review":{"suite_result":` + fmt.Sprintf("%q", file) + `}}`))
+			api := newSuiteAPI(t, http.StatusCreated)
+			out, err, closed := suiteRun(t, api, c.end)
+			if err != nil || closed.State != event.StateSucceeded {
+				t.Fatalf("%v, closed %+v\n%s", err, closed, out)
+			}
+			data, rerr := os.ReadFile(file)
+			if rerr != nil {
+				t.Fatal(rerr)
+			}
+			if !strings.Contains(string(data), `"state":"`+c.state+`"`) {
+				t.Errorf("the file has %s, want state %s", data, c.state)
+			}
+			if c.state == "failed" && !strings.Contains(string(data), `"counts":{"tests":2,"failed":1,"skipped":0}`) {
+				t.Errorf("the file has %s, want the counts", data)
+			}
+		})
+	}
+}
+
+// TestAFullSuiteThatCannotStartPostsAnEscalate: a script that ends before the command ran gives
+// the verdict escalate with the point, and the run still closes as its session did.
+func TestAFullSuiteThatCannotStartPostsAnEscalate(t *testing.T) {
+	api := newSuiteAPI(t, http.StatusCreated)
+	failed := &session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: -1}
+	out, err, closed := suiteRun(t, api, suiteEnd{after: failed})
+	if err != nil || closed.State != event.StateSucceeded {
+		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
+	}
+	want := `{"verdict":"escalate","points":[{"text":"The full suite did not start: the after step could not run.","action":"run_again"}]}`
+	if posted := api.posted(); len(posted) != 1 || posted[0] != want {
+		t.Errorf("posted %q, want %s", posted, want)
 	}
 }

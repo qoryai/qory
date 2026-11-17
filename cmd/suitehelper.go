@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 	"github.com/qoryai/forager/sink"
 
 	"github.com/qoryai/qory/internal/hostgit"
-	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/suite"
 	"github.com/qoryai/qory/internal/verdictformat"
@@ -41,9 +39,9 @@ const (
 	textSuiteGreen      = "the full suite passed, so qory posts no verdict"
 	textSuiteCut        = "qory run was stopped while the full suite ran, so the run closes cancelled"
 	textSuiteStands     = "the verdict %s of the agent stands over the red full suite"
-	textSuitePosted     = "posted the verdict %s for the red full suite"
-	textSuiteNoRoom     = "the verdict escalate has 20 points already, so qory adds none for the red full suite"
-	textSuiteNoPost     = "Take the work item in again in Qory Apiary: qory could not post the verdict of the red full suite.\n  %s"
+	textSuitePosted     = "posted the verdict %s for the full suite"
+	textSuiteNoRoom     = "the verdict of the agent has 20 points already, so qory adds none for the full suite"
+	textSuiteNoPost     = "Take the work item in again in Qory Apiary: qory could not post the verdict of the full suite.\n  %s"
 )
 
 // The lines of the point of the verdict that a red suite sets. Each is one sentence on one line
@@ -55,10 +53,18 @@ const (
 	textPointExit     = "The full suite failed: its command exited with status %d."
 	textPointNoTests  = "The full suite ran 0 tests, so it proves nothing."
 	textPointMismatch = "The full suite failed: the totals of its result file do not match its testcases."
-	textPointNoStart  = "The full suite did not start: its script exited with status %d before the command ran."
 	textPointStopped  = "The full suite did not finish: the run was stopped."
-	textPointTimeout  = "The full suite did not finish within %d minutes, and qory stopped it."
+	textPointTimeout  = "The full suite did not finish: the after step reached its limit of %d minutes."
 	maxPointLine      = 100
+)
+
+// The points of a suite that did not start, which a person must see: the cause follows the colon.
+const (
+	textPointNoStartStep   = "The full suite did not start: the after step could not run."
+	textPointNoStartFolder = "The full suite did not start: the script could not make a folder it needs."
+	textPointNoStartClone  = "The full suite did not start: git could not clone HEAD of the workspace."
+	textPointNoStartHead   = "The full suite did not start: git could not read HEAD of the workspace."
+	textPointNoStartExit   = "The full suite did not start: its script exited with status %d before the command ran."
 )
 
 // suiteMinutes is the time the suite's cap counts in: the cap is limit minutes.
@@ -74,21 +80,6 @@ var errNoVerdictFile = errors.New("the run's verdict has no file")
 // could not read it.
 var errNoBuildPlan = errors.New("the run started with no build plan")
 
-// nextSession is what qory knows of the next session from Qory Apiary's next-session answer.
-// qory reads no such answer yet, so no run has one.
-type nextSession struct {
-	// RunsSuite is the answer's yes or no to whether the session that ends runs the full
-	// suite: yes for a workflow in a loop or with first_attempt, no otherwise.
-	RunsSuite bool
-}
-
-// nextSessionAnswer is the answer for the session that is about to join. It returns nil until
-// qory calls Qory Apiary's next-session call, which a run of several sessions needs.
-var nextSessionAnswer = func() *nextSession { return nil }
-
-// runsSuite reports whether the session runs the full suite: only when the answer is yes.
-func runsSuite(answer *nextSession) bool { return answer != nil && answer.RunsSuite }
-
 // suiteSetup is what [openSuites] needs from a run that has its session about to join.
 type suiteSetup struct {
 	run    openedRun
@@ -97,6 +88,11 @@ type suiteSetup struct {
 	walled bool
 	// readOnly is whether the run only reads the checkout, so no commit comes of it.
 	readOnly bool
+	// fullSuite is the run documents' full_suite: whether the session runs the full suite.
+	fullSuite bool
+	// inputs is the run's inputs as JSON, "" for none; its review.suite_result is the file
+	// that gets the suite's result, see [suiteResultFile].
+	inputs []byte
 	// extensions is the harness extensions of the report that the run composed.
 	extensions map[string]any
 	said       func(string)
@@ -111,17 +107,14 @@ type suiteRun struct {
 	dir     string
 	full    suite.Full
 	minutes int
+	// resultFile is the path of review.suite_result, "" for none.
+	resultFile string
 }
 
-// openSuites sets the after step of the full suite on the spec of the session that is about to
-// join, and returns the run that judges it afterwards; nil when the session runs none: a run with
-// no wall, no run API or no write access, a next-session answer that is no, a build plan with no
-// full row, or a checkout with no .git folder. The command is the full row of the build plan of
-// the run's launch, read here from the run API, so a plan that the agent pushes during the session
-// changes nothing. The after step starts after the agent's container is removed, and its
-// time limit is the suite's cap.
+// openSuites sets the after step of the full suite on the session's spec and returns the run that
+// judges it; nil when the session runs none. The command is the full row of the launch build plan.
 func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
-	if !s.walled || s.readOnly || !runsSuite(nextSessionAnswer()) {
+	if !s.walled || s.readOnly || !s.fullSuite {
 		return nil
 	}
 	if _, _, err := s.run.RunAPI(); err != nil {
@@ -143,9 +136,29 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 		s.said(fmt.Sprintf(textSuiteNotStarted, shownError(err)))
 		return nil
 	}
+	resultFile, err := suiteResultFile(s.inputs)
+	if err != nil {
+		s.said(shownError(err))
+	}
 	minutes := suite.LimitMinutes(s.extensions)
-	s.spec.After, s.spec.AfterTimeout = after, time.Duration(minutes)*suiteMinutes
-	return &suiteRun{run: s.run, runID: s.runID, said: s.said, dir: s.spec.Dir, full: full, minutes: minutes}
+	s.spec.After, s.spec.AfterTimeout = after, afterLimit(minutes)
+	return &suiteRun{run: s.run, runID: s.runID, said: s.said, dir: s.spec.Dir, full: full, minutes: minutes, resultFile: resultFile}
+}
+
+// afterLimit is the time limit of the after step: the suite's cap alone. The session's time
+// limit covers the agent's runtime only.
+func afterLimit(minutes int) time.Duration { return time.Duration(minutes) * suiteMinutes }
+
+// fullSuiteOf is whether the session of a run from Qory Apiary runs the full suite: the run
+// documents' full_suite, false for a run with no run code.
+var fullSuiteOf = func(c *codeRun) bool { return c != nil && c.fullSuite }
+
+// inputsOf is the run's inputs as JSON, nil for a run with no run code.
+var inputsOf = func(c *codeRun) []byte {
+	if c == nil {
+		return nil
+	}
+	return c.inputs
 }
 
 // suitePlanWait is the longest the read of the build plan at the run's start may take.
@@ -154,12 +167,10 @@ const suitePlanWait = 15 * time.Second
 // headCommit is the commit that HEAD has in dir, read with git as qory runs it on this machine
 // before the agent runs, "" when dir has none.
 func headCommit(ctx context.Context, dir string) string {
-	args := slices.Concat(proxygit.Hardened, []string{"rev-parse", "--verify", "--quiet", "HEAD^{commit}"})
-	cmd, err := hostgit.Unchecked(ctx, dir, hostgit.Base(ctx), args...)
+	cmd, err := hostgit.Command(ctx, dir, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
 	if err != nil {
 		return ""
 	}
-	cmd.Env = proxygit.Env(cmd.Env, &proxygit.Proxy{})
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -228,11 +239,8 @@ func readBuildPlan(ctx context.Context, client *runapi.Client) (string, error) {
 	return "", errNoBuildPlan
 }
 
-// after judges the suite once the session exited with out and res, before the push step, and
-// posts the verdict of a red suite, see [suiteRun.post]. A red suite does not change the outcome
-// the run closes with: the run closes as its session did, and the posted verdict starts the fix
-// round. A post that fails closes the run failed, with exit status 1. The state folder of the
-// workspace is removed in every case.
+// after judges the suite, writes its result for the reviewers, and posts the verdict of a suite
+// that did not pass, before the push step. A red suite leaves the run's outcome as the session's.
 func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *session.Result, out session.Outcome) (session.Outcome, error) {
 	if r == nil {
 		return out, nil
@@ -242,21 +250,27 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 			r.said("remove " + suite.StateFolder + " in the workspace: " + shownError(err))
 		}
 	}()
+	ran := res != nil && res.After != nil
+	var got suite.Outcome
+	var step int
+	if ran {
+		a := res.After
+		step = a.Step
+		got = suite.Judge(r.dir, r.full, suite.End{
+			Succeeded: a.State == event.StateSucceeded,
+			Cancelled: a.State == event.StateCancelled,
+			TimedOut:  a.Reason == event.ReasonTimeout,
+			ExitCode:  a.ExitCode,
+		})
+	}
+	r.writeResult(got, ran)
 	if out.State != event.StateSucceeded {
 		return out, nil
 	}
-	if res == nil || res.After == nil {
+	switch {
+	case !ran:
 		r.said(textSuiteNoAfter)
 		return out, nil
-	}
-	a := res.After
-	got := suite.Judge(r.dir, r.full, suite.End{
-		Succeeded: a.State == event.StateSucceeded,
-		Cancelled: a.State == event.StateCancelled,
-		TimedOut:  a.Reason == event.ReasonTimeout,
-		ExitCode:  a.ExitCode,
-	})
-	switch {
 	case got.State == suite.Skipped:
 		r.said(textSuiteSkipped)
 		return out, nil
@@ -268,10 +282,13 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 		return r.cut(ctx, again, limit, got)
 	}
 	r.said(fmt.Sprintf(textSuiteEnded, onCommit(got.Commit), got.State, countsSuffix(got.Counts)))
-	refused := suite.ReadRefused(filepath.Join(r.run.Dir(), sink.EventsFile), a.Step)
+	refused := suite.Refused{Local: true}
+	if got.Started {
+		refused = suite.ReadRefused(filepath.Join(r.run.Dir(), sink.EventsFile), step)
+	}
 	postCtx, cancelPost := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
 	defer cancelPost()
-	posted, err := r.post(postCtx, suitePoint(got, refused, r.minutes), maxBranchTries)
+	posted, err := r.post(postCtx, suitePoint(got, refused, r.minutes), got.NotStarted(), maxBranchTries)
 	if err != nil {
 		r.said(fmt.Sprintf(textSuiteNoPost, shownError(err)))
 		return session.Outcome{State: event.StateFailed, ExitCode: 1}, &exitError{code: 1}
@@ -286,17 +303,15 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 // try: the push step follows within the time that a signal leaves.
 const cutPostWait = 5 * time.Second
 
-// cut ends the run after a stop of qory run cut the after step: the session had succeeded, so the
-// run must not close succeeded over a suite that did not finish. qory posts the verdict of the
-// red suite with one try, which a failure does not turn into another close, and the run closes
-// cancelled with the reason interrupted, with exit status 1, as a cut push step closes it.
+// cut ends the run after a stop cut the after step of a session that succeeded: qory posts the
+// red verdict with one try and closes the run cancelled with the reason interrupted, exit 1.
 func (r *suiteRun) cut(ctx, again context.Context, limit time.Time, got suite.Outcome) (session.Outcome, error) {
 	r.said(textSuiteCut)
 	postCtx, cancelPost := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
 	defer cancelPost()
 	postCtx, cancelWait := context.WithTimeout(postCtx, cutPostWait)
 	defer cancelWait()
-	posted, err := r.post(postCtx, suitePoint(got, suite.Refused{Local: true}, r.minutes), 1)
+	posted, err := r.post(postCtx, suitePoint(got, suite.Refused{Local: true}, r.minutes), false, 1)
 	switch {
 	case err != nil:
 		r.said(fmt.Sprintf(textSuiteNoPost, shownError(err)))
@@ -318,10 +333,9 @@ func countsSuffix(c *suite.Counts) string {
 	return fmt.Sprintf(", %d tests", c.Tests)
 }
 
-// post posts the verdict of a red suite whose point is point, with at most tries requests, and
-// returns the line that describes what it posted: "" when the agent's verdict stands and nothing
-// went out.
-func (r *suiteRun) post(ctx context.Context, point runapi.Point, tries int) (string, error) {
+// post posts the verdict for a suite that did not pass, with at most tries requests, and returns
+// the line for what it posted, "" for nothing. The rules by prior verdict are in docs/run.md.
+func (r *suiteRun) post(ctx context.Context, point runapi.Point, notStarted bool, tries int) (string, error) {
 	httpClient, base, err := r.run.RunAPI()
 	if err != nil {
 		return "", err
@@ -334,57 +348,76 @@ func (r *suiteRun) post(ctx context.Context, point runapi.Point, tries int) (str
 	if err != nil {
 		return "", err
 	}
-	switch {
-	case agent == nil || agent.Verdict == runapi.VerdictPassed:
-		body, err := runapi.VerdictBody(runapi.VerdictChangesRequested, []runapi.Point{point})
-		if err != nil {
-			return "", err
-		}
+	send := func(body []byte, verdict string) (string, error) {
 		if err := postVerdict(ctx, client, body, tries); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf(textSuitePosted, runapi.VerdictChangesRequested), nil
-	case agent.Verdict == runapi.VerdictEscalate && len(agent.Points) < maxVerdictPoints:
+		return fmt.Sprintf(textSuitePosted, verdict), nil
+	}
+	switch {
+	case agent == nil || agent.Verdict == runapi.VerdictPassed:
+		verdict := runapi.VerdictChangesRequested
+		if notStarted {
+			verdict = runapi.VerdictEscalate
+		}
+		body, err := runapi.VerdictBody(verdict, []runapi.Point{point})
+		if err != nil {
+			return "", err
+		}
+		return send(body, verdict)
+	case agent.Verdict == runapi.VerdictEscalate || notStarted:
+		if len(agent.Points) >= maxVerdictPoints {
+			return textSuiteNoRoom, nil
+		}
 		agent.Points = append(agent.Points, point)
 		body, err := encodeVerdict(agent)
 		if err != nil {
 			return "", err
 		}
-		if err := postVerdict(ctx, client, body, tries); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf(textSuitePosted, runapi.VerdictEscalate), nil
-	case agent.Verdict == runapi.VerdictEscalate:
-		return textSuiteNoRoom, nil
+		return send(body, agent.Verdict)
 	}
 	return fmt.Sprintf(textSuiteStands, agent.Verdict), nil
 }
 
-// suitePoint is the one point of the verdict for the red suite got. Its text is the first line:
-// the hosts that the proxy refused while the suite ran when the run's events have some, and
-// otherwise what the suite's end shows. Its fix is the second line, for a suite whose refused
-// connections the events cannot show in full.
+// suitePoint is the one point for a suite that did not pass. A host text that the verdict format
+// refuses is left out of its first line.
 func suitePoint(got suite.Outcome, refused suite.Refused, minutes int) runapi.Point {
+	p := buildPoint(got, refused, minutes)
+	if len(refused.Hosts) > 0 && !validPoint(p) {
+		refused.Hosts = nil
+		p = buildPoint(got, refused, minutes)
+	}
+	return p
+}
+
+func buildPoint(got suite.Outcome, refused suite.Refused, minutes int) runapi.Point {
 	p := runapi.Point{Text: pointLine(got, refused, minutes), Action: "run_again"}
-	if !refused.Local || refused.Denied > 0 {
+	if !got.NotStarted() && (!refused.Local || refused.Denied > 0) {
 		p.Fix = textPointDenied
 	}
 	return p
 }
 
-// pointLine is the first line of the point of a red suite: at most [maxPointLine] characters.
+// validPoint reports whether a verdict with p as its one point passes the verdict format.
+func validPoint(p runapi.Point) bool {
+	body, err := runapi.VerdictBody(runapi.VerdictChangesRequested, []runapi.Point{p})
+	return err == nil && verdictformat.Check(body) == nil
+}
+
+// pointLine is the first line of the point of a suite that did not pass: at most [maxPointLine]
+// characters.
 func pointLine(got suite.Outcome, refused suite.Refused, minutes int) string {
 	switch c := got.Counts; {
 	case got.State == suite.Stopped:
 		return textPointStopped
+	case got.NotStarted():
+		return notStartedLine(got.ExitCode)
 	case len(refused.Hosts) > 0:
 		return hostsLine(refused.Hosts)
 	case got.State == suite.Timeout:
 		return fmt.Sprintf(textPointTimeout, minutes)
 	case got.Mismatch:
 		return textPointMismatch
-	case !got.Started:
-		return fmt.Sprintf(textPointNoStart, got.ExitCode)
 	case c != nil && c.Tests == 0:
 		return textPointNoTests
 	case c != nil && c.Failed > 0:
@@ -393,11 +426,24 @@ func pointLine(got suite.Outcome, refused suite.Refused, minutes int) string {
 	return fmt.Sprintf(textPointExit, got.ExitCode)
 }
 
-// hostsLine is the line for the hosts that the proxy refused: the first host, "and N more" for the
-// others. The line has at most [maxPointLine] characters, and the words around the host leave
-// about 20 for the host named twice. So the first mention keeps the host whole when it can, the
-// second is cut to what is left, and the second loses "and N more" before the first is cut. A
-// cut host ends in "...".
+// notStartedLine is the first line of the point of a suite whose command never ran, by the exit
+// status of the script, or -1 for an after step that ended with none.
+func notStartedLine(exit int) string {
+	switch {
+	case exit < 0:
+		return textPointNoStartStep
+	case exit == suite.ExitNoState:
+		return textPointNoStartFolder
+	case exit == suite.ExitNoClone:
+		return textPointNoStartClone
+	case exit == suite.ExitNoHead:
+		return textPointNoStartHead
+	}
+	return fmt.Sprintf(textPointNoStartExit, exit)
+}
+
+// hostsLine is the line for the refused hosts, at most [maxPointLine] characters: the first host
+// whole when it fits, the second mention cut first, and "..." ends a cut host.
 func hostsLine(hosts []string) string {
 	host := hosts[0]
 	suffix, verb := "", "was"

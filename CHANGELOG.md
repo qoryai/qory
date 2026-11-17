@@ -469,17 +469,20 @@ release may change what an existing document does, and states it under Upgrading
   qory serves no path on it, and answers `404` to a request of the session that runs. The
   setup container of `wall.setup: outside` gets neither the variable nor the route. See The
   route to qory in `docs/run.md`.
-- A session whose Qory Apiary next-session answer is yes for the full suite ends with the
-  repository's full test suite, in Forager's after step: when HEAD moved, qory runs the `full`
-  command of the build plan that the work item had at the launch, in a fresh clone of HEAD,
-  in a container of the run's image on the run's network, so the run's egress policy applies.
-  A session that left HEAD where it started runs no suite. The limit is
-  `command_limits_minutes.full_suite`, 60 minutes by default, on top of `--timeout`. A red suite
-  posts `changes-requested` with one point over a `passed` verdict or none, or adds the point to
-  an `escalate`; it does not end the run `failed`. When the proxy refused a host while the
-  suite ran, the point has the host. A stop of `qory run` during the suite closes the run
-  `cancelled`, with the reason `interrupted`. A green suite posts nothing. If qory cannot post the
-  verdict, the run closes `failed`. See The full suite in `docs/run.md`.
+- A session runs the repository's full test suite when the run documents have `full_suite`
+  true. Forager's after step runs it after the agent's container is removed: when HEAD moved,
+  the `full` command of the build plan that the work item had at the launch runs in a fresh
+  clone of HEAD, in a container of the run's image on the run's network, so the run's egress
+  policy applies. A session that left HEAD where it started runs no suite. The limit is
+  `command_limits_minutes.full_suite`, 60 minutes by default, as the after step's time limit.
+  A suite that ran and failed posts `changes-requested` with one point over a `passed` verdict
+  or none, or adds the point to an `escalate`, and does not end the run `failed`; when the
+  proxy refused a host while the suite ran, the point has the host. A suite that did not start
+  posts `escalate` with the point `The full suite did not start: <cause>.` A green suite posts
+  nothing. If qory cannot post the verdict, the run closes `failed`. A stop of `qory run` during
+  the suite closes the run `cancelled`, with the reason `interrupted`. When the run's inputs have
+  `review.suite_result`, qory writes the suite's result to that file. See The full suite in
+  `docs/run.md`.
 
 ### Changed
 
