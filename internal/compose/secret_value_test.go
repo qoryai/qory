@@ -114,6 +114,33 @@ func TestAComposeRefusalPrintsNoSecretName(t *testing.T) {
 	}
 }
 
+// TestTheModuleNameRefusalNamesTheFileThatDeclaresTheModule is a module whose manifest has
+// another name than the one listed, listed in the harness section of qory.yaml: line 1
+// contains qory.yaml, not qory-stack.yaml.
+func TestTheModuleNameRefusalNamesTheFileThatDeclaresTheModule(t *testing.T) {
+	isolateAll(t)
+	dir := writeTree(t, map[string]string{
+		"base/" + stack.FileName:          "apiVersion: qory.dev/v1alpha1\nname: core\nextending:\n  kinds: [commands]\nmodules:\n  - name: a\n    source:\n      path: modules/a\n",
+		"base/modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: a\n",
+		"app/" + config.FileName:          "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  target:\n    runtime: claude\n  modules:\n    - name: m\n      source: {path: modules/m}\n",
+		"app/modules/m/qory-module.yaml":  "apiVersion: qory.dev/v1alpha1\nname: acme-core\n",
+		"app/modules/m/commands/ship.md":  "ship\n",
+	})
+	p, err := config.Compose(filepath.Join(dir, "app", config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, base, err := compose.LoadBase(p, "", compose.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = compose.ComposeWith(merged, compose.Options{Base: base})
+	const want = "Use one name for the module in qory.yaml and in its qory-module.yaml.\n  The module m at modules/m has the name acme-core in its qory-module.yaml."
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("%v\nwant one that starts with %q", err, want)
+	}
+}
+
 // TestAnExtendingModuleRefusalPrintsNoSecretName is an extending module whose name and
 // whose skill's name contain a secret, of a kind the base does not let it ship: the
 // refusal prints Forager's phrase in place of both.
