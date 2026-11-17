@@ -23,6 +23,7 @@ import (
 	"github.com/qoryai/qory/internal/foragerdir"
 	"github.com/qoryai/qory/internal/pool"
 	"github.com/qoryai/qory/internal/provisioner"
+	"github.com/qoryai/qory/internal/runtimeinstall"
 )
 
 // verbPool is qory run pool's verb, as its lines name it after "qory".
@@ -165,6 +166,17 @@ func loadPool() (*poolSettings, error) {
 		return nil, input(fmt.Errorf("%s has no pool section", r.File))
 	}
 	p := r.Pool
+	registry, err := runtimeinstall.RegistryOf(p.Registry)
+	if err != nil {
+		return nil, input(err)
+	}
+	// Each run installs its runtime from the registry through the instance's token
+	// realm, so the address the pool writes after each run code must be one a run takes.
+	if registry != "" {
+		if err := runtimeinstall.CheckInstance(strings.TrimSuffix(r.Server.URL, "/")); err != nil {
+			return nil, input(err)
+		}
+	}
 	if info, err := os.Stat(p.RunConfig); err != nil || !info.IsDir() {
 		return nil, input(fmt.Errorf("%s: pool.run_config is %s, which is not a folder", r.File, p.RunConfig))
 	}
@@ -294,7 +306,10 @@ func runPool(ctx context.Context, s *poolSettings, key *accesskey.Key, pin acces
 // before the pool started has its wall removed as [poolReap] has it.
 func poolLoop(s *poolSettings, key *accesskey.Key, pin accesskey.Pin, log *slog.Logger) *pool.Pool {
 	return &pool.Pool{
-		Settings: pool.Settings{Runs: s.Pool.Runs, State: s.State, RunConfig: s.Pool.RunConfig, Probe: poolProbe(s.Runs)},
+		Settings: pool.Settings{
+			Runs: s.Pool.Runs, State: s.State, RunConfig: s.Pool.RunConfig, Registry: runtimeinstall.RegistryHost(s.Pool.Registry), Instance: strings.TrimSuffix(s.Forager.Server.URL, "/"),
+			Probe: poolProbe(s.Runs),
+		},
 		Client: &provisioner.Client{
 			URL: strings.TrimSuffix(s.Forager.Server.URL, "/"), KeyID: s.Forager.Server.AccessKeyID, Key: key, Pin: pin,
 			InstanceID: s.InstanceID, UserAgent: userAgent(), Log: log,

@@ -51,6 +51,7 @@ import (
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
 	"github.com/qoryai/qory/internal/runcopy"
+	"github.com/qoryai/qory/internal/runtimeinstall"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/statusfd"
@@ -377,6 +378,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					SocketGrace: socketGrace,
 				},
 			}
+			// The run holds the version's folder of its runtime until it ends.
+			defer func() {
+				if spec.installed != nil {
+					spec.installed.Release()
+				}
+			}()
 			switch {
 			case spec.RunID == "" && key != nil:
 				spec.RunID = key.key.RunID
@@ -924,6 +931,37 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return nil
 			}
+			// installWork installs the program of the session's runtime, see [installRuntime],
+			// within the run's time limit, prints the installed version, and gives the
+			// session the install, see [useInstalledRuntime].
+			installWork := func() error {
+				installCtx, cancel := ctx, func() {}
+				if timeout > 0 {
+					installCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				}
+				defer cancel()
+				var machine runtimeinstall.Machine
+				if code != nil {
+					machine = code.machine
+				}
+				in, err := installRuntime(installCtx, run, conf.Forager, machine, walled || remote, name, state, said)
+				if err != nil {
+					return &runLineError{codeLine(installFailed(err))}
+				}
+				if in != nil {
+					said(installedLine(*in))
+					useInstalledRuntime(&spec, in)
+				} else if installStandIn != nil && name == installedRuntime {
+					stood, err := installStandIn(spec.Command)
+					if err != nil {
+						return &runLineError{codeLine(err)}
+					}
+					if stood != nil {
+						useInstalledRuntime(&spec, stood)
+					}
+				}
+				return nil
+			}
 			// hostWork is the run's work on this machine before its session joins, in two
 			// steps of the run's record: the fetch, when the run configuration lists
 			// repositories, and the compose. When the run configuration lists repositories,
@@ -1017,6 +1055,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				})
 				if err != nil {
+					return err
+				}
+				// A run installs its runtime once the compose named it, and before
+				// prepareSession wraps the session's command for the wall.
+				if err := installWork(); err != nil {
 					return err
 				}
 				// A home whose push checks qory cannot run stops the run here, before the
@@ -1565,6 +1608,9 @@ type runSpec struct {
 	// engineProxyFile is wall.engine_proxy_file of a walled run with an engine proxy,
 	// whose engine lock the run holds around its image step: see [withEngineLock].
 	engineProxyFile string
+	// installed is the runtime qory run installed for the session, nil for none: see
+	// [useInstalledRuntime].
+	installed *runtimeinstall.Installed
 }
 
 // openedRun is a run open at its gateway, as qory run uses it: a [*session.Run], as

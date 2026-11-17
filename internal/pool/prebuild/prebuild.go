@@ -144,7 +144,7 @@ const inspectFormat = `{"repo_digests":{{json .RepoDigests}},"os":{{json .Os}},"
 var (
 	// runIDShape is a run id: a UUID in the canonical lower-case form.
 	runIDShape = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-	// pinnedShape is an image pinned by digest, as the build takes the agent's.
+	// pinnedShape is an image pinned by digest, as the result's base image is.
 	pinnedShape = regexp.MustCompile(`^[^@\s]+@sha256:[0-9a-f]{64}$`)
 	// destinationShape is a place at a registry, as image_destination and
 	// environment_destination are: image_place of the run contract's
@@ -162,9 +162,8 @@ type Settings struct {
 	// RunConfig is the XDG_CONFIG_HOME of every command, an absolute directory: the
 	// configuration directory whose qory/forager.yaml sets the wall.
 	RunConfig string
-	// AgentImage and User are wall.image, pinned by digest, and wall.user of RunConfig's
-	// forager.yaml: the build's agent image, and the wall user the image runs as.
-	AgentImage, User string
+	// User is wall.user of RunConfig's forager.yaml: the wall user the image runs as.
+	User string
 	// Wall is the wall the run opens with, its helper wall.helper; Image is the name of
 	// the image it starts, wall.prebuild_image, and Images that image's definition alone,
 	// so a policy that selects another image is refused. CAEnv is wall.ca_env, Exec the
@@ -387,7 +386,7 @@ func (s Settings) step(ctx context.Context, run Opened, r Run, dir string) (step
 	}
 	st := Step{
 		Out: out, RunID: r.RunID, ImageDestination: r.ImageDestination, EnvironmentDestination: r.EnvironmentDestination,
-		EnvironmentImage: r.EnvironmentImage, AgentImage: s.AgentImage, User: s.User,
+		EnvironmentImage: r.EnvironmentImage, User: s.User,
 	}
 	// The session masks its output with s.Masker, so lines gets it as it is: a second
 	// pass would mask inside a placeholder, such as qory-proxy-password.
@@ -626,9 +625,6 @@ func checkRun(s Settings, r Run) (string, error) {
 		case place && (noRegistry != nil || !destinationShape.MatchString(d.value) || !policy.ImageReference(image)):
 			return "", fmt.Errorf("ask Qory Apiary's instance admin: the run's %s is not a place at a registry, a host and a path of at most 255 characters with no tag and no digest", d.member)
 		}
-	}
-	if !pinnedShape.MatchString(s.AgentImage) {
-		return "", errors.New("the agent image is not pinned by digest")
 	}
 	if s.User == "" {
 		return "", errors.New("the wall's user is needed to build")

@@ -22,12 +22,14 @@ import (
 	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/foragerdir"
 	"github.com/qoryai/qory/internal/pool/prebuild"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/runcopy"
+	"github.com/qoryai/qory/internal/runtimeinstall"
 )
 
 // SetWriteLabels makes qory run keep a checkout's labels with f, and returns what
@@ -844,7 +846,7 @@ func SetRunCodeCAFile(caFile string) func() {
 // key pair k, its proof made at now, as qory run redeems one, and returns the run's id
 // and its run key.
 func RedeemRunCode(ctx context.Context, k *accesskey.Key, file, gatewayURL string, now time.Time) (runID, key string, err error) {
-	code, _, _, err := readRunCode(file, nil)
+	code, _, _, _, err := readRunCode(file, nil)
 	if err != nil {
 		return "", "", err
 	}
@@ -915,3 +917,75 @@ func SetCheckoutUnwritable() func() {
 	checkoutWritable = func(string) bool { return false }
 	return func() { checkoutWritable = canWrite }
 }
+
+// SetInstallRuntimes sets whether qory run installs its runtime's program, and returns
+// what restores the setting before. TestMain turns it off for the tests of other parts.
+func SetInstallRuntimes(on bool) func() {
+	before := installRuntimes
+	installRuntimes = on
+	return func() { installRuntimes = before }
+}
+
+// SetInstallStandIn makes a run of Claude Code that installs nothing start a copy of its
+// launch's program, from a new folder under root that others can read, as an install
+// makes one, and returns what restores the default. A launch whose Command is not the
+// absolute path of a file gets a program that exits 0.
+func SetInstallStandIn(root string) func() {
+	before := installStandIn
+	installStandIn = func(command string) (*runtimeinstall.Installed, error) {
+		data, err := os.ReadFile(command)
+		if err != nil || !filepath.IsAbs(command) {
+			data = []byte("#!/bin/sh\nexit 0\n")
+		}
+		folder, err := os.MkdirTemp(root, "claude-")
+		if err != nil {
+			return nil, err
+		}
+		if err := os.Chmod(folder, 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.Mkdir(filepath.Join(folder, "bin"), 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(filepath.Join(folder, "bin", "claude"), data, 0o755); err != nil {
+			return nil, err
+		}
+		standInMu.Lock()
+		lastStandIn = filepath.Join(folder, "bin", "claude")
+		standInMu.Unlock()
+		return &runtimeinstall.Installed{Runtime: "claude", Version: "0", Dir: folder}, nil
+	}
+	return func() { installStandIn = before }
+}
+
+var (
+	standInMu   sync.Mutex
+	lastStandIn string
+)
+
+// LastStandIn is the program of the stand-in install that the last run of Claude Code
+// got, from [SetInstallStandIn].
+func LastStandIn() string {
+	standInMu.Lock()
+	defer standInMu.Unlock()
+	return lastStandIn
+}
+
+// SetNpmRegistry makes qory run install from the npm registry at url, and returns what
+// restores the default.
+func SetNpmRegistry(url string) func() {
+	before := npmRegistry
+	npmRegistry = url
+	return func() { npmRegistry = before }
+}
+
+// SetInstanceAddress makes qory run read the address of its Qory Apiary instance with
+// f, and returns what restores the default.
+func SetInstanceAddress(f func(*config.Forager) string) func() {
+	before := instanceOf
+	instanceOf = f
+	return func() { instanceOf = before }
+}
+
+// InstanceAddress is instanceAddress.
+var InstanceAddress = instanceAddress

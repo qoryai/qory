@@ -34,19 +34,6 @@ var foragerList = sync.OnceValues(func() ([]foragerRuntime, error) {
 	return list.Runtimes, nil
 })
 
-// foragerRuntimes is the names in Forager's runtime list, in its order.
-func foragerRuntimes() ([]string, error) {
-	list, err := foragerList()
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, len(list))
-	for i, rt := range list {
-		names[i] = rt.Name
-	}
-	return names, nil
-}
-
 // foragerFixed is the fixed variables of the runtime name in Forager's runtime list,
 // NAME=value sorted by name; none for a runtime that has none or is not in the list.
 func foragerFixed(name string) ([]string, error) {

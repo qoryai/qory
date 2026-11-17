@@ -25,6 +25,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
+	"golang.org/x/sys/unix"
 
 	"github.com/qoryai/qory/internal/pool/explore"
 	"github.com/qoryai/qory/internal/pool/prebuild"
@@ -103,10 +104,16 @@ type report struct {
 	Problems []string
 }
 
-// fd3Pipe reports whether descriptor 3 is open and a pipe, as a key's would be.
+// fd3Pipe reports whether descriptor 3 is open, a pipe, and inherited, as a key's would
+// be: FD_CLOEXEC is clear on it. On macOS the Go runtime's kqueue is descriptor 3 of a
+// fake, and reads as a pipe, but the runtime sets FD_CLOEXEC on it.
 func fd3Pipe() bool {
 	var st syscall.Stat_t
-	return syscall.Fstat(3, &st) == nil && st.Mode&syscall.S_IFMT == syscall.S_IFIFO
+	if syscall.Fstat(3, &st) != nil || st.Mode&syscall.S_IFMT != syscall.S_IFIFO {
+		return false
+	}
+	flags, err := unix.FcntlInt(3, unix.F_GETFD, 0)
+	return err == nil && flags&unix.FD_CLOEXEC == 0
 }
 
 func TestMain(m *testing.M) {
@@ -512,9 +519,6 @@ const testCommit = "8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f70819"
 // testInputs are a prebuild's inputs.
 const testInputs = `{"version":1,"environment_ref":"3f2a1b0c9d8e"}`
 
-// testAgent is the agent image, pinned by digest.
-const testAgent = "ghcr.io/qoryai/agent@sha256:1111111111111111111111111111111111111111111111111111111111111111"
-
 // testDestination and testEnvironmentDestination are the run's image_destination and
 // environment_destination.
 const (
@@ -621,7 +625,7 @@ func newEnv(t *testing.T) *env {
 	e := &env{home: filepath.Join(root, "home"), elsewhere: filepath.Join(root, "elsewhere")}
 	e.settings = prebuild.Settings{
 		State: filepath.Join(root, "state"), RunConfig: filepath.Join(root, "runconfig"),
-		AgentImage: testAgent, User: "1000:1000",
+		User: "1000:1000",
 		Wall: &wall.Docker{Command: "docker", User: "1000:1000"}, Image: "prebuild", Images: []session.Image{testImage},
 		CAEnv: []string{"SSL_CERT_FILE"}, Exec: []string{"/qory/qory", "run", "exec"}, Limits: wall.Limits{CPUs: "2", PIDs: 512},
 		Git: os.Args[0], Log: e.log, Version: "qory 0.0.0-test", Machine: "aws-ec2",
@@ -1117,7 +1121,7 @@ func TestLaunchCommands(t *testing.T) {
 	}
 	j := e.joins[0]
 	wantArgs := append(slices.Clone(prebuild.StepArgs), "--out", out, "--run-id", testRunID, "--image-destination", testDestination,
-		"--environment-destination", testEnvironmentDestination, "--agent-image", testAgent, "--user", "1000:1000")
+		"--environment-destination", testEnvironmentDestination, "--user", "1000:1000")
 	if j.Command != "/qory/qory" || !slices.Equal(j.Args, wantArgs) || j.Dir != work || j.Runtime != nil {
 		t.Errorf("the session runs %s %q in %s, runtime %v", j.Command, j.Args, j.Dir, j.Runtime)
 	}
@@ -1135,7 +1139,7 @@ func TestLaunchCommands(t *testing.T) {
 		t.Fatalf("built %d times", len(e.built))
 	}
 	o := e.built[0]
-	if o.Repository != work || o.AgentImage != testAgent || o.User != "1000:1000" || o.Tag != tag || o.Helper != "/qory/qory" || !slices.Equal(o.SeedArgs, []string{"run", "seed"}) ||
+	if o.Repository != work || o.User != "1000:1000" || o.Tag != tag || o.Helper != "/qory/qory" || !slices.Equal(o.SeedArgs, []string{"run", "seed"}) ||
 		o.EnvironmentTag != testEnvironmentTag || o.EnvironmentImage != "" || !o.Walled || !slices.Equal(o.Env, e.stepEnv()) {
 		t.Errorf("the build's options %+v", o)
 	}
@@ -1444,7 +1448,6 @@ func TestLaunchRefused(t *testing.T) {
 		{"environment image by tag", func(_ *prebuild.Settings, r *prebuild.Run) {
 			r.EnvironmentDestination, r.EnvironmentImage = "", "r.example/env:1"
 		}},
-		{"agent image by tag", func(s *prebuild.Settings, _ *prebuild.Run) { s.AgentImage = "ghcr.io/qoryai/agent:1" }},
 		{"no user", func(s *prebuild.Settings, _ *prebuild.Run) { s.User = "" }},
 		{"no wall", func(s *prebuild.Settings, _ *prebuild.Run) { s.Wall = nil }},
 		{"no image behind the wall", func(s *prebuild.Settings, _ *prebuild.Run) { s.Image = "" }},
