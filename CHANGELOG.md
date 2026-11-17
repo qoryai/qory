@@ -472,6 +472,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The push step of a write run pushes through the run's push proxy, which sets the run
+  configuration's push credentials alone, and the run's proxy no longer adds push
+  credentials. A run with no push credential stops at the push with `add a push
+  credential to the run configuration: no push proxy`. The fetch, the runtime's install
+  and a prebuild stay on the run's proxy.
 - The `agent`, `agent-docker` and `prebuild` images contain no agent runtime. The machine
   installs the runtime at run time, and Forager mounts it read-only at
   `/qory/runtime/<runtime>`. `qory image check` checks no runtime and prints no runtime
