@@ -354,6 +354,22 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 	}
 }
 
+// TestARunCodeMapsTheTierBalanced is a run from a run code whose run settings map the
+// tiers light, balanced and thinking: the run composes with each tier as a --tier flag,
+// and the join starts.
+func TestARunCodeMapsTheTierBalanced(t *testing.T) {
+	r := runFromCodeWith(t, behindAWall(t), nil, writesHello, func(d map[string]any) {
+		d["run_settings"] = map[string]any{
+			"runtime": "claude", "model": "example-large",
+			"provider_models": []any{map[string]any{"id": "example-large"}, map[string]any{"id": "example-small"}},
+			"tiers":           map[string]any{"light": "example-small", "balanced": "example-large", "thinking": "example-large"},
+		}
+	})
+	if !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+}
+
 // TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours is a run from a run code whose
 // base sets no time_limit for its workflow: the session's time limit is 3 hours.
 func TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours(t *testing.T) {

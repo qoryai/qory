@@ -1,4 +1,4 @@
 Set workflows.fix.tier to a valid tier.
-  The tiers are light, fast, and thinking.
+  The tiers are light, balanced, and thinking.
   The value is "fastest".
   workflows.fix is in stack/qory-stack.yaml.

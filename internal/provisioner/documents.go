@@ -112,7 +112,7 @@ func checkRunSettings(name, step string, rs *contracts.RunSettings) error {
 		return broken
 	}
 	if rs.Tiers != nil {
-		for _, t := range []*contracts.Tier{rs.Tiers.Light, rs.Tiers.Fast, rs.Tiers.Thinking} {
+		for _, t := range []*contracts.Tier{rs.Tiers.Light, rs.Tiers.Balanced, rs.Tiers.Thinking} {
 			if t != nil && !listed(t.Model, t.Effort) {
 				return broken
 			}

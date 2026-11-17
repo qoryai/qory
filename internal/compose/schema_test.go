@@ -419,7 +419,7 @@ func TestConfigSchemaKnowsTiers(t *testing.T) {
 		body   string
 		valid  bool
 	}{
-		{composeSchema, `{"harness": {"tiers": {"light": "claude-haiku-5-5", "fast": "claude-sonnet-5-5", "thinking": {"model": "claude-opus-5-5", "effort": "max"}}}}`, true},
+		{composeSchema, `{"harness": {"tiers": {"light": "claude-haiku-5-5", "balanced": "claude-sonnet-5-5", "thinking": {"model": "claude-opus-5-5", "effort": "max"}}}}`, true},
 		{composeSchema, `{"harness": {"extends": {"path": "../harness/nextjs-15"}, "tiers": {"thinking": {"model": "claude-opus-5-5"}}}}`, true},
 		{composeSchema, `{"harness": {"tiers": {"heavy": "claude-haiku-5-5"}}}`, false},
 		{composeSchema, `{"harness": {"tiers": {"light": ""}}}`, false},

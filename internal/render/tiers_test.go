@@ -15,14 +15,14 @@ import (
 // threeTiers maps each tier to a model and an effort, as a session's tier map does.
 var threeTiers = map[string]stack.Tier{
 	"light":    {Model: "example-small-model", Effort: "low", From: "--tier"},
-	"fast":     {Model: "example-mid-model", Effort: "medium", From: "--tier"},
+	"balanced": {Model: "example-mid-model", Effort: "medium", From: "--tier"},
 	"thinking": {Model: "example-big-model", Effort: "high", From: "--tier"},
 }
 
-// fastWithoutEffort is threeTiers with no effort for the tier fast.
-var fastWithoutEffort = map[string]stack.Tier{
+// balancedWithoutEffort is threeTiers with no effort for the tier balanced.
+var balancedWithoutEffort = map[string]stack.Tier{
 	"light":    threeTiers["light"],
-	"fast":     {Model: "example-mid-model", From: "--tier"},
+	"balanced": {Model: "example-mid-model", From: "--tier"},
 	"thinking": threeTiers["thinking"],
 }
 
@@ -53,7 +53,7 @@ func TestBuildWritesThreeTiersIntoAgentFiles(t *testing.T) {
 			"planner":  "---\ndescription: Plans a change.\nmodel: example-big-model\nname: planner\nreasoning-effort: high\n---\n\nPlan the change.\n",
 			"writer":   copilotWriter,
 		}},
-		{"copilot, fast with no effort", "copilot", fastWithoutEffort, copilotPaths, map[string]string{
+		{"copilot, balanced with no effort", "copilot", balancedWithoutEffort, copilotPaths, map[string]string{
 			"reviewer": "---\ndescription: Reviews a change for defects.\nmodel: example-mid-model\nname: reviewer\n---\n\nReview the change and list defects.\n",
 			"planner":  "---\ndescription: Plans a change.\nmodel: example-big-model\nname: planner\nreasoning-effort: high\n---\n\nPlan the change.\n",
 			"writer":   copilotWriter,
