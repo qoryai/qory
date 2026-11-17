@@ -18,6 +18,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- The `agent` image has the Node packages `typescript` 5.9.3, `libpg-query` 18.2.4,
+  `parse5` 8.1.1, `postcss` 8.5.33 and `postcss-scss` 4.0.9 in `/opt/qory/parsers`. The
+  folder belongs to root and no other user can write to it. A script loads a package with
+  `require('/opt/qory/parsers/node_modules/<package>')`. See
+  Qory's images in `docs/run.md`.
 - A run takes the lower of its workflow's `access` and `access` in its documents, in
   the order `read`, `write-no-push`, `write`. A workflow's `access` in a stack takes
   `write-no-push` in both schemas and in the stack check, and documents may have it. A
