@@ -141,6 +141,31 @@ func TestTheModuleNameRefusalContainsTheFileThatDeclaresTheModule(t *testing.T) 
 	}
 }
 
+// TestTheModuleNameRefusalOfABaseModuleContainsTheBaseStackFile is a module listed by the
+// base stack, with a manifest that has another name, under a checkout that declares its
+// stack in qory.yaml: line 1 contains qory-stack.yaml, the file that lists the module.
+func TestTheModuleNameRefusalOfABaseModuleContainsTheBaseStackFile(t *testing.T) {
+	isolateAll(t)
+	dir := writeTree(t, map[string]string{
+		"base/" + stack.FileName:          "apiVersion: qory.dev/v1alpha1\nname: core\nextending:\n  kinds: [commands]\nmodules:\n  - name: a\n    source:\n      path: modules/a\n",
+		"base/modules/a/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: z\n",
+		"app/" + config.FileName:          "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  target:\n    runtime: claude\n",
+	})
+	p, err := config.Compose(filepath.Join(dir, "app", config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, base, err := compose.LoadBase(p, "", compose.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = compose.ComposeWith(merged, compose.Options{Base: base})
+	const want = "Use one name for the module in qory-stack.yaml and in its qory-module.yaml.\n  The module a at "
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("%v\nwant one that starts with %q", err, want)
+	}
+}
+
 // TestTheVariantRefusalContainsTheFileThatListsTheModule is a module with variants and no
 // variant for the runtime, listed in the harness section of qory.yaml and in
 // qory-stack.yaml: line 1 contains the file that lists the module.

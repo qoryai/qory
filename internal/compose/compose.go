@@ -339,7 +339,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			afterManifest(src.Dir)
 		}
 		if pl.Name != "" && o.m.Name != pl.Name {
-			return nil, exports.Refuse(fmt.Sprintf("Use one name for the module in %s and in its %s.", declaringFile(p), module.ManifestName),
+			return nil, exports.Refuse(fmt.Sprintf("Use one name for the module in %s and in its %s.", listedIn(p, pl), module.ManifestName),
 				fmt.Sprintf("The module %s at %s has the name %s in its %s.", accesskey.ShownName(pl.Name, false), ps.Shown(), accesskey.ShownName(o.m.Name, false), module.ManifestName))
 		}
 		if other, ok := dirs[o.m.Name]; ok {
@@ -378,7 +378,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	for _, o := range opened {
 		pl, ps, src, root, rootInfo, realDir, copied, m := o.pl, o.ps, o.src, o.root, o.rootInfo, o.realDir, o.copied, o.m
 		name := m.Name
-		variant, err := selectVariant(m, pl, p.Target.Runtimes, name, declaringFile(p))
+		variant, err := selectVariant(m, pl, p.Target.Runtimes, name, listedIn(p, pl))
 		if err != nil {
 			return nil, exports.Prefixed("module "+accesskey.ShownName(name, false), err)
 		}
@@ -787,10 +787,6 @@ func envValue(v any) (string, bool) {
 // a collision. A module with no variants, or one whose variants resolve the same way for
 // every targeted runtime, composes for all of them.
 func selectVariant(m *module.Manifest, pl stack.Module, runtimes stack.Runtimes, name, declared string) (string, error) {
-	// A module of the base stack is listed in the base's stack file.
-	if pl.Base {
-		declared = stack.FileName
-	}
 	first, err := module.SelectVariant(m, pl.Variant, runtimes.First(), declared)
 	if err != nil {
 		return "", err
@@ -1873,4 +1869,13 @@ func declaringFile(p *stack.Stack) string {
 		return stack.FileName
 	}
 	return filepath.Base(p.File)
+}
+
+// listedIn is the name of the file that lists the module pl: the file that declares the
+// stack p, or the stack file for a module of the base stack, which the base lists.
+func listedIn(p *stack.Stack, pl stack.Module) string {
+	if pl.Base {
+		return stack.FileName
+	}
+	return declaringFile(p)
 }
