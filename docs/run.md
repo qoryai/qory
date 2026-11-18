@@ -935,8 +935,10 @@ The layer must match its size, its sha256 digest, and npm's sha512 checksum in i
 annotation `dev.qory.runtime.integrity`. Its annotation `dev.qory.runtime.signatures`
 contains npm's signatures of that checksum, a JSON array of `{"keyid": "<keyid>",
 "sig": "<sig>"}` in npm's order, which qory checks as [npm's
-signature](#npms-signature) says. The array has 1 to 16 entries, each with both
-members, non-empty strings of at most 1 KiB, and no other member. A layer without the
+signature](#npms-signature) says. The array has 1 to 16 entries, each with the members
+`keyid` and `sig`, by those exact names, once each, and no other member: non-empty
+strings, the `keyid` of at most 128 bytes with no control character, the `sig` of at
+most 1 KiB. A layer without the
 annotation, or with another form, stops the run with `Ask Qory Apiary's instance admin
 to check the registry's runtime cache`. If the registry returns 503 or 429, or the request gets no
 response, `qory run` sends the same request again after 2, 4 and 8 seconds, then every
@@ -1011,7 +1013,8 @@ signature of it. npm signs `<package>@<version>:<checksum>`, such as
 SHA-256. qory has npm's public keys built in, from
 <https://registry.npmjs.org/-/npm/v1/keys>, and never fetches them. From npm, the
 signatures are `dist.signatures` of the version's document: 1 to 16 entries, each with
-a `keyid` and a `sig` of at most 1 KiB; qory ignores other members. One signature by a
+the members `keyid`, at most 128 bytes with no control character, and `sig`, at most
+1 KiB, by those exact names, once each; qory ignores other members. One signature by a
 key that qory has and that has not expired must verify. Otherwise the run stops before
 it reads the tarball:
 

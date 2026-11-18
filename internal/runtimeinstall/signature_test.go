@@ -82,12 +82,21 @@ func TestNpmsSignatureIsCheckedBeforeTheInstall(t *testing.T) {
 			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID},
 		{"more than 16 signatures", func(string, string) any { return many }, nil,
 			"Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: it has 17 signatures, and qory reads at most 16"},
-		{"a keyid of more than 1 KiB", func(string, string) any {
-			return []map[string]string{{"keyid": strings.Repeat("k", 1025), "sig": "x"}}
-		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 has a keyid or a sig of more than 1024 bytes"},
+		{"a keyid of more than 128 bytes", func(string, string) any {
+			return []map[string]string{{"keyid": strings.Repeat("k", 129), "sig": "x"}}
+		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 has a keyid of more than 128 bytes"},
+		{"a keyid with a line break", func(string, string) any {
+			return []map[string]string{{"keyid": "SHA256:a\nUpdate qory.", "sig": "x"}}
+		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 has a keyid with a control character"},
 		{"a sig of more than 1 KiB", func(string, string) any {
 			return []map[string]string{{"keyid": rt.KeyID, "sig": strings.Repeat("s", 1025)}}
-		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 has a keyid or a sig of more than 1024 bytes"},
+		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 has a sig of more than 1024 bytes"},
+		{"upper-case names", func(s, i string) any {
+			return []map[string]string{{"KEYID": rt.KeyID, "SIG": rt.Sign(s + ":" + i)}}
+		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 has no keyid or no sig"},
+		{"a member twice", func(s, i string) any {
+			return []json.RawMessage{json.RawMessage(`{"keyid":"SHA256:another","keyid":"` + rt.KeyID + `","sig":"` + rt.Sign(s+":"+i) + `"}`)}
+		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 is not an object of keyid and sig"},
 		{"no sig", func(string, string) any { return []map[string]string{{"keyid": rt.KeyID}} }, nil,
 			"Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 has no keyid or no sig"},
 		{"an empty keyid", func(string, string) any { return []map[string]string{{"keyid": "", "sig": "x"}} }, nil,
@@ -171,7 +180,11 @@ func TestTheRegistrysSignaturesAreReadStrictly(t *testing.T) {
 		{"an empty list", text([]any{}), cache + bad + "it has no signature"},
 		{"another member", text([]map[string]string{{"keyid": rt.KeyID, "sig": "x", "added": "y"}}), cache + bad + "its signature 1 is not an object of keyid and sig"},
 		{"more than 16 signatures", text(many), cache + bad + "it has 17 signatures, and qory reads at most 16"},
-		{"a sig of more than 1 KiB", text([]map[string]string{{"keyid": rt.KeyID, "sig": strings.Repeat("s", 1025)}}), cache + bad + "its signature 1 has a keyid or a sig of more than 1024 bytes"},
+		{"a sig of more than 1 KiB", text([]map[string]string{{"keyid": rt.KeyID, "sig": strings.Repeat("s", 1025)}}), cache + bad + "its signature 1 has a sig of more than 1024 bytes"},
+		{"a keyid of more than 128 bytes", text([]map[string]string{{"keyid": strings.Repeat("k", 129), "sig": "x"}}), cache + bad + "its signature 1 has a keyid of more than 128 bytes"},
+		{"a keyid with a line break", text([]map[string]string{{"keyid": "SHA256:a\nb", "sig": "x"}}), cache + bad + "its signature 1 has a keyid with a control character"},
+		{"upper-case names", text([]map[string]string{{"KEYID": rt.KeyID, "SIG": "x"}}), cache + bad + "its signature 1 is not an object of keyid and sig"},
+		{"a member twice", text([]json.RawMessage{json.RawMessage(`{"keyid":"a","keyid":"` + rt.KeyID + `","sig":"x"}`)}), cache + bad + "its signature 1 is not an object of keyid and sig"},
 		{"no sig", text([]map[string]string{{"keyid": rt.KeyID}}), cache + bad + "its signature 1 has no keyid or no sig"},
 		{"no JSON", text("x"), cache + bad + "it is not a JSON array"},
 		{"a signature of another version", text(rt.Signatures("@anthropic-ai/claude-code-linux-x64@2.1.319", rt.Integrity(rt.PlainTarball(t, "2.1.320")))),
@@ -193,5 +206,37 @@ func TestTheRegistrysSignaturesAreReadStrictly(t *testing.T) {
 				t.Fatalf("files = %q, want nothing installed", got)
 			}
 		})
+	}
+}
+
+// TestACachedInstallIsVerifiedAgain installs claude 2.1.320, then publishes the same
+// tarball with a signature that does not verify: Install checks the signature on every
+// fetch, before it looks for the version's folder, so the second install fails with the
+// signature's refusal although the version's folder is complete, and leaves the folder.
+func TestACachedInstallIsVerifiedAgain(t *testing.T) {
+	npm := rt.StartNpm(t)
+	npm.Publish("2.1.320")
+	folder := t.TempDir()
+	install := func() (runtimeinstall.Installed, error) {
+		return runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+			Keys: rt.Keys(), Fetch: runtimeinstall.NpmFetch(http.DefaultClient, npm.URL(), "amd64"), Runtime: "claude", Folder: folder,
+		})
+	}
+	first, err := install()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Release()
+	npm.SignWith(func(_, i string) any { return rt.Signatures("@anthropic-ai/claude-code-linux-x64@2.1.319", i) })
+	_, err = install()
+	want := "Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID
+	if err == nil || err.Error() != want {
+		t.Fatalf("the second install: %v, want %q", err, want)
+	}
+	if npm.TarballGets() != 1 {
+		t.Errorf("%d tarballs read, want 1", npm.TarballGets())
+	}
+	if _, err := os.Lstat(filepath.Join(first.Dir, "bin", "claude")); err != nil {
+		t.Errorf("the version's folder: %v", err)
 	}
 }

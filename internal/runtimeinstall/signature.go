@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"time"
+	"unicode"
 )
 
 // npmKeys are npm's public keys for registry signatures, as npm publishes them at
@@ -77,16 +79,20 @@ type Signature struct {
 	Sig   string `json:"sig"`
 }
 
-// The limits of a list of signatures.
+// The limits of a list of signatures. npm's keyids are SHA256: and 43 characters of
+// base64, so [maxKeyID] leaves room.
 const (
 	maxSignatures    = 16
 	maxSignatureText = 1 << 10
+	maxKeyID         = 128
 )
 
-// decodeSignatures reads b, a JSON array of signatures, each with a keyid and a sig, both
-// non-empty strings of at most [maxSignatureText] bytes. The array has 1 to
-// [maxSignatures] entries. strict refuses an entry with another member. The error is
-// the cause, for a line of a refusal.
+// decodeSignatures reads b, a JSON array of signatures, each an object with the members
+// keyid and sig, by those exact names, each once. Both are non-empty strings: the keyid
+// of at most [maxKeyID] bytes with no control character, the sig of at most
+// [maxSignatureText] bytes. The array has 1 to [maxSignatures] entries. strict refuses
+// an entry with another member; otherwise other members are left out. The error is the
+// cause, for a line of a refusal.
 func decodeSignatures(b []byte, strict bool) ([]Signature, error) {
 	var raw []json.RawMessage
 	if err := json.Unmarshal(b, &raw); err != nil {
@@ -100,29 +106,66 @@ func decodeSignatures(b []byte, strict bool) ([]Signature, error) {
 	}
 	sigs := make([]Signature, len(raw))
 	for i, r := range raw {
-		var s struct {
-			KeyID *string `json:"keyid"`
-			Sig   *string `json:"sig"`
-		}
-		d := json.NewDecoder(bytes.NewReader(r))
-		if strict {
-			d.DisallowUnknownFields()
-		}
-		if err := d.Decode(&s); err != nil {
-			return nil, fmt.Errorf("its signature %d is not an object of keyid and sig", i+1)
-		}
-		if _, err := d.Token(); err != io.EOF {
-			return nil, fmt.Errorf("its signature %d is not an object of keyid and sig", i+1)
-		}
+		s, ok := decodeSignature(r, strict)
 		switch {
-		case s.KeyID == nil || *s.KeyID == "" || s.Sig == nil || *s.Sig == "":
+		case !ok:
+			return nil, fmt.Errorf("its signature %d is not an object of keyid and sig", i+1)
+		case s.KeyID == "" || s.Sig == "":
 			return nil, fmt.Errorf("its signature %d has no keyid or no sig", i+1)
-		case len(*s.KeyID) > maxSignatureText || len(*s.Sig) > maxSignatureText:
-			return nil, fmt.Errorf("its signature %d has a keyid or a sig of more than %d bytes", i+1, maxSignatureText)
+		case len(s.KeyID) > maxKeyID:
+			return nil, fmt.Errorf("its signature %d has a keyid of more than %d bytes", i+1, maxKeyID)
+		case strings.IndexFunc(s.KeyID, unicode.IsControl) >= 0:
+			return nil, fmt.Errorf("its signature %d has a keyid with a control character", i+1)
+		case len(s.Sig) > maxSignatureText:
+			return nil, fmt.Errorf("its signature %d has a sig of more than %d bytes", i+1, maxSignatureText)
 		}
-		sigs[i] = Signature{KeyID: *s.KeyID, Sig: *s.Sig}
+		sigs[i] = s
 	}
 	return sigs, nil
+}
+
+// decodeSignature reads r, one JSON object, member by member, since encoding/json
+// matches member names in any case and takes the last of two members of one name. It
+// reads keyid and sig by their exact names, each once, as strings, and refuses any
+// other member when strict and skips it otherwise. false is any other form.
+func decodeSignature(r json.RawMessage, strict bool) (Signature, bool) {
+	d := json.NewDecoder(bytes.NewReader(r))
+	if t, err := d.Token(); err != nil || t != json.Delim('{') {
+		return Signature{}, false
+	}
+	var s Signature
+	seen := map[string]bool{}
+	for d.More() {
+		t, err := d.Token()
+		name, ok := t.(string)
+		if err != nil || !ok {
+			return Signature{}, false
+		}
+		var value *string
+		switch name {
+		case "keyid":
+			value = &s.KeyID
+		case "sig":
+			value = &s.Sig
+		default:
+			var skip json.RawMessage
+			if strict || d.Decode(&skip) != nil {
+				return Signature{}, false
+			}
+			continue
+		}
+		if seen[name] || d.Decode(value) != nil {
+			return Signature{}, false
+		}
+		seen[name] = true
+	}
+	if t, err := d.Token(); err != nil || t != json.Delim('}') {
+		return Signature{}, false
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return Signature{}, false
+	}
+	return s, true
 }
 
 // verify checks rel's signatures with keys at now: one signature by a key of keys that
