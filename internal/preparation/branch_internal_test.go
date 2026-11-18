@@ -324,7 +324,7 @@ func TestABranchNeedsATargetVersion(t *testing.T) {
 	}
 }
 
-// TestEachRepositoryKeepsItsOwnDefaultBranchName is a run of two repositories whose default
+// TestEachRepositoryKeepsTheNameOfItsDefaultBranch is a run of two repositories whose default
 // branches are trunk and stable: the fetch reads each name, before the switch moves HEAD to the
 // work branch, and [Push] has it as the base's branch of that repository alone.
 func TestEachRepositoryKeepsItsOwnDefaultBranchName(t *testing.T) {

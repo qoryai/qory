@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
@@ -193,7 +194,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 		if err != nil {
 			return nil, err
 		}
-		b.Version = withCommit(slices.Clone(b.Version), b.system, r.Path, heads[i], r.Start, r.DefaultBranch, commits)
+		b.Version = withCommit(slices.Clone(b.Version), b.system, r.Path, heads[i], r.Start, baseBranch(r.DefaultBranch), commits)
 	}
 	if len(b.pushed) == 0 {
 		fmt.Fprintln(report, textNoNewCommits)
@@ -676,6 +677,19 @@ func pushCause(output string) string {
 		line = strings.TrimSpace(lines[found])
 	}
 	return shownText(line)
+}
+
+// maxBaseBranch is the most characters of base.branch that the submission format takes.
+const maxBaseBranch = 255
+
+// baseBranch is the default branch name for base.branch: name, or "" when it has more than
+// [maxBaseBranch] characters, since a version that the format refuses would be refused after
+// the push landed.
+func baseBranch(name string) string {
+	if utf8.RuneCountInString(name) > maxBaseBranch {
+		return ""
+	}
+	return name
 }
 
 // withCommit is version with the repository path on system set to head, with the run's

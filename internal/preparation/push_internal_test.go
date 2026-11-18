@@ -1159,3 +1159,14 @@ func TestACommitThatFailsInAFurtherRepositoryPushesNothing(t *testing.T) {
 		t.Errorf("qory pushed %s", got)
 	}
 }
+
+// TestABaseBranchOverTheFormatsLimitIsLeftOut is a default branch name of 256 characters: the
+// base has no branch, so the version passes the format's check after the push landed.
+func TestABaseBranchOverTheFormatsLimitIsLeftOut(t *testing.T) {
+	if got := baseBranch(strings.Repeat("a", 255)); got != strings.Repeat("a", 255) {
+		t.Errorf("a name of 255 characters is %q", got)
+	}
+	if got := baseBranch(strings.Repeat("é", 256)); got != "" {
+		t.Errorf("a name of 256 characters is %q, want none", got)
+	}
+}

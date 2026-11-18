@@ -2857,9 +2857,10 @@ in the checkout. The file is JSON:
  "steps": {"<full commit id>": "<ledger step>"}}
 ```
 
-The file is in the checkout, the one place on the host that a session of a pool run can
-write: the home, the record and the inputs are mounted read-only, and a pool refuses
-`wall.mounts`. qory adds the line `/.qory/handoff/` to the checkout's `.git/info/exclude` once
+The file is in the checkout, where the session's work is and qory reads it: the home, the
+record and the inputs are mounted read-only, and a pool refuses `wall.mounts`. The session can
+also write the run's transcript folder, which Forager binds and qory does not read, and a run
+outside a pool can write a `--mount` that is not read-only. qory adds the line `/.qory/handoff/` to the checkout's `.git/info/exclude` once
 before the session starts, with the line `/.qory` that the compose adds. That file is local
 to the clone and no commit has it, so `git add -A` and `git commit -a` leave the hand-off
 file out. `git add -f` can still stage it: step 4 of the push step stops that push.
@@ -2984,9 +2985,10 @@ that the file has twice is not stored.
 
 `base.branch` is the branch that qory read as the repository's default when it fetched the
 repository at the start of the run, such as `main`: one name for each repository, since each
-has a default branch that can differ from the others. The submit program bases a pull request on it. A repository
-that qory cloned and whose HEAD names no branch has no `base.branch`, and the program may
-not change it.
+has a default branch that can differ from the others. It is the branch that a pull request
+of the run is based on; qory does not open the pull request. A repository whose branch name
+qory could not read, or whose name has more than 255 characters, has no `base.branch`, and the
+program may not change it.
 
 The program may change only `commit_url`, `base.commit_url` and each `commits[].commit_url`
 of a repository, and its `draft`, from `no-program` to a draft pull request. A file that
