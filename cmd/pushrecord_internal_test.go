@@ -16,6 +16,7 @@ import (
 
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/server"
+	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
@@ -318,5 +319,55 @@ func TestASendThatGetsNoResponseIsCutAtTheLimit(t *testing.T) {
 	ended, err := recordLanded(context.Background(), send, "qory/w-1", landedRepositories(1))
 	if ended != "" || err != nil || sends != 2 {
 		t.Errorf("ended = %q, err = %v, sends = %d, want \"\", nil and 2", ended, err, sends)
+	}
+}
+
+// TestAClosedRunInTheSecondCallOfThreeEndsTheReport is a push of 130 repositories, as calls of
+// 64, 64 and 2, whose second call returns an error that wraps [session.ErrRunClosed]: the
+// first call is sent, the second is sent once with no wait, the third is not sent, and the
+// report returns the line of the code run_closed and no error.
+func TestAClosedRunInTheSecondCallOfThreeEndsTheReport(t *testing.T) {
+	var waits []time.Duration
+	before := branchWait
+	branchWait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	defer func() { branchWait = before }()
+	first, sizes := recordServer(t, nil)
+	sent := 0
+	send := func(ctx context.Context, body []byte) ([]byte, error) {
+		sent++
+		if sent == 2 {
+			return nil, fmt.Errorf("Open another run to send the pushed-commits request: %w.", session.ErrRunClosed)
+		}
+		return first(ctx, body)
+	}
+	ended, err := recordLanded(context.Background(), send, "qory/w-1", landedRepositories(130))
+	want := "qory run: The run ended (run_closed), so qory pushes nothing more and no later session starts."
+	if ended != want || err != nil {
+		t.Errorf("ended = %q, err = %v, want %q and no error", ended, err, want)
+	}
+	if sent != 2 || !slices.Equal(*sizes, []int{64}) || len(waits) != 0 {
+		t.Errorf("%d calls sent, the server got %v, the waits %v, want 2, [64] and none", sent, *sizes, waits)
+	}
+}
+
+// TestAnErrorOfARunWithNoControlPlaneIsSentAgainAndFails is the error of [session.Run] for an
+// open run with no control plane, which does not wrap [session.ErrRunClosed]: the call is sent
+// 4 times, after 1 s, 2 s and 4 s, and the report fails with the contact support line.
+func TestAnErrorOfARunWithNoControlPlaneIsSentAgainAndFails(t *testing.T) {
+	var waits []time.Duration
+	before := branchWait
+	branchWait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	defer func() { branchWait = before }()
+	sent := 0
+	send := func(context.Context, []byte) ([]byte, error) {
+		sent++
+		return nil, errors.New("Open the run with a control plane to send the pushed-commits request: this run has none.")
+	}
+	ended, err := recordLanded(context.Background(), send, "qory/w-1", landedRepositories(1))
+	if ended != "" || err == nil || !strings.Contains(err.Error(), "Contact support: Qory Apiary did not record the last push.") {
+		t.Errorf("ended = %q, err = %v, want no end and the contact support line", ended, err)
+	}
+	if want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}; sent != 4 || !slices.Equal(waits, want) {
+		t.Errorf("%d calls sent and the waits %v, want 4 and %v", sent, waits, want)
 	}
 }

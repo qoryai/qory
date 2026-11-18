@@ -466,7 +466,7 @@ func TestConfigSchemaKnowsTiers(t *testing.T) {
 		body   string
 		valid  bool
 	}{
-		{composeSchema, `{"harness": {"tiers": {"light": "claude-haiku-5-5", "fast": "claude-sonnet-5-5", "thinking": {"model": "claude-opus-5-5", "effort": "max"}}}}`, true},
+		{composeSchema, `{"harness": {"tiers": {"light": "claude-haiku-5-5", "balanced": "claude-sonnet-5-5", "thinking": {"model": "claude-opus-5-5", "effort": "max"}}}}`, true},
 		{composeSchema, `{"harness": {"extends": {"path": "../harness/nextjs-15"}, "tiers": {"thinking": {"model": "claude-opus-5-5"}}}}`, true},
 		{composeSchema, `{"harness": {"tiers": {"heavy": "claude-haiku-5-5"}}}`, false},
 		{composeSchema, `{"harness": {"tiers": {"light": ""}}}`, false},
@@ -620,6 +620,14 @@ func TestQuestionsSchema(t *testing.T) {
 		return replace(option, strings.TrimSuffix(strings.Repeat(option+", ", n), ", "))
 	}
 	question := "Which database does the service use?"
+	// withProposal gives the document's first option the member proposal, and withCriterion
+	// gives the first question the member criterion.
+	withProposal := func(value string) string {
+		return replace(option, strings.Replace(option, `}`, `, "proposal": `+value+`}`, 1))
+	}
+	withCriterion := func(doc string) string {
+		return strings.Replace(doc, `"question": "`+question+`",`, `"question": "`+question+`", "criterion": "ac-3",`, 1)
+	}
 	// answerStart and historyStart start the answer and the history entry of the document.
 	const (
 		answerStart  = `"answer": {"option": "PostgreSQL"`
@@ -784,6 +792,20 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-10000"`), false},
 		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-03"`), false},
 		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": 3`), false},
+		// an option's proposal, only on a question with criterion
+		{withCriterion(withProposal(`"Use PostgreSQL 16."`)), true},
+		{withCriterion(withProposal(`"` + strings.Repeat("a", 2000) + `"`)), true},
+		{withCriterion(withProposal(`"Use PostgreSQL\n16."`)), true},
+		{withProposal(`"Use PostgreSQL 16."`), false},
+		{replace(`{"title": "None", "explanation": "Every read goes to the database."}`, `{"title": "None", "explanation": "Every read goes to the database.", "proposal": "Use no cache."}`), false},
+		{withCriterion(replace(redis, redis+`, "proposal": "Use Redis."`)), false},
+		{withCriterion(withProposal(`""`)), false},
+		{withCriterion(withProposal(`"` + strings.Repeat("a", 2001) + `"`)), false},
+		{withCriterion(withProposal(`null`)), false},
+		{withCriterion(withProposal(`7`)), false},
+		{withCriterion(withProposal(`"Use\u200bPostgreSQL."`)), false},
+		{withCriterion(questionsDocument), true},
+		{withCriterion(replace(option, recommended(`true`))), true},
 		// history
 		{replace(`, "reopened": {"run": 2, "at": "2026-11-04T10:45:00Z"}`, ``), false},
 		{replace(`"reopened": {"run": 2, `, `"reopened": {"run": 0, `), false},
@@ -855,6 +877,8 @@ func TestVerdictSchema(t *testing.T) {
 	}{
 		{verdictDocument, true},
 		{`{"verdict": "passed"}`, true},
+		{`{"verdict": "passed", "track": {"id": "small-change", "reason": "One file."}}`, true},
+		{`{"verdict": "passed", "track": {"id": "small-change", "kind": "A text that the product shows", "reason": "One file."}}`, false},
 		{`{"verdict": "changes-requested"}`, true},
 		{`{}`, false},
 		{`[]`, false},

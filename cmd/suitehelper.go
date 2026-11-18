@@ -368,16 +368,16 @@ func (r *suiteRun) post(ctx context.Context, point runapi.Point, kind suiteKind,
 	// verdict is what qory posts over a prior verdict of the agent, and points the points it has.
 	verdict, points := runapi.VerdictChangesRequested, []runapi.Point{point}
 	switch {
-	case agent == nil || agent.Verdict == runapi.VerdictPassed:
+	case agent == nil || agent.verdict == runapi.VerdictPassed:
 		if kind == kindUnfixable {
 			verdict = runapi.VerdictEscalate
 		}
-	case agent.Verdict == runapi.VerdictEscalate:
-		verdict, points = runapi.VerdictEscalate, append(agent.Points, point)
+	case agent.verdict == runapi.VerdictEscalate:
+		verdict, points = runapi.VerdictEscalate, append(agent.points, point)
 	case kind == kindRed:
-		return fmt.Sprintf(textSuiteStands, agent.Verdict), nil
+		return fmt.Sprintf(textSuiteStands, agent.verdict), nil
 	default:
-		verdict, points = runapi.VerdictChangesRequested, append(agent.Points, point)
+		verdict, points = runapi.VerdictChangesRequested, append(agent.points, point)
 		if kind == kindUnfixable {
 			verdict = runapi.VerdictEscalate
 		}
@@ -385,15 +385,11 @@ func (r *suiteRun) post(ctx context.Context, point runapi.Point, kind suiteKind,
 	if len(points) > maxVerdictPoints {
 		return textSuiteNoRoom, nil
 	}
-	doc := &verdictDocument{Verdict: verdict, Points: points}
+	var track *runapi.Track
 	if agent != nil {
-		doc.Track = agent.Track
+		track = agent.track
 	}
-	body, err := encodeVerdict(doc)
-	if err != nil {
-		return "", err
-	}
-	if err := postVerdict(ctx, client, body, tries); err != nil {
+	if err := postVerdict(ctx, client, verdict, points, track, tries); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf(textSuitePosted, verdict), nil
@@ -420,7 +416,7 @@ func buildPoint(got suite.Outcome, refused suite.Refused, minutes int) runapi.Po
 
 // validPoint reports whether a verdict with p as its one point passes the verdict format.
 func validPoint(p runapi.Point) bool {
-	body, err := runapi.VerdictBody(runapi.VerdictChangesRequested, []runapi.Point{p})
+	body, err := runapi.VerdictBody(runapi.VerdictChangesRequested, []runapi.Point{p}, nil)
 	return err == nil && verdictformat.Check(body) == nil
 }
 
@@ -527,22 +523,17 @@ func shortCommit(commit string) string {
 	return commit
 }
 
-// verdictDocument is a verdict as the run's version of it has it.
-type verdictDocument struct {
-	Verdict string          `json:"verdict"`
-	Points  []runapi.Point  `json:"points,omitempty"`
-	Track   json.RawMessage `json:"track,omitempty"`
-}
-
-// encodeVerdict is the body of POST verdict for d.
-func encodeVerdict(d *verdictDocument) ([]byte, error) {
-	return json.Marshal(d)
+// priorVerdict is the verdict that the run wrote: its verdict, points and track.
+type priorVerdict struct {
+	verdict string
+	points  []runapi.Point
+	track   *runapi.Track
 }
 
 // agentVerdict is the newest verdict that the run wrote, nil when it wrote none. It is read
 // from the artifact index and its file, since the work item's newest verdict can be an earlier
 // run's.
-func agentVerdict(ctx context.Context, client *runapi.Client, runID string) (*verdictDocument, error) {
+func agentVerdict(ctx context.Context, client *runapi.Client, runID string) (*priorVerdict, error) {
 	ctx, cancel := context.WithTimeout(ctx, runAPITimeout)
 	defer cancel()
 	index, err := client.Artifacts(ctx)
@@ -572,16 +563,24 @@ func agentVerdict(ctx context.Context, client *runapi.Client, runID string) (*ve
 	if err := client.Download(ctx, newest.ID, newest.Files[0], &file); err != nil {
 		return nil, err
 	}
-	var d verdictDocument
+	var d struct {
+		Verdict string         `json:"verdict"`
+		Points  []runapi.Point `json:"points"`
+		Track   *runapi.Track  `json:"track"`
+	}
 	if err := json.Unmarshal(file.Bytes(), &d); err != nil {
 		return nil, fmt.Errorf("the run's verdict is not a verdict document: %w", err)
 	}
-	return &d, nil
+	return &priorVerdict{d.Verdict, d.Points, d.Track}, nil
 }
 
-// postVerdict posts body as the run's verdict, up to tries times: a verdict sent twice is stored
-// twice with the same content, so a request that got no response is sent again.
-func postVerdict(ctx context.Context, client *runapi.Client, body []byte, tries int) error {
+// postVerdict posts the verdict as the run's verdict, up to tries times: a verdict sent twice is
+// stored twice with the same content, so a request that got no response is sent again.
+func postVerdict(ctx context.Context, client *runapi.Client, verdict string, points []runapi.Point, track *runapi.Track, tries int) error {
+	body, err := runapi.VerdictBody(verdict, points, track)
+	if err != nil {
+		return err
+	}
 	if err := verdictformat.Check(body); err != nil {
 		return err
 	}
@@ -593,7 +592,7 @@ func postVerdict(ctx context.Context, client *runapi.Client, body []byte, tries 
 			}
 		}
 		one, cancel := context.WithTimeout(ctx, runAPITimeout)
-		_, last = client.PushVerdictDocument(one, body)
+		_, last = client.PushVerdict(one, verdict, points, track)
 		cancel()
 		switch {
 		case last == nil:

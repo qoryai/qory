@@ -1,0 +1,3 @@
+Set notes_for in app-naming of module app to a role the stack fills.
+  The stack fills no tester role.
+  The stack fills developer and reviewers.

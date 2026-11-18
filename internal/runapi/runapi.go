@@ -189,6 +189,14 @@ type Point struct {
 	Fix      string `json:"fix,omitempty"`
 }
 
+// Track is the track that a verdict proposes for the work item, with the reason. ID is
+// the id of a track that the gate of the run's stage offers. The contract is
+// contracts/harness/v1/verdict.schema.json.
+type Track struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
+}
+
 // Index is the work item's artifacts with their versions. Raw is the whole response, as
 // the run API returned it.
 type Index struct {
@@ -429,19 +437,13 @@ func CheckVersion(artifactType string, sizes []int64) error {
 }
 
 // PushVerdict stores the run's verdict, one of the Verdict constants, with the body of
-// [VerdictBody].
-func (c *Client) PushVerdict(ctx context.Context, verdict string, points []Point) (*Pushed, error) {
-	body, err := VerdictBody(verdict, points)
+// [VerdictBody]. It sends nothing for a body over the limit of POST verdict.
+func (c *Client) PushVerdict(ctx context.Context, verdict string, points []Point, track *Track) (*Pushed, error) {
+	body, err := VerdictBody(verdict, points, track)
 	if err != nil {
 		return nil, err
 	}
 
-	return c.post(ctx, "/verdict", body)
-}
-
-// PushVerdictDocument stores body, a verdict document of the form of [VerdictBody], with a
-// track too when the verdict has one: [Client.PushVerdict] sends none.
-func (c *Client) PushVerdictDocument(ctx context.Context, body []byte) (*Pushed, error) {
 	if len(body) > maxVerdictBody {
 		return nil, &Error{Code: CodePayloadTooLarge, Request: "POST /verdict", Limit: maxVerdictBody}
 	}
@@ -450,14 +452,16 @@ func (c *Client) PushVerdictDocument(ctx context.Context, body []byte) (*Pushed,
 }
 
 // VerdictBody is the document of a verdict, as POST verdict reads it and as the file of
-// a version of the artifact type verdict: verdict, and points when there are any.
-func VerdictBody(verdict string, points []Point) ([]byte, error) {
+// a version of the artifact type verdict: verdict, points when there are any, and track
+// when track is not nil.
+func VerdictBody(verdict string, points []Point, track *Track) ([]byte, error) {
 	body, err := encode(struct {
 		Verdict string  `json:"verdict"`
 		Points  []Point `json:"points,omitempty"`
-	}{verdict, points})
+		Track   *Track  `json:"track,omitempty"`
+	}{verdict, points, track})
 	if err != nil {
-		return nil, fmt.Errorf("Check the verdict's points. Encoding the request failed: %w", err)
+		return nil, fmt.Errorf("Check the verdict's points and track. Encoding the request failed: %w", err)
 	}
 
 	return body, nil

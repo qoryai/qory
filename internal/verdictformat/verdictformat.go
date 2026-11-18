@@ -29,6 +29,10 @@ const (
 	MaxPoints = 20
 	// MaxText is the most characters of a point's text, and of its fix.
 	MaxText = 500
+	// MaxTrackID is the most characters of a track's id.
+	MaxTrackID = 40
+	// MaxReason is the most characters of a track's reason.
+	MaxReason = 300
 )
 
 // schemaURL is the schema's $id, which it is compiled under.
@@ -76,6 +80,26 @@ var (
 // questionID is the id form of a question in contracts/harness/v1/questions.schema.json.
 var questionID = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
+// trackID is the form of a track's id: lower-case words joined by hyphens.
+var trackID = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
+
+// ValidTrackID reports whether id has the form of a track's id, at most [MaxTrackID]
+// characters.
+func ValidTrackID(id string) bool {
+	return len(id) <= MaxTrackID && trackID.MatchString(id)
+}
+
+// CheckTrack checks track against the schema, as the track of a verdict that passed. The
+// error starts with the fix.
+func CheckTrack(track runapi.Track) error {
+	body, err := runapi.VerdictBody(runapi.VerdictPassed, nil, &track)
+	if err != nil {
+		return err
+	}
+
+	return Check(body)
+}
+
 // pointMembers are the members a point has.
 var pointMembers = []string{"text", "action", "question", "fix"}
 
@@ -114,7 +138,7 @@ func Points(data []byte) ([]runapi.Point, error) {
 		}
 		points = append(points, point)
 	}
-	body, err := runapi.VerdictBody(runapi.VerdictEscalate, points)
+	body, err := runapi.VerdictBody(runapi.VerdictEscalate, points, nil)
 	if err != nil {
 		return nil, err
 	}

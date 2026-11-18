@@ -44,7 +44,7 @@ func TestTheConfigRowsPrintAPhraseForAValueWithASecret(t *testing.T) {
   effort: qrk_effort
   home: /opt/qak_home
   tiers:
-    fast: {model: qrk_model, effort: qak_effort}
+    balanced: {model: qrk_model, effort: qak_effort}
   launch:
     claude:
       command: /opt/qak_tool
@@ -75,7 +75,7 @@ env: {API_TOKEN: qak_v, QRK_N: plain}
 		"harness.model":                     accessKeyValue,
 		"harness.effort":                    runKeyValue,
 		"harness.home":                      accessKeyValue,
-		"harness.tiers.fast":                runKeyValue + ", effort " + accessKeyValue,
+		"harness.tiers.balanced":            runKeyValue + ", effort " + accessKeyValue,
 		"harness.launch.claude":             "API_KEY=" + accessKeyValue + " " + accessKeyPhrase + "=plain " + accessKeyValue + " --flag --token " + runKeyValue,
 		"harness.launch." + accessKeyPhrase: "/opt/tool",
 		"worktree.dir":                      accessKeyValue,
@@ -141,8 +141,8 @@ func TestConfigRefusalsPrintAPhraseForASecret(t *testing.T) {
 		{"harness: {links: qrk_l}\n", "Set harness.links to checkout or none.\n  The value is " + runKeyValue + ".\n  harness.links is in {path}."},
 		{"git: {timeout: qak_t}\n", "Set git.timeout to a duration above zero, such as 10m.\n  The value is " + accessKeyValue + ".\n  git.timeout is in {path}."},
 		{"env: {QAK_X-1: v}\n", "Rename each variable in env to an environment variable name.\n  " + accessKeyPhrase + " is not one.\n  env is in {path}."},
-		{"harness: {tiers: {qak_tier: m}}\n", "Use one of the tiers light, fast, and thinking.\n  " + accessKeyPhrase + " is not a tier.\n  The name is in harness.tiers." + accessKeyPhrase + ".\n  The file is {path}."},
-		{"harness: {tiers: {fast: \"${qory:qak_x}\"}}\n", "Set harness.tiers.fast to a model id.\n  " + accessKeyValue + " is a tier placeholder, which goes only in an agent's model.\n  harness.tiers.fast is in {path}."},
+		{"harness: {tiers: {qak_tier: m}}\n", "Use one of the tiers light, balanced, and thinking.\n  " + accessKeyPhrase + " is not a tier.\n  The name is in harness.tiers." + accessKeyPhrase + ".\n  The file is {path}."},
+		{"harness: {tiers: {balanced: \"${qory:qak_x}\"}}\n", "Set harness.tiers.balanced to a model id.\n  " + accessKeyValue + " is a tier placeholder, which goes only in an agent's model.\n  harness.tiers.balanced is in {path}."},
 		{"worktree: {name: qak_w}\n", "Add {branch} to worktree.name.\n  worktree.name is " + accessKeyValue + ", and without {branch} two worktrees share one directory.\n  worktree.name is in {path}."},
 		{"worktree: {name: \"qak_/{branch}\"}\n", "Remove the slash from worktree.name.\n  worktree.name is " + accessKeyValue + ". It is one directory name under worktree.dir.\n  worktree.name is in {path}."},
 		{"worktree: {pr: refs/qak_}\n", "Set worktree.pr to a ref under refs/ with {n}, as refs/pull/{n}/head.\n  worktree.pr is " + accessKeyValue + ", and {n} stands for the pull request number.\n  worktree.pr is in {path}."},
