@@ -29,7 +29,7 @@ import (
 
 // The words of the push step of a write run. textChangesLeft is the message of the commit
 // of what the agent left, with the run's number. textNoBranchType has the fix of the workflow
-// model, with the two ways of [preparation.WorkBranch.VersionWays].
+// model, with the fix of [preparation.WorkBranch.DeleteBranch].
 const (
 	textChangesLeft     = "Changes left by run %d"
 	textNoRunNumber     = "Check the run's gateway. The response to GET /work-item has no run number" + codeUsed
@@ -357,15 +357,15 @@ func pushStepName(branch *preparation.WorkBranch, system string) string {
 // a POST with no response sends it again only when [branchStored] reads that no
 // version of this run has the document. At most [maxBranchTries] POST go out, and
 // unknown_type is [textNoBranchType]. Every failure has the fix of
-// [preparation.WorkBranch.VersionWays], as the push landed. check gets the version's
+// [preparation.WorkBranch.DeleteBranch], as the push landed. check gets the version's
 // file before the first POST, and its error sends none.
 func storeBranch(ctx context.Context, client *runapi.Client, runID, note string, branch *preparation.WorkBranch, document *branchformat.Branch, check func(content []byte) error) error {
 	content, err := json.Marshal(document)
 	if err != nil {
-		return fmt.Errorf(textNotStored, branch.VersionWays(), document.Ref, shownError(err))
+		return fmt.Errorf(textNotStored, branch.DeleteBranch(), document.Ref, shownError(err))
 	}
 	if err := branchformat.Check(content); err != nil {
-		return fmt.Errorf(textNotStored, branch.VersionWays(), document.Ref, shownError(err))
+		return fmt.Errorf(textNotStored, branch.DeleteBranch(), document.Ref, shownError(err))
 	}
 	if err := check(content); err != nil {
 		return err
@@ -388,7 +388,7 @@ func storeBranch(ctx context.Context, client *runapi.Client, runID, note string,
 		case ctx.Err() != nil:
 			return last
 		case runapi.HasCode(last, runapi.CodeUnknownType):
-			return fmt.Errorf(textNoBranchType, branch.VersionWays())
+			return fmt.Errorf(textNoBranchType, branch.DeleteBranch())
 		case runapi.HasCode(last, runapi.CodeRateLimited):
 		case noResponse(last):
 			stored, err := branchStored(ctx, client, runID, hex.EncodeToString(sum[:]))
@@ -396,15 +396,15 @@ func storeBranch(ctx context.Context, client *runapi.Client, runID, note string,
 			case err != nil && ctx.Err() != nil:
 				return err
 			case err != nil:
-				return fmt.Errorf(textStoreUnknown, branch.VersionWays(), document.Ref, shownError(err))
+				return fmt.Errorf(textStoreUnknown, branch.DeleteBranch(), document.Ref, shownError(err))
 			case stored:
 				return nil
 			}
 		default:
-			return fmt.Errorf(textNotStored, branch.VersionWays(), document.Ref, shownError(last))
+			return fmt.Errorf(textNotStored, branch.DeleteBranch(), document.Ref, shownError(last))
 		}
 	}
-	return fmt.Errorf(textNotStored, branch.VersionWays(), document.Ref, shownError(last))
+	return fmt.Errorf(textNotStored, branch.DeleteBranch(), document.Ref, shownError(last))
 }
 
 // postBranch sends push once, within the limit of one request.
@@ -560,11 +560,11 @@ func (e pushEnding) cutBy() string {
 // ended prints how a push step that failed with err ended, for a run on branch, and
 // returns qory run's exit status: ended, the session's, when the session did not succeed,
 // [exitTimeout] for a step cut at the run's time limit, and 1 otherwise. Each cut line
-// has the two ways out when a push landed with no version stored.
+// has the fix for a push that landed with no version stored.
 func (e pushEnding) ended(u *ui.UI, said func(string), err error, branch *preparation.WorkBranch, ended error) error {
 	if e.cut && !e.noStep {
 		if pushed := branch.PushedPaths(); pushed != "" {
-			u.Fail(fmt.Errorf(textPushCutPushed, branch.VersionWays(), pushed, e.cutBy()))
+			u.Fail(fmt.Errorf(textPushCutPushed, branch.DeleteBranch(), pushed, e.cutBy()))
 		} else {
 			u.Fail(fmt.Errorf(textPushCut, e.cutBy()))
 		}

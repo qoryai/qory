@@ -195,7 +195,7 @@ func TestPushCause(t *testing.T) {
 func TestPushFailed(t *testing.T) {
 	b := &WorkBranch{Ref: testRef, system: "git.example.com"}
 	for output, want := range map[string]string{
-		" ! [rejected] a -> b (non-fast-forward)":           "qory run: add a new version of the artifact branch",
+		" ! [rejected] a -> b (non-fast-forward)":           "qory run: delete branch " + testRef + " of acme/shop on git.example.com, then take the work item in again: the branch moved",
 		" ! [remote rejected] a -> b (protected)":           "qory run: change the rule on git.example.com",
 		"error: RPC failed; HTTP 403 curl 22":               "qory run: Contact support: the push was refused (403).",
 		"fatal: unable to access 'x': returned error: 403":  "qory run: Contact support: the push was refused (403).",
@@ -206,6 +206,9 @@ func TestPushFailed(t *testing.T) {
 		got := pushFailed(b, "acme/shop", &gitError{line: output, exit: 1, output: output}).Error()
 		if !strings.HasPrefix(got, want) || !strings.HasSuffix(got, "; the code is used") {
 			t.Errorf("pushFailed(%q) = %q, want it to start with %q", output, got, want)
+		}
+		if strings.Contains(got, "add a new version") {
+			t.Errorf("pushFailed(%q) offers a version: %q", output, got)
 		}
 		if strings.Contains(got, "token-123") {
 			t.Errorf("pushFailed(%q) shows the password: %q", output, got)
@@ -1142,5 +1145,15 @@ func TestACommitThatFailsInAFurtherRepositoryPushesNothing(t *testing.T) {
 	}
 	if got := b.PushedPaths(); got != "" {
 		t.Errorf("qory pushed %s", got)
+	}
+}
+
+// TestDeleteBranchIsTheOnlyWayOut is the fix of a branch that was pushed with no version
+// stored: delete the branch, because only a run stores a version.
+func TestDeleteBranchIsTheOnlyWayOut(t *testing.T) {
+	b := &WorkBranch{Ref: testRef, system: "git.example.com", pushed: []string{"acme/shop", "acme/lib"}}
+	want := "delete branch qory/wi_1 of acme/shop and acme/lib on git.example.com"
+	if got := b.DeleteBranch(); got != want {
+		t.Errorf("DeleteBranch() = %q, want %q", got, want)
 	}
 }
