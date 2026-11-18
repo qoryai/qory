@@ -473,8 +473,10 @@ func TestPushEndingOutcome(t *testing.T) {
 
 // TestPushEndingOutcomeOfAMovedBranch is the close of a run whose push step was refused because the
 // branch moved: failed with push_head_changed after a session that succeeded, failed or timed out,
-// with the session's exit code for the last two. A session that was interrupted, cancelled or paused
-// keeps its end, and a stop that landed after the refusal wins.
+// with the session's exit code for the last two, also when the run's time limit cut the step after
+// the refusal. A session that was interrupted, cancelled or paused keeps its end, and a stop that
+// landed after the refusal wins. A time limit that cuts a step with no refusal still closes a
+// passed session cancelled with the reason timeout.
 func TestPushEndingOutcomeOfAMovedBranch(t *testing.T) {
 	succeeded := session.Outcome{State: event.StateSucceeded}
 	timedOut := session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
@@ -495,6 +497,9 @@ func TestPushEndingOutcomeOfAMovedBranch(t *testing.T) {
 		{"interrupted session", pushEnding{session: interrupted}, interrupted},
 		{"session that a stop closed", pushEnding{session: closed}, closed},
 		{"paused session", pushEnding{session: paused}, paused},
+		{"time limit after the refusal, succeeded session", pushEnding{session: succeeded, cut: true}, session.Outcome{State: event.StateFailed, ExitCode: 1, Reason: code}},
+		{"time limit after the refusal, failed session", pushEnding{session: failed, cut: true}, session.Outcome{State: event.StateFailed, ExitCode: 3, Reason: code}},
+		{"time limit after the refusal, timed out session", pushEnding{session: timedOut, cut: true}, session.Outcome{State: event.StateFailed, ExitCode: exitTimeout, Reason: code}},
 		{"stop after the refusal, succeeded session", pushEnding{session: succeeded, cut: true, stopped: true}, session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}},
 		{"stop after the refusal, failed session", pushEnding{session: failed, cut: true, stopped: true}, failed},
 		{"stop after the refusal, timed out session", pushEnding{session: timedOut, cut: true, stopped: true}, timedOut},

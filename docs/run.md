@@ -2839,7 +2839,8 @@ so qory did not push.`, also in the list above.
 
 A refusal because the branch moved closes the run `failed` with the end code
 `push_head_changed`, after a session that succeeded, failed or timed out; after a session that
-failed or timed out, the exit code of the close is the session's. A session that was interrupted or
+failed or timed out, the exit code of the close is the session's. The run's time limit that cuts the
+step after the refusal does not change the close. A session that was interrupted or
 cancelled keeps its end. A stop that lands after the refusal closes the run `cancelled` after a
 session that succeeded, and keeps the end of the session after one that failed or timed out. After a
 session that did not succeed, any other failure of the step keeps the session's end, and a step that

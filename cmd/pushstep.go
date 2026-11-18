@@ -545,10 +545,11 @@ func (e *pushEnding) settle(now stopRead) {
 // because the branch moved ([*preparation.HeadChanged]) closes the run failed with the end code
 // push_head_changed after a session that succeeded, failed or timed out, since the next run of
 // the work item needs that code; after a session that failed or timed out, the close keeps the
-// session's exit code. A stop that landed after the refusal still wins, and a session that was
+// session's exit code. The run's time limit that cuts the step after the refusal does not change
+// that close. A stop that landed after the refusal still wins, and a session that was
 // interrupted, cancelled or paused keeps its end. Any other failure after a session that did not
 // succeed keeps the session's end, whatever the step did. After a session that succeeded, a cut
-// step closes the run as a stop does, and a failed one closes it failed with the status of err.
+// step with no refusal closes the run as a stop does, and a failed one closes it failed with the status of err.
 func (e pushEnding) outcome(err error) session.Outcome {
 	changed := errors.As(err, new(*preparation.HeadChanged))
 	switch {
@@ -561,7 +562,7 @@ func (e pushEnding) outcome(err error) session.Outcome {
 		return e.session
 	case e.cut && e.stopped:
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}
-	case e.cut:
+	case e.cut && !changed:
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
 	}
 	out := session.Outcome{State: event.StateFailed, ExitCode: ExitCode(err)}
