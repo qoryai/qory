@@ -68,9 +68,9 @@ type Landed struct {
 func (b *WorkBranch) Landed() []Landed { return slices.Clone(b.landed) }
 
 // DeleteBranch is the fix for a branch that [Push] pushed with no version stored: the next
-// run starts at the last version, so its push fails as a branch that moved. Only a run's push
-// stores a version, so deleting the branch is the only fix, and the next run pushes from the
-// last version.
+// run starts at the last version, so its push fails as a branch that moved. Only a run stores
+// a version, so deleting the branch is the only fix. The next run then starts from the last
+// version, or from target_version when no version exists.
 func (b *WorkBranch) DeleteBranch() string {
 	return fmt.Sprintf(textDeleteBranch, b.Ref, b.PushedPaths(), shownPath(b.system))
 }
