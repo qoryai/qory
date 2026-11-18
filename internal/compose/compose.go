@@ -205,7 +205,7 @@ type Result struct {
 	// ScopeChecks are the scope checks the modules of the base stack declare, by the
 	// artifact type of a plan; nil when no module declares one. A module that a checkout
 	// adds to the base declares none that counts, since the repository under work must
-	// not supply the check of its own plan.
+	// not supply the check of the plan that the base's workflow names.
 	ScopeChecks map[string]ScopeCheck
 	// Hooks are the workflow hooks of the checkout's qory.yaml, in its order, each
 	// checked against the base stack; nil when it lists none. A build writes them into
@@ -660,7 +660,7 @@ func addScopeChecks(res *Result, dir string, root *os.Root, name string, checks 
 	}
 	for _, typ := range slices.Sorted(maps.Keys(checks)) {
 		if other, ok := res.ScopeChecks[typ]; ok {
-			return exports.Errorf("Remove the scope check for %s from module %s or module %s.\n  A type has one scope check, and both modules declare one.", typ, shown(other.Module), shown(name))
+			return exports.Errorf("Remove the scope check for %s from module %s or %s.\n  A type has one scope check, and both modules declare one.", typ, shown(other.Module), shown(name))
 		}
 		var commands [][]string
 		for _, c := range checks[typ] {

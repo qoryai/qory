@@ -126,7 +126,7 @@ func TestScopeCheckProblemsOfAModuleAreRefused(t *testing.T) {
 			"modules/web/qory-module.yaml":     "apiVersion: qory.dev/v1alpha1\nname: web\nscope_checks:\n  change-plan:\n    - [check.sh]\n",
 			"modules/web/check.sh":             "x\n",
 			"modules/core/skills/fix/SKILL.md": "text\n",
-		}, "Remove the scope check for change-plan from module core or module web.\n  A type has one scope check, and both modules declare one."},
+		}, "Remove the scope check for change-plan from module core or web.\n  A type has one scope check, and both modules declare one."},
 		{"a program that is no file", map[string]string{
 			stack.FileName:                     planStack,
 			"modules/core/qory-module.yaml":    scopeManifest,

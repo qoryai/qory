@@ -1069,7 +1069,7 @@ match `^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 64 bytes, one type twice in o
 value that is not a list or is empty, a command that is not a list or is empty, a word of a
 command that is not a string, and a program that is empty, absolute or has a `..` part fail
 the compose, each with the manifest's path. The compose also fails when two modules declare
-one type, `Remove the scope check for build-plan from module core or module web.` with `A
+one type, `Remove the scope check for build-plan from module core or web.` with `A
 type has one scope check, and both modules declare one.` on the next line; when a program
 is not a file in the module, `Add checks/check.js to module core, or change its scope check
 for build-plan.` with `Module core has no file at checks/check.js.`; and when a program is
