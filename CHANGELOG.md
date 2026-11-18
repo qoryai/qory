@@ -539,8 +539,8 @@ release may change what an existing document does, and states it under Upgrading
 - A session runs the repository's full test suite when the run documents have `full_suite`
   true. Forager's after step runs it after the agent's container is removed: when HEAD moved,
   the `full` command of the plan type that the stack names for the run's workflow, in the
-  version that the work item had at the launch, runs in a fresh clone of HEAD, in a container of the run's image on the run's network, so the run's egress
-  policy applies. A session that left HEAD where it started runs no suite. The limit is
+  version that the work item had at the launch, runs in a fresh clone of HEAD, in a container
+  of the run's image on the run's network, so the run's egress policy applies. A session that left HEAD where it started runs no suite. The limit is
   `command_limits_minutes.full_suite`, 60 minutes by default, as the after step's time limit.
   A suite that ran and failed posts `changes-requested` with one point over a `passed` verdict
   or none, or adds the point to an `escalate`, and does not end the run `failed`; when the

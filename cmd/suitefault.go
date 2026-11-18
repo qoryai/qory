@@ -39,7 +39,8 @@ func (f *suiteFault) kind() suiteKind {
 // the fix, when the agent can fix the cause, is the point's fix. A text that has a plan type or a
 // workflow name has at most 100 characters for a type of up to 34 characters and a workflow of up
 // to 29. The stack allows names of up to 64 bytes, so a longer name makes the line longer than 100
-// characters, and the verdict format allows 500; qory prints the line shortened.
+// characters, and the verdict format allows 500. These lines are printed in full: a 64-byte type makes
+// [textFaultNoCmd] 130 characters.
 const (
 	textFaultNoPlan   = "The full suite did not start: the work item has no usable %s."
 	textFixNoPlan     = "Write a %s with a full row in Commands, then push it."

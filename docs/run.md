@@ -3536,7 +3536,7 @@ at is `skipped`, as above. For a session that moved HEAD, qory runs no suite, pr
 `write-no-push` access cannot name a plan type, so a run of it whose documents set `full_suite`
 true stops after the compose, before the join, exit 1, with `The run settings set full_suite for
 workflow <name>, which has write-no-push access and no plan to read the full suite from, so the
-run did not start; the code is used.` and closes `failed`. A run that only reads the checkout runs
+run did not start; the code is used.` and closes `failed` with `no_session` (exit code -1). A run that only reads the checkout runs
 no suite and is not refused.
 
 **Where it runs.** After the agent's container is removed, Forager starts a new container of the run's
