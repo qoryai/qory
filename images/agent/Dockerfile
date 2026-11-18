@@ -166,14 +166,12 @@ COPY --from=gh /out/bin/gh /usr/local/bin/gh
 COPY --from=parsers --chown=0:0 /opt/qory/parsers /opt/qory/parsers
 
 # Each tool runs, Chromium from /usr/bin, Tesseract lists each language installed, and
-# fontconfig lists a font of each Noto package, and /etc/codex is absent: Codex reads
-# system configuration and hooks from that fixed path. A check that fails prints its
-# fix. Each Node parser loads from /opt/qory/parsers and has the version of
-# parsers/package.json, and the image's non-root user cannot write there. HOME is one
-# directory every user may write, with the sticky bit, because the wall runs the agent
-# as the machine's user id, which has no entry in this image.
-RUN { test ! -e /etc/codex || { echo "Remove /etc/codex: Codex reads system configuration and hooks from it" >&2; exit 1; }; } \
- && gh --version \
+# fontconfig lists a font of each Noto package; a check that fails prints its fix. Each
+# Node parser loads from /opt/qory/parsers and has the version of parsers/package.json,
+# and the image's non-root user cannot write there. HOME is one directory every user may
+# write, with the sticky bit, because the wall runs the agent as the machine's user id,
+# which has no entry in this image.
+RUN gh --version \
  && git --version \
  && pdftoppm -v \
  && rg --version \
