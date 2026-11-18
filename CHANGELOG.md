@@ -627,9 +627,12 @@ release may change what an existing document does, and states it under Upgrading
   `delete branch qory/<work item id> of <path> on <system>`. A branch whose head is not the
   commit the run expected is refused before any push, with the line `Set the branch to the
   expected commit or delete it` and the branch, the head and the expected commit on the next
-  line. To go on, do one of the two, then take the work item in again. Both lose the commits on the branch that no version has. The next run creates a
-  deleted branch at `target_version` when no version exists, and starts from the last
-  version otherwise.
+  line. To go on, do one of the two, then take the work item in again. Moving the branch back
+  works when that line ends the expected commit with `the start commit`; with `this run's last
+  push` it works only when Qory Apiary recorded that push, and otherwise the next run refuses
+  again, so delete the branch. Either way the commits on the branch that no version has are
+  lost. The next run creates a deleted branch at `target_version` when no version exists, and
+  starts from the last version otherwise.
 - The lines that stopped a run on a stored branch version with a fix for Qory Apiary
   (a ref, a file, a format, a commit that is missing, is no commit, differs in `.qory` or
   fails to check out) now state the fact first: `Version <n> of the artifact submission has a

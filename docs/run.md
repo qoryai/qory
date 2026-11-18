@@ -2727,7 +2727,11 @@ Apiary has no record of the push (see The report of a push), the head of the bra
 the commit the next run starts at, and the next run ends `failed` with the end code
 `push_head_changed`, with the refusal that [The head check](#the-head-check) lists. To go on,
 delete the branch, or move it back to the commit that the second line of the refusal shows
-after `Expected:`. Both lose the commits on the branch that no version has. When the work
+after `Expected:`. Both lose the commits on the branch that no version has. Moving it back works
+when the line ends that commit with `the start commit`. When it ends it with `this run's last
+push`, the next run starts at the newest push that Qory Apiary recorded: moving the branch
+back works only when Apiary recorded that push, and otherwise the next run refuses again,
+so delete the branch. When the work
 item has no version, the next run creates a deleted branch at `target_version`, not at the
 commit that the deleted branch had; with a version, it starts from the last one.
 
