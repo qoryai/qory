@@ -458,13 +458,12 @@ func TestARunCodeFileTakesTheMachineLines(t *testing.T) {
 // TestARunWithNoAddressOfQoryApiaryStopsAtTheRegistrysRealm runs from a run key, whose
 // run has no gateway.server in forager.yaml, with a pool.registry that returns a 401
 // challenge: qory has no address of Qory Apiary to check the realm against, so it takes
-// no realm, and the run's first line is the fix.
+// no realm, and the run, a dispatched one, prints the cause with no fix line.
 func TestARunWithNoAddressOfQoryApiaryStopsAtTheRegistrysRealm(t *testing.T) {
 	reg := rt.StartRegistry(t)
 	reg.PublishPlain("2.1.320")
 	r := runInstalling(t, installSetup{reg: reg, proxy: rt.StartProxy(t), walled: true, noInstance: true})
-	want := "qory run: Set gateway.server.url in forager.yaml to the address of Qory Apiary\n" +
-		"The realm is " + reg.Instance() + "/registry/token, and the run has no address of Qory Apiary to check it against.\n"
+	want := "qory run: the realm is " + reg.Instance() + "/registry/token, and the run has no address of Qory Apiary to check it against\n"
 	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 || !strings.Contains(r.out, want) || reg.BlobGets() != 0 {
 		t.Fatalf("%d joins, %v (exit %d), %d blobs\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), reg.BlobGets(), r.out)
 	}
@@ -473,13 +472,13 @@ func TestARunWithNoAddressOfQoryApiaryStopsAtTheRegistrysRealm(t *testing.T) {
 // TestARunCodeFileWithNoApiaryLineStopsAtTheRegistrysRealm runs from a run code file
 // whose lines are the registry and the runtimes folder, as a pool without an address of
 // Qory Apiary writes them: the run has no server in its forager.yaml, so the install
-// stops at the registry's realm with the fix first.
+// stops at the registry's realm with the cause, and no fix line.
 func TestARunCodeFileWithNoApiaryLineStopsAtTheRegistrysRealm(t *testing.T) {
 	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
 	reg.PublishPlain("2.1.320")
 	lines := "registry " + reg.Host() + "\nruntimes " + filepath.Join(t.TempDir(), "runtimes") + "\n"
 	_, err := runCodeInstalling(t, lines, proxy, "")
-	if err == nil || !strings.HasPrefix(err.Error(), "Set gateway.server.url in forager.yaml to the address of Qory Apiary\n") || reg.BlobGets() != 0 {
+	if err == nil || !strings.HasPrefix(err.Error(), "the realm is "+reg.Instance()+"/registry/token, and the run has no address of Qory Apiary to check it against; the code is used") || reg.BlobGets() != 0 {
 		t.Fatalf("err = %v, %d blobs", err, reg.BlobGets())
 	}
 }
@@ -518,7 +517,7 @@ func TestTheApiaryLineOfARunCodeFileWinsOverTheServersURL(t *testing.T) {
 	}
 	t.Chdir(pkg)
 	_, err = runCodeInstalling(t, lines("http://127.0.0.1:1"), proxy, reg.Instance())
-	if err == nil || !strings.HasPrefix(err.Error(), "Ask Qory Apiary's instance admin to put the registry's token realm at http://127.0.0.1:1/registry/token\n") {
+	if err == nil || err.Error() != "it is "+reg.Instance()+"/registry/token; the code is used" {
 		t.Fatalf("a wrong line: %v", err)
 	}
 }
