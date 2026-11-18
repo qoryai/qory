@@ -460,7 +460,7 @@ func lacks(c module.Contract, doc module.Document, tier string) []string {
 		}
 	}
 	if c.Tier && tier == "" {
-		out = append(out, "a tier in model, such as ${qory:fast}")
+		out = append(out, "a tier in model, such as ${qory:balanced}")
 	}
 	return out
 }

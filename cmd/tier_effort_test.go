@@ -60,7 +60,7 @@ func TestTierEffortMistakes(t *testing.T) {
 		{[]string{"--tier-effort", "light"}, "--tier-effort light: write --tier-effort <tier>=<effort>, such as --tier-effort thinking=high"},
 		{[]string{"--tier-effort", "light="}, "--tier-effort light=: write --tier-effort <tier>=<effort>, such as --tier-effort thinking=high"},
 		{[]string{"--tier-effort", "light=lo\nw"}, `--tier-effort light=lo\nw: write --tier-effort <tier>=<effort>, such as --tier-effort thinking=high`},
-		{[]string{"--tier-effort", "heavy=low"}, "Use one of the tiers light, fast, and thinking.\n  heavy is not a tier.\n  The name is in --tier-effort heavy=low."},
+		{[]string{"--tier-effort", "heavy=low"}, "Use one of the tiers light, balanced, and thinking.\n  heavy is not a tier.\n  The name is in --tier-effort heavy=low."},
 		{[]string{"--tier", "light=a", "--tier-effort", "light=low", "--tier-effort", "light=high"}, "--tier-effort light is given twice; give each tier once"},
 		{[]string{"--tier-effort", "light=low"}, "--tier-effort light=low: give --tier light=<model id> as well; the effort is for the model that --tier maps the tier to"},
 		{[]string{"--tier", "thinking=claude-opus-5-5", "--tier-effort", "thinking=ultra"}, "set tier thinking's effort to one of low, medium, high, xhigh, max for claude agents\nultra is not one (from --tier-effort)"},
@@ -84,15 +84,15 @@ func TestTierEffortMistakes(t *testing.T) {
 func TestTierEffortForATierNoAgentSets(t *testing.T) {
 	root := tierCheckout(t)
 	tierModule(t, root, "claude", map[string]string{"planner": tierAgents["planner"]})
-	out, err := run(t, "harness", "compose", "--tier", "thinking=claude-opus-5-5", "--tier", "fast=claude-haiku-5-5", "--tier-effort", "fast=ultra")
+	out, err := run(t, "harness", "compose", "--tier", "thinking=claude-opus-5-5", "--tier", "balanced=claude-haiku-5-5", "--tier-effort", "balanced=ultra")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	if got, want := fieldRows(out)["tier"], []string{"thinking  claude-opus-5-5  (agent planner; from --tier)"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("tier rows %q, want %q\n%s", got, want, out)
 	}
-	if _, ok := readReport(t, root).Tiers["fast"]; ok {
-		t.Error("the report lists the tier fast, which no agent sets")
+	if _, ok := readReport(t, root).Tiers["balanced"]; ok {
+		t.Error("the report lists the tier balanced, which no agent sets")
 	}
 	lacks(t, out, "ultra")
 }
