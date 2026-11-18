@@ -538,7 +538,9 @@ release may change what an existing document does, and states it under Upgrading
 - A run adds the module that Qory Apiary sends as `submit_module` by its manifest name, in
   place of the module of that name in the harness, and prints a line for the replacement.
 - A session hands its title, description and the step of each commit to the submit step in
-  the file that `QORY_SUBMISSION_HANDOFF` names. A commit with no step is `unreviewed`.
+  the file that `QORY_SUBMISSION_HANDOFF` names. A commit with no step is `unreviewed`. qory
+  reads the file inside the checkout and follows no link, and drops a title, description or
+  step that is over a limit of the submission format, with one line.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
   qory stops a run whose documents have one. A run whose documents set no

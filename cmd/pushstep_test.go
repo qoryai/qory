@@ -1072,6 +1072,57 @@ func TestTheHandoffGivesTheTextAndTheSteps(t *testing.T) {
 	}
 }
 
+// TestAHandoffOverTheFormatsLimitsIsDroppedAndTheRunStores is a hand-off with a title of 257
+// characters and a step of 129: the run stores a version that passes the format's check, with
+// no text and the commit unreviewed, prints one line that names no content of the file, and
+// succeeds.
+func TestAHandoffOverTheFormatsLimitsIsDroppedAndTheRunStores(t *testing.T) {
+	p := newPushRepo(t, "write")
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
+		commitAll(t, dir, "Add a file")
+		writeFile(t, filepath.Join(dir, ".qory", "handoff", "submission.json"),
+			`{"text":{"title":"`+strings.Repeat("t", 257)+`","description":"A file."},"steps":{"`+gitHead(t, dir)+`":"`+strings.Repeat("s", 129)+`"}}`)
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	doc := p.api.document(t, 1)
+	if doc.Text != nil {
+		t.Errorf("the text is %+v, want none", doc.Text)
+	}
+	for _, c := range doc.Repositories[0].Commits {
+		if c.Step != stepUnreviewedName {
+			t.Errorf("the commit %s has the step %q, want unreviewed", c.Commit, c.Step)
+		}
+	}
+	wants(t, r.log(), "qory run: Shorten what the file at the path in QORY_SUBMISSION_HANDOFF gives: qory dropped the text, whose title has more than 256 characters and a step of more than 128 characters and stored")
+	lacks(t, r.log(), "ttttt", "sssss")
+}
+
+// TestALinkedHandoffFolderIsNotRead is a session that links .qory/handoff to a folder of this
+// machine that has a submission.json with a title: the run stores no text, prints that qory
+// ignored the file, and succeeds.
+func TestALinkedHandoffFolderIsNotRead(t *testing.T) {
+	p := newPushRepo(t, "write")
+	outside := tempDir(t)
+	writeFile(t, filepath.Join(outside, "submission.json"), `{"text":{"title":"From the host","description":"x"}}`)
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
+		commitAll(t, dir, "Add a file")
+		if err := os.MkdirAll(filepath.Join(dir, ".qory"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(dir, ".qory", "handoff")); err != nil {
+			t.Fatal(err)
+		}
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if doc := p.api.document(t, 1); doc.Text != nil {
+		t.Errorf("the text is %+v, want none", doc.Text)
+	}
+	wants(t, r.log(), "qory run: Check the file at the path in QORY_SUBMISSION_HANDOFF: qory ignored it")
+	lacks(t, r.log(), "From the host")
+}
+
 // earlierPush pushes a commit on top of the commit that the run started at to the branch on
 // the forge, as an earlier run of the work item did, and returns it.
 func (p *pushRepo) earlierPush(t *testing.T) string {

@@ -41,6 +41,7 @@ const (
 	textPushNoCred       = "Contact support: this run has no push credential, so qory pushed nothing.\n  The run configuration has no credential with purpose push, so qory pushed nothing" + codeUsed
 	textPushNoReadProxy  = "take the work item in again in Qory Apiary: the run's host proxy, through which qory reads the head of the branch before it pushes, did not open: %s" + codeUsed
 	textHandoffIgnored   = "qory run: Check the file at the path in " + handoffEnv + ": qory ignored it and stored the submission with no text, and each commit as unreviewed. %s"
+	textHandoffDropped   = "qory run: Shorten what the file at the path in " + handoffEnv + " gives: qory dropped %s and stored the submission without them, with no text or with the step unreviewed"
 	textPushNoRunAPI     = "take the work item in again in Qory Apiary: the run API, which stores the version of the artifact " + submissionType + ", is not reachable from this run: %s" + codeUsed
 	textNoSubmissionType = "Define the artifact type " + submissionType + " in the workspace's Artifact types, then %s, then run the round again"
 	textNotStored        = "%s, then take the work item in again: qory pushed %s, and the version of the artifact " + submissionType + " was not stored: %s" + codeUsed
@@ -193,7 +194,7 @@ type sessionPush struct {
 	// [preparation.Push]: true for a walled run.
 	agentStopped bool
 	checks       *runPushChecks
-	// handoff is the path of the session's hand-off file, "" for none, and program whether the
+	// handoff is the checkout that has the session's hand-off file, "" for none, and program whether the
 	// composed harness has a submit program.
 	handoff string
 	program bool
@@ -246,11 +247,11 @@ var pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outc
 // working folder, so the check of the step is valid only once the container is gone. After a
 // failed removal [openedRun.PushProxy] fails and [openedRun.StartStep] still works, so this
 // check alone stops the push, and the run has no step.
-func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string, handoffPath string, hasProgram bool) (noStep bool, err error) {
+func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string, handoffRoot string, hasProgram bool) (noStep bool, err error) {
 	if err := run.RemoveSetup(ctx); err != nil {
 		return true, fmt.Errorf(textSetupStays, shownError(err))
 	}
-	return false, pushWork(ctx, run, stderr, branch, dir, runID, runNumber, out, agentStopped, checks, ended, handoffPath, hasProgram)
+	return false, pushWork(ctx, run, stderr, branch, dir, runID, runNumber, out, agentStopped, checks, ended, handoffRoot, hasProgram)
 }
 
 // pushWork is the run's step of kind push: it pushes what the agent left, through the
@@ -267,7 +268,7 @@ func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch
 // [runEndedLine] when the report found the run over, Qory Apiary's run_ended or the gateway's
 // 410, also when the push failed. The step then stores no version, and ends with no error
 // unless the push failed.
-func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string, handoffPath string, hasProgram bool) error {
+func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string, handoffRoot string, hasProgram bool) error {
 	cut := func() bool { return ctx.Err() != nil }
 	return inStep(run, stderr, event.StepPush, pushStepName(branch, run.System()), cut, func(w io.Writer) error {
 		httpClient, base, err := run.RunAPI()
@@ -320,9 +321,12 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		if err != nil {
 			return &runLineError{fmt.Errorf(textNotStored, branch.VersionWays(), branch.Ref, shownError(err))}
 		}
-		given, err := readHandoff(handoffPath)
+		given, err := readHandoff(handoffRoot)
 		if err != nil {
 			fmt.Fprintf(w, textHandoffIgnored+"\n", shownError(err))
+		}
+		if given != nil && len(given.dropped) > 0 {
+			fmt.Fprintf(w, textHandoffDropped+"\n", strings.Join(given.dropped, " and "))
 		}
 		document := assembleSubmission(branch, repositories, verdict, given, hasProgram)
 		check := func(content []byte) error {

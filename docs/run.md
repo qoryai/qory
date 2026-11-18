@@ -2847,13 +2847,24 @@ the hand-off cannot list, so a run that reached its time limit stores the edits 
 one commit with the step `unreviewed`.
 
 qory reads the file only when it is a regular file of at most 262144 bytes that holds JSON
-of this form. With no file, the submission has no `text`, and each commit is `unreviewed`.
-With a link, any other file that is not a regular file, a larger file, or a file that is not
-this JSON, qory ignores the file, stores the submission the same way, and prints
+of this form, and it reads it inside the checkout: a link at any part of the path, such as
+`.qory/handoff` linked to a folder of this machine, ends the read, so the agent cannot make
+qory read another file. With no file, the submission has no `text`, and each commit is
+`unreviewed`. With a link, any other file that is not a regular file, a larger file, or a file
+that is not this JSON, qory ignores the file, stores the submission the same way, and prints
 `qory run: Check the file at the path in QORY_SUBMISSION_HANDOFF: qory ignored it and stored
 the submission with no text, and each commit as unreviewed. <cause>`. `<cause>` is `the path
-is not a regular file`, `the file has <size> bytes, and qory reads at most 262144`, or the
-error of the JSON reader.
+is not a regular file`, `the file has more than 262144 bytes, and qory reads at most 262144`,
+or the error of the file read or of the JSON reader.
+
+qory also checks the file against the limits of the submission format, and drops the part
+that is over a limit and keeps the rest: a `text` whose `title` has more than 256 characters or
+whose `description` has more than 20000 is dropped whole, and a step of more than 128
+characters is dropped, so its commit is `unreviewed`. qory prints one line for what it dropped,
+`qory run: Shorten what the file at the path in QORY_SUBMISSION_HANDOFF gives: qory dropped
+<what> and stored the submission without them, with no text or with the step unreviewed`, and
+no content of the file. A step for a commit that this run did not make is not used. The run
+never fails because of the file.
 
 A module manifest can declare `submit_program`, a command of the module: a file in the
 module, then its arguments (see `contracts/harness/v1/README.md`). A composed harness has

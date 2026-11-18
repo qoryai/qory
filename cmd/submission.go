@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
@@ -22,6 +24,15 @@ const (
 	handoffMax = 256 << 10
 )
 
+// The limits that the submission format sets on what a hand-off gives: the title's
+// characters, the description's, and the step's. A hand-off part over a limit is dropped,
+// since the stored version would fail the check of the format after the push.
+const (
+	maxTitle       = 256
+	maxDescription = 20000
+	maxStep        = 128
+)
+
 // stepUnreviewed is the ledger step of a commit that the hand-off gives no step: the commit
 // of the edits that the time limit left, and any commit the session did not list.
 const stepUnreviewed = "unreviewed"
@@ -33,23 +44,37 @@ const stepUnreviewed = "unreviewed"
 type handoff struct {
 	Text  *submission.Text  `json:"text"`
 	Steps map[string]string `json:"steps"`
+	// dropped says what [readHandoff] left out because it is over a limit of the format, as
+	// one phrase for each part; nil for none.
+	dropped []string
 }
+
+// handoffRel is the hand-off file of a run, in the checkout.
+var handoffRel = filepath.Join(".qory", "handoff", "submission.json")
 
 // handoffPath is the hand-off file of a run in the checkout at root: .qory/handoff/submission.json.
-func handoffPath(root string) string {
-	return filepath.Join(root, ".qory", "handoff", "submission.json")
-}
+func handoffPath(root string) string { return filepath.Join(root, handoffRel) }
 
-// readHandoff reads the hand-off file at path. A path that is "" or a file that is not there
-// is no hand-off, nil with no error; a file that is not JSON in the form of [handoff], or
-// is over [handoffMax], is an error that the caller prints before it goes on without it.
-func readHandoff(path string) (*handoff, error) {
-	if path == "" {
+// readHandoff reads the hand-off file of the checkout at root. A root that is "" or a file
+// that is not there is no hand-off, nil with no error; a file that is not JSON in the form of
+// [handoff], or is over [handoffMax], is an error that the caller prints before it goes on
+// without it. The agent wrote the path, so the read stays inside root, whatever links the
+// agent made: a link that leads out of the checkout, at any part of the path, is an error, and
+// so is a link or another kind of file as the file. A title, a description or a step over a
+// limit of the format is dropped and listed in [handoff.dropped].
+func readHandoff(root string) (*handoff, error) {
+	if root == "" {
 		return nil, nil
 	}
-	// The agent wrote the path: a link or another kind of file is not read, since a link
-	// could lead to a file of the host.
-	info, err := os.Lstat(path)
+	checkout, err := os.OpenRoot(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer checkout.Close()
+	info, err := checkout.Lstat(handoffRel)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -59,18 +84,52 @@ func readHandoff(path string) (*handoff, error) {
 	if !info.Mode().IsRegular() {
 		return nil, errors.New("the path is not a regular file")
 	}
-	if info.Size() > handoffMax {
-		return nil, fmt.Errorf("the file has %d bytes, and qory reads at most %d", info.Size(), handoffMax)
-	}
-	data, err := os.ReadFile(path)
+	f, err := checkout.Open(handoffRel)
 	if err != nil {
 		return nil, err
+	}
+	defer f.Close()
+	// The file may be swapped for a larger one after the check: the read stops at the limit.
+	data, err := io.ReadAll(io.LimitReader(f, handoffMax+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > handoffMax {
+		return nil, fmt.Errorf("the file has more than %d bytes, and qory reads at most %d", handoffMax, handoffMax)
 	}
 	var h handoff
 	if err := json.Unmarshal(data, &h); err != nil {
 		return nil, err
 	}
+	h.limit()
 	return &h, nil
+}
+
+// limit drops the parts of h that are over a limit of the submission format.
+func (h *handoff) limit() {
+	if h.Text != nil {
+		switch {
+		case utf8.RuneCountInString(h.Text.Title) > maxTitle:
+			h.Text = nil
+			h.dropped = append(h.dropped, fmt.Sprintf("the text, whose title has more than %d characters", maxTitle))
+		case utf8.RuneCountInString(h.Text.Description) > maxDescription:
+			h.Text = nil
+			h.dropped = append(h.dropped, fmt.Sprintf("the text, whose description has more than %d characters", maxDescription))
+		}
+	}
+	bad := 0
+	for commit, step := range h.Steps {
+		if utf8.RuneCountInString(step) > maxStep {
+			delete(h.Steps, commit)
+			bad++
+		}
+	}
+	switch {
+	case bad == 1:
+		h.dropped = append(h.dropped, fmt.Sprintf("a step of more than %d characters", maxStep))
+	case bad > 1:
+		h.dropped = append(h.dropped, fmt.Sprintf("%d steps of more than %d characters", bad, maxStep))
+	}
 }
 
 // stepOf is the ledger step of commit: the hand-off's, else [stepUnreviewed].
