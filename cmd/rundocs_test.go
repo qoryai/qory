@@ -600,3 +600,51 @@ func TestARunCodeStartsTheWorkflowsPrefixedSkill(t *testing.T) {
 	wants(t, r.out, "starts the workflow deploy of ")
 	lacks(t, r.out, "the workflow workflow-deploy")
 }
+
+// TestARunCodeReadsThePlanTypeOfItsWorkflowFromTheComposedStack is the plan type read through the
+// real stack, with no [cmd.SetPlan]: the base stack's workflow hello has access write and the plan
+// type change-plan, and its module declares the scope check for it. The suite command is the full
+// row of the work item's change-plan. A workflow with access write and no plan gets the after step
+// that only tells whether HEAD moved, and a workflow that only reads gets no after step.
+func TestARunCodeReadsThePlanTypeOfItsWorkflowFromTheComposedStack(t *testing.T) {
+	const manifest = "apiVersion: qory.dev/v1alpha1\nname: hello\nscope_checks:\n  change-plan:\n    - [checks/check.js, scope, --plan]\n"
+	fullSuite := func(d map[string]any) { d["full_suite"] = true }
+	for _, c := range []struct {
+		name      string
+		stackFile func(string) string
+		extra     map[string]string
+		after     bool
+		command   string
+	}{
+		{"a plan type", func(f string) string {
+			return f + "workflows:\n  hello:\n    access: write\n    plan: change-plan\n"
+		}, map[string]string{
+			"examples/hello/modules/hello/qory-module.yaml": manifest,
+			"examples/hello/modules/hello/checks/check.js":  "#!/usr/bin/env node\n",
+		}, true, "printf"},
+		{"write and no plan", writesHello, nil, true, "true"},
+		{"read and no plan", func(f string) string { return f + "workflows:\n  hello:\n    access: read\n" }, nil, false, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			api := newSuiteAPIOf(t, http.StatusCreated, "change-plan", suitePlan)
+			codeRunAPI = api.srv.URL + "/v1/runs/r1"
+			t.Cleanup(func() { codeRunAPI = "" })
+			r := runFromCodeLinks(t, behindAWall(t), nil, c.stackFile, fullSuite, c.extra, nil)
+			if !r.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			if got := len(r.spec.After) > 0; got != c.after {
+				t.Fatalf("After = %q, want it set: %v", r.spec.After, c.after)
+			}
+			if !c.after {
+				if r.spec.AfterTimeout != 0 {
+					t.Errorf("AfterTimeout = %v with no After", r.spec.AfterTimeout)
+				}
+				return
+			}
+			if !strings.HasPrefix(r.spec.After[4], c.command) || (c.command == "true") != (r.spec.After[4] == "true") {
+				t.Errorf("the command is %q, want one that starts %q", r.spec.After[4], c.command)
+			}
+		})
+	}
+}
