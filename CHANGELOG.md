@@ -555,6 +555,10 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A push that landed with no version stored, and a push that fails as a branch that moved,
+  give one way out in the line of `qory run`: `delete branch qory/<work item id> of <path>
+  on <system>`. Qory Apiary has no form to add a version by hand. After the delete, the next
+  run pushes from the last version.
 - The middle model tier is named `balanced` in place of `fast`. The tiers are `light`,
   `balanced` and `thinking`. `${qory:balanced}`, `--tier balanced=<model id>`,
   `--tier-effort balanced=<effort>`, `harness.tiers.balanced`, a workflow's `tier: balanced`

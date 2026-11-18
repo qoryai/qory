@@ -36,11 +36,11 @@ import (
 	"github.com/qoryai/qory/internal/secretmask"
 )
 
-// versionWays is the fix of a branch pushed with no version stored, and noType the line of
+// deleteBranch is the fix of a branch pushed with no version stored, and noType the line of
 // a workspace with no artifact type branch.
 const (
-	versionWays = "add a new version of the artifact branch in Qory Apiary with the head of qory/" + workItem + " on acme/site, or delete that branch on " + proxygittest.Host
-	noType      = "Define the artifact type branch in the workspace's Artifact types, then " + versionWays + ", then run the round again"
+	deleteBranch = "delete branch qory/" + workItem + " of acme/site on " + proxygittest.Host
+	noType       = "Define the artifact type branch in the workspace's Artifact types, then " + deleteBranch + ", then run the round again"
 )
 
 // pushRunNumber is the run's number in the work item of [pushAPI], and changesLeft the
@@ -993,8 +993,9 @@ func TestARejectedPushFailsTheStep(t *testing.T) {
 	if _, state := r.step(); state != event.StateFailed {
 		t.Errorf("the step ended %q, want failed", state)
 	}
-	wants(t, r.out, "qory run: add a new version of the artifact branch in Qory Apiary with the head of qory/"+workItem+" on acme/site, or delete that branch on "+proxygittest.Host+
+	wants(t, r.out, "qory run: delete branch qory/"+workItem+" of acme/site on "+proxygittest.Host+
 		", then take the work item in again: the branch moved since the run fetched it, and the push failed: ! [rejected]")
+	lacks(t, r.out, "add a new version")
 	lacks(t, r.out, proxygittest.Password)
 	if got := p.branchHead(t); got != moved {
 		t.Errorf("the branch moved to %s", got)
@@ -1091,7 +1092,8 @@ func TestARateLimitIsBounded(t *testing.T) {
 	if len(p.waits) != 4 || p.waits[0] != time.Minute {
 		t.Errorf("the waits are %v, want 4 of a minute", p.waits)
 	}
-	wants(t, r.out, "qory run: "+versionWays+", then take the work item in again: qory pushed qory/"+workItem+", and the version of the artifact branch was not stored: ")
+	wants(t, r.out, "qory run: "+deleteBranch+", then take the work item in again: qory pushed qory/"+workItem+", and the version of the artifact branch was not stored: ")
+	lacks(t, r.out, "add a new version")
 }
 
 // TestNoResponseToAStoredVersionSendsNothingAgain is a POST that stored its version and
@@ -1160,12 +1162,12 @@ func TestNoResponseThatTheIndexDoesNotSettleFails(t *testing.T) {
 	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 6 {
 		t.Errorf("%d POST, %d reads, want 1, and the read of the fetch and 5", posts, reads)
 	}
-	wants(t, r.out, "qory run: check the artifact branch of the work item in Qory Apiary; with no version of this run, "+versionWays+"; then take the work item in again: qory pushed qory/"+workItem+
+	wants(t, r.out, "qory run: check the artifact branch of the work item in Qory Apiary; with no version of this run, "+deleteBranch+"; then take the work item in again: qory pushed qory/"+workItem+
 		", and the request that stores its version ended with no response, so the version may or may not be stored: ")
 }
 
 // TestAWorkspaceWithoutTheTypeFailsTheStep is unknown_type: the step fails after the push,
-// with the line of the workflow model and the two ways of a pushed branch.
+// with the line of the workflow model and the fix of a pushed branch.
 func TestAWorkspaceWithoutTheTypeFailsTheStep(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
@@ -1721,10 +1723,10 @@ func TestTheMessageOfAnUnverifiedAnswerIsPrintedAsItIs(t *testing.T) {
 	wants(t, r.out, "the version of the artifact branch was not stored: "+message+"; the code is used")
 }
 
-// TestASecondRepositoryThatFailsGivesTheWays is a run of two repositories whose first push
-// landed and whose second failed: no version is stored, and the line has the two ways for
+// TestASecondRepositoryThatFailsGivesTheFix is a run of two repositories whose first push
+// landed and whose second failed: no version is stored, and the line has the fix for
 // the first and the fix of the second.
-func TestASecondRepositoryThatFailsGivesTheWays(t *testing.T) {
+func TestASecondRepositoryThatFailsGivesTheFix(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
 	bare := filepath.Join(p.h.server.Root, "acme", "lib.git")
@@ -1739,7 +1741,7 @@ func TestASecondRepositoryThatFailsGivesTheWays(t *testing.T) {
 		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
 	}, nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "qory run: "+versionWays+": qory pushed acme/site and stored no version, because the push of the next repository failed: change the rule on "+proxygittest.Host)
+	wants(t, r.out, "qory run: "+deleteBranch+": qory pushed acme/site and stored no version, because the push of the next repository failed: change the rule on "+proxygittest.Host)
 	if p.branchHead(t) == "" {
 		t.Error("the first repository has no branch")
 	}
@@ -1828,7 +1830,7 @@ func TestAStopAfterThePushShowsBothWaysOut(t *testing.T) {
 				t.Errorf("the forge has no branch\n%s", r.out)
 			}
 			wants(t, r.log(), "qory run: pushed qory/"+workItem+" to acme/site at ")
-			wants(t, r.out, "check the artifact branch of the work item in Qory Apiary; with no version of this run, "+versionWays+
+			wants(t, r.out, "check the artifact branch of the work item in Qory Apiary; with no version of this run, "+deleteBranch+
 				"; then take the work item in again: qory pushed acme/site, and "+c.cause+", so the version may or may not be stored; the code is used")
 			lacks(t, r.out, "may not have reached the branch")
 		})
