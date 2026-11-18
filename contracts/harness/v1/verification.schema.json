@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.dev/contracts/harness/v1/verification.schema.json",
+  "title": "The verification format, version 1",
+  "description": "The result of checking a work item's acceptance criteria against one version of its work: the file of a version of a structured artifact type. matrix has one row for each criterion that was checked, and not_verified lists each criterion that was not, with the reason. A criterion is in matrix or in not_verified, never in both, which a JSON Schema cannot check. The ids are the criterion ids of acceptance-criteria.schema.json, and each is one of the ids in the newest version of the acceptance criteria, which a JSON Schema cannot check either. The file's size limit is the artifact type's, which a JSON Schema cannot check. No object has a member this schema does not define.",
+  "type": "object",
+  "required": ["commit", "matrix", "not_verified", "model_families"],
+  "additionalProperties": false,
+  "properties": {
+    "commit": {"description": "The version of the work that was checked, as a full commit id: 40 or 64 lower-case hexadecimal digits.", "type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"},
+    "matrix": {
+      "description": "One row for each criterion that was checked, in the order of the criteria: empty when no criterion was checked.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/row"}
+    },
+    "not_verified": {
+      "description": "Each criterion that was not checked, with the reason: empty when every criterion was checked.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/not_verified"}
+    },
+    "model_families": {
+      "description": "The families of the models that checked the criteria, such as the names of their makers: at least one, each 1 to 64 characters on one line, none twice.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/line", "minLength": 1, "maxLength": 64}
+    }
+  },
+  "$defs": {
+    "row": {
+      "description": "The result for one criterion that was checked.",
+      "type": "object",
+      "required": ["criterion", "state", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "criterion": {"description": "The id of the criterion: ac- and a number from 1 to 9999 with no leading zero, such as ac-3.", "$ref": "#/$defs/criterion_id"},
+        "state": {"description": "verified when the check shows that the criterion is met, failed when the check shows that it is not.", "enum": ["verified", "failed"]},
+        "evidence": {"description": "What the check found, in plain text: what was looked at or run, and the result.", "$ref": "#/$defs/short_text"}
+      }
+    },
+    "not_verified": {
+      "description": "A criterion that was not checked, and why.",
+      "type": "object",
+      "required": ["criterion", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "criterion": {"description": "The id of the criterion: ac- and a number from 1 to 9999 with no leading zero, such as ac-3.", "$ref": "#/$defs/criterion_id"},
+        "reason": {"description": "Why the criterion was not checked, in plain text.", "$ref": "#/$defs/short_text"}
+      }
+    },
+    "criterion_id": {
+      "description": "A criterion's id: ac- and a number from 1 to 9999 with no leading zero, such as ac-3.",
+      "type": "string",
+      "pattern": "^ac-[1-9][0-9]{0,3}$"
+    },
+    "text": {
+      "description": "Text that may span lines. Tab, line feed and carriage return are its only control characters: it has none of U+0000 to U+0008, U+000B, U+000C, U+000E to U+001F, U+007F and U+0080 to U+009F. It has none of the bidirectional controls, the marks U+061C, U+200E and U+200F, the embeddings and overrides U+202A to U+202E and the isolates U+2066 to U+2069; the separators U+2028 and U+2029; and the format characters U+00AD, U+180E, U+200B, U+2060 to U+2064, U+FEFF and U+FFF9 to U+FFFB.",
+      "type": "string",
+      "pattern": "^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0080-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]*$"
+    },
+    "line": {
+      "description": "Text on one line: text as $defs text defines it, with no control character at all, so no tab, line feed or carriage return.",
+      "type": "string",
+      "pattern": "^[^\u0000-\u001f\u007f\u0080-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]*$"
+    },
+    "short_text": {
+      "description": "A short text, 1 to 2000 characters.",
+      "$ref": "#/$defs/text",
+      "minLength": 1,
+      "maxLength": 2000
+    }
+  }
+}

@@ -210,17 +210,29 @@ release may change what an existing document does, and states it under Upgrading
 - Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
   item's branch, `qory/<work item id>`, and the commit in each repository. A software
   factory can use it as the `json_schema` of a custom artifact type `branch`.
+- Version 1 of the acceptance criteria format,
+  `contracts/harness/v1/acceptance-criteria.schema.json`: a `summary` and `criteria`, each
+  with `id`, `text` and `check` (free text). A removed criterion has `removed` with its
+  `reason`. It names no kind of work, so a workspace that does not produce software uses it
+  as it is. Every criterion id has the form `ac-` and a number from 1 to 9999 with no
+  leading zero. See The acceptance criteria format in `contracts/harness/v1/README.md`.
+- Version 1 of the verification format, `contracts/harness/v1/verification.schema.json`:
+  the `commit` that was checked, the `matrix` of rows (`criterion`, `state` of `verified`
+  or `failed`, `evidence`), `not_verified` with the criteria that were not checked and the
+  `reason` for each, and `model_families`. See The verification format in
+  `contracts/harness/v1/README.md`.
 - Version 1 of the questions format, `contracts/harness/v1/questions.schema.json`: every
   question of a work item and its answer or a run's decision, the file of the artifact
   type `questions`. A run adds, decides, withdraws or reopens questions with `qory artifact
   push`, and the control plane writes the answers. At most one option of a question has
   `recommended` set to `true`. A decided question has `state: decided` and `decision`
   (`option`, `reason`, `run`, `at`), and at least one option and none with `recommended`;
-  `decision` stays when the state changes. A question may have `criterion`, the id of
-  the acceptance criterion it is about, such as `ac-3`. An option may have `proposal`,
-  the new wording of the criterion that the run proposes, for a member to edit before
-  sending, 1 to 2000 characters, and only in a question with `criterion`. See The questions format in
-  `contracts/harness/v1/README.md`.
+  `decision` stays when the state changes. A question has `about`, what it is about:
+  `{"work_item": true}` for the work item itself, or an output given as `type` and `name`,
+  with `item` for one entry of it. `about` replaces `criterion`. An option may have
+  `proposal`, the new wording of the entry that `about.item` names, for a member to edit
+  before sending, 1 to 2000 characters, and only in a question whose `about` has `item`.
+  See The questions format in `contracts/harness/v1/README.md`.
 - Version 1 of the review comments format,
   `contracts/harness/v1/review-comments.schema.json`: the members' review comments on a
   work item's artifact versions and the replies to them, the file of the artifact type
