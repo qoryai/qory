@@ -7,16 +7,12 @@
 // adapter, a gateway credential definition's adapter word for word. The package contains no table of
 // integrations: what one takes and does is defined by its description, so Qory's own
 // qory-<name> programs and a machine's own are read the same way.
-//
-// The contract's repository is not a module this one requires, so the description's
-// schema is a copy, description.schema.json beside this file.
 package integration
 
 import (
 	"bytes"
 	"cmp"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,20 +30,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/qoryai/forager/accesskey"
+	"github.com/qoryai/integrations/contracts"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 )
-
-// descriptionSchema is a copy of contracts/integration/v1/description.schema.json of
-// github.com/qoryai/integrations, byte for byte: the contract as of commit 952eec3. A
-// new revision of the contract is copied over it.
-//
-//go:embed description.schema.json
-var descriptionSchema []byte
-
-// descriptionURL is the schema's $id, which it is compiled under.
-const descriptionURL = "https://qory.dev/contracts/integration/v1/description.schema.json"
 
 // settingsURL is what a description's settings schema is compiled under: a name no
 // loader resolves, since the schema refers to nothing outside itself.
@@ -75,7 +62,8 @@ const RoleCredential = "credential"
 type Description struct {
 	// Name is the integration's own name, which a machine may declare it under or not.
 	Name string
-	// ProgramVersion is the program's version, as it was built.
+	// ProgramVersion is the program's version, as it was built, and empty for a
+	// description in the data form, which has no program_version.
 	ProgramVersion string
 	// Roles lists every role the program plays, known here or not, sorted.
 	Roles []string
@@ -95,18 +83,10 @@ type Credential struct {
 	Hosts []string
 }
 
-// contract is the description's schema, compiled once.
+// contract is the description's schema, contracts/integration/v1/description.schema.json
+// of the github.com/qoryai/integrations module this one requires, compiled once.
 var contract = sync.OnceValues(func() (*jsonschema.Schema, error) {
-	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(descriptionSchema))
-	if err != nil {
-		return nil, err
-	}
-	c := jsonschema.NewCompiler()
-	c.UseLoader(jsonschema.SchemeURLLoader{})
-	if err := c.AddResource(descriptionURL, doc); err != nil {
-		return nil, err
-	}
-	return c.Compile(descriptionURL)
+	return contracts.Compile("description.schema.json")
 })
 
 // Describe runs program describe, as Forager starts an adapter: with this process's
@@ -470,9 +450,11 @@ func PrintableWithin(s string, limit int) string {
 }
 
 // read takes a description the contract's schema accepted, so every field it reads is
-// there and of its type, and compiles its settings schema.
+// of its type and there, program_version aside, which the data form leaves out, and
+// compiles its settings schema.
 func read(doc map[string]any) (*Description, error) {
-	d := &Description{Name: doc["name"].(string), ProgramVersion: doc["program_version"].(string)}
+	version, _ := doc["program_version"].(string)
+	d := &Description{Name: doc["name"].(string), ProgramVersion: version}
 	roles := doc["roles"].(map[string]any)
 	for name := range roles {
 		d.Roles = append(d.Roles, name)

@@ -1417,6 +1417,10 @@ release may change what an existing document does, and states it under Upgrading
   1024 entries, more than 4096 values, nesting deeper than 64 levels, or more than 256
   KiB, and a description that is not valid UTF-8, holds a `\u` escape of a lone
   surrogate or repeats a member.
+- Every qory command that describes an integration checks the description against the
+  integration contract of the `github.com/qoryai/integrations` commit qory is built with.
+  A description with a field of that contract such as `egress_hosts` or `vendor` is read,
+  and a data description, which has no `program_version`, is read with no version.
 - `qory run` given a run key starts Claude Code with `--setting-sources user`,
   `--strict-mcp-config`, and the harness's MCP list or an empty one. Behind a wall,
   Claude Code's `CLAUDE_CONFIG_DIR` is an empty folder qory makes after the commands the

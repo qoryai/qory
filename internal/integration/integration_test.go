@@ -5,23 +5,50 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/qoryai/integrations/contracts"
 	"github.com/qoryai/qory/internal/integration"
 )
 
-// The fixtures under testdata/fixtures are contracts/integration/v1/fixtures of
-// github.com/qoryai/integrations, copied unchanged with the schema: the ones of v0.3.0,
-// which the contract as of commit 952eec3 keeps as they were; three under invalid that
-// break the bounds of every value, an array of 1025 entries, an object of 1025 members
-// and a string of 16385 characters; and the three under refused-by-reader, which the
-// schema accepts once they are read and a reader refuses on their raw bytes.
-// unknown-role.json plays acme_role as the role qory does not know.
+// The fixtures are contracts/integration/v1/fixtures of the github.com/qoryai/integrations
+// module this one requires, read from contracts.FS: the descriptions directly under it;
+// under invalid, those the schema refuses, three of them past the bounds of every value,
+// an array of 1025 entries, an object of 1025 members and a string of 16385 characters;
+// and the three under refused-by-reader, which the schema accepts once they are read and
+// a reader refuses on their raw bytes. unknown-role.json plays acme_role as the role qory
+// does not know.
+
+// fixture reads the contract's fixture at name, a path under fixtures.
+func fixture(t *testing.T, name string) []byte {
+	t.Helper()
+	doc, err := fs.ReadFile(contracts.FS, path.Join("fixtures", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return doc
+}
+
+// fixtures are the contract's fixtures directly under dir, a path under fixtures, whose
+// names match pattern.
+func fixtures(t *testing.T, dir, pattern string) []string {
+	t.Helper()
+	names, err := fs.Glob(contracts.FS, path.Join("fixtures", dir, pattern))
+	if err != nil || len(names) == 0 {
+		t.Fatalf("no fixture fixtures/%s/%s: %v", dir, pattern, err)
+	}
+	for i, n := range names {
+		names[i] = strings.TrimPrefix(n, "fixtures/")
+	}
+	return names
+}
 
 // program writes a program that answers describe with doc and exits 0.
 func program(t *testing.T, doc string) string {
@@ -34,34 +61,39 @@ func program(t *testing.T, doc string) string {
 	return path
 }
 
-// TestTheSchemaCopyHoldsToTheContractsFixtures describes a program for each fixture:
-// every accepted one reads, with its credential role and its roles, and every one the
-// contract refuses is refused.
-func TestTheSchemaCopyHoldsToTheContractsFixtures(t *testing.T) {
-	valid, _ := filepath.Glob("testdata/fixtures/*.json")
-	invalid, _ := filepath.Glob("testdata/fixtures/invalid/*.json")
-	if len(valid) != 4 || len(invalid) != 12 {
-		t.Fatalf("fixtures %v %v", valid, invalid)
-	}
-	for _, f := range valid {
-		doc, _ := os.ReadFile(f)
-		d, err := integration.Describe(context.Background(), program(t, string(doc)))
+// TestDescribeReadsEveryValidFixtureAndRefusesEveryInvalidOne describes a program that
+// prints each of the contract's description fixtures byte for byte. Each valid one
+// passes every step of Describe, the scan, the bounds, the schema and read, with its
+// roles, and its credential role when it plays one. The contract's schema refuses each
+// one under invalid.
+func TestDescribeReadsEveryValidFixtureAndRefusesEveryInvalidOne(t *testing.T) {
+	for _, f := range fixtures(t, "", "*.json") {
+		doc := fixture(t, f)
+		d, err := integration.Describe(context.Background(), printing(t, doc))
 		if err != nil {
 			t.Errorf("%s: %v", f, err)
 			continue
 		}
-		if d.Credential == nil || len(d.Credential.Hosts) == 0 || d.Credential.Argument == "" {
+		var described struct {
+			Roles map[string]json.RawMessage `json:"roles"`
+		}
+		if err := json.Unmarshal(doc, &described); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		if len(d.Roles) != len(described.Roles) {
+			t.Errorf("%s: roles %v, want the %d of the fixture", f, d.Roles, len(described.Roles))
+		}
+		_, credential := described.Roles[integration.RoleCredential]
+		if credential != (d.Credential != nil) || credential && (len(d.Credential.Hosts) == 0 || d.Credential.Argument == "") {
 			t.Errorf("%s: credential role %+v", f, d.Credential)
 		}
 	}
-	for _, f := range invalid {
-		doc, _ := os.ReadFile(f)
-		if _, err := integration.Describe(context.Background(), program(t, string(doc))); err == nil || !strings.Contains(err.Error(), "a description the integration contract refuses") {
+	for _, f := range fixtures(t, "invalid", "description-*.json") {
+		if _, err := integration.Describe(context.Background(), printing(t, fixture(t, f))); err == nil || !strings.Contains(err.Error(), "a description the integration contract refuses") {
 			t.Errorf("%s: %v, want a refusal", f, err)
 		}
 	}
-	doc, _ := os.ReadFile("testdata/fixtures/unknown-role.json")
-	d, err := integration.Describe(context.Background(), program(t, string(doc)))
+	d, err := integration.Describe(context.Background(), program(t, string(fixture(t, "unknown-role.json"))))
 	if err != nil || strings.Join(d.Roles, " ") != "acme_role credential" || d.Name != "acme-tracker" || d.ProgramVersion != "0.2.0" {
 		t.Errorf("unknown-role: %+v, %v", d, err)
 	}
@@ -72,8 +104,7 @@ func TestTheSchemaCopyHoldsToTheContractsFixtures(t *testing.T) {
 // _file named in its place, and each refusal names the setting and the rule, never
 // what was given.
 func TestSettingsAreCheckedWithoutTheirValues(t *testing.T) {
-	doc, _ := os.ReadFile("testdata/fixtures/github.json")
-	d, err := integration.Describe(context.Background(), program(t, string(doc)))
+	d, err := integration.Describe(context.Background(), program(t, string(fixture(t, "github.json"))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,11 +160,7 @@ func TestTheCredentialAdapterIsTheContracts(t *testing.T) {
 // withSettings is the acme-tracker fixture with settings as its settings schema.
 func withSettings(t *testing.T, settings string) string {
 	t.Helper()
-	doc, err := os.ReadFile("testdata/fixtures/acme-tracker.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.Replace(string(doc), `"settings": {"type": "object"}`, `"settings": `+settings, 1)
+	return strings.Replace(string(fixture(t, "acme-tracker.json")), `"settings": {"type": "object"}`, `"settings": `+settings, 1)
 }
 
 // TestASecretIsAPropertyOfTheSettingsThemselves takes writeOnly on a property of the
@@ -162,7 +189,8 @@ func TestASecretIsAPropertyOfTheSettingsThemselves(t *testing.T) {
 
 // TestTheSettingsSchemaIsDraft2020 takes a settings schema that names draft 2020-12,
 // with or without an empty fragment, or no draft, and refuses one that names another,
-// quoting it as a terminal takes it.
+// quoting it as a terminal takes it. The contract's schema refuses a $schema that is no
+// URI before read sees it, and quotes it with every escape written out.
 func TestTheSettingsSchemaIsDraft2020(t *testing.T) {
 	for _, settings := range []string{`{"type": "object"}`, `{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object"}`, `{"$schema": "https://json-schema.org/draft/2020-12/schema#", "type": "object"}`} {
 		if _, err := integration.Describe(context.Background(), program(t, withSettings(t, settings))); err != nil {
@@ -173,11 +201,41 @@ func TestTheSettingsSchemaIsDraft2020(t *testing.T) {
 	if _, err := integration.Describe(context.Background(), program(t, withSettings(t, settings))); err == nil || !strings.Contains(err.Error(), "the settings schema is written in http://json-schema.org/draft-07/schema#; the integration contract takes draft 2020-12") {
 		t.Errorf("draft-07: %v", err)
 	}
-	// An escape in the $schema is printed as ?, and a long one cut.
+	// A long $schema is cut.
+	long := "https://schemas.acme.example/" + strings.Repeat("x", 300)
+	settings = `{"$schema": "` + long + `", "type": "object"}`
+	if _, err := integration.Describe(context.Background(), program(t, withSettings(t, settings))); err == nil || !strings.Contains(err.Error(), "written in "+long[:200]+"...;") {
+		t.Errorf("a long $schema: %v", err)
+	}
+	// An escape in the $schema is no URI, and the refusal writes it out as \x1b.
 	escape := string([]byte{0x5c}) + "u001b"
-	settings = `{"$schema": "` + escape + `[31mred` + strings.Repeat("x", 300) + `", "type": "object"}`
-	if _, err := integration.Describe(context.Background(), program(t, withSettings(t, settings))); err == nil || !strings.Contains(err.Error(), "written in ?[31mred"+strings.Repeat("x", 192)+"...;") {
+	settings = `{"$schema": "` + escape + `[31mred", "type": "object"}`
+	_, err := integration.Describe(context.Background(), program(t, withSettings(t, settings)))
+	if err == nil || !strings.Contains(err.Error(), `a description the integration contract refuses: `) || !strings.Contains(err.Error(), `'\x1b[31mred' is not valid uri`) || strings.ContainsRune(err.Error(), 0x1b) {
 		t.Errorf("a $schema with an escape: %v", err)
+	}
+}
+
+// TestADescriptionInTheDataFormIsRead describes a program that prints
+// descriptions/openai-subscription.json of github.com/qoryai/integrations at commit
+// b5ae1a43582ee58a490f17edb0fce2e4c19a6c6d, copied unchanged to testdata, since the module
+// does not export it: a description in the data form, with an oauth_device sign-in and
+// no program_version. The contract's schema accepts it, and it reads with no version and
+// its one role, model_provider.
+func TestADescriptionInTheDataFormIsRead(t *testing.T) {
+	doc, err := os.ReadFile("testdata/openai-subscription.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(doc, []byte(`"oauth_device"`)) || bytes.Contains(doc, []byte(`"program_version"`)) {
+		t.Fatal("the copy is not a description with oauth_device and no program_version")
+	}
+	d, err := integration.Describe(context.Background(), printing(t, doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Name != "openai-subscription" || d.ProgramVersion != "" || strings.Join(d.Roles, " ") != "model_provider" || d.Credential != nil {
+		t.Errorf("read as %+v", d)
 	}
 }
 
@@ -195,7 +253,7 @@ func script(t *testing.T, body string) string {
 // more than the cap, and quotes the first line of a failure's standard error cut to 200
 // runes, every character that does not print as ?.
 func TestDescribeKeepsWhatItQuotesShort(t *testing.T) {
-	doc, _ := os.ReadFile("testdata/fixtures/acme-tracker.json")
+	doc := fixture(t, "acme-tracker.json")
 	d, err := integration.Describe(context.Background(), script(t, "cat <<EOF\n"+strings.Replace(string(doc), `"0.1.0"`, `"$(pwd)"`, 1)+"\nEOF\n"))
 	if err != nil || d.ProgramVersion != "/" {
 		t.Errorf("describe ran in %+v, %v; want /", d, err)
@@ -241,8 +299,8 @@ func TestANameOfTheDescriptionIsPrintedAsATerminalTakesIt(t *testing.T) {
 // as one that names none, since a declared integration expands the same whatever its
 // domains.
 func TestADescriptionThatNamesItsDomainsIsRead(t *testing.T) {
-	for _, f := range []string{"testdata/fixtures/github.json", "testdata/fixtures/acme-chat.json"} {
-		doc, _ := os.ReadFile(f)
+	for _, f := range []string{"github.json", "acme-chat.json"} {
+		doc := fixture(t, f)
 		if !strings.Contains(string(doc), `"domains"`) {
 			t.Fatalf("%s names no domains", f)
 		}
@@ -260,7 +318,7 @@ func TestDescribeNeverReceivesTheAccessKey(t *testing.T) {
 		t.Setenv(name, "set")
 	}
 	t.Setenv("QORY_TEST_KEPT", "kept")
-	doc, _ := os.ReadFile("testdata/fixtures/acme-tracker.json")
+	doc := fixture(t, "acme-tracker.json")
 	body := "test -z \"$QORY_ACCESS_KEY_SECRET$QORY_ACCESS_KEY_ID$QORY_APIARY_PUBLIC_KEY$QORY_RUN_KEY\" || exit 7\ntest \"$QORY_TEST_KEPT\" = kept || exit 8\ncat <<'EOF'\n" + string(doc) + "\nEOF\n"
 	if _, err := integration.Describe(context.Background(), script(t, body)); err != nil {
 		t.Errorf("describe: %v", err)
@@ -284,15 +342,12 @@ func TestADescriptionIsAtMost256KiB(t *testing.T) {
 	if integration.MaxDescription != 262144 {
 		t.Fatalf("the cap is %d bytes, want 262144", integration.MaxDescription)
 	}
-	doc, err := os.ReadFile("testdata/fixtures/acme-tracker.json")
-	if err != nil {
-		t.Fatal(err)
-	}
+	doc := fixture(t, "acme-tracker.json")
 	padded := func(n int) []byte { return append(bytes.Clone(doc), bytes.Repeat([]byte(" "), n-len(doc))...) }
 	if d, err := integration.Describe(context.Background(), printing(t, padded(262144))); err != nil || d.Name != "acme-tracker" {
 		t.Errorf("262144 bytes: %+v, %v", d, err)
 	}
-	_, err = integration.Describe(context.Background(), printing(t, padded(262145)))
+	_, err := integration.Describe(context.Background(), printing(t, padded(262145)))
 	if err == nil || !strings.HasSuffix(err.Error(), " describe printed more than 262144 bytes; a description is a few kilobytes") {
 		t.Errorf("262145 bytes: %v", err)
 	}
@@ -308,11 +363,7 @@ func TestTheContractsBoundsFixturesAreRefused(t *testing.T) {
 		"description-settings-properties-1025-members.json": "a description the integration contract refuses: at '': 'allOf' failed; at '/settings/properties': maxProperties: got 1,025, want 1,024",
 		"description-string-16385-characters.json":          "a description the integration contract refuses: the string at /description is more than 16384 bytes",
 	} {
-		doc, err := os.ReadFile(filepath.Join("testdata/fixtures/invalid", f))
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = integration.Describe(context.Background(), program(t, string(doc)))
+		_, err := integration.Describe(context.Background(), program(t, string(fixture(t, path.Join("invalid", f)))))
 		if err == nil || !strings.HasSuffix(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", f, err, want)
 		}
@@ -524,18 +575,14 @@ func TestTheContractsReaderFixturesAreRefused(t *testing.T) {
 		"description-string-lone-surrogate.json": " describe printed a description the integration contract refuses: the string at /title holds a " + u + " escape of a lone surrogate",
 		"description-member-repeated.json":       " describe printed a description the integration contract refuses: the object at /settings names \"type\" twice",
 	}
-	fixtures, _ := filepath.Glob("testdata/fixtures/refused-by-reader/*.json")
-	if len(fixtures) != len(want) {
-		t.Fatalf("fixtures %v", fixtures)
+	read := fixtures(t, "refused-by-reader", "*.json")
+	if len(read) != len(want) {
+		t.Fatalf("fixtures %v", read)
 	}
-	for _, f := range fixtures {
-		doc, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		prog := printing(t, doc)
-		_, err = integration.Describe(context.Background(), prog)
-		if w, ok := want[filepath.Base(f)]; !ok || err == nil || err.Error() != prog+w {
+	for _, f := range read {
+		prog := printing(t, fixture(t, f))
+		_, err := integration.Describe(context.Background(), prog)
+		if w, ok := want[path.Base(f)]; !ok || err == nil || err.Error() != prog+w {
 			t.Errorf("%s: %v, want %q", f, err, prog+w)
 		}
 	}

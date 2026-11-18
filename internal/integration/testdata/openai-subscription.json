@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "name": "openai-subscription",
+  "title": "OpenAI subscription",
+  "description": "Runs use your ChatGPT subscription through a sign-in that Qory Apiary makes with OpenAI's device code. For personal use only: OpenAI's terms do not allow a subscription to serve requests on behalf of other users. OpenAI's terms: https://openai.com/policies/terms-of-use/",
+  "vendor": "OpenAI",
+  "settings": {"type": "object", "properties": {}, "additionalProperties": false},
+  "egress_hosts": ["chatgpt.com"],
+  "roles": {
+    "model_provider": {
+      "apis": [
+        {"format": "openai-responses", "endpoint": "https://chatgpt.com/backend-api/codex",
+         "auth": {"scheme": "bearer", "oauth": true, "account_header": "chatgpt-account-id", "account_claim": "/https:~1~1api.openai.com~1auth/chatgpt_account_id"},
+         "runtimes": ["codex"], "paths": ["/backend-api/codex/*"],
+         "oauth_refresh": {"url": "https://auth.openai.com/oauth/token", "client_id": "app_EMoamEEZ73f0CkXaXp7hrann"},
+         "oauth_device": {"usercode_url": "https://auth.openai.com/api/accounts/deviceauth/usercode", "poll_url": "https://auth.openai.com/api/accounts/deviceauth/token",
+                          "verification_url": "https://auth.openai.com/codex/device", "redirect_uri": "https://auth.openai.com/deviceauth/callback"}}
+      ],
+      "models": [
+        {"id": "gpt-6.1-sol", "title": "GPT-6.1 Sol", "effort": ["low", "medium", "high", "xhigh", "max", "ultra"]},
+        {"id": "gpt-6.2-sol", "title": "GPT-6.2 Sol", "effort": ["low", "medium", "high", "xhigh", "max", "ultra"]},
+        {"id": "gpt-6.2-astra", "title": "GPT-6.2 Astra", "effort": ["low", "medium", "high", "xhigh", "max", "ultra"]},
+        {"id": "gpt-6-astra", "title": "GPT-6 Astra", "effort": ["low", "medium", "high", "xhigh", "max", "ultra"]},
+        {"id": "gpt-6.1-terra", "title": "GPT-6.1 Terra", "effort": ["low", "medium", "high", "xhigh", "max", "ultra"]},
+        {"id": "gpt-6-sol", "title": "GPT-6 Sol", "effort": ["low", "medium", "high", "xhigh", "max", "ultra"]},
+        {"id": "gpt-6-luna", "title": "GPT-6 Luna", "effort": ["low", "medium", "high", "xhigh", "max"]},
+        {"id": "gpt-5.6-sol", "title": "GPT-5.6 Sol", "effort": ["low", "medium", "high", "xhigh", "max", "ultra"]},
+        {"id": "gpt-5.6-terra", "title": "GPT-5.6 Terra", "effort": ["low", "medium", "high", "xhigh", "max", "ultra"]},
+        {"id": "gpt-5.6-luna", "title": "GPT-5.6 Luna", "effort": ["low", "medium", "high", "xhigh", "max"]}
+      ],
+      "limit_windows": ["five_hour", "seven_day"]
+    }
+  }
+}
