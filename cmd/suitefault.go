@@ -14,7 +14,7 @@ type suiteKind int
 const (
 	// kindRed is a suite whose command ran and failed: the agent fixes the code.
 	kindRed suiteKind = iota
-	// kindFixable is a suite that did not start for a cause in the build plan the agent wrote.
+	// kindFixable is a suite that did not start for a cause in the plan the agent wrote.
 	kindFixable
 	// kindUnfixable is a suite that did not start or run for a cause outside the agent's reach.
 	kindUnfixable
@@ -36,22 +36,25 @@ func (f *suiteFault) kind() suiteKind {
 }
 
 // The points of a suite that did not start before the after step was set. The text is line 1,
-// the fix, when the agent can fix the cause, is the point's fix.
+// the fix, when the agent can fix the cause, is the point's fix. A text that has a plan type or a
+// workflow name has at most 100 characters for a type of up to 34 characters and a workflow of up
+// to 29. The stack allows names of up to 64 bytes, so a longer name makes the line longer than 100
+// characters, and the verdict format allows 500; qory prints the line shortened.
 const (
-	textFaultNoPlan   = "The full suite did not start: the work item has no usable build plan."
-	textFixNoPlan     = "Write a build plan with a full row in Commands, then push it."
-	textFaultTooBig   = "The full suite did not start: the build plan is larger than 1 MiB."
-	textFixTooBig     = "Cut the build plan below 1 MiB, then push it."
+	textFaultNoPlan   = "The full suite did not start: the work item has no usable %s."
+	textFixNoPlan     = "Write a %s with a full row in Commands, then push it."
+	textFaultTooBig   = "The full suite did not start: the %s is larger than 1 MiB."
+	textFixTooBig     = "Cut the %s below 1 MiB, then push it."
 	textFaultNoFull   = "The full suite did not start: %s has no full command."
 	textFixNoTable    = "Add the table Commands with the columns Kind, Command, Result file and Source."
 	textFixNoFull     = "Add a row of kind full to Commands in %s."
-	textFaultNoCmd    = "The full suite did not start: the full row of the build plan has no command."
+	textFaultNoCmd    = "The full suite did not start: the full row of the %s has no command."
 	textFixNoCmd      = "Write the command that runs the whole test suite in the full row."
 	textFaultBadCmd   = "The full suite did not start: the command of the full row is too long or has a NUL."
 	textFixBadCmd     = "Shorten the command, or move it into a script of the repository."
 	textFaultBadFile  = "The full suite did not start: the result file of the full row is no path below the repository."
 	textFixBadFile    = "Write a relative path below the repository as the Result file, or none."
-	textFaultPlanRead = "The full suite did not start: qory could not read the build plan."
+	textFaultPlanRead = "The full suite did not start: qory could not read the %s."
 	textShownBadFile  = "The full suite did not start: the result file is no path below the repository."
 	textFaultNoPlanIn = "The full suite did not start: the workflow %s names no plan in the stack."
 	textFaultNoRunAPI = "The full suite did not start: qory cannot reach the run API."
@@ -72,19 +75,19 @@ func faultOf(err error, plan string) *suiteFault {
 	case errors.Is(err, suite.ErrNoFull):
 		return fixable(fmt.Sprintf(textFaultNoFull, plan), fmt.Sprintf(textFixNoFull, plan))
 	case errors.Is(err, suite.ErrNoCommand):
-		return fixable(textFaultNoCmd, textFixNoCmd)
+		return fixable(fmt.Sprintf(textFaultNoCmd, plan), textFixNoCmd)
 	case errors.Is(err, suite.ErrBadCommand):
 		return fixable(textFaultBadCmd, textFixBadCmd)
 	case errors.Is(err, suite.ErrBadResultFile):
 		return fixable(textFaultBadFile, textFixBadFile)
-	case errors.Is(err, errBuildPlanTooBig):
-		return fixable(textFaultTooBig, textFixTooBig)
-	case err == errNoBuildPlan:
-		return fixable(textFaultNoPlan, textFixNoPlan)
+	case errors.Is(err, errPlanTooBig):
+		return fixable(fmt.Sprintf(textFaultTooBig, plan), fmt.Sprintf(textFixTooBig, plan))
+	case err == errNoPlan:
+		return fixable(fmt.Sprintf(textFaultNoPlan, plan), fmt.Sprintf(textFixNoPlan, plan))
 	case errors.Is(err, suite.ErrBadStart):
 		return &suiteFault{point: runapi.Point{Text: textFaultBadStart, Action: "run_again"}}
 	}
-	return &suiteFault{point: runapi.Point{Text: textFaultPlanRead, Action: "run_again"}}
+	return &suiteFault{point: runapi.Point{Text: fmt.Sprintf(textFaultPlanRead, plan), Action: "run_again"}}
 }
 
 // line is the line of qory run for the fault: the fix first, then the cause on the next line; a

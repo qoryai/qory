@@ -3649,11 +3649,11 @@ order of preference:
 - For a session whose after step did not run, `The full suite did not run: the run closed before
   the after step.`
 - For a suite that did not start, `The full suite did not start: <cause>.` The causes at the launch
-  are `the work item has no usable build plan` (no version of the plan type, several names with none named `main`, or only
-  withdrawn versions), `the build plan is larger than 1 MiB`, `<type> has no full command` (no `Commands`
-  table, or no `full` row), `the full row of the build plan has no command`, `the command of the full
+  are `the work item has no usable <type>` (no version of the plan type, several names with none named `main`, or only
+  withdrawn versions), `the <type> is larger than 1 MiB`, `<type> has no full command` (no `Commands`
+  table, or no `full` row), `the full row of the <type> has no command`, `the command of the full
   row is too long or has a NUL`, `the result file of the full row is no path below the repository`
-  (each with a `fix`), `qory could not read the build plan`, `qory cannot reach the run API`, `the workflow <name> names no
+  (each with a `fix`), `qory could not read the <type>`, `qory cannot reach the run API`, `the workflow <name> names no
   plan in the stack` (for a session that moved HEAD), `the session's folder has no .git
   folder` and `qory could not read the commit the session started at`. For a script that ended before the command, the cause is `the script could not make a folder it
   needs` (70), `git could not clone HEAD of the workspace` (71), `git could not read HEAD of the

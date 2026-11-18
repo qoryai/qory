@@ -50,18 +50,18 @@ var (
 
 const planNoFull = "# Plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n"
 
-// TestACauseInTheBuildPlanPostsChangesRequestedWithTheFix: a plan with no full row, no table, no
+// TestACauseInThePlanPostsChangesRequestedWithTheFix: a plan with no full row, no table, no
 // command, or no plan at all stops the suite at the launch. After the session, qory posts
 // changes-requested with the point "The full suite did not start: <cause>." and the fix in `fix`.
-func TestACauseInTheBuildPlanPostsChangesRequestedWithTheFix(t *testing.T) {
+func TestACauseInThePlanPostsChangesRequestedWithTheFix(t *testing.T) {
 	for _, c := range []struct {
 		name, plan, text, fix string
 	}{
 		{"no full row", planNoFull, noFullText, noFullFix},
 		{"no table", "# Plan\n", noFullText, textFixNoTable},
-		{"no command", "## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| full | none | none | s |\n", textFaultNoCmd, textFixNoCmd},
-		{"no plan", "", textFaultNoPlan, textFixNoPlan},
-		{"a plan over 1 MiB", "## Commands\n" + strings.Repeat("x", maxBuildPlan), textFaultTooBig, textFixTooBig},
+		{"no command", "## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| full | none | none | s |\n", fmt.Sprintf(textFaultNoCmd, "build-plan"), textFixNoCmd},
+		{"no plan", "", fmt.Sprintf(textFaultNoPlan, "build-plan"), fmt.Sprintf(textFixNoPlan, "build-plan")},
+		{"a plan over 1 MiB", "## Commands\n" + strings.Repeat("x", maxPlan), fmt.Sprintf(textFaultTooBig, "build-plan"), fmt.Sprintf(textFixTooBig, "build-plan")},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHelper(t)
@@ -79,7 +79,7 @@ func TestACauseInTheBuildPlanPostsChangesRequestedWithTheFix(t *testing.T) {
 }
 
 // TestACauseOutsideTheAgentsReachPostsEscalate: a session folder with no .git folder, an
-// unreadable build plan and a start commit that cannot be read post escalate with the point.
+// unreadable plan and a start commit that cannot be read post escalate with the point.
 func TestACauseOutsideTheAgentsReachPostsEscalate(t *testing.T) {
 	h := newHelper(t)
 	launchFaultRun(t, h, buildPlanText, true)
@@ -91,7 +91,7 @@ func TestACauseOutsideTheAgentsReachPostsEscalate(t *testing.T) {
 		t.Errorf("no .git: posted %q, want %s", posted, want)
 	}
 	for name, err := range map[string]error{
-		"an unreadable plan": errors.Join(errNoBuildPlan, errors.New("the index failed")),
+		"an unreadable plan": errors.Join(errNoPlan, errors.New("the index failed")),
 		"a bad start commit": errors.New("x"),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -147,7 +147,7 @@ func TestACauseOverAChangesRequestedOfTheAgent(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHelper(t)
 			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: c.agent})
-			h.fault = faultOf(errNoBuildPlan, "build-plan")
+			h.fault = faultOf(errNoPlan, "build-plan")
 			h.fault.point.Text, h.fault.point.Fix = noFullText, noFullFix
 			if c.unfixable {
 				h.fault = noGitFault()
@@ -191,7 +191,7 @@ func TestASessionWhoseAfterStepDidNotRunPostsEscalate(t *testing.T) {
 }
 
 // TestAPlanThatCannotBeReadIsOutsideTheAgentsReach: a plan that the run API cannot send is
-// wrapped with errNoBuildPlan, not fixable, and posts escalate.
+// wrapped with errNoPlan, not fixable, and posts escalate.
 func TestAPlanThatCannotBeReadIsOutsideTheAgentsReach(t *testing.T) {
 	h := newHelper(t)
 	h.api.failFiles = true
@@ -202,14 +202,14 @@ func TestAPlanThatCannotBeReadIsOutsideTheAgentsReach(t *testing.T) {
 	if _, err := h.after(nil, succeeded); err != nil {
 		t.Fatal(err)
 	}
-	want := `{"verdict":"escalate","points":[{"text":"` + textFaultPlanRead + `","action":"run_again"}]}`
+	want := `{"verdict":"escalate","points":[{"text":"` + fmt.Sprintf(textFaultPlanRead, "build-plan") + `","action":"run_again"}]}`
 	if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != want {
 		t.Errorf("posted %q, want %s", posted, want)
 	}
 }
 
-// TestAPassedVerdictKeepsItsTrackUnderACauseInTheBuildPlan.
-func TestAPassedVerdictKeepsItsTrackUnderACauseInTheBuildPlan(t *testing.T) {
+// TestAPassedVerdictKeepsItsTrackUnderACauseInThePlan.
+func TestAPassedVerdictKeepsItsTrackUnderACauseInThePlan(t *testing.T) {
 	const track = `"track":{"id":"small","reason":"One file."}`
 	h := newHelper(t)
 	h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: `{"verdict":"passed",` + track + `}`})

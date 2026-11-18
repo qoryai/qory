@@ -485,7 +485,7 @@ func TestTheSuiteDoesNotFallBackToTheBuildPlan(t *testing.T) {
 	if err != nil || closed.State != event.StateSucceeded {
 		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
 	}
-	if posted := api.posted(); len(posted) != 1 || !strings.Contains(posted[0], "The full suite did not start: the work item has no usable build plan.") || strings.Contains(posted[0], "tests failed") {
+	if posted := api.posted(); len(posted) != 1 || !strings.Contains(posted[0], "The full suite did not start: the work item has no usable change-plan.") || strings.Contains(posted[0], "tests failed") {
 		t.Errorf("posted %q", posted)
 	}
 	if len(seen.After) != 0 {

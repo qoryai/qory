@@ -788,7 +788,7 @@ func TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite(t *testing.T)
 		{"no wall", true, false, false, buildPlanText, false, false, false, ""},
 		{"a read run", true, true, true, buildPlanText, false, false, false, ""},
 		{"no full row", true, true, false, "# Plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n", false, false, true, "Add a row of kind full to Commands in build-plan.\n  The full suite did not start: build-plan has no full command."},
-		{"no build plan", true, true, false, "", false, false, true, "Write a build plan with a full row in Commands, then push it.\n  The full suite did not start: the work item has no usable build plan."},
+		{"no plan", true, true, false, "", false, false, true, "Write a build-plan with a full row in Commands, then push it.\n  The full suite did not start: the work item has no usable build-plan."},
 		{"no git folder", true, true, false, buildPlanText, true, false, true, "The full suite did not start: the session's folder has no .git folder."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -886,8 +886,8 @@ func TestLaunchFullReadsTheNewestUsableVersionOfTheBuildPlan(t *testing.T) {
 			if c.none != (err != nil) || full.Command != c.want && !c.none {
 				t.Errorf("launchFull = %+v, %v, want command %q, none %v", full, err, c.want, c.none)
 			}
-			if c.none && !errors.Is(err, errNoBuildPlan) {
-				t.Errorf("error %v is no errNoBuildPlan", err)
+			if c.none && !errors.Is(err, errNoPlan) {
+				t.Errorf("error %v is no errNoPlan", err)
 			}
 		})
 	}
@@ -906,6 +906,17 @@ func TestThePointTextsHaveAtMost100Characters(t *testing.T) {
 			t.Errorf("the point text %q has %d characters, valid %v", text, len(text), validPoint(runapi.Point{Text: text, Action: "run_again"}))
 		}
 	}
+	// A plan type and a workflow name of 20 characters, a normal length for both.
+	const planType, workflow = "change-request-plan", "implement-the-fix-wf"
+	for _, text := range []string{
+		fmt.Sprintf(textFaultNoFull, planType), fmt.Sprintf(textFixNoFull, planType), fmt.Sprintf(textFaultNoPlanIn, workflow),
+		fmt.Sprintf(textFaultNoPlan, planType), fmt.Sprintf(textFixNoPlan, planType), fmt.Sprintf(textFaultTooBig, planType),
+		fmt.Sprintf(textFixTooBig, planType), fmt.Sprintf(textFaultNoCmd, planType), fmt.Sprintf(textFaultPlanRead, planType),
+	} {
+		if len(text) > 100 || !validPoint(runapi.Point{Text: text, Action: "run_again"}) {
+			t.Errorf("the point text %q has %d characters, valid %v", text, len(text), validPoint(runapi.Point{Text: text, Action: "run_again"}))
+		}
+	}
 	for _, f := range allFaults() {
 		if len(f.point.Text) > 100 || !validPoint(f.point) || f.fixable != (f.point.Fix != "") {
 			t.Errorf("fault %+v: text of %d characters, valid %v", f, len(f.point.Text), validPoint(f.point))
@@ -916,7 +927,7 @@ func TestThePointTextsHaveAtMost100Characters(t *testing.T) {
 func allFaults() []*suiteFault {
 	return []*suiteFault{
 		faultOf(suite.ErrNoCommands, "build-plan"), faultOf(suite.ErrNoFull, "build-plan"), faultOf(suite.ErrNoCommand, "build-plan"), faultOf(suite.ErrBadCommand, "build-plan"),
-		faultOf(suite.ErrBadResultFile, "build-plan"), faultOf(errNoBuildPlan, "build-plan"), faultOf(errBuildPlanTooBig, "build-plan"), faultOf(suite.ErrBadStart, "build-plan"), faultOf(errors.New("x"), "build-plan"),
+		faultOf(suite.ErrBadResultFile, "build-plan"), faultOf(errNoPlan, "build-plan"), faultOf(errPlanTooBig, "build-plan"), faultOf(suite.ErrBadStart, "build-plan"), faultOf(errors.New("x"), "build-plan"),
 		noGitFault(), noAfterFault(), noRunAPIFault(), noPlanFault("fix"),
 	}
 }
@@ -1074,8 +1085,8 @@ func TestLaunchFullReadsTheFileOfThePlanTypeAndNoOther(t *testing.T) {
 			if c.none != (err != nil) || !c.none && full.Command != c.want {
 				t.Errorf("launchFull = %+v, %v, want command %q, none %v", full, err, c.want, c.none)
 			}
-			if c.none && !errors.Is(err, errNoBuildPlan) {
-				t.Errorf("error %v is no errNoBuildPlan", err)
+			if c.none && !errors.Is(err, errNoPlan) {
+				t.Errorf("error %v is no errNoPlan", err)
 			}
 		})
 	}

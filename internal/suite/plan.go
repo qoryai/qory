@@ -36,7 +36,7 @@ var (
 var commandColumns = []string{"Kind", "Command", "Result file", "Source"}
 
 // FullRow reads the full row of the table under the heading "## Commands" in text, a
-// build plan as the harness writes it: a Markdown table with the columns Kind, Command,
+// plan as the harness writes it: a Markdown table with the columns Kind, Command,
 // Result file and Source. A cell that is one code span is the text inside it, and any
 // other cell has its backticks taken out; none and an empty cell are no command and no
 // file. Only the first table of the section counts, and a line inside a code block is no

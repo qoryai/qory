@@ -23,8 +23,8 @@ import (
 	"github.com/qoryai/qory/internal/verdictformat"
 )
 
-// maxBuildPlan is the most bytes of the file of a plan that qory reads.
-const maxBuildPlan = 1 << 20
+// maxPlan is the most bytes of the file of a plan that qory reads.
+const maxPlan = 1 << 20
 
 // planFile is the name of the file of a version of the plan type plan: the type and ".md".
 func planFile(plan string) string { return plan + ".md" }
@@ -86,12 +86,12 @@ const maxVerdictPoints = 20
 // errNoVerdictFile is the error of a version of the verdict of the run that has no file.
 var errNoVerdictFile = errors.New("the run's verdict has no file")
 
-// errNoBuildPlan is why a run has no suite command: the run started with no version of its plan
+// errNoPlan is why a run has no suite command: the run started with no version of its plan
 // type, or qory could not read it.
-var errNoBuildPlan = errors.New("the run started with no version of its plan type")
+var errNoPlan = errors.New("the run started with no version of its plan type")
 
-// errBuildPlanTooBig is the error of a plan whose file is over [maxBuildPlan] bytes.
-var errBuildPlanTooBig = errors.New("the plan is too large")
+// errPlanTooBig is the error of a plan whose file is over [maxPlan] bytes.
+var errPlanTooBig = errors.New("the plan is too large")
 
 // suiteSetup is what [openSuites] needs from a run that has its session about to join.
 type suiteSetup struct {
@@ -187,7 +187,7 @@ var planOf = func(c *codeRun, workflows map[string]stack.Workflow) (workflow, pl
 	return c.workflow, workflows[c.workflow].Plan
 }
 
-// suitePlanWait is the longest the read of the build plan at the run's start may take.
+// suitePlanWait is the longest the read of the plan at the run's start may take.
 const suitePlanWait = 15 * time.Second
 
 // headCommit is the commit that HEAD has in dir, read with git as qory runs it on this machine
@@ -206,15 +206,15 @@ func headCommit(ctx context.Context, dir string) string {
 
 // launchFull is the full row of the plan type plan, in the version that the run's work item has at
 // the run's launch, read through the run API, from the work item's artifacts. An error is
-// [errNoBuildPlan] or an error of [suite.FullRow].
+// [errNoPlan] or an error of [suite.FullRow].
 func launchFull(ctx context.Context, run openedRun, plan string) (suite.Full, error) {
 	httpClient, base, err := run.RunAPI()
 	if err != nil {
-		return suite.Full{}, fmt.Errorf("%w: %s", errNoBuildPlan, shownError(err))
+		return suite.Full{}, fmt.Errorf("%w: %s", errNoPlan, shownError(err))
 	}
 	client, err := runapi.New(base, httpClient)
 	if err != nil {
-		return suite.Full{}, fmt.Errorf("%w: %s", errNoBuildPlan, shownError(err))
+		return suite.Full{}, fmt.Errorf("%w: %s", errNoPlan, shownError(err))
 	}
 	text, err := readPlan(ctx, client, plan)
 	if err != nil {
@@ -228,7 +228,7 @@ func launchFull(ctx context.Context, run openedRun, plan string) (suite.Full, er
 func readPlan(ctx context.Context, client *runapi.Client, plan string) (string, error) {
 	index, err := client.Artifacts(ctx)
 	if err != nil {
-		return "", fmt.Errorf("%w: %s", errNoBuildPlan, shownError(err))
+		return "", fmt.Errorf("%w: %s", errNoPlan, shownError(err))
 	}
 	var plans []runapi.Artifact
 	for _, a := range index.Artifacts {
@@ -244,26 +244,26 @@ func readPlan(ctx context.Context, client *runapi.Client, plan string) (string, 
 		}
 	}
 	if chosen < 0 {
-		return "", errNoBuildPlan
+		return "", errNoPlan
 	}
 	version := newestBeforeWithdrawal(plans[chosen])
 	if version == nil {
-		return "", errNoBuildPlan
+		return "", errNoPlan
 	}
 	for _, file := range version.Files {
 		if file.Filename != planFile(plan) {
 			continue
 		}
-		if file.Size > maxBuildPlan {
-			return "", fmt.Errorf("%w: %s is over %d bytes", errBuildPlanTooBig, planFile(plan), maxBuildPlan)
+		if file.Size > maxPlan {
+			return "", fmt.Errorf("%w: %s is over %d bytes", errPlanTooBig, planFile(plan), maxPlan)
 		}
 		var text bytes.Buffer
 		if err := client.Download(ctx, version.ID, file, &text); err != nil {
-			return "", fmt.Errorf("%w: %s", errNoBuildPlan, shownError(err))
+			return "", fmt.Errorf("%w: %s", errNoPlan, shownError(err))
 		}
 		return text.String(), nil
 	}
-	return "", errNoBuildPlan
+	return "", errNoPlan
 }
 
 // after judges the suite, writes its result, and posts the verdict of a suite that did not pass

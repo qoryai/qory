@@ -31,7 +31,8 @@ release may change what an existing document does, and states it under Upgrading
   suite with `The full suite did not start: <type> has no full command.` A write workflow with
   no `plan` has no suite command: a session that left HEAD where it started is skipped, and
   one that moved HEAD gets `The full suite did not start: the workflow <name> names no plan in
-  the stack.` and an `escalate` verdict.
+  the stack.` and an `escalate` verdict. The other texts of a suite that did not start name the
+  plan type, such as `the work item has no usable <type>`, not the build plan.
 - `qory run verdict` proposes a track for the work item: `--track <id>` is the id of a
   track that the gate of the run's stage offers, and `--track-reason <text>` is the
   reason, one sentence on one line of 1 to 300 characters. Pass both or neither. A track's
