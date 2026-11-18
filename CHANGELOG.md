@@ -205,7 +205,9 @@ release may change what an existing document does, and states it under Upgrading
   `recommended` set to `true`. A decided question has `state: decided` and `decision`
   (`option`, `reason`, `run`, `at`), and at least one option and none with `recommended`;
   `decision` stays when the state changes. A question may have `criterion`, the id of
-  the acceptance criterion it is about, such as `ac-3`. See The questions format in
+  the acceptance criterion it is about, such as `ac-3`. An option may have `proposal`,
+  the new wording of the criterion that the run proposes, for a member to edit before
+  sending, 1 to 2000 characters, and only in a question with `criterion`. See The questions format in
   `contracts/harness/v1/README.md`.
 - Version 1 of the review comments format,
   `contracts/harness/v1/review-comments.schema.json`: the members' review comments on a

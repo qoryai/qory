@@ -15,7 +15,7 @@
   },
   "$defs": {
     "question": {
-      "description": "One question. answer is present exactly when state is answered. decision is present when state is decided, and stays when the state changes after that.",
+      "description": "One question. An option has proposal only when the question has criterion. answer is present exactly when state is answered. decision is present when state is decided, and stays when the state changes after that.",
       "type": "object",
       "required": ["id", "question", "options", "state", "asked"],
       "additionalProperties": false,
@@ -74,6 +74,10 @@
           "else": {"not": {"required": ["answer"]}}
         },
         {
+          "if": {"required": ["options"], "properties": {"options": {"contains": {"required": ["proposal"]}}}},
+          "then": {"required": ["criterion"]}
+        },
+        {
           "if": {"required": ["state"], "properties": {"state": {"const": "decided"}}},
           "then": {
             "required": ["decision"],
@@ -90,7 +94,8 @@
       "properties": {
         "title": {"description": "The option's title.", "$ref": "#/$defs/option_title"},
         "explanation": {"description": "A short explanation of the option, plain text.", "$ref": "#/$defs/short_text"},
-        "recommended": {"description": "true when the run recommends this option: absent or false otherwise.", "type": "boolean"}
+        "recommended": {"description": "true when the run recommends this option: absent or false otherwise.", "type": "boolean"},
+        "proposal": {"description": "The new wording of the question's criterion that the run proposes, for a member to edit before sending.", "$ref": "#/$defs/short_text"}
       }
     },
     "answer": {
