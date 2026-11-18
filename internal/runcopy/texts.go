@@ -11,10 +11,10 @@ const (
 	textFile       = "check that you can read and write %s: %v"
 	textExists     = "remove %s: qory makes it new for each run, and it exists"
 
-	textCodexHomeRunID   = "give a run id of letters, digits, dots, dashes and underscores that starts with a letter or a digit: a walled Codex run writes its Codex home in a folder named after it, and %s is not such a name"
-	textCodexHomeNoCache = "set HOME: a walled Codex run writes its Codex home under the user's cache folder, and the lookup of that folder failed: %w"
-	textCodexHomeOverlap = "set XDG_STATE_HOME to a folder outside %s: a walled Codex run writes its Codex home in %s, and that folder overlaps %s, which no walled run may write"
-	textCodexHomeExists  = "remove %s, or start the run again with another id: a walled Codex run writes its Codex home in a new folder, and that folder exists"
+	textCodexHomeRunID   = "give a run id of letters, digits, . - and _ that starts with a letter or a digit\n  A walled Codex run writes its Codex home in a folder named after the id, and %s is not such a name"
+	textCodexHomeNoCache = "set HOME\n  A walled Codex run writes its Codex home under the user's cache folder, and the lookup of that folder failed: %w"
+	textCodexHomeOverlap = "set XDG_STATE_HOME to a folder outside the user's cache folder\n  A walled Codex run writes its Codex home in %[2]s, in the cache folder %[1]s, and that folder overlaps %[3]s, which no walled run may write"
+	textCodexHomeExists  = "remove the run's folder, or start the run again with another id\n  A walled Codex run writes its Codex home in a new folder, %s, and that folder exists"
 
 	textInRunCopies  = "run qory in your checkout: %s is in %s, the folder of the runs' copies, which a run could have written"
 	textNoHead       = "commit in %s, or start the run in a repository with a commit at HEAD: the run works in a copy of the commit at HEAD, and the fetch of HEAD failed: %w"

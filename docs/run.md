@@ -4534,16 +4534,16 @@ A walled Codex run copies the composed home's `skills/`, `rules/` and `agents/` 
 link replaced by the file or folder it leads to, since Codex 0.167.2 passes over a
 `SKILL.md` that is a link. A link whose target lies outside the composed home, the folders
 of the harness's modules and qory's module cache fails the run with ``Remove the link
-`<path>` from the harness: it leads to `<target>`, outside the harness's modules, and a
-Codex run copies only files inside them.``
+`<path>` from the harness.`` and the next line ``It leads to `<target>`, outside the
+harness's modules, and a Codex run copies only files inside them.``
 
 qory removes both folders when the run ends, also when the copy stays. If qory is killed
 or crashes, `<user cache>/qory/runs/<run id>` stays, with Codex's session transcript in
 `codex-home/sessions`. Remove that folder yourself: qory does not remove it later. A run
 with no copy whose folder `<user cache>/qory/runs/<run id>` exists stops before the agent
-starts with
-``remove <folder>, or start the run again with another id: a walled Codex run writes its
-Codex home in a new folder, and that folder exists``.
+starts with ``remove the run's folder, or start the run again with another id`` and the
+next line ``A walled Codex run writes its Codex home in a new folder, <folder>, and that
+folder exists``.
 
 ### Codex arguments a run refuses
 
@@ -4555,26 +4555,29 @@ exit status 1, when an argument before `--` is one of these:
 - `--config <key>=<value>` in the forms `--config`, `--config=`, `-c`, `-c<key>=<value>`
   and `-c=<key>=<value>`, where the key is a key qory or Forager sets, `skills` or
   `cloud.skills`, a key under one, or a table above one, such as `cloud`. The line is
-  ``Remove `--config <key>` from the run's Codex arguments: a Codex run takes this key
-  from qory and Forager, not from the arguments.``
+  ``Remove `--config <key>` from the run's Codex arguments.`` and the next line ``A Codex
+  run takes this key from qory and Forager, not from the arguments.``
 - `--enable <feature>` or `--disable <feature>`, also with `=`, for every feature:
-  ``Remove `--enable <feature>` from the run's Codex arguments: a Codex run takes this key
-  from qory and Forager, not from the arguments.``
-- `--oss` or `--local-provider`: ``Remove `<flag>` from the run's Codex arguments: a Codex
-  run takes its model provider from qory and Forager, not from the arguments.``
-- `--profile <name>`, `--profile=<name>`, `-p <name>`, `-p<name>` or `-p=<name>`:
-  ``Remove `--profile` from the run's Codex arguments: a Codex run takes its settings
-  from qory and Forager, not from a profile.``
-- `--ignore-user-config`: ``Remove `--ignore-user-config` from the run's Codex arguments:
-  a Codex run takes its settings from qory and Forager, not from the arguments.``
-- `--search`: ``Remove `--search` from the run's Codex arguments: a Codex run takes its
-  web search setting from qory and Forager, not from the arguments.``
+  ``Remove `--enable <feature>` from the run's Codex arguments.`` and the next line ``A
+  Codex run takes this key from qory and Forager, not from the arguments.``
+- `--oss` or `--local-provider`: ``Remove `<flag>` from the run's Codex arguments.`` and
+  the next line ``A Codex run takes its model provider from qory and Forager, not from the
+  arguments.``
+- `--profile <name>`, `--profile=<name>`, `-p <name>`, `-p<name>` or `-p=<name>`: ``Remove
+  `--profile` from the run's Codex arguments.`` and the next line ``A Codex run takes its
+  settings from qory and Forager, not from a profile.``
+- `--ignore-user-config`: ``Remove `--ignore-user-config` from the run's Codex
+  arguments.`` and the next line ``A Codex run takes its settings from qory and Forager,
+  not from the arguments.``
+- `--search`: ``Remove `--search` from the run's Codex arguments.`` and the next line ``A
+  Codex run takes its web search setting from qory and Forager, not from the arguments.``
 - `--dangerously-bypass-hook-trust`: ``Remove `--dangerously-bypass-hook-trust` from the
-  run's Codex arguments: a Codex run takes its hook trust from qory and Forager, not from
-  the arguments.``
+  run's Codex arguments.`` and the next line ``A Codex run takes its hook trust from qory
+  and Forager, not from the arguments.``
 - `--remote <addr>` or `--remote-auth-token-env <name>`, also with `=`: ``Remove
-  `--remote` from the run's Codex arguments: a Codex run takes its app server from qory
-  and Forager, not from the arguments.``, or the same with `--remote-auth-token-env`.
+  `--remote` from the run's Codex arguments.`` and the next line ``A Codex run takes its
+  app server from qory and Forager, not from the arguments.``, or the same with
+  `--remote-auth-token-env`.
 
 A key or feature in the line has each control character written as an escape, such as
 `\n`. Arguments after `--` pass unchanged.
@@ -4687,7 +4690,7 @@ both tests in that one step; any other such run, such as a read run, runs the te
 `/etc/codex` alone. When the image has anything at `/etc/codex`, the step fails with:
 
 ```text
-qory run: Use an image without /etc/codex: Codex reads its settings there before qory's, so the run does not start.
+qory run: Use an image without /etc/codex: Codex reads its settings there before qory's.
 ```
 
 A walled Codex run that lists no repositories, such as a person's walled run, runs the test of

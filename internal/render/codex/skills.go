@@ -25,9 +25,9 @@ const AllSkills = "*"
 // AllowedSkills are the skills a walled Codex run may load: the <name> of each
 // Skill(harness:<name>) rule in permissions.allow of the harness's
 // settings/claude/settings.json, and [AllSkills] for Skill(harness:*), sorted, with no
-// name twice. Codex has no list of its own, so the harness's Claude Code list is the
-// Codex list too. Any other rule with a pattern, such as Skill(harness:review-*), allows
-// no skill here. A harness with no such rule allows none.
+// name twice. The harness has no separate list for Codex, so the harness's Claude Code
+// list is the Codex list too. Any other rule with a pattern, such as
+// Skill(harness:review-*), allows no skill here. A harness with no such rule allows none.
 func AllowedSkills(res *compose.Result) []string {
 	perms, _ := res.Settings["claude"]["settings.json"]["permissions"].(map[string]any)
 	allow, _ := perms["allow"].([]any)

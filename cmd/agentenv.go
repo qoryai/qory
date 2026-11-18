@@ -203,7 +203,8 @@ func writeKept(file string, always, ca []string) error {
 // its first argument names, removes from its environment every [preparation.Dropped] name the file
 // does not keep, but a prefixed name holding the gateway's placeholder, and executes the
 // launch after -- with its arguments unchanged. It parses no flag. It prints nothing; on
-// a failure it prints one line that names no value, and the agent does not start.
+// a failure it prints the fix first, then any cause on the next line, naming no value, and
+// the agent does not start.
 func newAgentEnv() *cobra.Command {
 	return &cobra.Command{
 		Use:                "agent-env file [folder place] -- command [argument...]",

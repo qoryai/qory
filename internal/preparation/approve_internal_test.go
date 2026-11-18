@@ -92,7 +92,7 @@ func TestApproveStandInRefusesAFileThere(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := approveStandIn(envFor(home, runtimes.Placeholder), home)
-	want := "leave no program of the image or the setup commands running that writes into " + home + ": the agent's home held something once qory made it, so the run does not start"
+	want := "leave no program running that writes into " + home + "\n  The agent's home held something once qory made it, so the run does not start; a program that the image or the setup commands started can write there"
 	if err == nil || err.Error() != want {
 		t.Errorf("err %v\nwant %s", err, want)
 	}

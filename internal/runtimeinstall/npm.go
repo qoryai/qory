@@ -23,7 +23,7 @@ type npmPackage struct {
 }
 
 // npmPackages are the npm packages of each runtime that [NpmFetch] installs. Claude Code
-// publishes each platform's build as a package of its own name,
+// publishes each platform's build as a separate package,
 // @anthropic-ai/claude-code-linux-x64 and -arm64, at the same version. Codex publishes
 // it as a version of @openai/codex itself, <version>-linux-x64 and -linux-arm64.
 var npmPackages = map[string]npmPackage{

@@ -206,7 +206,7 @@ func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
 	old := "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: the git session of a walled run needs it, and /usr/bin/git prints git version 2.24.0"
 	failed := "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: /bin/git --version failed: exit status 3"
 	prefix := "install git in /usr/local/bin, /usr/bin, /bin: "
-	codexSettings := "Use an image without /etc/codex: Codex reads its settings there before qory's, so the run does not start."
+	codexSettings := "Use an image without /etc/codex: Codex reads its settings there before qory's."
 	for name, c := range map[string]struct {
 		text string
 		code int

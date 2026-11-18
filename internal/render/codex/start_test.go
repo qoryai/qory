@@ -107,7 +107,7 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 		{[]string{"exec", "-c", "model_verbosity=low", "-c", "web_search=live", "hi"}, "web_search"},
 	} {
 		got, err := w.WalledArgs(c.args, home)
-		want := "Remove `--config " + c.key + "` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."
+		want := "Remove `--config " + c.key + "` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
 		if err == nil || err.Error() != want || got != nil {
 			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, want)
 		}
@@ -144,9 +144,9 @@ func TestWalledArgsRefuseAProviderOrAProfile(t *testing.T) {
 	}
 	w, home := rt.(render.Walled), ""
 	provider := func(flag string) string {
-		return "Remove `" + flag + "` from the run's Codex arguments: a Codex run takes its model provider from qory and Forager, not from the arguments."
+		return "Remove `" + flag + "` from the run's Codex arguments.\n  A Codex run takes its model provider from qory and Forager, not from the arguments."
 	}
-	profile := "Remove `--profile` from the run's Codex arguments: a Codex run takes its settings from qory and Forager, not from a profile."
+	profile := "Remove `--profile` from the run's Codex arguments.\n  A Codex run takes its settings from qory and Forager, not from a profile."
 	for _, c := range []struct {
 		args []string
 		want string
@@ -197,7 +197,7 @@ func TestWalledArgsRefuseAFeature(t *testing.T) {
 		{[]string{"exec", "hi", "--disable", "apps"}, "--disable apps"},
 		{[]string{"--enable", "apps"}, "--enable apps"},
 	} {
-		want := "Remove `" + c.flag + "` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."
+		want := "Remove `" + c.flag + "` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
 		got, err := w.WalledArgs(c.args, home)
 		if err == nil || err.Error() != want || got != nil {
 			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, want)
@@ -214,8 +214,8 @@ func TestWalledArgsRefuseSkippedSettingsAndSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	w, home := rt.(render.Walled), ""
-	ignore := "Remove `--ignore-user-config` from the run's Codex arguments: a Codex run takes its settings from qory and Forager, not from the arguments."
-	search := "Remove `--search` from the run's Codex arguments: a Codex run takes its web search setting from qory and Forager, not from the arguments."
+	ignore := "Remove `--ignore-user-config` from the run's Codex arguments.\n  A Codex run takes its settings from qory and Forager, not from the arguments."
+	search := "Remove `--search` from the run's Codex arguments.\n  A Codex run takes its web search setting from qory and Forager, not from the arguments."
 	for _, c := range []struct {
 		args []string
 		want string
@@ -245,9 +245,9 @@ func TestWalledArgsRefuseHookTrustAndRemote(t *testing.T) {
 		t.Fatal(err)
 	}
 	w, home := rt.(render.Walled), ""
-	hooks := "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments: a Codex run takes its hook trust from qory and Forager, not from the arguments."
-	remote := "Remove `--remote` from the run's Codex arguments: a Codex run takes its app server from qory and Forager, not from the arguments."
-	token := "Remove `--remote-auth-token-env` from the run's Codex arguments: a Codex run takes its app server from qory and Forager, not from the arguments."
+	hooks := "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.\n  A Codex run takes its hook trust from qory and Forager, not from the arguments."
+	remote := "Remove `--remote` from the run's Codex arguments.\n  A Codex run takes its app server from qory and Forager, not from the arguments."
+	token := "Remove `--remote-auth-token-env` from the run's Codex arguments.\n  A Codex run takes its app server from qory and Forager, not from the arguments."
 	for _, c := range []struct {
 		args []string
 		want string
@@ -294,7 +294,7 @@ func TestWalledArgsRefuseSkills(t *testing.T) {
 		{"cloud.skills={}", "cloud.skills"},
 		{"cloud={}", "cloud"},
 	} {
-		want := "Remove `--config " + c.key + "` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."
+		want := "Remove `--config " + c.key + "` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
 		for _, args := range [][]string{{"-c", c.pair}, {"--config=" + c.pair}, {"-c=" + c.pair}} {
 			got, err := w.WalledArgs(args, home)
 			if err == nil || err.Error() != want || got != nil {
@@ -322,9 +322,9 @@ func TestWalledArgsRefusalsEscapeControlCharacters(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"-c", "features.x\n\x1b[2Jy=1"}, "Remove `--config features.x\\n\\x1b[2Jy` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."},
-		{[]string{"--enable", "x\ay"}, "Remove `--enable x\\ay` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."},
-		{[]string{"--disable=x\ry"}, "Remove `--disable x\\ry` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."},
+		{[]string{"-c", "features.x\n\x1b[2Jy=1"}, "Remove `--config features.x\\n\\x1b[2Jy` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."},
+		{[]string{"--enable", "x\ay"}, "Remove `--enable x\\ay` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."},
+		{[]string{"--disable=x\ry"}, "Remove `--disable x\\ry` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."},
 	} {
 		_, err := w.WalledArgs(c.args, home)
 		if err == nil || err.Error() != c.want {

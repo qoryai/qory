@@ -252,7 +252,7 @@ const CodexSettings = "/etc/codex"
 
 // noCodexSettings is the fix for an image that has anything at [CodexSettings].
 func noCodexSettings() string {
-	return "Use an image without " + CodexSettings + ": Codex reads its settings there before qory's, so the run does not start."
+	return "Use an image without " + CodexSettings + ": Codex reads its settings there before qory's."
 }
 
 // SessionCheckScript is the sh script of a walled write run's setup step that checks, before the

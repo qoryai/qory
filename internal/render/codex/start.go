@@ -112,34 +112,34 @@ func StartDirs(args []string) []string {
 // textConfigArg is the refusal of a walled run whose Codex arguments set a key of
 // [reservedKeys] or [argReservedKeys] with --config or -c, with the key as given for its
 // %s.
-const textConfigArg = "Remove `--config %s` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."
+const textConfigArg = "Remove `--config %s` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
 
 // textProviderArg is the refusal of a walled run whose Codex arguments contain --oss or
 // --local-provider, with the flag for its %s.
-const textProviderArg = "Remove `%s` from the run's Codex arguments: a Codex run takes its model provider from qory and Forager, not from the arguments."
+const textProviderArg = "Remove `%s` from the run's Codex arguments.\n  A Codex run takes its model provider from qory and Forager, not from the arguments."
 
 // textFeatureArg is the refusal of a walled run whose Codex arguments contain --enable or
 // --disable, with the flag and the feature as given for its two %s.
-const textFeatureArg = "Remove `%s %s` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."
+const textFeatureArg = "Remove `%s %s` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
 
 // textProfileArg is the refusal of a walled run whose Codex arguments contain --profile
 // or -p.
-const textProfileArg = "Remove `--profile` from the run's Codex arguments: a Codex run takes its settings from qory and Forager, not from a profile."
+const textProfileArg = "Remove `--profile` from the run's Codex arguments.\n  A Codex run takes its settings from qory and Forager, not from a profile."
 
 // textIgnoreConfigArg is the refusal of a walled run whose Codex arguments contain
 // --ignore-user-config.
-const textIgnoreConfigArg = "Remove `--ignore-user-config` from the run's Codex arguments: a Codex run takes its settings from qory and Forager, not from the arguments."
+const textIgnoreConfigArg = "Remove `--ignore-user-config` from the run's Codex arguments.\n  A Codex run takes its settings from qory and Forager, not from the arguments."
 
 // textSearchArg is the refusal of a walled run whose Codex arguments contain --search.
-const textSearchArg = "Remove `--search` from the run's Codex arguments: a Codex run takes its web search setting from qory and Forager, not from the arguments."
+const textSearchArg = "Remove `--search` from the run's Codex arguments.\n  A Codex run takes its web search setting from qory and Forager, not from the arguments."
 
 // textHookTrustArg is the refusal of a walled run whose Codex arguments contain
 // --dangerously-bypass-hook-trust.
-const textHookTrustArg = "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments: a Codex run takes its hook trust from qory and Forager, not from the arguments."
+const textHookTrustArg = "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.\n  A Codex run takes its hook trust from qory and Forager, not from the arguments."
 
 // textRemoteArg is the refusal of a walled run whose Codex arguments contain --remote or
 // --remote-auth-token-env, with the flag for its %s.
-const textRemoteArg = "Remove `%s` from the run's Codex arguments: a Codex run takes its app server from qory and Forager, not from the arguments."
+const textRemoteArg = "Remove `%s` from the run's Codex arguments.\n  A Codex run takes its app server from qory and Forager, not from the arguments."
 
 // argReservedKeys are the key paths that the arguments of a walled run may not set
 // beside [reservedKeys]. Forager sets model_reasoning_effort from the run's effort as a

@@ -44,7 +44,7 @@ func TestCodexRefusesReservedKeys(t *testing.T) {
 		t.Run(c.key, func(t *testing.T) {
 			res, home := composeEnv(t, withFile("modules/core/settings/codex/config.toml", c.fragment), nil, "codex")
 			err := render.Build(res, home, lookup(t, "codex"))
-			want := "Remove `" + c.key + "` from the harness's `settings/codex/config.toml`: a Codex run takes this key from qory and Forager, not from the harness."
+			want := "Remove `" + c.key + "` from `settings/codex/config.toml`.\n  A Codex run takes this key from qory and Forager, not from the harness."
 			if err == nil || err.Error() != want {
 				t.Fatalf("Build: %v, want %q", err, want)
 			}
@@ -85,7 +85,7 @@ func TestCodexRefusesABadHookNumber(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			res, home := composeEnv(t, withFile("modules/core/settings/codex/"+c.file, c.fragment), nil, "codex")
 			err := render.Build(res, home, lookup(t, "codex"))
-			want := "Set `" + c.key + "` of the `SessionStart` hook in the harness's `settings/codex/" + c.file + "` to a whole number of 0 or more: Codex ignores the whole file otherwise."
+			want := "Set `" + c.key + "` of the `SessionStart` hook to a whole number of 0 or more.\n  The hook is in the harness's `settings/codex/" + c.file + "`, and Codex ignores the whole file otherwise."
 			if err == nil || err.Error() != want {
 				t.Fatalf("Build: %v, want %q", err, want)
 			}

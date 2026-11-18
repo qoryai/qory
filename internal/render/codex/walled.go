@@ -346,9 +346,9 @@ func relTo(dir, file string) string {
 // 10,000 entries and past 1 GiB, with the folder, and for a file past 64 MiB, with the
 // file's path, each as a path under the home.
 const (
-	textWalledTooMany      = "Ship fewer files in the modules. codex/%s contains more than 10,000 files, directories and links, the most a walled Codex run takes."
-	textWalledTooManyBytes = "Ship fewer files in the modules. The files of codex/%s add up to more than 1 GiB, the most a walled Codex run takes."
-	textWalledTooLarge     = "Ship codex/%s under 64 MiB. The file is larger than 64 MiB, the most a walled Codex run takes for one file."
+	textWalledTooMany      = "Ship fewer files in the modules.\n  codex/%s contains more than 10,000 files, directories and links, the most a walled Codex run takes."
+	textWalledTooManyBytes = "Ship fewer files in the modules.\n  The files of codex/%s add up to more than 1 GiB, the most a walled Codex run takes."
+	textWalledTooLarge     = "Ship codex/%s under 64 MiB.\n  The file is larger than 64 MiB, the most a walled Codex run takes for one file."
 )
 
 // walledLimit is the limit of [WriteWalledHome]'s copy of the folder name of the home,
@@ -375,7 +375,7 @@ const maxCopiedFile = maxSkillSize
 // textOutsideLink is the refusal of a link whose target lies outside the composed home
 // and every module folder, [WalledRun.LinkRoots] for [WriteWalledHome] and
 // compose.Result.SourceDirs for [placeSkills], with the link's path and its target.
-const textOutsideLink = "Remove the link `%s` from the harness: it leads to `%s`, outside the harness's modules, and a Codex run copies only files inside them."
+const textOutsideLink = "Remove the link `%s` from the harness.\n  It leads to `%s`, outside the harness's modules, and a Codex run copies only files inside them."
 
 // copyTree copies the folder src into dst, which exists, as folders and regular files
 // only, with shown, src's path as a refusal shows it; see [treeCopy].
@@ -627,11 +627,11 @@ func writeCopy(in io.Reader, dst string, perm os.FileMode, limit int64) (int64, 
 // WalledConfig is config, a config.toml the compose rendered, with what a walled run adds
 // for a Codex whose home is home in the wall: projects."<path>".trust_level = "untrusted"
 // for each of projects, the paths where the run's checkout is in the wall, so Codex reads
-// no hook, rule or setting of the repository's .codex and writes no trust of its own; and
-// hooks.state."<home>/config.toml:<event>:<group>:<handler>".trusted_hash for each
-// command and MCP tool hook of config's hooks, so Codex runs the harness's hooks without
-// --dangerously-bypass-hook-trust, which would trust an agent's hooks too. home is
-// absolute and contains no link, as Codex resolves it.
+// no hook, rule or setting of the repository's .codex and writes no trust setting
+// itself; and hooks.state."<home>/config.toml:<event>:<group>:<handler>".trusted_hash
+// for each command and MCP tool hook of config's hooks, so Codex runs the harness's
+// hooks without --dangerously-bypass-hook-trust, which would trust an agent's hooks too.
+// home is absolute and contains no link, as Codex resolves it.
 //
 // It also turns off the skills Codex ships and the skills of a cloud provider, with
 // skills.bundled.enabled = false and cloud.skills.enabled = false, and adds a

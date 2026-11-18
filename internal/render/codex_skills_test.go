@@ -333,7 +333,7 @@ func TestComposeRefusesALinkIntoAnotherModule(t *testing.T) {
 	}
 }
 
-// TestCodexRefusesALinkThatContainsItself composes a skill with a link to its own folder
+// TestCodexRefusesALinkThatContainsItself composes a skill with a link to the skill's folder
 // and one with a link to the module's folder, which the read of the module accepts: the
 // build for Codex fails, since the copy would never end.
 func TestCodexRefusesALinkThatContainsItself(t *testing.T) {
@@ -412,7 +412,7 @@ func TestCodexRefusesALinkOutOfTheModules(t *testing.T) {
 		t.Skip("no /etc/hosts:", err)
 	}
 	err = render.Build(res, home, lookup(t, "codex"))
-	want := "Remove the link `skills/review/hosts` from the harness: it leads to `" + target + "`, outside the harness's modules, and a Codex run copies only files inside them."
+	want := "Remove the link `skills/review/hosts` from the harness.\n  It leads to `" + target + "`, outside the harness's modules, and a Codex run copies only files inside them."
 	if err == nil || err.Error() != want {
 		t.Errorf("Build: %v, want %q", err, want)
 	}

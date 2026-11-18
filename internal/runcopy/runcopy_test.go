@@ -405,12 +405,12 @@ func TestNewCodexHomeNamesTheCodexHome(t *testing.T) {
 	root := filepath.Join(cache, "qory", "runs", "run-1")
 	keep := filepath.Join(root, "state")
 	_, err = NewCodexHome("a b")
-	want := "give a run id of letters, digits, dots, dashes and underscores that starts with a letter or a digit: a walled Codex run writes its Codex home in a folder named after it, and " + shown("a b") + " is not such a name"
+	want := "give a run id of letters, digits, . - and _ that starts with a letter or a digit\n  A walled Codex run writes its Codex home in a folder named after the id, and " + shown("a b") + " is not such a name"
 	if err == nil || err.Error() != want {
 		t.Errorf("run id: %v, want %q", err, want)
 	}
 	_, err = NewCodexHome("run-1", keep)
-	want = "set XDG_STATE_HOME to a folder outside " + shown(cache) + ": a walled Codex run writes its Codex home in " + shown(root) + ", and that folder overlaps " + shown(keep) + ", which no walled run may write"
+	want = "set XDG_STATE_HOME to a folder outside the user's cache folder\n  A walled Codex run writes its Codex home in " + shown(root) + ", in the cache folder " + shown(cache) + ", and that folder overlaps " + shown(keep) + ", which no walled run may write"
 	if err == nil || err.Error() != want {
 		t.Errorf("overlap: %v, want %q", err, want)
 	}
@@ -419,7 +419,7 @@ func TestNewCodexHomeNamesTheCodexHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = NewCodexHome("run-1")
-	want = "remove " + shown(root) + ", or start the run again with another id: a walled Codex run writes its Codex home in a new folder, and that folder exists"
+	want = "remove the run's folder, or start the run again with another id\n  A walled Codex run writes its Codex home in a new folder, " + shown(root) + ", and that folder exists"
 	if err == nil || err.Error() != want {
 		t.Errorf("a folder that exists: %v, want %q", err, want)
 	}
@@ -429,7 +429,7 @@ func TestNewCodexHomeNamesTheCodexHome(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("XDG_CACHE_HOME", "")
 	_, err = NewCodexHome("run-1")
-	hasPrefix(t, "no cache folder", err, "set HOME: a walled Codex run writes its Codex home under the user's cache folder, and the lookup of that folder failed: ")
+	hasPrefix(t, "no cache folder", err, "set HOME\n  A walled Codex run writes its Codex home under the user's cache folder, and the lookup of that folder failed: ")
 }
 
 // TestRemoveFolderDeletesFoldersWithNoWriteOrReadBit is a folder whose first removal

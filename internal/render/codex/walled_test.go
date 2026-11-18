@@ -608,7 +608,7 @@ func TestWriteWalledHomeCopiesALinkedSkillFile(t *testing.T) {
 		t.Errorf("SKILL.md %q %v, want the module's text", b, err)
 	}
 	_, err := codex.WriteWalledHome(dir, filepath.Join(t.TempDir(), "fixed"), codex.WalledRun{})
-	if err == nil || !strings.HasPrefix(err.Error(), "Remove the link `skills/review/SKILL.md` from the harness: it leads to `") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Remove the link `skills/review/SKILL.md` from the harness.\n  It leads to `") {
 		t.Errorf("WriteWalledHome with no link root: %v, want the refusal of the link", err)
 	}
 }

@@ -84,9 +84,9 @@ func (n *counter) add() error {
 // [maxEntries] entries, past [maxModuleBytes] bytes, and for a file at a path past
 // [maxFileBytes], with the path and the limit in MiB twice.
 const (
-	textTooMany      = "module %s: Ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home."
-	textTooManyBytes = "module %s: Ship fewer files. Its files add up to more than 1 GiB, the most qory copies into the home."
-	textTooLarge     = "module %s: Ship %s under %d MiB. It is larger than %d MiB, the most qory copies into the home."
+	textTooMany      = "Ship fewer files in module %s.\n  The module contains more than 10,000 files, directories and links, the most qory copies into the home."
+	textTooManyBytes = "Ship fewer files in module %s.\n  The module's files add up to more than 1 GiB, the most qory copies into the home."
+	textTooLarge     = "Ship %[2]s of module %[1]s under %[3]d MiB.\n  The file is larger than %[4]d MiB, the most qory copies into the home."
 )
 
 // CopyLimit is what one copy of a module's entry may write, and the refusal past each

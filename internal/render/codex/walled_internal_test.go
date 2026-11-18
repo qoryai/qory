@@ -120,9 +120,9 @@ func TestWalledLimitIsAModuleEntrysLimit(t *testing.T) {
 		err  error
 		want string
 	}{
-		{l.TooMany, "Ship fewer files in the modules. codex/rules contains more than 10,000 files, directories and links, the most a walled Codex run takes."},
-		{l.TooManyBytes, "Ship fewer files in the modules. The files of codex/rules add up to more than 1 GiB, the most a walled Codex run takes."},
-		{l.TooLarge("rules/big.rules"), "Ship codex/rules/big.rules under 64 MiB. The file is larger than 64 MiB, the most a walled Codex run takes for one file."},
+		{l.TooMany, "Ship fewer files in the modules.\n  codex/rules contains more than 10,000 files, directories and links, the most a walled Codex run takes."},
+		{l.TooManyBytes, "Ship fewer files in the modules.\n  The files of codex/rules add up to more than 1 GiB, the most a walled Codex run takes."},
+		{l.TooLarge("rules/big.rules"), "Ship codex/rules/big.rules under 64 MiB.\n  The file is larger than 64 MiB, the most a walled Codex run takes for one file."},
 	} {
 		if c.err == nil || c.err.Error() != c.want {
 			t.Errorf("refusal %v, want %q", c.err, c.want)
@@ -157,10 +157,10 @@ func TestWriteWalledHomeKeepsRulesAndAgentsToTheLimit(t *testing.T) {
 		bytes, file   int64
 		want          string
 	}{
-		{"rules entries", "rules", 2, 100, 100, "Ship fewer files in the modules. codex/rules contains more than 10,000 files, directories and links, the most a walled Codex run takes."},
-		{"agents entries", "agents", 2, 100, 100, "Ship fewer files in the modules. codex/agents contains more than 10,000 files, directories and links, the most a walled Codex run takes."},
-		{"agents bytes", "agents", 10, 10, 100, "Ship fewer files in the modules. The files of codex/agents add up to more than 1 GiB, the most a walled Codex run takes."},
-		{"agents file", "agents", 10, 100, 3, "Ship codex/agents/a under 64 MiB. The file is larger than 64 MiB, the most a walled Codex run takes for one file."},
+		{"rules entries", "rules", 2, 100, 100, "Ship fewer files in the modules.\n  codex/rules contains more than 10,000 files, directories and links, the most a walled Codex run takes."},
+		{"agents entries", "agents", 2, 100, 100, "Ship fewer files in the modules.\n  codex/agents contains more than 10,000 files, directories and links, the most a walled Codex run takes."},
+		{"agents bytes", "agents", 10, 10, 100, "Ship fewer files in the modules.\n  The files of codex/agents add up to more than 1 GiB, the most a walled Codex run takes."},
+		{"agents file", "agents", 10, 100, 3, "Ship codex/agents/a under 64 MiB.\n  The file is larger than 64 MiB, the most a walled Codex run takes for one file."},
 		{"skills", "skills", 2, 10, 3, ""},
 		{"within", "", 0, 0, 0, ""},
 	} {

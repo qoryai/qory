@@ -267,12 +267,12 @@ func TestCheckFilesRefusesReservedPaths(t *testing.T) {
 		{"claude/skills/review/SKILL.md", "module nextjs ships files/claude/skills/review/SKILL.md, and skills are linked there; ship it as skills/<name>"},
 		{"copilot/workflows/ci.yml", "module nextjs ships files/copilot/workflows/ci.yml, and GitHub runs it on every push"},
 		{"codex/skills/review/SKILL.md", "module nextjs ships files/codex/skills/review/SKILL.md, and qory copies them there for a launch; ship it as skills/<name>"},
-		{"codex/auth.json", "Remove `files/codex/auth.json` from module nextjs: a Codex run takes its model key from the run, not from a file."},
-		{"codex/hooks.json", "Remove `files/codex/hooks.json` from module nextjs: qory writes it for every walled Codex run."},
-		{"codex/.env", "Remove `files/codex/.env` from module nextjs: qory writes it for every walled Codex run."},
-		{"codex/environments.toml", "Remove `files/codex/environments.toml` from module nextjs: qory writes it for every walled Codex run."},
-		{"codex/AGENTS.override.md", "Remove `files/codex/AGENTS.override.md` from module nextjs: qory writes it for every walled Codex run."},
-		{"codex/rules/read-access.rules", "Remove `files/codex/rules/read-access.rules` from module nextjs: qory writes it for a walled Codex run that only reads, from the harness's `settings/codex/read-access.rules`."},
+		{"codex/auth.json", "Remove `files/codex/auth.json` from module nextjs.\n  A Codex run takes its model key from the run, not from a file."},
+		{"codex/hooks.json", "Remove `files/codex/hooks.json` from module nextjs.\n  qory writes it for every walled Codex run."},
+		{"codex/.env", "Remove `files/codex/.env` from module nextjs.\n  qory writes it for every walled Codex run."},
+		{"codex/environments.toml", "Remove `files/codex/environments.toml` from module nextjs.\n  qory writes it for every walled Codex run."},
+		{"codex/AGENTS.override.md", "Remove `files/codex/AGENTS.override.md` from module nextjs.\n  qory writes it for every walled Codex run."},
+		{"codex/rules/read-access.rules", "Remove `files/codex/rules/read-access.rules` from module nextjs.\n  qory writes it for a walled Codex run that only reads, from the harness's `settings/codex/read-access.rules`."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			res, _, _ := composeFixture(t, "claude")

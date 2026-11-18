@@ -83,7 +83,7 @@ type Release struct {
 // and package/<runtime> for any other runtime, such as package/claude for Claude Code.
 // Install extracts only this entry. Codex then runs without the other files of its
 // tarball: a walled run starts it with --sandbox danger-full-access, so it needs no bwrap
-// of its own, and takes rg from the image.
+// from the tarball, and takes rg from the image.
 func programEntry(runtime, arch string) string {
 	if runtime == "codex" {
 		triple := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[arch]

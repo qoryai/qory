@@ -74,16 +74,16 @@ func (codex) Skips() []string { return []string{"commands", "output-styles"} }
 
 // textAuthFile is the refusal of a module that ships Codex's login file, with the module's
 // name.
-const textAuthFile = "Remove `files/codex/auth.json` from module %s: a Codex run takes its model key from the run, not from a file."
+const textAuthFile = "Remove `files/codex/auth.json` from module %s.\n  A Codex run takes its model key from the run, not from a file."
 
 // textWalledFile is the refusal of a module that ships a file of [walledFiles], with the
 // file's path under files/codex for the first %s; the module's name is left as %%s.
-const textWalledFile = "Remove `files/codex/%s` from module %%s: qory writes it for every walled Codex run."
+const textWalledFile = "Remove `files/codex/%s` from module %%s.\n  qory writes it for every walled Codex run."
 
 // textReadRulesFile is the refusal of a module that ships files/codex/rules/
 // read-access.rules, with the module's name: qory writes that file only for a walled run
 // that only reads, from the harness's read rules, see [WriteWalledHome].
-const textReadRulesFile = "Remove `files/codex/rules/" + ReadRulesName + "` from module %s: qory writes it for a walled Codex run that only reads, from the harness's `settings/codex/" + ReadRulesName + "`."
+const textReadRulesFile = "Remove `files/codex/rules/" + ReadRulesName + "` from module %s.\n  qory writes it for a walled Codex run that only reads, from the harness's `settings/codex/" + ReadRulesName + "`."
 
 // walledFiles are the paths under .codex that qory writes in the home of every walled
 // Codex run, see [WriteWalledHome]: the hooks file, the variables Codex sets, the
@@ -210,7 +210,7 @@ type reservedKey []string
 
 // textReservedKey is the refusal of a fragment that sets a key of [reservedKeys], with
 // the key as a dotted path for its %s.
-const textReservedKey = "Remove `%s` from the harness's `settings/codex/config.toml`: a Codex run takes this key from qory and Forager, not from the harness."
+const textReservedKey = "Remove `%s` from `settings/codex/config.toml`.\n  A Codex run takes this key from qory and Forager, not from the harness."
 
 // reservedKeys are the key paths of config.toml that a harness fragment may not set,
 // because Forager's launch of Codex sets them as --config flags, which win over every
@@ -284,7 +284,7 @@ func findKey(m map[string]any, pattern []string) ([]string, bool) {
 
 // textHookNumber is the refusal of a hook number that Codex cannot read, with the key,
 // the hook's event and the settings file it is in.
-const textHookNumber = "Set `%s` of the `%s` hook in the harness's `settings/codex/%s` to a whole number of 0 or more: Codex ignores the whole file otherwise."
+const textHookNumber = "Set `%s` of the `%s` hook to a whole number of 0 or more.\n  The hook is in the harness's `settings/codex/%s`, and Codex ignores the whole file otherwise."
 
 // hookNumbers are the keys of a hook that Codex 0.167.2 reads as an unsigned whole
 // number, by the hook's type (codex-rs/protocol/src/hooks.rs, HookHandlerConfig). Codex

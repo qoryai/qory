@@ -284,7 +284,7 @@ func TestTheCodexCheckRefusesEtcCodex(t *testing.T) {
 	if want := sessionCheckScript(strings.Join(gitSessionDirs, ":"), "/etc/codex"); CodexSessionCheckScript() != want {
 		t.Errorf("CodexSessionCheckScript checks another place:\n%s", CodexSessionCheckScript())
 	}
-	if noCodexSettings() != "Use an image without /etc/codex: Codex reads its settings there before qory's, so the run does not start." {
+	if noCodexSettings() != "Use an image without /etc/codex: Codex reads its settings there before qory's." {
 		t.Errorf("the line: %q", noCodexSettings())
 	}
 }

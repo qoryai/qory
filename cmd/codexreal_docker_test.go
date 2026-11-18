@@ -227,7 +227,7 @@ func startUpstream(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey) 
 	u.host = dockerOut(t, "", "inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", u.name)
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort(u.host, "8443"), 5*time.Second)
 	if err != nil {
-		t.Fatalf("use an engine whose containers this machine reaches at their own addresses, such as OrbStack or Docker on Linux: "+
+		t.Fatalf("use an engine whose containers this machine reaches at the containers' addresses, such as OrbStack or Docker on Linux: "+
 			"the gateway of this process dials the upstream at %s:8443, and the dial failed: %v", u.host, err)
 	}
 	conn.Close()
@@ -401,7 +401,7 @@ func (s realCodexSetup) authority(t *testing.T) (*x509.Certificate, *ecdsa.Priva
 }
 
 // runRealCodexChild builds the wall's helper and the image, starts the upstream, and
-// runs test t in a test binary of its own, with the setup in [envRealCodexChild]: this
+// runs test t in a separate test binary, with the setup in [envRealCodexChild]: this
 // process may have read its roots already, and that binary reads them from the
 // upstream's authority. The test binary has until a minute before t's deadline, so this
 // process removes the upstream and the image also when that binary runs out of time.
@@ -454,8 +454,8 @@ func runRealCodexChild(t *testing.T) {
 // home, and the run ends succeeded, with egress to the stub alone. No file of the home,
 // of the run's record or of qory's folders contains the key, nor does qory's output, and
 // the home is gone once the run ends. It runs only with QORY_TEST_DOCKER=1 and docker on
-// the PATH, in a test binary of its own, which reads its roots from SSL_CERT_FILE. It
-// needs an engine whose containers this machine reaches at their own addresses, such as
+// the PATH, in a separate test binary, which reads its roots from SSL_CERT_FILE. It
+// needs an engine whose containers this machine reaches at the containers' addresses, such as
 // OrbStack or Docker on Linux, and fails on Docker Desktop for Mac, which routes no
 // container address to this machine.
 func TestARealWalledCodexRunReachesTheModelThroughTheGateway(t *testing.T) {

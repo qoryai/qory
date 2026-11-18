@@ -39,10 +39,10 @@ var managedSettings = "/etc/claude-code"
 // The words of the agent's home, which qory run agent-env prints after its name. Each
 // is one format string, with the fix first.
 const (
-	textManaged        = "use an image without %s: Claude Code reads managed settings there above every other source, so the run does not start"
+	textManaged        = "use an image without %s\n  Claude Code reads managed settings there above every other source, so the run does not start"
 	textManagedUnread  = "make %s readable for the agent's user in the image: Claude Code reads managed settings there, and the check for them failed: %s"
-	textHomeExists     = "remove %s from the image and from the setup commands: qory makes the agent's home only where nothing is, so the run does not start"
-	textHomeNotEmpty   = "leave no program of the image or the setup commands running that writes into %s: the agent's home held something once qory made it, so the run does not start"
+	textHomeExists     = "remove %s from the image and from the setup commands\n  qory makes the agent's home only where nothing is, so the run does not start"
+	textHomeNotEmpty   = "leave no program running that writes into %s\n  The agent's home held something once qory made it, so the run does not start; a program that the image or the setup commands started can write there"
 	textHomeParentLink = "replace the symbolic link %s with a folder in the image: the agent's home %s is made only where no link leads"
 	textHomeNotMade    = "let the agent's user make %s, then run again: the agent's home could not be made: %s"
 )
@@ -159,7 +159,7 @@ func freshFolder(path string, words freshWords) error {
 // one format string, with the fix first.
 const (
 	textLinkBad     = "point wall.helper at the Linux build of the qory that starts the run: the transcripts' folder %s or its place %s is not a relative path without a .. name"
-	textLinkExists  = "leave no program of the image or the setup commands running that writes into %s: something was at %s when qory linked the agent's transcripts there, so the run does not start"
+	textLinkExists  = "leave no program running that writes into %s\n  Something was at %s when qory linked the agent's transcripts there, so the run does not start; a program that the image or the setup commands started can write there"
 	textLinkNotMade = "let the agent's user write %s, then run again: the link of the agent's transcripts to %s could not be made: %s"
 )
 

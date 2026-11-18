@@ -313,7 +313,7 @@ func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 	}
 	log := walledForager(t)
 	_, err = run(t, "run", "codex", "--", "-c", "model_provider=x")
-	want := "Remove `--config model_provider` from the run's Codex arguments: a Codex run takes this key from qory and Forager, not from the arguments."
+	want := "Remove `--config model_provider` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
 	if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
 		t.Errorf("a walled run: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
 	}
@@ -371,7 +371,7 @@ func TestAWalledCodexRunWithNoRepositoriesChecksEtcCodexInside(t *testing.T) {
 	if cmd.ExitCode(err) != 1 {
 		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, out, "qory run: Use an image without /etc/codex: Codex reads its settings there before qory's, so the run does not start.\n")
+	wants(t, out, "qory run: Use an image without /etc/codex: Codex reads its settings there before qory's.\n")
 	lacks(t, out, "exited "+fmt.Sprint(image.CodexSettingsInsideExit))
 	if len(specs) != 1 {
 		t.Fatalf("%d joins, want 1", len(specs))
