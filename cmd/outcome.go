@@ -27,12 +27,10 @@ const (
 
 // The reasons of Forager's contract for a model key the model provider rejected with a
 // 401: model_key_switch, with paused, when another key of the run is usable, and
-// model_key_unauthorized, with failed, when no key is left. The Forager that go.mod pins
-// does not have them yet; TestModelKeyReasonsMatchForagers checks them against Forager's
-// event.ReasonModelKeySwitch and event.ReasonModelKeyUnauthorized when it does.
+// model_key_unauthorized, with failed, when no key is left.
 const (
-	reasonModelKeySwitch       = "model_key_switch"
-	reasonModelKeyUnauthorized = "model_key_unauthorized"
+	reasonModelKeySwitch       = event.ReasonModelKeySwitch
+	reasonModelKeyUnauthorized = event.ReasonModelKeyUnauthorized
 )
 
 // outcome is how qory says a run ended, by the state and the reason Forager gives: the

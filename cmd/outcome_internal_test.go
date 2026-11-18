@@ -3,13 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
-	"go/ast"
-	gobuild "go/build"
-	"go/parser"
-	"go/token"
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -663,63 +657,6 @@ func TestSessionOutcome(t *testing.T) {
 	} {
 		if got := sessionOutcome(c.res, c.err); got != c.want {
 			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
-		}
-	}
-}
-
-// TestModelKeyReasonsMatchForagers checks qory's reasons for a rejected model key against
-// Forager's event.ReasonModelKeySwitch and event.ReasonModelKeyUnauthorized, read from the
-// source of the Forager this build uses. It skips at a Forager without them.
-func TestModelKeyReasonsMatchForagers(t *testing.T) {
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	pkg, err := gobuild.Import("github.com/qoryai/forager/event", wd, gobuild.FindOnly)
-	if err != nil {
-		t.Fatalf("finding Forager's event package: %v", err)
-	}
-	fset := token.NewFileSet()
-	found := map[string]string{}
-	files, err := filepath.Glob(filepath.Join(pkg.Dir, "*.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range files {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		f, err := parser.ParseFile(fset, name, nil, 0)
-		if err != nil {
-			t.Fatalf("parsing %s: %v", name, err)
-		}
-		for _, decl := range f.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.CONST {
-				continue
-			}
-			for _, spec := range gen.Specs {
-				vs := spec.(*ast.ValueSpec)
-				for i, id := range vs.Names {
-					if i >= len(vs.Values) {
-						continue
-					}
-					if lit, ok := vs.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
-						if v, err := strconv.Unquote(lit.Value); err == nil {
-							found[id.Name] = v
-						}
-					}
-				}
-			}
-		}
-	}
-	want := map[string]string{"ReasonModelKeySwitch": reasonModelKeySwitch, "ReasonModelKeyUnauthorized": reasonModelKeyUnauthorized}
-	if _, ok := found["ReasonModelKeySwitch"]; !ok {
-		t.Skipf("the Forager in %s has no ReasonModelKeySwitch", pkg.Dir)
-	}
-	for name, v := range want {
-		if found[name] != v {
-			t.Errorf("Forager's event.%s is %q, qory's %q", name, found[name], v)
 		}
 	}
 }
