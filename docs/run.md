@@ -1076,7 +1076,8 @@ came from. For Codex, it also contains the other files of Codex's folder in the 
    top, more than 10,000 entries, or no `bin/codex` stops the run with `Check the source
    of the runtime's releases`. A missing or empty `bin/codex-code-mode-host`,
    `codex-resources/bwrap` or `codex-path/rg` means that Codex moved its files, and stops
-   the run with `Update qory.` and the missing file. The tarball may unpack to at most
+   the run with `Update qory.`, then `The tarball of codex <version> has no` and the
+   missing file on the next line. The tarball may unpack to at most
    4 GiB. qory
    then renames the temporary folder to the version's folder, so a folder at that path is
    always a complete install.
@@ -2002,9 +2003,6 @@ the work item. Then a run of the step explore:
   |---|---|---|
   | `claude` | `--output-format stream-json --verbose --add-dir <in> -p "/<name> <in>/inputs.json"`, where `<name>` is such as `harness:hello` | a skill or a command |
   | `codex` | `exec --json --add-dir <in> "$<name> <in>/inputs.json"` | a skill |
-  | `gemini` | `--output-format stream-json --include-directories <in> -p "/<name> <in>/inputs.json"` | a command |
-  | `opencode` | `run --format json --command <name> <in>/inputs.json` | a command |
-  | `cursor` | `--print --output-format stream-json --add-dir <in> "/<name> <in>/inputs.json"` | a skill |
 
   A run from a run code runs only on `claude` and `codex`: the runtimes that have a
   descriptor in Forager's `runtimes.json` and that qory installs. `gemini`, `opencode`
@@ -2366,9 +2364,8 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   before the schema check. Qory Apiary sends the runtime of the workspace, or of the
   workflow's settings when they set one; qory sets no default runtime. The documents of
   a prebuild start no agent session and contain no `run_settings`
-- `set another runtime for the workspace in Qory Apiary, then take the work item in
-  again: qory runs a run code's workflow on one of claude and codex, and not on
-  <runtime>; the code is used`, before anything is fetched
+- `qory runs a run code's workflow on one of claude and codex,` and the next line `and
+  not on <runtime>; the code is used`, before anything is fetched
 - `add a <kind> workflow-<workflow> to <harness>, or set another workflow in Qory
   Apiary: the composed harness has no skill or command workflow-<workflow> or <workflow>
   (workflow_not_in_harness); the code is used`, after the compose, which closes the run

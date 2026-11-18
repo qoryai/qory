@@ -664,8 +664,8 @@ func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 		{"opencode", skill, "add a command workflow-example to the checkout's harness, or set another runtime in Qory Apiary: opencode runs no skill by its name from a headless start, and the composed harness has no command workflow-example or example; the code is used"},
 		{"codex", command, "add a skill workflow-example to the checkout's harness, or set another runtime in Qory Apiary: codex runs no command by its name from a headless start, and the composed harness has no skill workflow-example or example; the code is used"},
 		{"cursor", command, "add a skill workflow-example to the checkout's harness, or set another runtime in Qory Apiary: cursor runs no command by its name from a headless start, and the composed harness has no skill workflow-example or example; the code is used"},
-		{"amp", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory runs a run code's workflow on one of claude and codex, and not on amp; the code is used"},
-		{"copilot", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory runs a run code's workflow on one of claude and codex, and not on copilot; the code is used"},
+		{"amp", skill, "qory runs a run code's workflow on one of claude and codex,\n  and not on amp; the code is used"},
+		{"copilot", skill, "qory runs a run code's workflow on one of claude and codex,\n  and not on copilot; the code is used"},
 	} {
 		if _, err := r.workflowArgs(c.runtime, c.rep, in, ""); err == nil || err.Error() != c.want {
 			t.Errorf("%s: got %v\nwant %s", c.runtime, err, c.want)
@@ -817,7 +817,7 @@ func TestTheRuntimeRefusalsListTheSetTheCheckUses(t *testing.T) {
 	if !strings.HasSuffix(noRuntime().Error(), "\n  qory runs one of "+list+".") {
 		t.Errorf("the refusal of no runtime is %q, want it to list %q", noRuntime(), list)
 	}
-	if got := notRunRuntime("gemini").Error(); !strings.Contains(got, "on one of "+list+", and not on gemini;") {
+	if got := notRunRuntime("gemini").Error(); !strings.Contains(got, "on one of "+list+",\n  and not on gemini;") {
 		t.Errorf("the refusal of gemini is %q, want it to list %q", got, list)
 	}
 	for _, name := range append([]string{"gemini", "cursor", "opencode"}, set...) {
@@ -825,5 +825,29 @@ func TestTheRuntimeRefusalsListTheSetTheCheckUses(t *testing.T) {
 		if accepted := slices.Contains(set, name); accepted != (err == nil) || !accepted && strings.Count(err.Error(), list) != 1 {
 			t.Errorf("%s: %v, want it accepted: %v", name, err, accepted)
 		}
+	}
+}
+
+// TestTheUnknownRuntimeTextFitsItsLines is the refusal of a runtime that a run code does
+// not run on, for a name of 64 characters, the longest a runtime's name has: with
+// "qory run: " before it, each line has at most 100 characters.
+func TestTheUnknownRuntimeTextFitsItsLines(t *testing.T) {
+	for _, line := range strings.Split("qory run: "+notRunRuntime(strings.Repeat("a", 64)).Error(), "\n") {
+		if len(line) > 100 {
+			t.Errorf("the line has %d characters: %s", len(line), line)
+		}
+	}
+}
+
+// TestCauseOnlyDropsTheFixLine is causeOnly on an install's error of a fix line and an
+// indented cause on two lines: the cause, its first line with no indent and its first
+// letter in lower case, and no full stop at its end.
+func TestCauseOnlyDropsTheFixLine(t *testing.T) {
+	got := causeOnly(errors.New("Update qory.\n  The tarball of codex 0.170.0 has no\n  package/vendor/x/bin/a.")).Error()
+	if want := "the tarball of codex 0.170.0 has no\n  package/vendor/x/bin/a"; got != want {
+		t.Errorf("causeOnly = %q, want %q", got, want)
+	}
+	if got := causeOnly(errors.New("one line")).Error(); got != "one line" {
+		t.Errorf("causeOnly of one line = %q", got)
 	}
 }

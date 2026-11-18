@@ -89,8 +89,9 @@ release may change what an existing document does, and states it under Upgrading
   and `codex-path/rg` are beside `bin/codex`, each mode `0755`, and prints `qory run:
   installed codex <version>`. A tarball without one of them, or with an empty one, stops
   the run with `Update qory.` and the missing file. A version's folder without one stops
-  the run with `Remove the version's folder once no run uses it, then run again`. The session starts `bin/codex`, and behind a wall Forager mounts the
-  version's folder read-only at `/qory/runtime/codex`. Before, a session of Codex started
+  the run with `Remove the version's folder once no run uses it, then run again`. The
+  session starts `bin/codex`, and behind a wall Forager mounts the version's folder
+  read-only at `/qory/runtime/codex`. Before, a session of Codex started
   the program from the image, which no agent image has.
 - A run from a run key or a run code whose runtime's install fails prints the cause of
   the failure alone, such as `qory run: npm has no signature of claude 2.1.320`, with no
@@ -589,10 +590,9 @@ release may change what an existing document does, and states it under Upgrading
   prebuild needs no runtime and runs as before.
 - A run from a run code runs only on `claude` and `codex`, the runtimes that have a
   descriptor in Forager's `runtimes.json` and that qory installs. On any other runtime,
-  such as `gemini`, `opencode` or `cursor`, it stops before anything is fetched, with `set
-  another runtime for the workspace in Qory Apiary, then take the work item in again: qory
-  runs a run code's workflow on one of claude and codex, and not on <runtime>; the code is
-  used`. Until now, a run on `gemini`, `opencode` or `cursor` started, with no install of
+  such as `gemini`, `opencode` or `cursor`, it stops before anything is fetched, with `qory
+  runs a run code's workflow on one of claude and codex,` and the next line `and not on
+  <runtime>; the code is used`. Until now, a run on `gemini`, `opencode` or `cursor` started, with no install of
   the runtime.
 - The middle model tier is named `balanced` in place of `fast`. The tiers are `light`,
   `balanced` and `thinking`. `${qory:balanced}`, `--tier balanced=<model id>`,

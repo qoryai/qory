@@ -32,7 +32,8 @@ type folder struct {
 // with npm's checksum integrity. A folder at that path is complete when it exists,
 // since [folder.install] renames only a finished folder there; it must contain
 // bin/<runtime> and each file of [folderFiles] for the runtime, each a regular file of at
-// least 1 byte that everyone can read and run, and checksumFile with integrity. A folder of another tarball, or a path that is not a folder, is an error:
+// least 1 byte that everyone can read and run, see [runnable], and checksumFile with
+// integrity. A folder of another tarball, or a path that is not a folder, is an error:
 // the version's folder is never replaced, since a run may still use it.
 func (f folder) complete(version, integrity string) (bool, error) {
 	dir := filepath.Join(f.base, version)
@@ -47,9 +48,7 @@ func (f folder) complete(version, integrity string) (bool, error) {
 		return false, fmt.Errorf("Remove the version's entry in the runtimes folder, then run again\n"+
 			"%s is where %s %s is installed, and it is not a folder.", dir, f.runtime, version)
 	}
-	program := filepath.Join(dir, "bin", f.runtime)
-	p, err := os.Lstat(program)
-	if err != nil || !p.Mode().IsRegular() || p.Mode().Perm()&0o555 != 0o555 {
+	if !runnable(filepath.Join(dir, "bin", f.runtime)) {
 		return false, fmt.Errorf("Remove the version's folder once no run uses it, then run again\n"+
 			"%s has no program bin/%s that everyone can read and run.", dir, f.runtime)
 	}
@@ -369,7 +368,7 @@ func extractFolder(r io.Reader, dir, runtime, prefix, what string) error {
 	// this qory's [folderFiles] is out of date.
 	for _, name := range folderFiles[runtime] {
 		if !runnable(filepath.Join(dir, filepath.FromSlash(name))) {
-			return fmt.Errorf("Update qory.\nThe tarball of %s has no %s.", what, prefix+name)
+			return fmt.Errorf("Update qory.\n  The tarball of %s has no\n  %s.", what, prefix+name)
 		}
 	}
 	for name := range made {

@@ -149,11 +149,11 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 		{"run settings with a null runtime", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": nil} }),
 			"The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of " + headlessRuntimes + "."},
 		{"a runtime with no descriptor and no install", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "gemini"} }),
-			"set another runtime for the workspace in Qory Apiary, then take the work item in again: qory runs a run code's workflow on one of " + headlessRuntimes + ", and not on gemini; the code is used"},
+			"qory runs a run code's workflow on one of " + headlessRuntimes + ",\n  and not on gemini; the code is used"},
 		{"a runtime with no headless start", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "goose"} }),
-			"set another runtime for the workspace in Qory Apiary, then take the work item in again: qory runs a run code's workflow on one of " + headlessRuntimes + ", and not on goose; the code is used"},
+			"qory runs a run code's workflow on one of " + headlessRuntimes + ",\n  and not on goose; the code is used"},
 		{"a runtime qory does not render", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "example"} }),
-			"set another runtime for the workspace in Qory Apiary, then take the work item in again: qory runs a run code's workflow on one of " + headlessRuntimes + ", and not on example; the code is used"},
+			"qory runs a run code's workflow on one of " + headlessRuntimes + ",\n  and not on example; the code is used"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root := runKeyCheckout(t)

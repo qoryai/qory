@@ -768,9 +768,11 @@ func listOf(names []string) string {
 }
 
 // notRunRuntime is the error of a run from a run code on the runtime name, which is not
-// one of [runRuntimes]. It is exit 1 and ends with [codeUsed].
+// one of [runRuntimes]. Only a dispatched run gets it, so it is the cause alone, with no
+// fix line, under the user's ruling 771 (a), on two lines that each stay within 100
+// characters with "qory run: ". It is exit 1 and ends with [codeUsed].
 func notRunRuntime(name string) error {
-	return fmt.Errorf("set another runtime for the workspace in Qory Apiary, then take the work item in again: qory runs a run code's workflow on one of %s, and not on %s%s", listOf(runRuntimes()), accesskey.ShownName(name, false), codeUsed)
+	return fmt.Errorf("qory runs a run code's workflow on one of %s,\n  and not on %s%s", listOf(runRuntimes()), accesskey.ShownName(name, false), codeUsed)
 }
 
 // entryKeys are rep's entries as <kind>/<name>, the form [render.Addresses] takes.
