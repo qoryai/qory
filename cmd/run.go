@@ -841,11 +841,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{handoffEnv: handoffPath(at.root)})
 					}
 				}
-				// The composed harness's submit program runs on a run with no run code alone, on
-				// the person's machine and with the person's login of the forge's command line. A
-				// run with a run code has none: the forge's adapter opens its draft from the stored
-				// submission.
-				if code == nil && c.submitProgram != nil {
+				// The composed harness's submit program runs on a run with neither a run code nor a
+				// run key, on the person's machine and with the person's login of the forge's
+				// command line. A run with a run code or a run key has none: it is a dispatched run,
+				// and the forge's adapter opens its draft from the stored submission. Everything of
+				// the local submit step follows from program: the hand-off exclusion and
+				// QORY_SUBMISSION_HANDOFF of the copy, copied.submits and submitLocal.
+				if code == nil && key == nil && c.submitProgram != nil {
 					program = &submitProgram{command: c.submitProgram.Command, limit: submitLimit}
 				}
 				if line := fromCode.submitLine(rep, submitLevel); line != "" {
@@ -1161,10 +1163,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err := copied.recordLinks(); err != nil {
 					return &runLineError{codeLine(err)}
 				}
-				// A local write run of a harness with a submit program hands its text over in a
-				// file of the copy, which no commit has: the copy's .qory stays out of the git
-				// session, and its folder out of a git add -A of the agent.
-				if program != nil && code == nil && !readOnly && !copied.plain {
+				// A local write run of a harness with a submit program (program is set for a run with
+				// no run code and no run key) hands its text over in a file of the copy, which no
+				// commit has: the copy's .qory stays out of the git session, and its folder out of a
+				// git add -A of the agent.
+				if program != nil && !readOnly && !copied.plain {
 					if err := copied.dir.Exclude(handoffExclude); err != nil {
 						return &runLineError{codeLine(err)}
 					}

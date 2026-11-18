@@ -760,3 +760,27 @@ func TestAPushIsNotRewrittenAgainByPushInsteadOf(t *testing.T) {
 		t.Errorf("the program started %d times, want 0", n)
 	}
 }
+
+// TestARunWithARunKeyAndNoRunCodeNeverPushesLocally is a run with a run key and no run code of a
+// harness whose module declares a submit program, with both push checks registered: qory pushes
+// nothing, starts no program, and prints no line of the local submit step, because that step is
+// for a run with neither a run code nor a run key.
+func TestARunWithARunKeyAndNoRunCodeNeverPushesLocally(t *testing.T) {
+	_, bare, started := localProgramCheckout(t)
+	calls := passingCheck(t)
+	gw := newKeyedGateway(t)
+	key := mintRunKey(t, keyRunID, gw.url())
+	t.Setenv("QORY_RUN_KEY", "")
+	_, restore := cmd.OpenNowhere()
+	defer restore()
+	agentInCopy(t, handsOffText(t))
+	out, _ := run(t, "run", "claude", "--run-key-fd", descriptor(t, key), "--", "-p", "hi")
+	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 || *calls != 0 {
+		t.Errorf("pushed %q, started %d programs and ran %d checks, want none\n%s", got, timesStarted(t, started), *calls, out)
+	}
+	for _, line := range []string{"Draft: ", "qory pushed nothing", "The push of the branch failed", "A push check refused"} {
+		if strings.Contains(out, line) {
+			t.Errorf("the output has %q:\n%s", line, out)
+		}
+	}
+}

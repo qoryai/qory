@@ -582,7 +582,8 @@ release may change what an existing document does, and states it under Upgrading
 - A run from a run code starts no submit program, relay, container or write token for the
   forge's API: the push step pushes and stores the submission, with the draft `no-program`,
   and the forge's adapter opens the draft pull request from it. The `submit_program` of the
-  composed harness is for a run with no run code: qory pushes the checked head of
+  composed harness is for a run with neither a run code nor a run key (a run with a run key and
+  no run code pushes nothing locally and runs no program): qory pushes the checked head of
   `qory/run-<run id>` for each repository to the remote origin's one push address with the
   person's git login, after the checks of every repository and before any program, then runs the program on the person's machine,
   outside the wall, with the person's login of the forge's command line, once for each

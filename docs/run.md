@@ -2912,7 +2912,7 @@ never fails because of the file.
 A module manifest can declare `submit_program`, a command of the module: a file in the
 module, then its arguments (see `contracts/harness/v1/README.md`). A composed harness has at
 most one, and a second declaration fails the compose. The run's documents have no member for
-the module of a submit program. A run with no run code gets the program from a module that the
+the module of a submit program. A run with neither a run code nor a run key gets the program from a module that the
 `qory.yaml` of the person's checkout composes, and a run from a run code runs no program.
 
 #### The submit program
@@ -2923,9 +2923,9 @@ program, no container, no relay and no write token for the forge's API: the push
 git's push alone, and the forge's adapter opens or updates the draft pull request from the
 stored submission.
 
-A run with no run code has no work item and no run API, so qory stores no submission for it. A run
-that has a run key and no run code, and whose composed harness has a submit program, is a local run
-too: qory does the same for it.
+A run with no run code has no work item and no run API, so qory stores no submission for it. The
+steps below are for a run with neither a run code nor a run key. A run with a run key and no run
+code runs no submit program: qory pushes nothing for it and prints no line of these steps.
 After the run's commits are back in your repositories on a branch `qory/run-<run id>`, qory
 pushes the head commit of that branch for each repository, as it was when the checks ran, to
 the push address of the remote `origin` (`git remote get-url --push origin`, after git's
