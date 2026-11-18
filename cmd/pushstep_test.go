@@ -2525,3 +2525,35 @@ func TestAWallThatStaysRunsNoGit(t *testing.T) {
 		}
 	})
 }
+
+// TestAMovedBranchEndsTheRunWithPushHeadChangedAfterAnySession is a branch that another push
+// moved, after a session that passed, one that failed and one that the time limit stopped: each
+// run closes failed with the code push_head_changed, the branch stays, and the printed refusal is
+// the same.
+func TestAMovedBranchEndsTheRunWithPushHeadChangedAfterAnySession(t *testing.T) {
+	for name, result := range map[string]func() (*session.Result, error){
+		"passed":    succeeded,
+		"failed":    func() (*session.Result, error) { return &session.Result{State: event.StateFailed, ExitCode: 1}, nil },
+		"timed out": timedOut,
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			other := tempDir(t)
+			proxygittest.Git(t, other, "clone", "--quiet", p.bare, ".")
+			writeFile(t, filepath.Join(other, "moved.txt"), "moved\n")
+			commitAll(t, other, "Move the branch")
+			proxygittest.Git(t, other, "push", "--quiet", "origin", "HEAD:refs/heads/qory/"+workItem)
+			moved := p.branchHead(t)
+			p.api.pushedCommits = `[]`
+
+			r := p.run(t, writesAndCommits(t), result)
+			if len(r.closes) != 1 || r.closes[0].State != event.StateFailed || r.closes[0].Reason != string(contracts.EndCodePushHeadChanged) {
+				t.Errorf("the run closed with %+v, want failed with %s\n%s", r.closes, contracts.EndCodePushHeadChanged, r.out)
+			}
+			wants(t, r.out, "qory run: Check branch qory/"+workItem+": its head is not the commit this run expected, so qory did not push.")
+			if got := p.branchHead(t); got != moved {
+				t.Errorf("the branch moved to %s", got)
+			}
+		})
+	}
+}

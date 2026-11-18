@@ -2816,9 +2816,10 @@ matches, also fails the step with that refusal, with the head read again. When t
 head fails, the step fails with the line `The run's host proxy could not read the head of the branch,
 so qory did not push.`, also in the list above.
 
-After a session that succeeded, a refusal closes the run `failed` with the end code
-`push_head_changed`. A session that did not succeed keeps its end, and a step that a stop or
-the time limit cut closes the run as the sections above say.
+A refusal because the branch moved closes the run `failed` with the end code
+`push_head_changed`, after a session that succeeded, failed or timed out. After a session that did
+not succeed, any other failure of the step keeps the session's end, and a step that a stop or the
+time limit cut closes the run as the sections above say.
 
 #### The submit step
 

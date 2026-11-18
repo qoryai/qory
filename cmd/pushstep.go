@@ -541,11 +541,16 @@ func (e *pushEnding) settle(now stopRead) {
 	e.stopped, e.again, e.got = now.stopped, now.again, now.got
 }
 
-// outcome is the outcome a run closes with after its push step failed with err. A session
-// that did not succeed keeps its end, whatever the step did. After a session that
-// succeeded, a cut step closes the run as a stop does, and a failed one closes it failed
-// with the status of err.
+// outcome is the outcome a run closes with after its push step failed with err. A refusal
+// because the branch moved ([*preparation.HeadChanged]) closes the run failed with the end code
+// push_head_changed after any session, whether it succeeded, failed or timed out: the next run
+// of the work item needs that code. Any other failure after a session that did not succeed
+// keeps the session's end, whatever the step did. After a session that succeeded, a cut step
+// closes the run as a stop does, and a failed one closes it failed with the status of err.
 func (e pushEnding) outcome(err error) session.Outcome {
+	if changed := (*preparation.HeadChanged)(nil); errors.As(err, &changed) {
+		return session.Outcome{State: event.StateFailed, ExitCode: ExitCode(err), Reason: string(contracts.EndCodePushHeadChanged)}
+	}
 	switch {
 	case e.session.State != event.StateSucceeded:
 		return e.session
@@ -554,11 +559,7 @@ func (e pushEnding) outcome(err error) session.Outcome {
 	case e.cut:
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
 	}
-	out := session.Outcome{State: event.StateFailed, ExitCode: ExitCode(err)}
-	if changed := (*preparation.HeadChanged)(nil); errors.As(err, &changed) {
-		out.Reason = string(contracts.EndCodePushHeadChanged)
-	}
-	return out
+	return session.Outcome{State: event.StateFailed, ExitCode: ExitCode(err)}
 }
 
 // copyOutcome is the outcome a run closes with when its copy step did not succeed or did not

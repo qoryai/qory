@@ -558,7 +558,8 @@ release may change what an existing document does, and states it under Upgrading
 
 - The push step stores a version of the artifact type `submission`, in place of `branch`.
   The step checks the head of the branch on the forge before it pushes: a head that is not
-  the commit the run expected ends the run `failed` with the code `push_head_changed`, and
+  the commit the run expected ends the run `failed` with the code `push_head_changed`, after a
+  session that passed, failed or timed out, and
   the push replaces commits of cancelled runs only, with a lease on the head it checked. The
   work item's record lists one head for each push, so a commit counts as cancelled when it is
   that head or an ancestor of it from the start commit on; a commit on top of a recorded head,
