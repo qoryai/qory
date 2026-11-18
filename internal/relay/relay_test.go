@@ -179,3 +179,46 @@ func TestTheRelayDialsOnlyItsTarget(t *testing.T) {
 		t.Errorf("an unreachable target answered %q", got)
 	}
 }
+
+// TestAClientThatHalfClosesAfterItsRequestStillGetsTheReply is a client that sends its request
+// and closes its writing side, as a program that waits for the end of the answer does: the
+// server reads until the end of the request, and its reply, sent after that, reaches the client.
+func TestAClientThatHalfClosesAfterItsRequestStillGetsTheReply(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		c, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		got, _ := io.ReadAll(c)
+		time.Sleep(100 * time.Millisecond)
+		c.Write([]byte("reply to " + string(got)))
+	}()
+	dir := shortDir(t)
+	r, err := relay.Start(dir, l.Addr().String(), 5, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	c, err := net.DialTimeout("unix", r.Path, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := c.Write([]byte("request")); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.(*net.UnixConn).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(c)
+	if err != nil || string(got) != "reply to request" {
+		t.Errorf("the client read %q, %v, want the reply", got, err)
+	}
+}

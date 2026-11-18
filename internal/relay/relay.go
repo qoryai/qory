@@ -2,13 +2,16 @@
 // That container has no network, so the program reaches the run's push proxy only through
 // the socket that the relay listens on in a folder that the container mounts.
 //
-// Who can reach the relay: the folder is made by the caller, mode 0700, and the socket in it
-// has mode 0600, so only this machine's user and the container that mounts the folder can
-// connect (a container that runs as another user needs a wider mode, which the caller sets
-// together with a folder that lists nothing). The container has no network, so nothing else can reach the socket.
+// Who can reach the relay: the folder is made by the caller, mode 0700 below a folder that is
+// mode 0700 too, and the socket in it has the mode the caller gives: 0600 when the program that
+// connects runs as the caller's user or the caller gives the socket to it, and a wider mode
+// only below a folder that no other user opens. The container mounts the folder, so the
+// container is the only other place that reaches the socket, and it has no network.
 //
 // What the relay carries: the bytes of each connection, both ways, to the one address it
-// was started with. That is the push proxy's address, so the program's requests carry the
+// was started with. A client that closes its writing side after its request, as a half-close,
+// still reads the reply: each direction ends on its own, and the connections close when both
+// have ended or the relay closes. That is the push proxy's address, so the program's requests carry the
 // proxy's password. The relay reads, checks and adds nothing: every limit on what a request
 // may reach, the push credential's list of paths and hosts, stays with the push proxy.
 //
@@ -93,7 +96,7 @@ func (r *Relay) accept() {
 	}
 }
 
-// forward copies between in and a new connection to the target until either side ends.
+// forward copies between in and a new connection to the target until both directions end.
 func (r *Relay) forward(in net.Conn) {
 	defer r.done.Done()
 	defer r.forget(in)
@@ -111,16 +114,23 @@ func (r *Relay) forward(in net.Conn) {
 	r.mu.Unlock()
 	defer r.forget(out)
 	ended := make(chan struct{}, 2)
+	// pipe copies src to dst, and then closes the writing side of dst, so the peer of dst
+	// reads the end of the data while the other direction goes on. A connection that cannot
+	// half-close closes whole.
 	pipe := func(dst, src net.Conn) {
 		io.Copy(dst, src)
+		if half, ok := dst.(interface{ CloseWrite() error }); ok {
+			half.CloseWrite()
+		} else {
+			dst.Close()
+		}
 		ended <- struct{}{}
 	}
 	go pipe(out, in)
 	go pipe(in, out)
+	// Both directions end before the connections close; [Relay.Close] ends a direction that
+	// has no end by closing every connection.
 	<-ended
-	// One side ended: both close, which ends the other copy.
-	in.Close()
-	out.Close()
 	<-ended
 }
 
