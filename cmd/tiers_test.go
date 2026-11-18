@@ -205,8 +205,8 @@ func TestComposeRefusesATierMistake(t *testing.T) {
 		root := tierCheckout(t)
 		tierModule(t, root, "claude", tierAgents, c.harness...)
 		out, err := run(t, append([]string{"harness", "compose"}, c.args...)...)
-		if cmd.ExitCode(err) != 2 || err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%v %v: exit %d, err %v\nwant to contain %s\n%s", c.args, c.harness, cmd.ExitCode(err), err, c.want, out)
+		if cmd.ExitCode(err) != 2 || err == nil || !strings.HasPrefix(err.Error(), c.want) {
+			t.Errorf("%v %v: exit %d, err %v\nwant to start with %s\n%s", c.args, c.harness, cmd.ExitCode(err), err, c.want, out)
 		}
 		if _, err := os.Stat(filepath.Join(root, ".qory")); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("%v: .qory was written", c.args)
