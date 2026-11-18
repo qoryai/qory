@@ -18,8 +18,6 @@ import (
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
-	"github.com/qoryai/qory/internal/render/claude"
-	"github.com/qoryai/qory/internal/render/codex"
 	"github.com/qoryai/qory/internal/runtimeinstall"
 	"github.com/qoryai/qory/internal/secretmask"
 )
@@ -31,11 +29,6 @@ import (
 // machine with the same version reads no tarball. qory run prints one line,
 // "qory run: installed claude 2.1.320", and the session gets the version's folder,
 // [useInstalledRuntime]. The run holds the version's folder until it ends.
-
-// installedRuntimes are the runtimes whose program qory run installs, by Forager's
-// descriptor name: claude, Claude Code, and codex, Codex. qory installs no other
-// runtime.
-var installedRuntimes = []string{claude.Runtime, codex.Runtime}
 
 // textNoRuntimeProxy is the line of a run whose host proxy, through which qory reads the
 // runtime, did not open, with the runtime and Forager's error after it.
@@ -88,7 +81,7 @@ func instanceAddress(r *config.Forager) string {
 // run's host proxy, proxied set; a run on a person's machine with neither sends its
 // requests directly. The host proxy closes once the install ends.
 func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machine runtimeinstall.Machine, proxied bool, runtime, state string, report func(string)) (*runtimeinstall.Installed, error) {
-	if !installRuntimes || !slices.Contains(installedRuntimes, runtime) {
+	if !installRuntimes || !slices.Contains(runtimeinstall.Runtimes(), runtime) {
 		return nil, nil
 	}
 	registry := machine.Registry

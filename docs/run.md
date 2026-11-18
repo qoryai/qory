@@ -1965,8 +1965,10 @@ the work item. Then a run of the step explore:
   | `opencode` | `run --format json --command <name> <in>/inputs.json` | a command |
   | `cursor` | `--print --output-format stream-json --add-dir <in> "/<name> <in>/inputs.json"` | a skill |
 
-  `amp`, `copilot`, `goose` and `any` have no headless start, so a run from a run code
-  does not start on them. Behind a wall, `codex exec` also gets `--sandbox
+  A run from a run code runs only on `claude` and `codex`: the runtimes that have a
+  descriptor in Forager's `runtimes.json` and that qory installs. `gemini`, `opencode`
+  and `cursor` have neither, and `amp`, `copilot`, `goose` and `any` have no headless
+  start. Behind a wall, `codex exec` also gets `--sandbox
   danger-full-access` right after `exec`: in the wall every other sandbox mode of Codex
   fails before it runs a command, and the wall is the limit of what the agent changes.
   qory adds no `--sandbox` when an argument before `--`, before `exec` or after it, sets
@@ -2316,16 +2318,16 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
 - `set a workflow for the workspace in Qory Apiary, then take the work item in again: the
   response to the run code has no workflow; the code is used`
 - `The run settings set no runtime, so the run did not start; the code is used.` and the
-  next line `qory runs one of claude, codex, cursor, gemini, and opencode.`, when the documents
-  contain no `run_settings`, a null one, or `run_settings` with no `runtime` or an empty
-  one, before anything is installed or fetched. Documents of the step explore start an
+  next line `qory runs one of claude and codex.`, when the documents
+  contain no `run_settings`, a null one, or `run_settings` whose `runtime` is missing,
+  empty or null, before anything is installed or fetched. Documents of the step explore start an
   agent session, so they require `run_settings` with a `runtime`; qory checks for them
   before the schema check. Qory Apiary sends the runtime of the workspace, or of the
   workflow's settings when they set one; qory sets no default runtime. The documents of
   a prebuild start no agent session and contain no `run_settings`
 - `set another runtime for the workspace in Qory Apiary, then take the work item in
-  again: qory starts a run code's workflow with a runtime's headless start, and has none
-  for <runtime>; the code is used`, before anything is fetched
+  again: qory runs a run code's workflow on one of claude and codex, and not on
+  <runtime>; the code is used`, before anything is fetched
 - `add a <kind> workflow-<workflow> to <harness>, or set another workflow in Qory
   Apiary: the composed harness has no skill or command workflow-<workflow> or <workflow>
   (workflow_not_in_harness); the code is used`, after the compose, which closes the run
@@ -2356,14 +2358,10 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   (read_needs_setup_removed); the code is used`, after the setup, for a read run whose
   setup container was not removed, which closes the run with the reason
   `read_needs_setup_removed`; see [Read workflows](#read-workflows)
-- `add a command workflow-<workflow> to <harness>, or set another runtime in Qory Apiary:
-  <runtime> runs no skill by its name from a headless start, and the composed harness has
-  no command workflow-<workflow> or <workflow>; the code is used`, after the compose, for
-  a workflow that is only a skill on `gemini` or `opencode`
 - `add a skill workflow-<workflow> to <harness>, or set another runtime in Qory Apiary:
-  <runtime> runs no command by its name from a headless start, and the composed harness
-  has no skill workflow-<workflow> or <workflow>; the code is used`, after the compose,
-  for a workflow that is only a command on `codex` or `cursor`
+  codex runs no command by its name from a headless start, and the composed harness has
+  no skill workflow-<workflow> or <workflow>; the code is used`, after the compose, for
+  a workflow that is only a command on `codex`
 - `take the work item in again in Qory Apiary: the run's host proxy, through which qory
   fetches the run's repositories, did not open: <error>; the code is used`, where a run
   without a run code prints `run again: the run's host proxy, through which qory fetches

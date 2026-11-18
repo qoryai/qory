@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,6 @@ import (
 	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/config"
-	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
 )
 
@@ -664,40 +664,29 @@ func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 		{"opencode", skill, "add a command workflow-example to the checkout's harness, or set another runtime in Qory Apiary: opencode runs no skill by its name from a headless start, and the composed harness has no command workflow-example or example; the code is used"},
 		{"codex", command, "add a skill workflow-example to the checkout's harness, or set another runtime in Qory Apiary: codex runs no command by its name from a headless start, and the composed harness has no skill workflow-example or example; the code is used"},
 		{"cursor", command, "add a skill workflow-example to the checkout's harness, or set another runtime in Qory Apiary: cursor runs no command by its name from a headless start, and the composed harness has no skill workflow-example or example; the code is used"},
-		{"amp", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for amp; the code is used"},
-		{"copilot", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for copilot; the code is used"},
+		{"amp", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory runs a run code's workflow on one of claude and codex, and not on amp; the code is used"},
+		{"copilot", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory runs a run code's workflow on one of claude and codex, and not on copilot; the code is used"},
 	} {
 		if _, err := r.workflowArgs(c.runtime, c.rep, in, ""); err == nil || err.Error() != c.want {
 			t.Errorf("%s: got %v\nwant %s", c.runtime, err, c.want)
 		}
 	}
-	for _, runtime := range []string{"goose", "amp", "copilot", "any", "example"} {
+	for _, runtime := range []string{"gemini", "cursor", "opencode", "goose", "amp", "copilot", "any", "example"} {
 		_, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: runtime}})
-		if want := noHeadless(runtime); err == nil || err.Error() != want.Error() {
+		if want := notRunRuntime(runtime); err == nil || err.Error() != want.Error() {
 			t.Errorf("%s: codeRunOf got %v, want %v", runtime, err, want)
 		}
 	}
 }
 
 // TestDocumentsWithNoRuntimeAreRefused is codeRunOf for documents with no run settings
-// and with run settings that set no runtime: each is refused with the runtimes that have
-// a headless start, exit 1. codeDocumentsOf refuses explore documents with no run
-// settings, null ones, or run settings with no runtime or an empty one before the schema
-// check, since explore starts an agent session, and leaves a prebuild's documents to that
-// check.
+// and with run settings that set no runtime: each is refused with the runtimes that a
+// run from a run code runs on, claude and codex, exit 1. codeDocumentsOf refuses explore documents with no run
+// settings, null ones, or run settings whose runtime is missing, empty or null, before
+// the schema check, since explore starts an agent session, and leaves a prebuild's
+// documents to that check.
 func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
-	var headless []string
-	for _, n := range render.Names() {
-		if rt, err := render.Lookup(n); err == nil {
-			if _, ok := rt.(render.Headless); ok {
-				headless = append(headless, n)
-			}
-		}
-	}
-	if len(headless) < 3 || headlessList() != strings.Join(headless[:len(headless)-1], ", ")+", and "+headless[len(headless)-1] {
-		t.Errorf("the list is %q, the headless runtimes %q", headlessList(), headless)
-	}
-	want := "The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of " + headlessList() + "."
+	want := "The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of claude and codex."
 	for name, settings := range map[string]*contracts.RunSettings{"no run settings": nil, "no runtime": {Model: "opus"}} {
 		_, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: settings})
 		if err == nil || err.Error() != want || ExitCode(err) != 1 {
@@ -710,6 +699,7 @@ func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
 	}{
 		{`{"step":"explore","run_settings":{}}`, true},
 		{`{"step":"explore","run_settings":{"runtime":""}}`, true},
+		{`{"step":"explore","run_settings":{"runtime":null}}`, true},
 		{`{"step":"explore","run_settings":{"runtime":"codex"}}`, false},
 		{`{"step":"explore"}`, true},
 		{`{"step":"explore","run_settings":null}`, true},
@@ -799,6 +789,21 @@ func TestFullSuiteOfTheDocumentsIsTheRunsFullSuite(t *testing.T) {
 		}
 		if r.fullSuite != c.want || fullSuiteOf(r) != c.want {
 			t.Errorf("%s: fullSuite %v, want %v", c.name, r.fullSuite, c.want)
+		}
+	}
+}
+
+// TestARunCodeRunsOnlyOnRuntimesWithADescriptorAndAnInstall is runRuntimes: the
+// runtimes that qory installs, have a descriptor in Forager's runtimes.json and have a
+// headless start. gemini, cursor and opencode have a headless start and neither a
+// descriptor nor an install, so they are not in it. listOf writes the list.
+func TestARunCodeRunsOnlyOnRuntimesWithADescriptorAndAnInstall(t *testing.T) {
+	if got := runRuntimes(); !slices.Equal(got, []string{"claude", "codex"}) {
+		t.Errorf("runRuntimes() = %q, want claude and codex", got)
+	}
+	for names, want := range map[string]string{"": "", "claude": "claude", "claude codex": "claude and codex", "claude codex gemini": "claude, codex, and gemini"} {
+		if got := listOf(strings.Fields(names)); got != want {
+			t.Errorf("listOf(%s) = %q, want %q", names, got, want)
 		}
 	}
 }

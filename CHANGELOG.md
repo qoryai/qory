@@ -569,14 +569,20 @@ release may change what an existing document does, and states it under Upgrading
 
 - A run from a run code whose explore documents contain no `run_settings` stops before
   anything is installed or fetched, with `The run settings set no runtime, so the run
-  did not start; the code is used.` and `qory runs one of claude, codex, cursor, gemini,
-  and opencode.` Until now, such a run started on
-  `claude`. Explore documents start an agent session, so they require `run_settings`
-  with a `runtime`. Documents whose `run_settings` are null, or have no `runtime` or an
-  empty one, stop with the same line, where they stopped with `it breaks
-  documents.schema.json`. A workflow runs on the runtime of the workspace, or of the
-  workflow's settings when they set one, which Qory Apiary sends. A prebuild needs no
-  runtime and runs as before.
+  did not start; the code is used.` and `qory runs one of claude and codex.` Until now,
+  such a run started on `claude`. Explore documents start an agent session, so they
+  require `run_settings` with a `runtime`. Documents whose `run_settings` are null, or
+  whose `runtime` is missing, empty or null, stop with the same line, where they stopped
+  with `it breaks documents.schema.json`. A workflow runs on the runtime of the
+  workspace, or of the workflow's settings when they set one, which Qory Apiary sends. A
+  prebuild needs no runtime and runs as before.
+- A run from a run code runs only on `claude` and `codex`, the runtimes that have a
+  descriptor in Forager's `runtimes.json` and that qory installs. On any other runtime,
+  such as `gemini`, `opencode` or `cursor`, it stops before anything is fetched, with `set
+  another runtime for the workspace in Qory Apiary, then take the work item in again: qory
+  runs a run code's workflow on one of claude and codex, and not on <runtime>; the code is
+  used`. Until now, a run on `gemini`, `opencode` or `cursor` started, with no install of
+  the runtime.
 - The middle model tier is named `balanced` in place of `fast`. The tiers are `light`,
   `balanced` and `thinking`. `${qory:balanced}`, `--tier balanced=<model id>`,
   `--tier-effort balanced=<effort>`, `harness.tiers.balanced`, a workflow's `tier: balanced`

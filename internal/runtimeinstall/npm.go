@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -35,6 +37,13 @@ var npmPackages = map[string]npmPackage{
 	}},
 }
 
+// Runtimes are the runtimes that [Install] installs, by Forager's descriptor names, in
+// alphabetical order: those of [npmPackages]. The runtime cache of a registry holds npm's
+// tarballs of the same runtimes.
+func Runtimes() []string {
+	return slices.Sorted(maps.Keys(npmPackages))
+}
+
 // The most bytes of npm's documents that NpmFetch reads.
 const (
 	maxDistTags = 64 << 10
@@ -52,7 +61,7 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 	return func(ctx context.Context, runtime string) (Release, error) {
 		pkg, ok := npmPackages[runtime]
 		if !ok {
-			return Release{}, fmt.Errorf("Install %s some other way: qory installs only claude and codex from npm", runtime)
+			return Release{}, fmt.Errorf("Install %s some other way: qory installs only %s from npm", runtime, strings.Join(Runtimes(), " and "))
 		}
 		cpu, ok := map[string]string{"amd64": "x64", "arm64": "arm64"}[arch]
 		if !ok {
