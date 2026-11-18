@@ -575,16 +575,16 @@ release may change what an existing document does, and states it under Upgrading
   is a head that the work item's record lists for a cancelled run (one head for each push)
   and that descends from the start commit, with a lease on that head. qory fetches
   the history of the branch head only when a cancelled run recorded that head, and then
-  checks that it descends from the start commit. A head below, above or beside a recorded
-  head refuses, with no fetch. A run starts at the newest commit that an earlier run pushed
-  and a person did not cancel.
+  checks that it descends from the start commit. qory refuses a head below, above or
+  beside a recorded head with no fetch. A run starts at the newest commit that an earlier run
+  pushed and a person did not cancel.
 - The submission has `base.branch` for each repository the run pushed: the name of the
   repository's default branch, read when the run fetched it. A name of more than 255
   characters is left out.
 - A module manifest can declare `submit_program`, a command of the module that opens the
   draft pull request. A composed harness has one; a second declaration stops the compose.
 - A session hands its title, description and the step of each commit to the submit step in
-  the file that `QORY_SUBMISSION_HANDOFF` names. A commit with no step is `unreviewed`. qory
+  the file at the path in `QORY_SUBMISSION_HANDOFF`. A commit with no step is `unreviewed`. qory
   reads the file inside the checkout: a link as the file, or a link that leads out of the
   checkout, ends the read. It drops a title with a control character or with no character
   that is not a space, a title, description or step that is over a limit of the submission

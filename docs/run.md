@@ -2605,7 +2605,7 @@ limits. Each error starts with its fix:
 A write run of a work item ends with a push step: qory commits what the agent left, pushes
 it to the branch `qory/<work item id>`, and stores a new version of the artifact `main` of
 the type `submission`. The next run of the work item starts at the newest commit that a run
-pushed and a person did not cancel, as [What the run takes from the response](#what-the-run-takes-from-the-response) says. The step runs after the run's session, once the agent exited, and before the
+pushed and a person did not cancel, see [What the run takes from the response](#what-the-run-takes-from-the-response). The step runs after the run's session, once the agent exited, and before the
 run closes. A setup container is gone by then: qory removes it before the step, in the wall step `remove the setup
 container`, so no process in it writes the working folder after the check. Its kind is `push` and its name is `push qory/<work item
 id> to <system>/<path>`, followed by ` and 1 further repository` or ` and <n> further
@@ -2667,7 +2667,7 @@ The step does this, in order:
    .qory/handoff/.`, `Repository <system>/<path>.`, `Commit <commit>.` and `Path <path>.` A commit that added the path and a later commit that
    removed it counts too, since the push would send the file in the history.
 5. qory checks the head of the branch on the forge, for each repository whose `HEAD` is past
-   the commit the run expected, as [The head check](#the-head-check) says. When one
+   the commit the run expected: see [The head check](#the-head-check). When one
    repository fails the check, qory pushes nothing in any repository.
 6. qory pushes each of these repositories to `refs/heads/qory/<work item id>`, through the
    run's push proxy: a fast-forward push, or a push with a lease where the head check asks
@@ -2677,7 +2677,7 @@ The step does this, in order:
    version.
 7. qory stores a new version of the artifact `main` of the type `submission`, with one file,
    `submission.json`, in the [submission format](../contracts/harness/v1/README.md#the-submission-format),
-   as [The submit step](#the-submit-step) says. After a 429, qory waits for `Retry-After`,
+   see [The submit step](#the-submit-step). After a 429, qory waits for `Retry-After`,
    at most 60 seconds, and sends the request again, at most 5 requests in all. After a
    request with no answer, or with a status of 500 or above, qory reads the work item's
    artifacts first, and sends the request again only when no version of this run has the
@@ -2762,7 +2762,7 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   <head>. Expected: <commit>, <the start commit or this run's last push>.` `<head>` is
   `none` when the branch is not on the forge. Both commits are in full. The step pushes
   nothing in any repository, and ends the run as
-  [The head check](#the-head-check) says. A push that the forge rejects with the status
+  [The head check](#the-head-check) describes. A push that the forge rejects with the status
   `[rejected]`, such as a lease that no longer matches, ends the step with the same text,
   with the head read again
 - `Keep .qory/handoff/ out of the commits of this run; qory pushed nothing.`, then four
@@ -2828,7 +2828,7 @@ credential alone. The result of each repository is one of these:
   not list, is any other head and is refused with no fetch. qory pushes with
   `--force-with-lease=refs/heads/qory/<work item id>:<head>`, so the push replaces
   those commits only while the branch is still at the head qory read.
-- Any other head (an unrecorded head, a recorded head after the run's first push, and a
+- Any other head (an unrecorded head, a recorded head after the run's first push, or a
   recorded head that does not descend from the start commit) or the branch missing where the
   run did not start at the checkout: qory pushes nothing in any repository, and the step
   fails with the refusal in the list above, which starts with `Check branch
@@ -2873,8 +2873,8 @@ read run have no submit step. The document has:
   verdict is `passed` and `text` is absent; `no-program` when the verdict is `passed`, `text`
   is there, and the run has a run code, or the composed harness has no submit program, or the
   program left the draft alone; `program-failed` (with `exit` 0, 1 or 2), `program-timeout`
-  or `login-needed` (with `exit` 3) when the program ran and did not finish the repository, as
-  [The submit program](#the-submit-program) says. A draft that a person closed or merged has the
+  or `login-needed` (with `exit` 3) when the program ran and did not finish the repository: see
+  [The submit program](#the-submit-program). A draft that a person closed or merged has the
   `state` `closed` or `merged` and the `action` `kept`.
 - `commit_url` of each repository, of its `base` and of each of its `commits`: the addresses
   that the submit program of a run with no run code and no run key prints. They are absent when no program
@@ -2882,7 +2882,7 @@ read run have no submit step. The document has:
 
 The hand-off file is how a session gives qory its text and the ledger step of each
 commit. A run on a work item's branch at the access `write` has the variable
-`QORY_SUBMISSION_HANDOFF`, which holds the path of the file: `.qory/handoff/submission.json`
+`QORY_SUBMISSION_HANDOFF`, which is set to the path of the file: `.qory/handoff/submission.json`
 in the checkout. The file is JSON:
 
 ```json
@@ -2906,7 +2906,7 @@ whose value is the id of a ledger row, such as `deliverable:d-1`, `fix:f1`, `pla
 the hand-off cannot list, so a run that reached its time limit stores the edits it left as
 one commit with the step `unreviewed`.
 
-qory reads the file only when it is a regular file of at most 262144 bytes that holds JSON
+qory reads the file only when it is a regular file of at most 262144 bytes that contains JSON
 of this form, and it reads it inside the checkout: a link at any part of the path that leads out
 of the checkout, such as `.qory/handoff` linked to a folder of this machine, ends the read, so the
 agent cannot make qory read a file outside the checkout. A link inside the checkout, such as
@@ -3061,7 +3061,7 @@ After exit 3 qory prints no more than the program's standard error lines, which 
 login command, so the person sees `qory run: submit program: Run `gh auth login`, then `qory run`
 again.` for a forge whose command line is `gh`.
 
-The program's exit status says how it ended:
+The program's exit status shows how it ended:
 
 | Exit | The draft of the repository |
 |---|---|
