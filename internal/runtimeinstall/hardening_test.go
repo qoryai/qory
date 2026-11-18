@@ -39,7 +39,7 @@ func TestTwoInstallsOfOneVersionReadOneTarball(t *testing.T) {
 	results := make(chan runtimeinstall.Installed, 2)
 	errs := make(chan error, 2)
 	run := func() {
-		got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: fetch, Runtime: "claude", Folder: in.folder})
+		got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(), Fetch: fetch, Runtime: "claude", Folder: in.folder})
 		results <- got
 		errs <- err
 	}
@@ -96,14 +96,14 @@ func TestAWaitingInstallEndsWithTheRun(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: slow, Runtime: "claude", Folder: in.folder})
+		got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(), Fetch: slow, Runtime: "claude", Folder: in.folder})
 		got.Release()
 		done <- err
 	}()
 	<-reading
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Fetch: in.src.Fetch, Runtime: "claude", Folder: in.folder})
+	_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Keys: rt.Keys(), Fetch: in.src.Fetch, Runtime: "claude", Folder: in.folder})
 	if err == nil || !strings.HasPrefix(err.Error(), "Run again with more time\nThe run ended while another run installed claude 2.1.320: ") {
 		t.Fatalf("err = %v", err)
 	}
@@ -136,7 +136,7 @@ func TestADirectClientFollowsNoRedirect(t *testing.T) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch:   runtimeinstall.RegistryFetch(runtimeinstall.DirectClient(), strings.TrimPrefix(srv.URL, "http://"), "amd64", srv.URL),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
@@ -238,7 +238,10 @@ func TestAResponseThatStopsSendingEndsTheInstall(t *testing.T) {
 				}
 				_, _ = io.WriteString(w, `{"latest":"2.1.320"}`)
 			case "/@anthropic-ai/claude-code-linux-x64/2.1.320":
-				_ = json.NewEncoder(w).Encode(map[string]any{"version": "2.1.320", "dist": map[string]string{"integrity": rt.Integrity(tarball), "tarball": url + "/claude.tgz"}})
+				_ = json.NewEncoder(w).Encode(map[string]any{"version": "2.1.320", "dist": map[string]any{
+					"integrity": rt.Integrity(tarball), "tarball": url + "/claude.tgz",
+					"signatures": rt.Signatures("@anthropic-ai/claude-code-linux-x64@2.1.320", rt.Integrity(tarball)),
+				}})
 			case "/claude.tgz":
 				_, _ = w.Write(tarball[:10])
 				stall()
@@ -272,7 +275,7 @@ func TestAResponseThatStopsSendingEndsTheInstall(t *testing.T) {
 			begun := time.Now()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Fetch: c.fetch(s.srv.URL), Runtime: "claude", Folder: t.TempDir()})
+			_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Keys: rt.Keys(), Fetch: c.fetch(s.srv.URL), Runtime: "claude", Folder: t.TempDir()})
 			if err == nil || !strings.HasPrefix(err.Error(), c.want) || !strings.Contains(err.Error(), "the response sent no byte for 200ms") {
 				t.Fatalf("err = %v\nwant it to start with %q and say that the response sent no byte for 200ms", err, c.want)
 			}
@@ -305,7 +308,7 @@ func TestARedirectFromTheRegistryFailsWithTheRedirectAsItsCause(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	host := strings.TrimPrefix(srv.URL, "http://")
-	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch:   runtimeinstall.RegistryFetch(runtimeinstall.DirectClient(), host, "amd64", srv.URL),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
@@ -342,7 +345,7 @@ func TestTheTokenRequestHasOnlyTheServiceAndTheScope(t *testing.T) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, strings.TrimPrefix(srv.URL, "http://"), "amd64", srv.URL),
 		Runtime: "claude", Folder: t.TempDir(),
 	})

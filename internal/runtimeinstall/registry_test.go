@@ -34,7 +34,7 @@ func (f *fromRegistry) install(t *testing.T, arch string) (runtimeinstall.Instal
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	return runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch: runtimeinstall.RegistryFetch(client, f.reg.Host(), arch, f.reg.Instance()), Runtime: "claude", Folder: f.folder,
 	})
 }
@@ -219,7 +219,7 @@ func TestACacheThatStaysUnavailableIsRetriedUntilTheContextEnds(t *testing.T) {
 			f := newFromRegistry(t)
 			f.reg.PublishPlain("2.1.320")
 			f.reg.Unavailable(-1, retryAfter)
-			_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{
+			_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Keys: rt.Keys(),
 				Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, f.reg.Host(), "amd64", f.reg.Instance()),
 				Runtime: "claude", Folder: f.folder,
 			})
@@ -247,7 +247,7 @@ func TestAnotherStatusIsNotRetried(t *testing.T) {
 	waits := fakeClock(t)
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) }))
 	t.Cleanup(reg.Close)
-	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, strings.TrimPrefix(reg.URL, "http://"), "amd64", ""),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
@@ -269,7 +269,7 @@ func TestATokenRealmElsewhereIsRefused(t *testing.T) {
 		f.reg.RealmHost("localhost:" + port)
 		f.reg.PublishPlain("2.1.320")
 		// The stand-in proxy forwards only to loopback addresses, so the install is direct.
-		got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+		got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 			Fetch: runtimeinstall.RegistryFetch(http.DefaultClient, f.reg.Host(), "amd64", f.reg.Instance()), Runtime: "claude", Folder: f.folder,
 		})
 		if err != nil {
@@ -317,7 +317,7 @@ func TestATokenRealmElsewhereIsRefused(t *testing.T) {
 			host := strings.TrimPrefix(reg.URL, "http://")
 			realm = c.realm(host, port)
 			fill := strings.NewReplacer("%PORT%", port, "%REGISTRY%", host)
-			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 				Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", fill.Replace(c.instance)),
 				Runtime: "claude", Folder: t.TempDir(),
 			})
@@ -338,7 +338,7 @@ func TestAProxyThatRefusesIsNotRetried(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch: runtimeinstall.RegistryFetch(client, f.reg.Host(), "amd64", f.reg.Instance()), Runtime: "claude", Folder: f.folder,
 	})
 	if err == nil || !strings.HasPrefix(err.Error(), "Check that the run's proxy reaches the registry at "+f.reg.Host()) || f.proxy.Refusals() == 0 || len(*waits) != 0 {
@@ -394,7 +394,7 @@ func TestARegistryThatNeverRespondsIsRetriedUntilTheContextEnds(t *testing.T) {
 	gone := httptest.NewServer(http.NotFoundHandler())
 	host := strings.TrimPrefix(gone.URL, "http://")
 	gone.Close()
-	_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{
+	_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", ""),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
@@ -421,7 +421,7 @@ func TestAConnectTheProxyRefusesIsNotRetried(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch:   runtimeinstall.RegistryFetch(client, "registry.example", "amd64", ""),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
@@ -442,7 +442,7 @@ func TestAWaitingFetchTellsItsProgress(t *testing.T) {
 		f.reg.PublishPlain("2.1.320")
 		f.reg.Unavailable(-1, "")
 		var lines []string
-		_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{
+		_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Keys: rt.Keys(),
 			Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, f.reg.Host(), "amd64", f.reg.Instance()),
 			Runtime: "claude", Folder: f.folder,
 			Progress: func(line string) { lines = append(lines, line) },
@@ -461,7 +461,7 @@ func TestAWaitingFetchTellsItsProgress(t *testing.T) {
 		host := strings.TrimPrefix(gone.URL, "http://")
 		gone.Close()
 		var lines []string
-		_, _ = runtimeinstall.Install(ctx, runtimeinstall.Options{
+		_, _ = runtimeinstall.Install(ctx, runtimeinstall.Options{Keys: rt.Keys(),
 			Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", ""),
 			Runtime: "claude", Folder: t.TempDir(),
 			Progress: func(line string) { lines = append(lines, line) },
@@ -476,7 +476,7 @@ func TestAWaitingFetchTellsItsProgress(t *testing.T) {
 		f := newFromRegistry(t)
 		f.reg.PublishPlain("2.1.320")
 		var lines []string
-		got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+		got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 			Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, f.reg.Host(), "amd64", f.reg.Instance()),
 			Runtime: "claude", Folder: f.folder,
 			Progress: func(line string) { lines = append(lines, line) },

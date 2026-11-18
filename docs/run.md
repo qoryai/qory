@@ -932,9 +932,13 @@ run` reads, in this order:
    `@openai/codex@<version>-linux-x64` or `-linux-arm64`.
 
 The layer must match its size, its sha256 digest, and npm's sha512 checksum in its
-annotation `dev.qory.runtime.integrity`. That checksum comes from the registry's
-annotation, so it guards against corruption in transit and in storage, not against a
-compromised registry. If the registry returns 503 or 429, or the request gets no
+annotation `dev.qory.runtime.integrity`. Its annotation `dev.qory.runtime.signatures`
+contains npm's signatures of that checksum, a JSON array of `{"keyid": "<keyid>",
+"sig": "<sig>"}` in npm's order, which qory checks as [npm's
+signature](#npms-signature) says. The array has 1 to 16 entries, each with both
+members, non-empty strings of at most 1 KiB, and no other member. A layer without the
+annotation, or with another form, stops the run with `Ask Qory Apiary's instance admin
+to check the registry's runtime cache`. If the registry returns 503 or 429, or the request gets no
 response, `qory run` sends the same request again after 2, 4 and 8 seconds, then every
 15 seconds, or after the response's `Retry-After` up to 30 seconds. The registry returns
 503 while it fills its cache of a new version. Only the end of the run
@@ -997,6 +1001,35 @@ For Codex, npm publishes each platform's build as a version of the same package,
 `qory run` reads `/-/package/@openai/codex/dist-tags`, then
 `/@openai/codex/<version>-linux-x64`, or `-linux-arm64`, then its tarball, with the
 same checks.
+
+#### npm's signature
+
+Before it uses a version, from npm or from the registry, `qory run` checks npm's
+signature of it. npm signs `<package>@<version>:<checksum>`, such as
+`@openai/codex@0.170.0-linux-x64:sha512-<checksum>` or
+`@anthropic-ai/claude-code-linux-arm64@2.1.320:sha512-<checksum>`, with ECDSA P-256 and
+SHA-256. qory has npm's public keys built in, from
+<https://registry.npmjs.org/-/npm/v1/keys>, and never fetches them. From npm, the
+signatures are `dist.signatures` of the version's document: 1 to 16 entries, each with
+a `keyid` and a `sig` of at most 1 KiB; qory ignores other members. One signature by a
+key that qory has and that has not expired must verify. Otherwise the run stops before
+it reads the tarball:
+
+- no signature, or a signature that does not verify:
+
+  ```text
+  qory run: Check the source of the runtime's releases
+  npm's signature of codex 0.170.0 with key SHA256:<keyid> does not verify
+  ```
+
+- only keys that qory does not have, or that expired: a newer qory has npm's new key.
+
+  ```text
+  qory run: Update qory.
+  npm signed codex 0.170.0 with key SHA256:<keyid>, which this qory does not have.
+  ```
+
+A version's folder that an earlier run installed is used only after the same check.
 
 `qory run` reads the registry's `newest`, or npm's `latest`, on every run, and keeps no
 other record of the newest version: once either moves, the next run installs the new

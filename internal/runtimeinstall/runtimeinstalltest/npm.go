@@ -23,6 +23,8 @@ type Npm struct {
 	versions    map[string]npmVersion
 	paths       []string
 	tarballGets int
+	// sign returns dist.signatures of a version's document; nil leaves them out.
+	sign func(signed, integrity string) any
 }
 
 // npmVersion is a published version of a platform's package.
@@ -85,6 +87,15 @@ func (n *Npm) PublishWith(cpu, version string, tarball []byte, integrity, tarbal
 	n.versions[cpu+" "+version] = npmVersion{integrity: integrity, tarball: tarballURL, body: tarball}
 }
 
+// SignWith makes each version's document have sign(signed, integrity) as its
+// dist.signatures, where signed is <package>@<version>, or none when sign returns nil.
+// By default the stub signs with [Signatures].
+func (n *Npm) SignWith(sign func(signed, integrity string) any) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.sign = sign
+}
+
 // SetLatest sets the dist-tag latest to version.
 func (n *Npm) SetLatest(version string) {
 	n.mu.Lock()
@@ -129,7 +140,15 @@ func (n *Npm) serve(w http.ResponseWriter, req *http.Request) {
 			name, docVersion = codexPackage, version+"-linux-"+cpu
 		}
 		if req.URL.Path == "/"+name+"/"+docVersion {
-			doc := map[string]any{"name": name, "version": docVersion, "dist": map[string]string{"integrity": v.integrity, "tarball": v.tarball}}
+			dist := map[string]any{"integrity": v.integrity, "tarball": v.tarball}
+			sign := n.sign
+			if sign == nil {
+				sign = func(signed, integrity string) any { return Signatures(signed, integrity) }
+			}
+			if sigs := sign(name+"@"+docVersion, v.integrity); sigs != nil {
+				dist["signatures"] = sigs
+			}
+			doc := map[string]any{"name": name, "version": docVersion, "dist": dist}
 			_ = json.NewEncoder(w).Encode(doc)
 			return
 		}

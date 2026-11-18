@@ -29,7 +29,7 @@ func newInstaller(t *testing.T) *installer {
 }
 
 func (in *installer) install() (runtimeinstall.Installed, error) {
-	return runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: in.src.Fetch, Runtime: "claude", Folder: in.folder, Mounted: in.mounted})
+	return runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(), Fetch: in.src.Fetch, Runtime: "claude", Folder: in.folder, Mounted: in.mounted})
 }
 
 // files is every path under dir, relative, with / after each folder's, but for the

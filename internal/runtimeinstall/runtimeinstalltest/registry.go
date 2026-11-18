@@ -183,11 +183,13 @@ func (r *Registry) SetTag(tag string, b []byte) {
 }
 
 // Layer is how [Registry.Publish] publishes one platform's layer: its tarball, the bytes
-// the blob returns in place of it when Served is set, and the integrity annotation in
-// place of the tarball's checksum when Integrity is set.
+// the blob returns in place of it when Served is set, the integrity annotation in place
+// of the tarball's checksum when Integrity is set, and the signatures annotation in
+// place of [SignaturesJSON] when Signatures is set, or none when it points to "".
 type Layer struct {
 	Tarball, Served []byte
 	Integrity       string
+	Signatures      *string
 }
 
 // Publish publishes version with a manifest for each architecture of layers, amd64 and
@@ -207,6 +209,17 @@ func (r *Registry) Publish(version string, newest bool, layers map[string]Layer)
 		if integrity == "" {
 			integrity = Integrity(l.Tarball)
 		}
+		annotations := map[string]string{"dev.qory.runtime.integrity": integrity}
+		signed := "@anthropic-ai/claude-code-linux-" + map[string]string{"amd64": "x64", "arm64": "arm64"}[arch] + "@" + version
+		if r.runtime == "codex" {
+			signed = "@openai/codex@" + version + "-linux-" + map[string]string{"amd64": "x64", "arm64": "arm64"}[arch]
+		}
+		switch {
+		case l.Signatures == nil:
+			annotations["dev.qory.runtime.signatures"] = SignaturesJSON(signed, integrity)
+		case *l.Signatures != "":
+			annotations["dev.qory.runtime.signatures"] = *l.Signatures
+		}
 		ld := Digest(l.Tarball)
 		r.mu.Lock()
 		r.blobs[ld] = served
@@ -218,7 +231,7 @@ func (r *Registry) Publish(version string, newest bool, layers map[string]Layer)
 			"config":        map[string]any{"mediaType": "application/vnd.oci.empty.v1+json", "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a", "size": 2},
 			"layers": []any{map[string]any{
 				"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": ld, "size": len(l.Tarball),
-				"annotations": map[string]string{"dev.qory.runtime.integrity": integrity},
+				"annotations": annotations,
 			}},
 			"annotations": map[string]string{"org.opencontainers.image.version": version},
 		})

@@ -38,6 +38,9 @@ const (
 	artifactType   = "application/vnd.qory.runtime.v1"
 	annotVersion   = "org.opencontainers.image.version"
 	annotIntegrity = "dev.qory.runtime.integrity"
+	// annotSignatures is npm's signatures of the layer's tarball, a JSON array of
+	// {"keyid": "<keyid>", "sig": "<sig>"} in npm's order, see [decodeSignatures].
+	annotSignatures = "dev.qory.runtime.signatures"
 	// newestTag is the tag that moves to each new version.
 	newestTag = "newest"
 )
@@ -81,11 +84,15 @@ func RegistryFetch(client *http.Client, host, arch, instance string) Fetch {
 		if arch != "amd64" && arch != "arm64" {
 			return Release{}, fmt.Errorf("Run on an amd64 or arm64 machine\nThe registry has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
 		}
+		if _, ok := npmPackages[runtime]; !ok {
+			return Release{}, fmt.Errorf("Install %s some other way: qory installs only %s", runtime, strings.Join(Runtimes(), " and "))
+		}
 		r := &registry{client: client, host: host, instance: instance, runtime: runtime, repository: "shared/runtimes/" + runtime}
 		rel, err := r.resolve(ctx, arch)
 		if err != nil {
 			return Release{}, err
 		}
+		rel.Signed, _ = signedName(runtime, rel.Version, arch)
 		rel.Program, rel.Folder = layout(runtime, arch)
 		return rel, nil
 	}
@@ -174,7 +181,7 @@ func (r *registry) resolve(ctx context.Context, arch string) (Release, error) {
 	if err != nil {
 		return Release{}, err
 	}
-	layer, err := r.platformLayer(ctx, entry, version, arch)
+	layer, sigs, err := r.platformLayer(ctx, entry, version, arch)
 	if err != nil {
 		return Release{}, err
 	}
@@ -187,13 +194,14 @@ func (r *registry) resolve(ctx context.Context, arch string) (Release, error) {
 	if again != digest {
 		return Release{}, fmt.Errorf(textCache+"%s:%s has the digest %s, and :%s has %s", r.repository, version, again, newestTag, digest)
 	}
-	if _, err := r.platformLayer(ctx, entry, version, arch); err != nil {
+	if _, _, err := r.platformLayer(ctx, entry, version, arch); err != nil {
 		return Release{}, err
 	}
 	return Release{
-		Version:   version,
-		Integrity: layer.Annotations[annotIntegrity],
-		Open:      func(ctx context.Context) (io.ReadCloser, error) { return r.blob(ctx, layer, version) },
+		Version:    version,
+		Integrity:  layer.Annotations[annotIntegrity],
+		Signatures: sigs,
+		Open:       func(ctx context.Context) (io.ReadCloser, error) { return r.blob(ctx, layer, version) },
 	}, nil
 }
 
@@ -212,52 +220,59 @@ func (r *registry) platform(index manifest, version, arch string) (descriptor, e
 }
 
 // platformLayer reads the manifest of entry, the image manifest of version for
-// linux/arch, by its digest, and returns its layer.
-func (r *registry) platformLayer(ctx context.Context, entry descriptor, version, arch string) (descriptor, error) {
+// linux/arch, by its digest, and returns its layer and npm's signatures of it.
+func (r *registry) platformLayer(ctx context.Context, entry descriptor, version, arch string) (descriptor, []Signature, error) {
 	what := fmt.Sprintf("the manifest of %s %s for linux/%s", r.runtime, version, arch)
 	body, digest, err := r.manifest(ctx, entry.Digest, version)
 	if err != nil {
-		return descriptor{}, err
+		return descriptor{}, nil, err
 	}
 	if digest != entry.Digest || entry.Size != int64(len(body)) {
-		return descriptor{}, fmt.Errorf(textCache+"%s does not match its digest %s", upper(what), entry.Digest)
+		return descriptor{}, nil, fmt.Errorf(textCache+"%s does not match its digest %s", upper(what), entry.Digest)
 	}
 	m, err := decode(body, mediaManifest)
 	if err != nil {
-		return descriptor{}, fmt.Errorf(textCache+"%s is not a runtime's: %w", upper(what), err)
+		return descriptor{}, nil, fmt.Errorf(textCache+"%s is not a runtime's: %w", upper(what), err)
 	}
-	layer, err := runtimeLayer(m, version)
+	layer, sigs, err := runtimeLayer(m, version)
 	if err != nil {
-		return descriptor{}, fmt.Errorf(textCache+"%s is not a runtime's: %w", upper(what), err)
+		return descriptor{}, nil, fmt.Errorf(textCache+"%s is not a runtime's: %w", upper(what), err)
 	}
-	return layer, nil
+	return layer, sigs, nil
 }
 
 // runtimeLayer is the one layer of m, a runtime's manifest of version, with the
-// annotation dev.qory.runtime.integrity, which Install checks.
-func runtimeLayer(m manifest, version string) (descriptor, error) {
+// annotations dev.qory.runtime.integrity and dev.qory.runtime.signatures, which Install
+// checks, and the signatures, decoded strictly, see [decodeSignatures].
+func runtimeLayer(m manifest, version string) (descriptor, []Signature, error) {
 	switch {
 	case m.ArtifactType != artifactType:
-		return descriptor{}, fmt.Errorf("its artifactType is %q, not %s", m.ArtifactType, artifactType)
+		return descriptor{}, nil, fmt.Errorf("its artifactType is %q, not %s", m.ArtifactType, artifactType)
 	case m.Config == nil || m.Config.MediaType != mediaEmpty:
-		return descriptor{}, errors.New("its config is not the empty config")
+		return descriptor{}, nil, errors.New("its config is not the empty config")
 	case m.Annotations[annotVersion] != version:
-		return descriptor{}, fmt.Errorf("its version is %q", m.Annotations[annotVersion])
+		return descriptor{}, nil, fmt.Errorf("its version is %q", m.Annotations[annotVersion])
 	case len(m.Layers) != 1:
-		return descriptor{}, fmt.Errorf("it has %d layers, not one", len(m.Layers))
+		return descriptor{}, nil, fmt.Errorf("it has %d layers, not one", len(m.Layers))
 	}
 	l := m.Layers[0]
 	switch {
 	case l.MediaType != mediaLayer:
-		return descriptor{}, fmt.Errorf("its layer's media type is %q, not %s", l.MediaType, mediaLayer)
+		return descriptor{}, nil, fmt.Errorf("its layer's media type is %q, not %s", l.MediaType, mediaLayer)
 	case !digestShape.MatchString(l.Digest):
-		return descriptor{}, errors.New("its layer's digest is not sha256: and 64 lower-case hexadecimal digits")
+		return descriptor{}, nil, errors.New("its layer's digest is not sha256: and 64 lower-case hexadecimal digits")
 	case l.Size < 1 || l.Size > maxTarball:
-		return descriptor{}, fmt.Errorf("its layer's size is %d bytes, and a runtime's layer has 1 to %d", l.Size, maxTarball)
+		return descriptor{}, nil, fmt.Errorf("its layer's size is %d bytes, and a runtime's layer has 1 to %d", l.Size, maxTarball)
 	case l.Annotations[annotIntegrity] == "":
-		return descriptor{}, fmt.Errorf("its layer has no %s", annotIntegrity)
+		return descriptor{}, nil, fmt.Errorf("its layer has no %s", annotIntegrity)
+	case l.Annotations[annotSignatures] == "":
+		return descriptor{}, nil, fmt.Errorf("its layer has no %s", annotSignatures)
 	}
-	return l, nil
+	sigs, err := decodeSignatures([]byte(l.Annotations[annotSignatures]), true)
+	if err != nil {
+		return descriptor{}, nil, fmt.Errorf("its layer's %s is not npm's signatures: %w", annotSignatures, err)
+	}
+	return l, sigs, nil
 }
 
 // decode reads body as JSON of the media type want.

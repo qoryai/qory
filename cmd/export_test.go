@@ -1186,6 +1186,14 @@ func SetNpmRegistry(url string) func() {
 	return func() { npmRegistry = before }
 }
 
+// SetRuntimeKeys makes qory run check npm's signatures with keys, and returns what
+// restores the default.
+func SetRuntimeKeys(keys []runtimeinstall.SigningKey) func() {
+	before := runtimeKeys
+	runtimeKeys = keys
+	return func() { runtimeKeys = before }
+}
+
 // SetInstanceAddress makes qory run read the address of its Qory Apiary instance with
 // f, and returns what restores the default.
 func SetInstanceAddress(f func(*config.Forager) string) func() {

@@ -18,7 +18,7 @@ import (
 // installCodex installs codex into folder through fetch.
 func installCodex(t *testing.T, fetch runtimeinstall.Fetch, folder string) runtimeinstall.Installed {
 	t.Helper()
-	got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: fetch, Runtime: "codex", Folder: folder})
+	got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(), Fetch: fetch, Runtime: "codex", Folder: folder})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestACodexTarballWithoutItsProgramIsRefused(t *testing.T) {
 	b := rt.PlainTarball(t, "0.170.0")
 	npm.PublishWith("arm64", "0.170.0", b, rt.Integrity(b), "")
 	npm.SetLatest("0.170.0")
-	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch: runtimeinstall.NpmFetch(http.DefaultClient, npm.URL(), "arm64"), Runtime: "codex", Folder: t.TempDir(),
 	})
 	if err == nil {
@@ -172,7 +172,7 @@ func TestACodexFolderQoryCannotKeepWholeIsRefused(t *testing.T) {
 			npm.PublishWith("arm64", "0.170.0", b, rt.Integrity(b), "")
 			npm.SetLatest("0.170.0")
 			folder := t.TempDir()
-			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 				Fetch: runtimeinstall.NpmFetch(http.DefaultClient, npm.URL(), "arm64"), Runtime: "codex", Folder: folder,
 			})
 			if err == nil {
@@ -208,7 +208,7 @@ func installCodexFolder(t *testing.T, folder string, edit func(*rt.Entry) bool) 
 	b := rt.Tarball(t, entries...)
 	npm.PublishWith("arm64", "0.170.0", b, rt.Integrity(b), "")
 	npm.SetLatest("0.170.0")
-	got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch: runtimeinstall.NpmFetch(http.DefaultClient, npm.URL(), "arm64"), Runtime: "codex", Folder: folder,
 	})
 	if err == nil {

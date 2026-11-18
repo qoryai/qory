@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -76,6 +77,11 @@ type Release struct {
 	// Program is the entry of the program in the tarball, see [layout]; "" stands for
 	// package/<runtime>. Install extracts only this entry, to bin/<runtime>.
 	Program string
+	// Signed is the package and version that npm signs, <package>@<version>, such as
+	// @openai/codex@0.170.0-linux-x64, and Signatures are npm's signatures of
+	// <Signed>:<Integrity>. Install checks them before it uses the release.
+	Signed     string
+	Signatures []Signature
 	// Folder, when it is set, is a folder of the tarball, ending in /, see [layout].
 	// Install extracts it whole, in its layout, as the version's folder, in place of
 	// Program: the folder's bin/<runtime> is the program.
@@ -124,6 +130,9 @@ type Options struct {
 	// Progress, when set, gets a line, with no prefix, when a registry fetch waits for
 	// the registry: at the first retry, and every five minutes after that.
 	Progress func(line string)
+	// Keys are the keys that npm signs with; nil stands for [NpmKeys], the keys built
+	// into qory.
+	Keys []SigningKey
 }
 
 // Installed is a runtime that [Install] installed, or found installed.
@@ -181,6 +190,15 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 	sum, err := sha512Of(rel.Integrity)
 	if err != nil {
 		return Installed{}, fmt.Errorf(textRelease+"The checksum of %s %s is not sha512- and 64 bytes in base64", o.Runtime, rel.Version)
+	}
+	keys := o.Keys
+	if keys == nil {
+		if keys, err = NpmKeys(); err != nil {
+			return Installed{}, fmt.Errorf("Update qory.\n%w", err)
+		}
+	}
+	if err := verify(rel, keys, time.Now(), o.Runtime+" "+rel.Version); err != nil {
+		return Installed{}, err
 	}
 	f := folder{base: filepath.Join(o.Folder, o.Runtime), runtime: o.Runtime}
 	if o.Mounted != nil {

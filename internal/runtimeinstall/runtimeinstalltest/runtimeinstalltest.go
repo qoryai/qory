@@ -168,8 +168,10 @@ func (s *Source) Fetch(_ context.Context, runtime string) (runtimeinstall.Releas
 		return runtimeinstall.Release{}, s.err
 	}
 	tarball := s.tarball
+	signed := "@anthropic-ai/claude-code-linux-x64@" + s.version
 	return runtimeinstall.Release{
 		Version: s.version, Integrity: s.integrity,
+		Signed: signed, Signatures: Signatures(signed, s.integrity),
 		Open: func(context.Context) (io.ReadCloser, error) {
 			s.mu.Lock()
 			s.opens++

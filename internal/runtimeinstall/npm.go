@@ -44,6 +44,22 @@ func Runtimes() []string {
 	return slices.Sorted(maps.Keys(npmPackages))
 }
 
+// npmCPU is npm's name of each architecture qory installs for.
+var npmCPU = map[string]string{"amd64": "x64", "arm64": "arm64"}
+
+// signedName is what npm signs for version of runtime's build for linux/arch,
+// <package>@<version>, see [npmPackages]; false for a runtime or an architecture that
+// qory does not install.
+func signedName(runtime, version, arch string) (string, bool) {
+	pkg, ok := npmPackages[runtime]
+	cpu, known := npmCPU[arch]
+	if !ok || !known {
+		return "", false
+	}
+	platform, docVersion := pkg.platform(version, cpu)
+	return platform + "@" + docVersion, true
+}
+
 // The most bytes of npm's documents that NpmFetch reads.
 const (
 	maxDistTags = 64 << 10
@@ -63,7 +79,7 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 		if !ok {
 			return Release{}, fmt.Errorf("Install %s some other way: qory installs only %s from npm", runtime, strings.Join(Runtimes(), " and "))
 		}
-		cpu, ok := map[string]string{"amd64": "x64", "arm64": "arm64"}[arch]
+		cpu, ok := npmCPU[arch]
 		if !ok {
 			return Release{}, fmt.Errorf("Run on an amd64 or arm64 machine\nnpm has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
 		}
@@ -84,8 +100,9 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 		var doc struct {
 			Version string `json:"version"`
 			Dist    struct {
-				Integrity string `json:"integrity"`
-				Tarball   string `json:"tarball"`
+				Integrity  string          `json:"integrity"`
+				Tarball    string          `json:"tarball"`
+				Signatures json.RawMessage `json:"signatures"`
 			} `json:"dist"`
 		}
 		what := platform + " " + docVersion
@@ -99,9 +116,19 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 		if err != nil || tarball.Scheme != root.Scheme || tarball.Host != root.Host || tarball.User != nil {
 			return Release{}, fmt.Errorf(textRelease+"The tarball of %s is not on %s", what, root.Host)
 		}
+		// npm may add members to a signature, so the decode ignores them. Install refuses a
+		// document with no signatures.
+		var sigs []Signature
+		if len(doc.Dist.Signatures) > 0 && string(doc.Dist.Signatures) != "null" {
+			if sigs, err = decodeSignatures(doc.Dist.Signatures, false); err != nil {
+				return Release{}, fmt.Errorf(textRelease+"The dist.signatures of %s are not npm's signatures: %v", what, err)
+			}
+		}
 		rel := Release{
-			Version:   version,
-			Integrity: doc.Dist.Integrity,
+			Version:    version,
+			Integrity:  doc.Dist.Integrity,
+			Signed:     platform + "@" + docVersion,
+			Signatures: sigs,
 			Open: func(ctx context.Context) (io.ReadCloser, error) {
 				resp, err := n.get(ctx, tarball.String(), "", "the tarball of "+what)
 				if err != nil {

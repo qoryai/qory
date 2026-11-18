@@ -92,6 +92,13 @@ release may change what an existing document does, and states it under Upgrading
   the run with `Remove the version's folder once no run uses it, then run again`. The session starts `bin/codex`, and behind a wall Forager mounts the
   version's folder read-only at `/qory/runtime/codex`. Before, a session of Codex started
   the program from the image, which no agent image has.
+- Every install of a runtime checks npm's signature of the version before it reads the
+  tarball, with npm's public keys built into qory: from npm, `dist.signatures`; from a
+  registry's runtime cache, the layer's annotation `dev.qory.runtime.signatures`. A
+  missing or bad signature stops the run with `Check the source of the runtime's
+  releases`; a signature only by a key qory does not have, or by an expired key, stops
+  it with `Update qory.` A layer without the annotation stops it with `Ask Qory Apiary's
+  instance admin to check the registry's runtime cache`.
 - Every run of Claude Code installs the runtime's program before its session: from the
   runtime cache of the pool's registry, or of `pool.registry`, or else from npm, through
   the run's host proxy when the run has one. qory reads the registry's `newest`, or npm's

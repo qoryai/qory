@@ -40,7 +40,10 @@ const textNoRuntimeProxy = "Run again: the run's host proxy, through which qory 
 var (
 	npmRegistry     = runtimeinstall.NpmRegistry
 	installRuntimes = true
-	instanceOf      = instanceAddress
+	// runtimeKeys are the keys an install checks npm's signatures with; nil stands for
+	// the keys built into qory.
+	runtimeKeys []runtimeinstall.SigningKey
+	instanceOf  = instanceAddress
 	// installStandIn is nil outside the tests. A test sets it, with installRuntimes off,
 	// to give a session of Claude Code the folder of a program in place of an install:
 	// Forager joins no session of Claude Code without one. It gets the session's Command.
@@ -120,7 +123,7 @@ func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machi
 	if r != nil && r.Wall != nil {
 		command = r.Wall.Command
 	}
-	opts := runtimeinstall.Options{Fetch: fetch, Runtime: runtime, Folder: folder, Mounted: engineMounts(command), Progress: report}
+	opts := runtimeinstall.Options{Fetch: fetch, Runtime: runtime, Folder: folder, Mounted: engineMounts(command), Progress: report, Keys: runtimeKeys}
 	in, err := runtimeinstall.Install(ctx, opts)
 	if err != nil {
 		return nil, err

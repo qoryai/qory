@@ -24,7 +24,7 @@ func newFromNpm(t *testing.T) *fromNpm {
 }
 
 func (f *fromNpm) install(client *http.Client, arch string) (runtimeinstall.Installed, error) {
-	return runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	return runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch: runtimeinstall.NpmFetch(client, f.npm.URL(), arch), Runtime: "claude", Folder: f.folder,
 	})
 }
@@ -144,7 +144,7 @@ func TestTheNpmFetchRefuses(t *testing.T) {
 			if c.base != "" {
 				base = c.base
 			}
-			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 				Fetch: runtimeinstall.NpmFetch(http.DefaultClient, base, "amd64"), Runtime: "claude", Folder: f.folder,
 			})
 			if err == nil || !strings.HasPrefix(err.Error(), c.want) {
@@ -175,7 +175,7 @@ func TestAWalledRunWithNoRegistryAndNoNpmInItsPolicyStartsWithTheFix(t *testing.
 				t.Fatal(err)
 			}
 			folder := t.TempDir()
-			_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+			_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 				Fetch: runtimeinstall.NpmFetch(client, runtimeinstall.NpmRegistry, "amd64"), Runtime: "claude", Folder: folder,
 			})
 			want := "Set up the instance's registry for this machine, or allow registry.npmjs.org in the run's policy.\n" +

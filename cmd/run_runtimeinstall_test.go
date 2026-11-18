@@ -67,6 +67,7 @@ type installSetup struct {
 func runInstalling(t *testing.T, s installSetup) installRun {
 	t.Helper()
 	defer cmd.SetInstallRuntimes(true)()
+	defer cmd.SetRuntimeKeys(rt.Keys())()
 	npmURL := unreachableNpm
 	if s.npm != nil {
 		npmURL = s.npm.URL()
@@ -321,6 +322,7 @@ func TestAnUnwalledRunInstallsFromNpmThroughTheHostProxy(t *testing.T) {
 // installed program, not the launch's.
 func TestARunWithNoControlPlaneInstallsFromNpmDirectly(t *testing.T) {
 	defer cmd.SetInstallRuntimes(true)()
+	defer cmd.SetRuntimeKeys(rt.Keys())()
 	npm := rt.StartNpm(t)
 	npm.Publish("2.1.320")
 	defer cmd.SetNpmRegistry(npm.URL())()
@@ -371,6 +373,7 @@ func TestATarballThatDoesNotMatchItsChecksumEndsTheRun(t *testing.T) {
 func runCodeInstalling(t *testing.T, lines string, proxy *rt.Proxy, server string) (string, error) {
 	t.Helper()
 	defer cmd.SetInstallRuntimes(true)()
+	defer cmd.SetRuntimeKeys(rt.Keys())()
 	if server != "" {
 		defer cmd.SetInstanceAddress(func(*config.Forager) string { return server })()
 	}
