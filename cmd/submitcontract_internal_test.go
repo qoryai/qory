@@ -42,6 +42,9 @@ func TestTheSubmitContractNamesAreThePinnedOnes(t *testing.T) {
 		{"exit forge", submitExitForge, contracts.SubmitExitForge},
 		{"exit input", submitExitInput, contracts.SubmitExitInput},
 		{"exit login", submitExitNoLogin, contracts.SubmitExitLogin},
+		// The next three are copies of the contract's limits (100 commits, 256 characters, 2048
+		// characters): the pinned package does not export them, so a pin that changes one is read
+		// in the README's tables, not here.
 		{"commits", maxSubmitCommits, 100},
 		{"title", maxSubmitTitle, 256},
 		{"address", maxSubmitURL, 2048},
@@ -50,6 +53,17 @@ func TestTheSubmitContractNamesAreThePinnedOnes(t *testing.T) {
 	} {
 		if c.got != c.want {
 			t.Errorf("%s is %d, the pinned contract has %d", c.name, c.got, c.want)
+		}
+	}
+}
+
+// TestTheMarkerLinesAreThePinnedOnes is the marker lines of the draft's description in the pinned
+// contract: a description with one is dropped. qory has no copy of the login line that the
+// program prints (SubmitLoginLine): it prints the program's standard error as the program wrote it.
+func TestTheMarkerLinesAreThePinnedOnes(t *testing.T) {
+	for _, marker := range []string{contracts.SubmitMarkerStart, contracts.SubmitMarkerEnd} {
+		if got := markerLineAt("text\n" + marker + "\n"); got != 2 {
+			t.Errorf("a description with the line %q has the marker at line %d, want 2", marker, got)
 		}
 	}
 }

@@ -10,7 +10,8 @@ import (
 // TestTheTextsOfTheSubmitStepHaveAShortLineOne is each text of the hand-off file, the submit
 // program and the push step's reads that qory prints: line 1 has at most 100 characters with the
 // prefix "qory run: ". The texts of the push step's reads and of the local submit step start with
-// the fix, as an instruction. The others state the cause and start with no verb of an instruction.
+// the fix, as an instruction. The other texts state the cause and start with no verb of an
+// instruction.
 func TestTheTextsOfTheSubmitStepHaveAShortLineOne(t *testing.T) {
 	fixFirst := map[string]string{
 		"textPushNoReadProxy":   "Take ",

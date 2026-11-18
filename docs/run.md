@@ -2772,9 +2772,9 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `Keep .qory/handoff/ out of the commits of this run; qory pushed nothing.`, then four
   lines indented by two spaces: `A commit of this run has a path under .qory/handoff/.`,
   `Repository <system>/<path>.`, `Commit <commit>.` and `Path <path>.`
-- `Take the work item in again in Qory Apiary: the proxy could not read the branch head.`,
-  then three lines indented by two spaces: `qory pushed nothing.`, `Repository
-  <system>/<path>.` and `Cause: <error>; the code is used`
+- `Take the work item in again in Qory Apiary: the run's host proxy could not read the head.`,
+  then three lines indented by two spaces: `qory could not read the head of the branch, so it
+  pushed nothing.`, `Repository <system>/<path>.` and `Cause: <error>; the code is used`
 - `Take the work item in again in Qory Apiary: the run's host proxy did not open.`, then two
   lines indented by two spaces: `qory could not read the head of the branch, so it pushed
   nothing.` and `Cause: <error>; the code is used`
@@ -2840,8 +2840,8 @@ credential alone. The result of each repository is one of these:
 
 A push that the forge rejects with the status `[rejected]`, such as a lease that no longer
 matches, also fails the step with that refusal, with the head read again. When the read of a
-head fails, the step fails with the line `Take the work item in again in Qory Apiary: the proxy could not
-read the branch head.`, also in the list above.
+head fails, the step fails with the line `Take the work item in again in Qory Apiary: the run's host proxy could not
+read the head.`, also in the list above.
 
 A refusal because the branch moved closes the run `failed` with the end code
 `push_head_changed`, after a session that succeeded, failed or timed out; after a session that

@@ -462,3 +462,18 @@ func TestTheTextsOfTheHeadCheckStartWithTheFix(t *testing.T) {
 		}
 	}
 }
+
+// TestAnUnreadableHeadStopsThePushWithTheFixFirst is a read of the branch head that fails: the
+// check returns the whole text, with the fix on line 1, and the cause on the last line.
+func TestAnUnreadableHeadStopsThePushWithTheFixFirst(t *testing.T) {
+	_, b := onBranch(t, "acme/shop")
+	read := func(context.Context, string, ...string) (string, error) { return "", errors.New("network down") }
+	_, err := checkHead(context.Background(), read, t.TempDir(), b, b.Repositories[0])
+	want := "qory run: Take the work item in again in Qory Apiary: the run's host proxy could not read the head.\n" +
+		"  qory could not read the head of the branch, so it pushed nothing.\n" +
+		"  Repository git.example.com/acme/shop.\n" +
+		"  Cause: network down; the code is used"
+	if err == nil || err.Error() != want {
+		t.Errorf("the refusal is\n%v\nwant\n%s", err, want)
+	}
+}
