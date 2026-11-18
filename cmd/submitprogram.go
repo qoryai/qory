@@ -217,7 +217,9 @@ func (p *submitProgram) run(ctx context.Context, in submitInput, dir string) pro
 	stdout, stderr := &capped{limit: maxProgramOutput}, &capped{limit: maxProgramOutput}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	cmd.WaitDelay = 5 * time.Second
+	inOwnGroup(cmd)
 	err := cmd.Run()
+	killGroup(cmd)
 	end := programEnd{stdout: stdout.String(), stderr: stderr.String()}
 	var exit *exec.ExitError
 	switch {
