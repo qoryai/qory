@@ -18,16 +18,22 @@ import (
 
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/suite"
 	"github.com/qoryai/qory/internal/verdictformat"
 )
 
-// The type and the file of the build plan, and the most bytes of its file qory reads.
-const (
-	buildPlanType = "build-plan"
-	buildPlanFile = "build-plan.md"
-	maxBuildPlan  = 1 << 20
-)
+// maxBuildPlan is the most bytes of the file of a plan that qory reads.
+const maxBuildPlan = 1 << 20
+
+// planFile is the name of the file of a version of the plan type plan: the type and ".md".
+func planFile(plan string) string { return plan + ".md" }
+
+// noPlanCommand is the command of the after step of a session whose workflow names no plan
+// type. The step still tells whether HEAD moved, which the script of [suite.Command] decides: a
+// session that left HEAD where it started is skipped, and the command of any other is not a
+// suite, see [suiteRun.noPlan].
+const noPlanCommand = "true"
 
 // The lines of qory run about the full suite. A line with an instruction starts with the fix,
 // and has at most 100 characters in its first line.
@@ -80,12 +86,12 @@ const maxVerdictPoints = 20
 // errNoVerdictFile is the error of a version of the verdict of the run that has no file.
 var errNoVerdictFile = errors.New("the run's verdict has no file")
 
-// errNoBuildPlan is why a run has no suite command: the run started with no build plan, or qory
-// could not read it.
-var errNoBuildPlan = errors.New("the run started with no build plan")
+// errNoBuildPlan is why a run has no suite command: the run started with no version of its plan
+// type, or qory could not read it.
+var errNoBuildPlan = errors.New("the run started with no version of its plan type")
 
-// errBuildPlanTooBig is the error of a build plan whose file is over [maxBuildPlan] bytes.
-var errBuildPlanTooBig = errors.New("the build plan is too large")
+// errBuildPlanTooBig is the error of a plan whose file is over [maxBuildPlan] bytes.
+var errBuildPlanTooBig = errors.New("the plan is too large")
 
 // suiteSetup is what [openSuites] needs from a run that has its session about to join.
 type suiteSetup struct {
@@ -97,6 +103,9 @@ type suiteSetup struct {
 	readOnly bool
 	// fullSuite is the run documents' full_suite: whether the session runs the full suite.
 	fullSuite bool
+	// workflow is the workflow of the run, and plan the plan type that the stack names for it,
+	// "" for a workflow that names none.
+	workflow, plan string
 	// extensions is the harness extensions of the report that the run composed.
 	extensions map[string]any
 	said       func(string)
@@ -113,6 +122,9 @@ type suiteRun struct {
 	minutes int
 	// fault is why no suite runs for this session, nil when the after step is set.
 	fault *suiteFault
+	// noPlan is set for a session whose workflow names no plan type: the fault that a session
+	// whose HEAD moved gets. A session whose HEAD did not move is skipped, as with a plan.
+	noPlan *suiteFault
 }
 
 // openSuites sets the after step of the full suite on the session's spec and returns the run that
@@ -122,20 +134,26 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 		return nil
 	}
 	r := &suiteRun{run: s.run, runID: s.runID, said: s.said, dir: s.spec.Dir, minutes: suite.LimitMinutes(s.extensions)}
-	// A cause that no After step can show is kept, and judged once the session ends.
-	if _, _, err := s.run.RunAPI(); err != nil {
-		r.fault = noRunAPIFault()
-		s.said(r.fault.line())
-		return r
-	}
-	planCtx, cancelPlan := context.WithTimeout(ctx, suitePlanWait)
-	var err error
-	r.full, err = launchFull(planCtx, s.run)
-	cancelPlan()
-	if err != nil {
-		r.fault = faultOf(err)
-		s.said(r.fault.line())
-		return r
+	if s.plan == "" {
+		// No version of a plan type sets a command, so the after step only tells whether HEAD
+		// moved.
+		r.full, r.noPlan = suite.Full{Command: noPlanCommand}, noPlanFault(s.workflow)
+	} else {
+		// A cause that no After step can show is kept, and judged once the session ends.
+		if _, _, err := s.run.RunAPI(); err != nil {
+			r.fault = noRunAPIFault()
+			s.said(r.fault.line())
+			return r
+		}
+		planCtx, cancelPlan := context.WithTimeout(ctx, suitePlanWait)
+		var err error
+		r.full, err = launchFull(planCtx, s.run, s.plan)
+		cancelPlan()
+		if err != nil {
+			r.fault = faultOf(err, s.plan)
+			s.said(r.fault.line())
+			return r
+		}
 	}
 	if info, err := os.Lstat(filepath.Join(s.spec.Dir, ".git")); err != nil || !info.IsDir() {
 		r.fault = noGitFault()
@@ -144,7 +162,7 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 	}
 	after, err := suite.Command(headCommit(ctx, s.spec.Dir), r.full)
 	if err != nil {
-		r.fault = faultOf(err)
+		r.fault = faultOf(err, s.plan)
 		s.said(r.fault.line())
 		return r
 	}
@@ -159,6 +177,15 @@ func afterLimit(minutes int) time.Duration { return time.Duration(minutes) * sui
 // fullSuiteOf is whether the session of a run from Qory Apiary runs the full suite: the run
 // documents' full_suite, false for a run with no run code.
 var fullSuiteOf = func(c *codeRun) bool { return c != nil && c.fullSuite }
+
+// planOf is the workflow of a run from Qory Apiary and the plan type that the stack names for it,
+// "" for each when the run has no run code and "" for the type of a workflow that names none.
+var planOf = func(c *codeRun, workflows map[string]stack.Workflow) (workflow, plan string) {
+	if c == nil {
+		return "", ""
+	}
+	return c.workflow, workflows[c.workflow].Plan
+}
 
 // suitePlanWait is the longest the read of the build plan at the run's start may take.
 const suitePlanWait = 15 * time.Second
@@ -177,9 +204,10 @@ func headCommit(ctx context.Context, dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// launchFull is the full row of the build plan that the run's work item has at the run's launch,
-// read through the run API, from the work item's artifacts. An error is [errNoBuildPlan] or an error of [suite.FullRow].
-func launchFull(ctx context.Context, run openedRun) (suite.Full, error) {
+// launchFull is the full row of the plan type plan, in the version that the run's work item has at
+// the run's launch, read through the run API, from the work item's artifacts. An error is
+// [errNoBuildPlan] or an error of [suite.FullRow].
+func launchFull(ctx context.Context, run openedRun, plan string) (suite.Full, error) {
 	httpClient, base, err := run.RunAPI()
 	if err != nil {
 		return suite.Full{}, fmt.Errorf("%w: %s", errNoBuildPlan, shownError(err))
@@ -188,23 +216,23 @@ func launchFull(ctx context.Context, run openedRun) (suite.Full, error) {
 	if err != nil {
 		return suite.Full{}, fmt.Errorf("%w: %s", errNoBuildPlan, shownError(err))
 	}
-	text, err := readBuildPlan(ctx, client)
+	text, err := readPlan(ctx, client, plan)
 	if err != nil {
 		return suite.Full{}, err
 	}
 	return suite.FullRow(text)
 }
 
-// readBuildPlan is the text of the newest version of the artifact build-plan, as the index
-// lists it: the name main, or the one name; a withdrawn name has none.
-func readBuildPlan(ctx context.Context, client *runapi.Client) (string, error) {
+// readPlan is the text of the newest version of the artifact of type plan, as the index lists it:
+// the name main, or the one name; a withdrawn name has none. The file is [planFile].
+func readPlan(ctx context.Context, client *runapi.Client, plan string) (string, error) {
 	index, err := client.Artifacts(ctx)
 	if err != nil {
 		return "", fmt.Errorf("%w: %s", errNoBuildPlan, shownError(err))
 	}
 	var plans []runapi.Artifact
 	for _, a := range index.Artifacts {
-		if a.Type == buildPlanType && !withdrawn(a) {
+		if a.Type == plan && !withdrawn(a) {
 			plans = append(plans, a)
 		}
 	}
@@ -223,11 +251,11 @@ func readBuildPlan(ctx context.Context, client *runapi.Client) (string, error) {
 		return "", errNoBuildPlan
 	}
 	for _, file := range version.Files {
-		if file.Filename != buildPlanFile {
+		if file.Filename != planFile(plan) {
 			continue
 		}
 		if file.Size > maxBuildPlan {
-			return "", fmt.Errorf("%w: %s is over %d bytes", errBuildPlanTooBig, buildPlanFile, maxBuildPlan)
+			return "", fmt.Errorf("%w: %s is over %d bytes", errBuildPlanTooBig, planFile(plan), maxBuildPlan)
 		}
 		var text bytes.Buffer
 		if err := client.Download(ctx, version.ID, file, &text); err != nil {
@@ -256,9 +284,7 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 	var got suite.Outcome
 	var point *runapi.Point
 	kind := kindRed
-	if fault != nil {
-		point, kind = &fault.point, fault.kind()
-	} else {
+	if fault == nil {
 		a := res.After
 		got = suite.Judge(r.dir, r.full, suite.End{
 			Succeeded: a.State == event.StateSucceeded,
@@ -266,6 +292,17 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 			TimedOut:  a.Reason == event.ReasonTimeout,
 			ExitCode:  a.ExitCode,
 		})
+		// A workflow with no plan type has no suite: a session that moved HEAD gets the fault, and
+		// one that did not is skipped. A step that did not get as far as its command, or a stop
+		// that cut it, is judged as it is with a plan.
+		if r.noPlan != nil && got.Started && got.State != suite.Stopped {
+			fault = r.noPlan
+		}
+	}
+	if fault != nil {
+		point, kind = &fault.point, fault.kind()
+	} else {
+		a := res.After
 		if got.State.Red() {
 			refused := suite.Refused{Local: true}
 			if got.Started && got.State != suite.Stopped {

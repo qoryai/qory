@@ -33,6 +33,7 @@ import (
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/runcopy"
 	"github.com/qoryai/qory/internal/runtimeinstall"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // SetWriteLabels makes qory run keep a checkout's labels with f, and returns what
@@ -1181,6 +1182,15 @@ func SetFullSuite(yes bool) func() {
 	before := fullSuiteOf
 	fullSuiteOf = func(*codeRun) bool { return yes }
 	return func() { fullSuiteOf = before }
+}
+
+// SetPlan makes qory take workflow for the workflow of the run and plan for the plan type that the
+// stack names for it, as a run with a run code and that stack has them, and returns what restores
+// the default.
+func SetPlan(workflow, plan string) func() {
+	before := planOf
+	planOf = func(*codeRun, map[string]stack.Workflow) (string, string) { return workflow, plan }
+	return func() { planOf = before }
 }
 
 // SetGOOS makes qory take goos for the operating system that it runs on, as the point for a suite

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ func launchFaultRun(t *testing.T, h helperRun, plan string, noGit bool) {
 	spec := &runSpec{}
 	spec.Dir = dir
 	r := openSuites(context.Background(), suiteSetup{
+		workflow: "fix", plan: "build-plan",
 		run: apiRun{api: h.api, dir: h.runDir}, spec: spec, runID: "r1", walled: true, fullSuite: true,
 		said: func(string) {},
 	})
@@ -40,6 +42,12 @@ func launchFaultRun(t *testing.T, h helperRun, plan string, noGit bool) {
 	*h.suiteRun = *r
 }
 
+// noFullText and noFullFix are the point of a plan of the type build-plan with no full command.
+var (
+	noFullText = fmt.Sprintf(textFaultNoFull, "build-plan")
+	noFullFix  = fmt.Sprintf(textFixNoFull, "build-plan")
+)
+
 const planNoFull = "# Plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n"
 
 // TestACauseInTheBuildPlanPostsChangesRequestedWithTheFix: a plan with no full row, no table, no
@@ -49,8 +57,8 @@ func TestACauseInTheBuildPlanPostsChangesRequestedWithTheFix(t *testing.T) {
 	for _, c := range []struct {
 		name, plan, text, fix string
 	}{
-		{"no full row", planNoFull, textFaultNoFull, textFixNoFull},
-		{"no table", "# Plan\n", textFaultNoTable, textFixNoTable},
+		{"no full row", planNoFull, noFullText, noFullFix},
+		{"no table", "# Plan\n", noFullText, textFixNoTable},
 		{"no command", "## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| full | none | none | s |\n", textFaultNoCmd, textFixNoCmd},
 		{"no plan", "", textFaultNoPlan, textFixNoPlan},
 		{"a plan over 1 MiB", "## Commands\n" + strings.Repeat("x", maxBuildPlan), textFaultTooBig, textFixTooBig},
@@ -88,7 +96,7 @@ func TestACauseOutsideTheAgentsReachPostsEscalate(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHelper(t)
-			h.fault = faultOf(err)
+			h.fault = faultOf(err, "build-plan")
 			if h.fault.fixable {
 				t.Fatalf("the fault %+v is fixable", h.fault)
 			}
@@ -124,7 +132,7 @@ func TestACauseOverAChangesRequestedOfTheAgent(t *testing.T) {
 	for i := range twenty {
 		twenty[i] = `{"text":"P","action":"run_again"}`
 	}
-	fixable := `{"text":"` + textFaultNoFull + `","action":"run_again","fix":"` + textFixNoFull + `"}`
+	fixable := `{"text":"` + noFullText + `","action":"run_again","fix":"` + noFullFix + `"}`
 	unfixable := `{"text":"` + textFaultNoGit + `","action":"run_again"}`
 	for _, c := range []struct {
 		name, agent, want string
@@ -139,8 +147,8 @@ func TestACauseOverAChangesRequestedOfTheAgent(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHelper(t)
 			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: c.agent})
-			h.fault = faultOf(errNoBuildPlan)
-			h.fault.point.Text, h.fault.point.Fix = textFaultNoFull, textFixNoFull
+			h.fault = faultOf(errNoBuildPlan, "build-plan")
+			h.fault.point.Text, h.fault.point.Fix = noFullText, noFullFix
 			if c.unfixable {
 				h.fault = noGitFault()
 			}
@@ -209,7 +217,7 @@ func TestAPassedVerdictKeepsItsTrackUnderACauseInTheBuildPlan(t *testing.T) {
 	if _, err := h.after(nil, succeeded); err != nil {
 		t.Fatal(err)
 	}
-	want := `{"verdict":"changes-requested","points":[{"text":"` + textFaultNoFull + `","action":"run_again","fix":"` + textFixNoFull + `"}],` + track + `}`
+	want := `{"verdict":"changes-requested","points":[{"text":"` + noFullText + `","action":"run_again","fix":"` + noFullFix + `"}],` + track + `}`
 	if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != want {
 		t.Errorf("posted %q, want %s", posted, want)
 	}
@@ -243,6 +251,7 @@ func TestARunAPIThatFailsAtTheLaunchIsACauseOutsideTheAgentsReach(t *testing.T) 
 			spec := &runSpec{}
 			spec.Dir = workspaceRepo(t)
 			r := openSuites(context.Background(), suiteSetup{
+				workflow: "fix", plan: "build-plan",
 				run: flakyRun{apiRun{api: h.api, dir: h.runDir}, &down}, spec: spec, runID: "r1", walled: true, fullSuite: true,
 				said: func(l string) { said = append(said, l) },
 			})

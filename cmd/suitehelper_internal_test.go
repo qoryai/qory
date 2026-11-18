@@ -740,6 +740,7 @@ func TestTheSuiteCapIsTheTimeLimitOfTheAfterStep(t *testing.T) {
 			spec.Dir = dir
 			var said []string
 			r := openSuites(context.Background(), suiteSetup{
+				workflow: "fix", plan: "build-plan",
 				run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, fullSuite: true,
 				extensions: c.extensions, said: func(l string) { said = append(said, l) },
 			})
@@ -785,7 +786,7 @@ func TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite(t *testing.T)
 		{"full_suite is false", false, true, false, buildPlanText, false, false, false, ""},
 		{"no wall", true, false, false, buildPlanText, false, false, false, ""},
 		{"a read run", true, true, true, buildPlanText, false, false, false, ""},
-		{"no full row", true, true, false, "# Plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n", false, false, true, "Add a row of kind full to Commands in the build plan.\n  The full suite did not start: the build plan has no full row."},
+		{"no full row", true, true, false, "# Plan\n\n## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n", false, false, true, "Add a row of kind full to Commands in build-plan.\n  The full suite did not start: build-plan has no full command."},
 		{"no build plan", true, true, false, "", false, false, true, "Write a build plan with a full row in Commands, then push it.\n  The full suite did not start: the work item has no usable build plan."},
 		{"no git folder", true, true, false, buildPlanText, true, false, true, "The full suite did not start: the session's folder has no .git folder."},
 	} {
@@ -804,6 +805,7 @@ func TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite(t *testing.T)
 			spec.Dir = dir
 			var said []string
 			r := openSuites(context.Background(), suiteSetup{
+				workflow: "fix", plan: "build-plan",
 				run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: c.walled, readOnly: c.readOnly, fullSuite: c.fullSuite,
 				said: func(l string) { said = append(said, l) },
 			})
@@ -830,6 +832,7 @@ func TestTheAfterCommandHasTheLaunchPlansCommandNotAPushedOne(t *testing.T) {
 	spec := &runSpec{}
 	spec.Dir = workspaceRepo(t)
 	r := openSuites(context.Background(), suiteSetup{
+		workflow: "fix", plan: "build-plan",
 		run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, fullSuite: true, said: func(string) {},
 	})
 	if r == nil {
@@ -878,7 +881,7 @@ func TestLaunchFullReadsTheNewestUsableVersionOfTheBuildPlan(t *testing.T) {
 			for _, v := range c.versions {
 				api.add(v)
 			}
-			full, err := launchFull(context.Background(), apiRun{api: api, dir: t.TempDir()})
+			full, err := launchFull(context.Background(), apiRun{api: api, dir: t.TempDir()}, "build-plan")
 			if c.none != (err != nil) || full.Command != c.want && !c.none {
 				t.Errorf("launchFull = %+v, %v, want command %q, none %v", full, err, c.want, c.none)
 			}
@@ -911,9 +914,9 @@ func TestThePointTextsHaveAtMost100Characters(t *testing.T) {
 
 func allFaults() []*suiteFault {
 	return []*suiteFault{
-		faultOf(suite.ErrNoCommands), faultOf(suite.ErrNoFull), faultOf(suite.ErrNoCommand), faultOf(suite.ErrBadCommand),
-		faultOf(suite.ErrBadResultFile), faultOf(errNoBuildPlan), faultOf(errBuildPlanTooBig), faultOf(suite.ErrBadStart), faultOf(errors.New("x")),
-		noGitFault(), noAfterFault(), noRunAPIFault(),
+		faultOf(suite.ErrNoCommands, "build-plan"), faultOf(suite.ErrNoFull, "build-plan"), faultOf(suite.ErrNoCommand, "build-plan"), faultOf(suite.ErrBadCommand, "build-plan"),
+		faultOf(suite.ErrBadResultFile, "build-plan"), faultOf(errNoBuildPlan, "build-plan"), faultOf(errBuildPlanTooBig, "build-plan"), faultOf(suite.ErrBadStart, "build-plan"), faultOf(errors.New("x"), "build-plan"),
+		noGitFault(), noAfterFault(), noRunAPIFault(), noPlanFault("fix"),
 	}
 }
 
@@ -1042,5 +1045,60 @@ func TestTheProgressLinesAreOneSentence(t *testing.T) {
 		if got := endedLine(c.got); got != c.want {
 			t.Errorf("endedLine = %q, want %q", got, c.want)
 		}
+	}
+}
+
+// TestLaunchFullReadsTheFileOfThePlanTypeAndNoOther: the plan type change-plan is read from the
+// artifact of that type, in the file change-plan.md; a build-plan with a full row, and a
+// change-plan whose file has another name, give none.
+func TestLaunchFullReadsTheFileOfThePlanTypeAndNoOther(t *testing.T) {
+	change := fakeVersion{artifact: "change-plan", name: "main", number: 1, runID: "r0", file: "change-plan.md", content: strings.Replace(buildPlanText, "make test", "make change", 1)}
+	build := fakeVersion{artifact: "build-plan", name: "main", number: 1, runID: "r0", file: "build-plan.md", content: buildPlanText}
+	for _, c := range []struct {
+		name     string
+		versions []fakeVersion
+		want     string
+		none     bool
+	}{
+		{"the type and its file", []fakeVersion{build, change}, "make change", false},
+		{"only a build plan", []fakeVersion{build}, "", true},
+		{"a file of another name", []fakeVersion{{artifact: "change-plan", name: "main", number: 1, runID: "r0", file: "build-plan.md", content: buildPlanText}}, "", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			api := newFakeAPI(t)
+			for _, v := range c.versions {
+				api.add(v)
+			}
+			full, err := launchFull(context.Background(), apiRun{api: api, dir: t.TempDir()}, "change-plan")
+			if c.none != (err != nil) || !c.none && full.Command != c.want {
+				t.Errorf("launchFull = %+v, %v, want command %q, none %v", full, err, c.want, c.none)
+			}
+			if c.none && !errors.Is(err, errNoBuildPlan) {
+				t.Errorf("error %v is no errNoBuildPlan", err)
+			}
+		})
+	}
+}
+
+// TestAWorkflowWithNoPlanGetsTheAfterStepThatTellsIfHeadMoved: with no plan type, openSuites reads
+// no plan, sets the after step with the command noPlanCommand and no result file, and keeps the
+// fault for a session that moved HEAD; the fault has no fix, and the agent cannot mend it.
+func TestAWorkflowWithNoPlanGetsTheAfterStepThatTellsIfHeadMoved(t *testing.T) {
+	api := newFakeAPI(t)
+	spec := &runSpec{}
+	spec.Dir = workspaceRepo(t)
+	r := openSuites(context.Background(), suiteSetup{
+		run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, fullSuite: true,
+		workflow: "fix", said: func(string) {},
+	})
+	if r == nil || r.fault != nil || r.noPlan == nil || len(spec.After) != 7 || spec.After[4] != noPlanCommand || spec.After[5] != "" {
+		t.Fatalf("suite %+v, After %q", r, spec.After)
+	}
+	if api.indexCalls != 0 {
+		t.Errorf("the run API was read %d times, want 0", api.indexCalls)
+	}
+	const text = "The full suite did not start: the workflow fix names no plan in the stack."
+	if r.noPlan.point.Text != text || r.noPlan.fixable || r.noPlan.point.Fix != "" || len(text) > 100 || !validPoint(r.noPlan.point) {
+		t.Errorf("fault %+v", r.noPlan)
 	}
 }

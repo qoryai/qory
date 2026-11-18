@@ -747,6 +747,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var level string
 			// extensions is the composed harness report's extensions, which the suite's time limit reads.
 			var extensions map[string]any
+			// planWorkflow is the run's workflow, and planType the plan type that the stack names
+			// for it, "" for none.
+			var planWorkflow, planType string
 			// link is the transcript link of a run whose agent starts on a fresh home, see
 			// [transcriptLinkFor].
 			var link transcriptLink
@@ -770,6 +773,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// The report on disk can be another run's by now, so the run reads what it composed.
 				rep, harness, workflows := c.rep, c.harness, c.workflows
 				extensions = rep.Extensions
+				planWorkflow, planType = planOf(fromCode, workflows)
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
 					return false, err
@@ -1296,7 +1300,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			// The agent's session is the run's first join, so the gateway numbers it 1.
-			suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, fullSuite: fullSuiteOf(fromCode), extensions: extensions, said: said})
+			suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, fullSuite: fullSuiteOf(fromCode), workflow: planWorkflow, plan: planType, extensions: extensions, said: said})
 			closeRoute := route.open(1)
 			res, err := joinSession(run, ctx, spec.SessionSpec)
 			closeRoute()

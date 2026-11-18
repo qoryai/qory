@@ -4,7 +4,7 @@
 // when the session ends and runs the full suite's command on the clone. [Judge] reads the files
 // that the script wrote and how the step ended, and [ReadRefused] reads the hosts that the
 // proxy refused while it ran. The command and the file it writes its result to come from the
-// launch build plan, see [FullRow]; the counts come from that file, see [ReadResult] and
+// launch version of the workflow's plan type, see [FullRow]; the counts come from that file, see [ReadResult] and
 // [ParseJUnit].
 package suite
 
@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-// Full is the full row of the Commands table of a build plan: the command that runs the
+// Full is the full row of the Commands table of a plan: the command that runs the
 // repository's whole test suite, and the file it writes the result to, relative to the top
 // of the checkout; ResultFile is "" for a command that writes none.
 type Full struct {
@@ -24,15 +24,15 @@ type Full struct {
 
 // The errors of [FullRow].
 var (
-	// ErrNoCommands is the error of a build plan with no table of commands.
-	ErrNoCommands = errors.New("the build plan has no table of commands")
-	// ErrNoFull is the error of a build plan whose commands have no row of kind full.
-	ErrNoFull = errors.New("the commands of the build plan have no row of kind full")
+	// ErrNoCommands is the error of a plan with no table of commands.
+	ErrNoCommands = errors.New("the plan has no table of commands")
+	// ErrNoFull is the error of a plan whose commands have no row of kind full.
+	ErrNoFull = errors.New("the commands of the plan have no row of kind full")
 	// ErrNoCommand is the error of a full row whose command is none or empty.
-	ErrNoCommand = errors.New("the full row of the build plan has no command")
+	ErrNoCommand = errors.New("the full row of the plan has no command")
 )
 
-// commandColumns are the columns of the Commands table of a build plan.
+// commandColumns are the columns of the Commands table of a plan.
 var commandColumns = []string{"Kind", "Command", "Result file", "Source"}
 
 // FullRow reads the full row of the table under the heading "## Commands" in text, a

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/suite"
@@ -41,10 +42,9 @@ const (
 	textFixNoPlan     = "Write a build plan with a full row in Commands, then push it."
 	textFaultTooBig   = "The full suite did not start: the build plan is larger than 1 MiB."
 	textFixTooBig     = "Cut the build plan below 1 MiB, then push it."
-	textFaultNoTable  = "The full suite did not start: the build plan has no table of commands."
+	textFaultNoFull   = "The full suite did not start: %s has no full command."
 	textFixNoTable    = "Add the table Commands with the columns Kind, Command, Result file and Source."
-	textFaultNoFull   = "The full suite did not start: the build plan has no full row."
-	textFixNoFull     = "Add a row of kind full to Commands in the build plan."
+	textFixNoFull     = "Add a row of kind full to Commands in %s."
 	textFaultNoCmd    = "The full suite did not start: the full row of the build plan has no command."
 	textFixNoCmd      = "Write the command that runs the whole test suite in the full row."
 	textFaultBadCmd   = "The full suite did not start: the command of the full row is too long or has a NUL."
@@ -53,22 +53,24 @@ const (
 	textFixBadFile    = "Write a relative path below the repository as the Result file, or none."
 	textFaultPlanRead = "The full suite did not start: qory could not read the build plan."
 	textShownBadFile  = "The full suite did not start: the result file is no path below the repository."
+	textFaultNoPlanIn = "The full suite did not start: the workflow %s names no plan in the stack."
 	textFaultNoRunAPI = "The full suite did not start: qory cannot reach the run API."
 	textFaultNoGit    = "The full suite did not start: the session's folder has no .git folder."
 	textFaultBadStart = "The full suite did not start: qory could not read the commit the session started at."
 	textPointNoAfter  = "The full suite did not run: the run closed before the after step."
 )
 
-// faultOf is the fault for err, an error of [launchFull] or of [suite.Command].
-func faultOf(err error) *suiteFault {
+// faultOf is the fault for err, an error of [launchFull] or of [suite.Command], for a workflow
+// whose plan type is plan.
+func faultOf(err error, plan string) *suiteFault {
 	fixable := func(text, fix string) *suiteFault {
 		return &suiteFault{point: runapi.Point{Text: text, Action: "run_again", Fix: fix}, fixable: true}
 	}
 	switch {
 	case errors.Is(err, suite.ErrNoCommands):
-		return fixable(textFaultNoTable, textFixNoTable)
+		return fixable(fmt.Sprintf(textFaultNoFull, plan), textFixNoTable)
 	case errors.Is(err, suite.ErrNoFull):
-		return fixable(textFaultNoFull, textFixNoFull)
+		return fixable(fmt.Sprintf(textFaultNoFull, plan), fmt.Sprintf(textFixNoFull, plan))
 	case errors.Is(err, suite.ErrNoCommand):
 		return fixable(textFaultNoCmd, textFixNoCmd)
 	case errors.Is(err, suite.ErrBadCommand):
@@ -97,6 +99,12 @@ func (f *suiteFault) line() string {
 // noRunAPIFault is the fault of a run whose run API cannot be reached at the launch.
 func noRunAPIFault() *suiteFault {
 	return &suiteFault{point: runapi.Point{Text: textFaultNoRunAPI, Action: "run_again"}}
+}
+
+// noPlanFault is the fault of a session whose workflow names no plan type in the stack, and whose
+// HEAD moved: the agent cannot add a plan type to the stack.
+func noPlanFault(workflow string) *suiteFault {
+	return &suiteFault{point: runapi.Point{Text: fmt.Sprintf(textFaultNoPlanIn, workflow), Action: "run_again"}}
 }
 
 // noGitFault is the fault of a session's folder with no .git folder.

@@ -37,16 +37,21 @@ type suiteAPI struct {
 }
 
 func newSuiteAPI(t *testing.T, status int) *suiteAPI {
+	return newSuiteAPIOf(t, status, "build-plan", suitePlan)
+}
+
+// newSuiteAPIOf is a run API whose one artifact has the type typ, with the file <typ>.md that has text.
+func newSuiteAPIOf(t *testing.T, status int, typ, text string) *suiteAPI {
 	t.Helper()
 	a := &suiteAPI{status: status}
-	sum := sha256.Sum256([]byte(suitePlan))
-	index := fmt.Sprintf(`{"version":1,"artifacts":[{"type":"build-plan","name":"main","newest_version":1,"versions":[{"id":"bp1","number":1,"writer":{"kind":"run","run_id":"earlier"},"files":[{"filename":"build-plan.md","size":%d,"sha256":%q}]}]}]}`, len(suitePlan), hex.EncodeToString(sum[:]))
+	sum := sha256.Sum256([]byte(text))
+	index := fmt.Sprintf(`{"version":1,"artifacts":[{"type":%q,"name":"main","newest_version":1,"versions":[{"id":"bp1","number":1,"writer":{"kind":"run","run_id":"earlier"},"files":[{"filename":%q,"size":%d,"sha256":%q}]}]}]}`, typ, typ+".md", len(text), hex.EncodeToString(sum[:]))
 	a.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/artifacts"):
 			io.WriteString(w, index)
-		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/files/build-plan.md"):
-			io.WriteString(w, suitePlan)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/files/"+typ+".md"):
+			io.WriteString(w, text)
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/verdict"):
 			body, _ := io.ReadAll(r.Body)
 			a.mu.Lock()
@@ -85,6 +90,10 @@ type suiteEnd struct {
 	extensions string
 	// noFullSuite is whether the run documents have full_suite false.
 	noFullSuite bool
+	// plan is the plan type that the stack names for the run's workflow fix, build-plan when
+	// "". noPlan is whether the workflow names none.
+	plan   string
+	noPlan bool
 	// after, when not nil, is the end of the after step in place of the script's.
 	after *session.AfterResult
 	// cutAfterStart runs the script, so the command starts, and then ends the step as this result
@@ -119,6 +128,14 @@ func suiteRun(t *testing.T, api *suiteAPI, e suiteEnd) (string, error, session.O
 	if !e.noFullSuite {
 		t.Cleanup(cmd.SetFullSuite(true))
 	}
+	plan := e.plan
+	switch {
+	case e.noPlan:
+		plan = ""
+	case plan == "":
+		plan = "build-plan"
+	}
+	t.Cleanup(cmd.SetPlan("fix", plan))
 	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
 		if spec.OnVariables != nil {
 			spec.OnVariables(session.Applied{})
@@ -411,4 +428,98 @@ func TestAFullSuiteThatCannotStartPostsAnEscalate(t *testing.T) {
 	if posted := api.posted(); len(posted) != 1 || posted[0] != want {
 		t.Errorf("posted %q, want %s", posted, want)
 	}
+}
+
+// TestACustomPlanTypesFullRowRunsAsTheSuite: the stack names change-plan for the workflow, the work
+// item has a version of change-plan with a full row, and that row's command is the suite, in the
+// after step.
+func TestACustomPlanTypesFullRowRunsAsTheSuite(t *testing.T) {
+	api := newSuiteAPIOf(t, http.StatusCreated, "change-plan", suitePlan)
+	var seen session.SessionSpec
+	out, err, closed := suiteRun(t, api, suiteEnd{plan: "change-plan", result: suiteRed, exit: 1, seen: &seen})
+	if err != nil || closed.State != event.StateSucceeded {
+		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
+	}
+	if posted := api.posted(); len(posted) != 1 || posted[0] != changesRequested {
+		t.Errorf("posted %q, want one changes-requested", posted)
+	}
+	if len(seen.After) < 5 || !strings.Contains(seen.After[4], "SUITE_RESULT") {
+		t.Errorf("After = %q, want the command of the full row of change-plan", seen.After)
+	}
+}
+
+// TestAPlanTypeWithNoFullCommandStartsNoSuite: a version of the plan type with no Commands table, or
+// with no full row, ends the launch of the suite with the not-started result, the point "<type> has no
+// full command", and no suite runs.
+func TestAPlanTypeWithNoFullCommandStartsNoSuite(t *testing.T) {
+	for name, c := range map[string]struct{ text, fix string }{
+		"no table":    {"# Plan\n", "Add the table Commands with the columns Kind, Command, Result file and Source."},
+		"no full row": {"## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n", "Add a row of kind full to Commands in change-plan."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			api := newSuiteAPIOf(t, http.StatusCreated, "change-plan", c.text)
+			var seen session.SessionSpec
+			out, err, closed := suiteRun(t, api, suiteEnd{plan: "change-plan", result: suiteGreen, seen: &seen})
+			if err != nil || closed.State != event.StateSucceeded {
+				t.Fatalf("%v, closed %+v\n%s", err, closed, out)
+			}
+			want := `{"verdict":"changes-requested","points":[{"text":"The full suite did not start: change-plan has no full command.","action":"run_again","fix":"` + c.fix + `"}]}`
+			if posted := api.posted(); len(posted) != 1 || posted[0] != want {
+				t.Errorf("posted %q, want %s", posted, want)
+			}
+			if len(seen.After) != 0 {
+				t.Errorf("After = %q, want none", seen.After)
+			}
+			wants(t, out, "The full suite did not start: change-plan has no full command.")
+		})
+	}
+}
+
+// TestTheSuiteDoesNotFallBackToTheBuildPlan: the stack names change-plan, and the work item has a
+// build-plan with a full row and no change-plan: no suite runs, and the point is the one for a plan
+// type with no version.
+func TestTheSuiteDoesNotFallBackToTheBuildPlan(t *testing.T) {
+	api := newSuiteAPI(t, http.StatusCreated)
+	var seen session.SessionSpec
+	out, err, closed := suiteRun(t, api, suiteEnd{plan: "change-plan", result: suiteRed, exit: 1, seen: &seen})
+	if err != nil || closed.State != event.StateSucceeded {
+		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
+	}
+	if posted := api.posted(); len(posted) != 1 || !strings.Contains(posted[0], "The full suite did not start: the work item has no usable build plan.") || strings.Contains(posted[0], "tests failed") {
+		t.Errorf("posted %q", posted)
+	}
+	if len(seen.After) != 0 {
+		t.Errorf("After = %q, want none", seen.After)
+	}
+}
+
+// TestAWriteWorkflowWithNoPlanAndHeadWhereItStartedIsSkipped: the stack names no plan type for the
+// workflow, and the session left HEAD at its start commit: no suite runs, qory posts nothing, and the
+// run succeeds, as with a plan.
+func TestAWriteWorkflowWithNoPlanAndHeadWhereItStartedIsSkipped(t *testing.T) {
+	api := newSuiteAPI(t, http.StatusCreated)
+	out, err, closed := suiteRun(t, api, suiteEnd{noPlan: true, stay: true, result: suiteRed, exit: 1})
+	if err != nil || closed.State != event.StateSucceeded {
+		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
+	}
+	if posted := api.posted(); len(posted) != 0 {
+		t.Errorf("posted %q for a session that changed nothing", posted)
+	}
+	wants(t, out, "the full suite did not run: the session left HEAD at the commit it started at")
+}
+
+// TestAWriteWorkflowWithNoPlanAndHeadMovedPostsEscalate: the session moved HEAD: qory posts escalate
+// with the point that the workflow names no plan, which the agent cannot fix, and runs no suite
+// command.
+func TestAWriteWorkflowWithNoPlanAndHeadMovedPostsEscalate(t *testing.T) {
+	api := newSuiteAPI(t, http.StatusCreated)
+	out, err, closed := suiteRun(t, api, suiteEnd{noPlan: true, result: suiteRed, exit: 1})
+	if err != nil || closed.State != event.StateSucceeded {
+		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
+	}
+	const want = `{"verdict":"escalate","points":[{"text":"The full suite did not start: the workflow fix names no plan in the stack.","action":"run_again"}]}`
+	if posted := api.posted(); len(posted) != 1 || posted[0] != want {
+		t.Errorf("posted %q, want %s", posted, want)
+	}
+	wants(t, out, "The full suite did not start: the workflow fix names no plan in the stack.")
 }
