@@ -34,7 +34,7 @@
       "additionalProperties": false,
       "properties": {
         "criterion": {"description": "The id of the criterion: ac- and a number from 1 to 9999 with no leading zero, such as ac-3.", "$ref": "#/$defs/criterion_id"},
-        "state": {"description": "verified when the check shows that the criterion is met, failed when the check shows that it is not.", "enum": ["verified", "failed"]},
+        "state": {"description": "met when the check shows that the criterion is met, not_met when the check shows that it is not.", "enum": ["met", "not_met"]},
         "evidence": {"description": "What the check found, in plain text: what was looked at or run, and the result.", "$ref": "#/$defs/short_text"}
       }
     },

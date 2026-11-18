@@ -582,9 +582,11 @@ func TestQuestionsSchema(t *testing.T) {
 		return strings.Replace(doc, option, strings.Replace(option, `}`, `, "proposal": `+value+`}`, 1), 1)
 	}
 	const workItem = `"about": {"work_item": true}`
-	withItem := func(item string) string {
-		return replace(workItem, `"about": {"type": "proposal", "name": "main", "item": `+item+`}`)
+	withItemOf := func(typ, item string) string {
+		return replace(workItem, `"about": {"type": "`+typ+`", "name": "main", "item": `+item+`}`)
 	}
+	withItem := func(item string) string { return withItemOf("proposal", item) }
+	withCriterion := func(item string) string { return withItemOf("acceptance-criteria", item) }
 	// answerStart and historyStart start the answer and the history entry of the document.
 	const (
 		answerStart  = `"answer": {"option": "PostgreSQL"`
@@ -766,30 +768,38 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(workItem, `"about": {"type": "proposal", "name": "`+strings.Repeat("a", 65)+`"}`), false},
 		{replace(workItem, `"about": {"type": "proposal", "name": "a\nb"}`), false},
 		{replace(workItem, `"about": {"type": 3, "name": "main"}`), false},
-		// about.item: a criterion id, or the id of an entry of another kind
+		// about.item of the type acceptance-criteria is a criterion id
+		{withCriterion(`"ac-3"`), true},
+		{withCriterion(`"ac-1"`), true},
+		{withCriterion(`"ac-9999"`), true},
+		{withCriterion(`"screen-2"`), false},
+		{withCriterion(`"ac-0"`), false},
+		{withCriterion(`"ac-01"`), false},
+		{withCriterion(`"ac-03"`), false},
+		{withCriterion(`"ac-10000"`), false},
+		{withCriterion(`"ac-"`), false},
+		{withCriterion(`"ac-x"`), false},
+		{withCriterion(`"ac-3a"`), false},
+		{withCriterion(`"ac-3\n"`), false},
+		{withCriterion(`"AC-3"`), false},
+		{withCriterion(`3`), false},
+		{withCriterion(`null`), false},
+		{withCriterion(`""`), false},
+		{replace(workItem, `"about": {"type": "acceptance-criteria", "name": "main"}`), true},
+		// about.item of another type is any line of 1 to 32 characters
+		{withItemOf("mockup", `"screen-2"`), true},
+		{withItemOf("mockup", `"ac-3"`), true},
+		{withItemOf("mockup", `"ac-0"`), true},
+		{withItemOf("mockup", `"AC-3"`), true},
+		{withItem(`"screen-2"`), true},
 		{withItem(`"ac-3"`), true},
-		{withItem(`"ac-1"`), true},
-		{withItem(`"ac-9999"`), true},
-		{withItem(`"ac-0"`), false},
-		{withItem(`"ac-01"`), false},
-		{withItem(`"ac-03"`), false},
-		{withItem(`"ac-10000"`), false},
-		{withItem(`"ac-"`), false},
-		{withItem(`"ac-x"`), false},
-		{withItem(`"ac-3a"`), false},
-		{withItem(`"ac-3\n"`), false},
+		{withItem(`"login"`), true},
+		{withItem(`"Login screen"`), true},
+		{withItem(`"` + strings.Repeat("a", 32) + `"`), true},
+		{withItem(`"` + strings.Repeat("a", 33) + `"`), false},
 		{withItem(`3`), false},
 		{withItem(`null`), false},
 		{withItem(`""`), false},
-		{withItem(`"login"`), true},
-		{withItem(`"Login screen"`), true},
-		{withItem(`"AC-3"`), false},
-		{withItem(`"Ac-0"`), false},
-		{withItem(`"aC-3"`), false},
-		{withItem(`"screen-2"`), true},
-		{withItem(`"acme"`), true},
-		{withItem(`"` + strings.Repeat("a", 32) + `"`), true},
-		{withItem(`"` + strings.Repeat("a", 33) + `"`), false},
 		{withItem(`"a\nb"`), false},
 		{withItem(`"a\u200bb"`), false},
 		// an option's proposal, only on a question that is about an entry
@@ -1295,12 +1305,12 @@ func TestAcceptanceCriteriaSchema(t *testing.T) {
 }
 
 // verificationDocument is a document of verification.schema.json that passes: a row that
-// is verified, a row that failed, a criterion that was not verified and two model
+// is met, a row that is not met, a criterion that was not verified and two model
 // families.
 const verificationDocument = `{"target_version": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
  "matrix": [
-  {"criterion": "ac-1", "state": "verified", "evidence": "The price page shows 12.50."},
-  {"criterion": "ac-2", "state": "failed", "evidence": "The page still shows 10.00 in the footer."}
+  {"criterion": "ac-1", "state": "met", "evidence": "The price page shows 12.50."},
+  {"criterion": "ac-2", "state": "not_met", "evidence": "The page still shows 10.00 in the footer."}
  ],
  "not_verified": [{"criterion": "ac-3", "reason": "The payment sandbox was down."}],
  "model_families": ["anthropic", "openai"]}`
@@ -1320,10 +1330,10 @@ func TestVerificationSchema(t *testing.T) {
 	const (
 		version = `"5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e"`
 		matrix  = `"matrix": [
-  {"criterion": "ac-1", "state": "verified", "evidence": "The price page shows 12.50."},
-  {"criterion": "ac-2", "state": "failed", "evidence": "The page still shows 10.00 in the footer."}
+  {"criterion": "ac-1", "state": "met", "evidence": "The price page shows 12.50."},
+  {"criterion": "ac-2", "state": "not_met", "evidence": "The page still shows 10.00 in the footer."}
  ]`
-		row      = `{"criterion": "ac-1", "state": "verified", "evidence": "The price page shows 12.50."}`
+		row      = `{"criterion": "ac-1", "state": "met", "evidence": "The price page shows 12.50."}`
 		notVer   = `"not_verified": [{"criterion": "ac-3", "reason": "The payment sandbox was down."}]`
 		families = `"model_families": ["anthropic", "openai"]`
 	)
@@ -1358,13 +1368,15 @@ func TestVerificationSchema(t *testing.T) {
 		{replace(version, `12`), false},
 		{replace(version, `null`), false},
 		// the matrix rows
-		{replace(row, `{"criterion": "ac-9999", "state": "verified", "evidence": "Seen."}`), true},
-		{replace(`"state": "verified"`, `"state": "failed"`), true},
-		{replace(`"state": "verified"`, `"state": "not_verified"`), false},
-		{replace(`"state": "verified"`, `"state": "passed"`), false},
-		{replace(`"state": "verified"`, `"state": "Verified"`), false},
-		{replace(`"state": "verified"`, `"state": true`), false},
-		{replace(`"state": "verified", `, ``), false},
+		{replace(row, `{"criterion": "ac-9999", "state": "met", "evidence": "Seen."}`), true},
+		{replace(`"state": "met"`, `"state": "not_met"`), true},
+		{replace(`"state": "met"`, `"state": "verified"`), false},
+		{replace(`"state": "met"`, `"state": "failed"`), false},
+		{replace(`"state": "met"`, `"state": "not_verified"`), false},
+		{replace(`"state": "met"`, `"state": "passed"`), false},
+		{replace(`"state": "met"`, `"state": "Met"`), false},
+		{replace(`"state": "met"`, `"state": true`), false},
+		{replace(`"state": "met", `, ``), false},
 		{replace(`"criterion": "ac-1", "state"`, `"state"`), false},
 		{replace(`, "evidence": "The price page shows 12.50."`, ``), false},
 		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": ""`), false},
@@ -1372,7 +1384,7 @@ func TestVerificationSchema(t *testing.T) {
 		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": "`+strings.Repeat("a", 2001)+`"`), false},
 		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": "Seen.\nTwice."`), true},
 		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": "Seen.​"`), false},
-		{replace(`"state": "verified"`, `"state": "verified", "by": "model"`), false},
+		{replace(`"state": "met"`, `"state": "met", "by": "model"`), false},
 		{replace(matrix, `"matrix": {}`), false},
 		// a criterion id in a row, in not_verified: ac- and a number from 1 to 9999
 		{replace(`"ac-1"`, `"ac-0"`), false},

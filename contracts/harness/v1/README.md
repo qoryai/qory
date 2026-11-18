@@ -812,8 +812,8 @@ format ([verification.schema.json](verification.schema.json)):
 
 ```json
 {"target_version": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
- "matrix": [{"criterion": "ac-1", "state": "verified", "evidence": "The price page shows 12.50."},
-            {"criterion": "ac-2", "state": "failed", "evidence": "The page still shows 10.00 in the footer."}],
+ "matrix": [{"criterion": "ac-1", "state": "met", "evidence": "The price page shows 12.50."},
+            {"criterion": "ac-2", "state": "not_met", "evidence": "The page still shows 10.00 in the footer."}],
  "not_verified": [{"criterion": "ac-3", "reason": "The payment sandbox was down."}],
  "model_families": ["anthropic", "openai"]}
 ```
@@ -823,7 +823,7 @@ format ([verification.schema.json](verification.schema.json)):
 | `target_version` | the exact version of the target that the verification checked, never a name that can later point to another version; for a repository, a commit. 1 to 255 letters, digits and the characters `._/-`, such as `5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e` or `2026-11-18.3` |
 | `matrix` | one row for each criterion that was checked, empty when none was |
 | `criterion` | the id of the criterion, in the form of `id` in the acceptance criteria format |
-| `state` | `verified`: the check shows that the criterion is met; `failed`: the check shows that it is not |
+| `state` | `met`: the check shows that the criterion is met; `not_met`: the check shows that it is not |
 | `evidence` | what the check found: what was looked at or run, and the result, plain text, 1 to 2000 characters |
 | `not_verified` | each criterion that was not checked, empty when every criterion was checked; each has `criterion` and `reason`, why it was not checked, 1 to 2000 characters |
 | `model_families` | the families of the models that checked the criteria, at least one, each 1 to 64 characters on one line, none twice |
@@ -858,10 +858,10 @@ forms:
 - An output of the work item: `type` is the artifact type's name, as in `artifact` of a
   review comment, and `name` is the artifact's name, 1 to 64 characters on one line, such
   as `main`. `item` is optional: the id of the entry of that artifact that the question
-  concerns, as one of two forms. A criterion id has the form `ac-` and a number from 1 to
-  9999 with no leading zero, such as `ac-3`. The id of an entry of any other output, such
-  as a screen of a mockup, is 1 to 32 characters on one line that do not start with `ac-` in any letter case,
-  so `ac-0`, `ac-01`, `ac-10000`, `AC-3` and `Ac-0` fail the schema.
+  concerns, 1 to 32 characters on one line, such as `screen-2` for a screen of a mockup.
+  When `type` is `acceptance-criteria`, `item` is a criterion id: `ac-` and a number from
+  1 to 9999 with no leading zero, such as `ac-3`, so `screen-2`, `ac-0`, `ac-01` and
+  `ac-10000` fail the schema. With any other `type`, `ac-3` is an id like any other.
 
 No member of `about` is a work item id: the document is for one work item. A JSON Schema
 cannot check that the work item has the artifact or that the artifact has the entry.
