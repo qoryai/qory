@@ -579,7 +579,7 @@ func TestAnUnavailablePushSaysToReadTheIndexFirst(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			client := serve(t, respond(http.StatusServiceUnavailable, body))
 
-			_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, nil)
+			_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, nil, nil)
 
 			want := "Read the artifact index, and try again if the version is not there. " +
 				"POST /verdict may have stored it (503 unavailable)."
@@ -622,13 +622,46 @@ func TestPushVerdictSendsTheBodyTheRunAPIReads(t *testing.T) {
 				`{"version": 1, "artifact": {"type": "verdict", "name": "main", "version": {"id": "av_4", "number": 4}}}`)(w, r)
 		})
 
-		pushed, err := client.PushVerdict(context.Background(), c.verdict, c.points)
+		pushed, err := client.PushVerdict(context.Background(), c.verdict, c.points, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		if pushed.Type != "verdict" || pushed.Version.Number != 4 {
 			t.Errorf("pushed = %+v", pushed)
+		}
+	}
+}
+
+// TestPushVerdictSendsTheTrack sends track after points, as the member track, and sends no
+// member for a nil track.
+func TestPushVerdictSendsTheTrack(t *testing.T) {
+	points := []runapi.Point{{Text: "The checks script failed.", Action: runapi.ActionRunAgain}}
+
+	for _, c := range []struct {
+		verdict string
+		points  []runapi.Point
+		track   *runapi.Track
+		want    string
+	}{
+		{runapi.VerdictPassed, nil, &runapi.Track{ID: "small-change", Reason: "One file < two & more."},
+			`{"verdict":"passed","track":{"id":"small-change","reason":"One file < two & more."}}`},
+		{runapi.VerdictChangesRequested, points, &runapi.Track{ID: "standard", Reason: "A person decides."},
+			`{"verdict":"changes-requested","points":[{"text":"The checks script failed.","action":"run_again"}],` +
+				`"track":{"id":"standard","reason":"A person decides."}}`},
+		{runapi.VerdictPassed, nil, nil, `{"verdict":"passed"}`},
+	} {
+		client := serve(t, func(w http.ResponseWriter, r *http.Request) {
+			if raw, _ := io.ReadAll(r.Body); string(raw) != c.want {
+				t.Errorf("body = %s, want %s", raw, c.want)
+			}
+
+			respond(http.StatusCreated,
+				`{"version": 1, "artifact": {"type": "verdict", "name": "main", "version": {"id": "av_4", "number": 4}}}`)(w, r)
+		})
+
+		if _, err := client.PushVerdict(context.Background(), c.verdict, c.points, c.track); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
@@ -747,7 +780,7 @@ func TestErrorsStartWithTheFix(t *testing.T) {
 func TestATooLargeVerdictHasTheVerdictLimit(t *testing.T) {
 	client := serve(t, respond(http.StatusRequestEntityTooLarge, `{"error":"payload_too_large"}`))
 
-	_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, nil)
+	_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, nil, nil)
 
 	want := "Shrink the request to at most 65536 bytes encoded. POST /verdict returned 413 payload_too_large."
 	if err == nil || err.Error() != want {
@@ -836,7 +869,7 @@ func TestACancelledContextIsNotAGatewayError(t *testing.T) {
 	}
 }
 
-func TestPushVerdictDocumentSendsTheBodyAsGiven(t *testing.T) {
+func TestPushVerdictSendsTheRunsRequest(t *testing.T) {
 	const body = `{"verdict":"escalate","points":[{"text":"The checks script failed.","action":"run_again"}],"track":{"id":"small","reason":"One file."}}`
 	var headers http.Header
 	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -851,7 +884,9 @@ func TestPushVerdictDocumentSendsTheBodyAsGiven(t *testing.T) {
 			`{"version": 1, "artifact": {"type": "verdict", "name": "main", "version": {"id": "av_4", "number": 4}}}`)(w, r)
 	})
 
-	pushed, err := client.PushVerdictDocument(context.Background(), []byte(body))
+	pushed, err := client.PushVerdict(context.Background(), runapi.VerdictEscalate,
+		[]runapi.Point{{Text: "The checks script failed.", Action: runapi.ActionRunAgain}},
+		&runapi.Track{ID: "small", Reason: "One file."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -863,7 +898,7 @@ func TestPushVerdictDocumentSendsTheBodyAsGiven(t *testing.T) {
 	}
 }
 
-func TestPushVerdictDocumentMapsTheErrorsOfThePost(t *testing.T) {
+func TestPushVerdictMapsTheErrorsOfThePost(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		status int
@@ -878,7 +913,7 @@ func TestPushVerdictDocumentMapsTheErrorsOfThePost(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			client := serve(t, respond(c.status, c.body))
 
-			_, err := client.PushVerdictDocument(context.Background(), []byte(`{"verdict":"passed"}`))
+			_, err := client.PushVerdict(context.Background(), runapi.VerdictPassed, nil, nil)
 
 			var apiError *runapi.Error
 			if !errors.As(err, &apiError) || apiError.Status != c.status || apiError.Code != c.code || apiError.Request != "POST /verdict" {
@@ -888,10 +923,23 @@ func TestPushVerdictDocumentMapsTheErrorsOfThePost(t *testing.T) {
 	}
 }
 
-func TestPushVerdictDocumentRefusesABodyOverTheVerdictLimit(t *testing.T) {
+// verdictOfBytes returns one point such that the body of an escalate verdict with it has
+// exactly size bytes.
+func verdictOfBytes(t *testing.T, size int) []runapi.Point {
+	t.Helper()
+
+	empty, err := runapi.VerdictBody(runapi.VerdictEscalate, []runapi.Point{{Action: runapi.ActionRunAgain}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return []runapi.Point{{Text: strings.Repeat("a", size-len(empty)), Action: runapi.ActionRunAgain}}
+}
+
+func TestPushVerdictRefusesABodyOverTheVerdictLimit(t *testing.T) {
 	client := serve(t, func(http.ResponseWriter, *http.Request) { t.Error("a request went out") })
 
-	_, err := client.PushVerdictDocument(context.Background(), make([]byte, 64<<10+1))
+	_, err := client.PushVerdict(context.Background(), runapi.VerdictEscalate, verdictOfBytes(t, 64<<10+1), nil)
 
 	var apiError *runapi.Error
 	if !errors.As(err, &apiError) || apiError.Code != runapi.CodePayloadTooLarge || apiError.Limit != 64<<10 {
@@ -899,7 +947,7 @@ func TestPushVerdictDocumentRefusesABodyOverTheVerdictLimit(t *testing.T) {
 	}
 }
 
-func TestPushVerdictDocumentAcceptsABodyOfExactlyTheLimit(t *testing.T) {
+func TestPushVerdictAcceptsABodyOfExactlyTheLimit(t *testing.T) {
 	var got int
 	client := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -908,7 +956,7 @@ func TestPushVerdictDocumentAcceptsABodyOfExactlyTheLimit(t *testing.T) {
 			`{"version": 1, "artifact": {"type": "verdict", "name": "main", "version": {"id": "av_4", "number": 4}}}`)(w, r)
 	})
 
-	if _, err := client.PushVerdictDocument(context.Background(), make([]byte, 64<<10)); err != nil {
+	if _, err := client.PushVerdict(context.Background(), runapi.VerdictEscalate, verdictOfBytes(t, 64<<10), nil); err != nil {
 		t.Fatal(err)
 	}
 	if got != 64<<10 {
