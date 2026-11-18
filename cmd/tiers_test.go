@@ -50,7 +50,7 @@ func readText(t *testing.T, path string) string {
 var tierAgents = map[string]string{
 	"explorer": "---\nname: explorer\nmodel: ${qory:light}\neffort: low\n---\nExplores.\n",
 	"planner":  "---\nname: planner\nmodel: ${qory:thinking}\n---\nPlans.\n",
-	"reviewer": "---\nname: reviewer\nmodel: ${qory:fast}\n---\nReviews.\n",
+	"reviewer": "---\nname: reviewer\nmodel: ${qory:balanced}\n---\nReviews.\n",
 	"writer":   "---\nname: writer\nmodel: claude-opus-5-5\n---\nWrites.\n",
 }
 
@@ -61,10 +61,10 @@ var tierAgents = map[string]string{
 // The rows and the report contain each tier, its model and where it came from.
 func TestComposeWritesEachAgentsTier(t *testing.T) {
 	root := tierCheckout(t)
-	machineConfig(t, "harness:\n  tiers:\n    fast: claude-sonnet-5-5\n")
+	machineConfig(t, "harness:\n  tiers:\n    balanced: claude-sonnet-5-5\n")
 	tierModule(t, root, "claude", tierAgents,
 		"tiers:",
-		"  fast: repo-fast",
+		"  balanced: repo-balanced",
 		"  thinking: {model: claude-opus-5-5, effort: max}",
 	)
 	out, err := run(t, "harness", "compose", "--tier", "light=claude-haiku-5-5")
@@ -73,7 +73,7 @@ func TestComposeWritesEachAgentsTier(t *testing.T) {
 	}
 	if got, want := fieldRows(out)["tier"], []string{
 		"light  claude-haiku-5-5  (agent explorer; from --tier)",
-		"fast  claude-sonnet-5-5  (agent reviewer; from ~/.config/qory/qory.yaml)",
+		"balanced  claude-sonnet-5-5  (agent reviewer; from ~/.config/qory/qory.yaml)",
 		"thinking  claude-opus-5-5, effort max  (agent planner; from qory.yaml)",
 	}; !reflect.DeepEqual(got, want) {
 		t.Errorf("tier rows %q\nwant %q\n%s", got, want, out)
@@ -105,12 +105,12 @@ func TestComposeWritesEachAgentsTier(t *testing.T) {
 			tiers[e.Name] = e.Tier
 		}
 	}
-	if want := map[string]string{"explorer": "light", "planner": "thinking", "reviewer": "fast", "writer": ""}; !reflect.DeepEqual(tiers, want) {
+	if want := map[string]string{"explorer": "light", "planner": "thinking", "reviewer": "balanced", "writer": ""}; !reflect.DeepEqual(tiers, want) {
 		t.Errorf("report entry tiers %v, want %v", tiers, want)
 	}
 	want := map[string]report.Tier{
 		"light":    {Model: "claude-haiku-5-5", From: "--tier"},
-		"fast":     {Model: "claude-sonnet-5-5", From: filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml")},
+		"balanced": {Model: "claude-sonnet-5-5", From: filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml")},
 		"thinking": {Model: "claude-opus-5-5", Effort: "max", From: filepath.Join(root, "qory.yaml")},
 	}
 	if !reflect.DeepEqual(rep.Tiers, want) {
@@ -195,17 +195,18 @@ func TestComposeRefusesATierMistake(t *testing.T) {
 	}{
 		{[]string{"--tier", "light"}, nil, "--tier light: write --tier <tier>=<model id>, such as --tier light=claude-haiku-5-5"},
 		{[]string{"--tier", "light="}, nil, "--tier light=: write --tier <tier>=<model id>, such as --tier light=claude-haiku-5-5"},
-		{[]string{"--tier", "heavy=claude-haiku-5-5"}, nil, "Use one of the tiers light, fast, and thinking.\n  heavy is not a tier.\n  The name is in --tier heavy=claude-haiku-5-5."},
+		{[]string{"--tier", "heavy=claude-haiku-5-5"}, nil, "Use one of the tiers light, balanced, and thinking.\n  heavy is not a tier.\n  The name is in --tier heavy=claude-haiku-5-5."},
+		{[]string{"--tier", "fast=claude-haiku-5-5"}, nil, "Use one of the tiers light, balanced, and thinking.\n  fast is not a tier.\n  The name is in --tier fast=claude-haiku-5-5."},
 		{[]string{"--tier", "light=a", "--tier", "light=b"}, nil, "--tier light is given twice; give each tier once"},
-		{[]string{"--tier", "light=${qory:fast}"}, nil, "--tier light=${qory:fast}: write a model id; ${qory:fast} is a tier placeholder, which goes only in an agent's model"},
-		{[]string{"--model", "${qory:light}"}, nil, "--model ${qory:light} is a tier placeholder; set the main model by its id, and a tier only in an agent's model"},
-		{nil, []string{"model: ${qory:light}"}, "harness.model ${qory:light} is a tier placeholder; set the main model by its id, and a tier only in an agent's model"},
+		{[]string{"--tier", "light=${qory:balanced}"}, nil, "--tier light=${qory:balanced}: write a model id, not a tier placeholder.\n  ${qory:balanced} goes only in an agent's model."},
+		{[]string{"--model", "${qory:light}"}, nil, "Set --model to a model id, not a tier placeholder.\n  ${qory:light} is a tier placeholder, which goes only in an agent's model."},
+		{nil, []string{"model: ${qory:light}"}, "Set harness.model to a model id, not a tier placeholder.\n  ${qory:light} is a tier placeholder, which goes only in an agent's model."},
 	} {
 		root := tierCheckout(t)
 		tierModule(t, root, "claude", tierAgents, c.harness...)
 		out, err := run(t, append([]string{"harness", "compose"}, c.args...)...)
-		if cmd.ExitCode(err) != 2 || err == nil || !strings.HasSuffix(err.Error(), c.want) {
-			t.Errorf("%v %v: exit %d, err %v\nwant suffix %s\n%s", c.args, c.harness, cmd.ExitCode(err), err, c.want, out)
+		if cmd.ExitCode(err) != 2 || err == nil || !strings.HasPrefix(err.Error(), c.want) {
+			t.Errorf("%v %v: exit %d, err %v\nwant to start with %s\n%s", c.args, c.harness, cmd.ExitCode(err), err, c.want, out)
 		}
 		if _, err := os.Stat(filepath.Join(root, ".qory")); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("%v: .qory was written", c.args)
@@ -215,7 +216,7 @@ func TestComposeRefusesATierMistake(t *testing.T) {
 	writeFile(t, filepath.Join(root, "harness", "core", "qory-module.yaml"), "apiVersion: qory.dev/v1alpha1\nname: core\n")
 	writeOwnStack(t, root, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\n  model: ${qory:light}\nmodules:\n  - name: core\n    source: {path: ./harness/core}\n")
 	_, err := run(t, "harness", "compose")
-	want := filepath.Join(root, "qory.yaml") + ": target.model ${qory:light} is a tier placeholder; set the main model by its id, and a tier only in an agent's model"
+	want := "Set target.model to a model id, not a tier placeholder.\n  ${qory:light} is a tier placeholder, which goes only in an agent's model.\n  target.model is in " + filepath.Join(root, "qory.yaml") + "."
 	if cmd.ExitCode(err) != 2 || err == nil || err.Error() != want {
 		t.Errorf("target.model: exit %d, err %v\nwant %s", cmd.ExitCode(err), err, want)
 	}

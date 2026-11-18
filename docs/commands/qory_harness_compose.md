@@ -48,7 +48,7 @@ qory harness compose [flags]
       --model string              write this model instead of target.model (qory.yaml: model)
       --no-links                  write no link into the checkout; with the home at .qory/harness, compose still writes the /.qory exclude line; harness launch prints how an agent reads the home (qory.yaml: harness.links: none)
       --runtime string            render for these runtimes instead of target.runtime, comma separated (amp, any, claude, codex, copilot, cursor, gemini, goose, opencode; qory.yaml: runtime)
-      --tier stringArray          map a tier to a model id for each agent whose model is ${qory:<tier>}, as <tier>=<model id>; repeat it for each tier (tiers: light, fast, thinking; qory.yaml: harness.tiers)
+      --tier stringArray          map a tier to a model id for each agent whose model is ${qory:<tier>}, as <tier>=<model id>; repeat it for each tier (tiers: light, balanced, thinking; qory.yaml: harness.tiers)
       --tier-effort stringArray   set the effort value for each agent whose model is ${qory:<tier>}, as <tier>=<effort>, beside --tier <tier>=<model id>; repeat it for each tier
       --update                    fetch every git source again, not the cached clone (qory.yaml: update)
 ```

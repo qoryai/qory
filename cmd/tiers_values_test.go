@@ -38,9 +38,9 @@ func TestComposeWritesAModelIdAsTheSameString(t *testing.T) {
 	root := tierCheckout(t)
 	tierModule(t, root, "[claude, opencode]", map[string]string{
 		"a": "---\nname: a\ndescription: A.\nmodel: ${qory:light}\n---\nA.\n",
-		"b": "---\nname: b\ndescription: B.\nmodel: ${qory:fast}\n---\nB.\n",
+		"b": "---\nname: b\ndescription: B.\nmodel: ${qory:balanced}\n---\nB.\n",
 		"c": "---\nname: c\ndescription: C.\nmodel: ${qory:thinking}\n---\nC.\n",
-	}, `tiers: {light: "null", fast: "yes"}`)
+	}, `tiers: {light: "null", balanced: "yes"}`)
 	for _, c := range []struct{ tier, model string }{
 		{"thinking", "acme#1"},
 		{"thinking", "acme: model"},
