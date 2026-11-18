@@ -355,8 +355,9 @@ func TestSettingsRefuseAnotherRulesFile(t *testing.T) {
 				"modules/a/settings/" + file: readRules,
 				"modules/b/":                 "",
 			})
-			if err == nil || !strings.HasPrefix(err.Error(), "module a: ") || !strings.HasSuffix(err.Error(), "settings/"+file+": settings fragments are .json or .toml") {
-				t.Fatalf("error %v, want today's refusal of settings/%s", err, file)
+			want := "Rename the settings fragment of module a to end in .json or .toml.\n  The file is "
+			if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), "/modules/a/settings/"+file+".") {
+				t.Fatalf("error %v, want the refusal of any other extension for settings/%s", err, file)
 			}
 		})
 	}

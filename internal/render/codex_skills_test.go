@@ -327,9 +327,9 @@ func TestComposeRefusesALinkIntoAnotherModule(t *testing.T) {
 		"modules/shared/docs/style.md":        "shared style\n",
 	}
 	_, _, err := composeLinked(t, files, map[string]string{"modules/core/skills/review/style.md": "../../../shared/docs/style.md"}, compose.Options{})
-	want := "module core: Remove the link skills/review/style.md or point it inside the module."
-	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Errorf("compose: %v, want %q", err, want)
+	want := "Point the link inside module core, or remove it.\n  The link skills/review/style.md leads to "
+	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), "/modules/shared/docs/style.md, outside the module, and qory reads only the module's files.") {
+		t.Errorf("compose: %v, want %q and the link's target", err, want)
 	}
 }
 
