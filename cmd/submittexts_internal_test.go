@@ -7,11 +7,16 @@ import (
 	"unicode/utf8"
 )
 
-// TestTheTextsOfTheSubmitStepStateTheCauseInLineOne is each text of the hand-off file, the
-// submit program and the push step's reads that qory prints in a dispatched run: line 1 has
-// at most 100 characters with the prefix "qory run: ", and it has no advice, so it starts
-// with no verb of an instruction.
-func TestTheTextsOfTheSubmitStepStateTheCauseInLineOne(t *testing.T) {
+// TestTheTextsOfTheSubmitStepHaveAShortLineOne is each text of the hand-off file, the submit
+// program and the push step's reads that qory prints: line 1 has at most 100 characters with the
+// prefix "qory run: ". The texts that name a fix start with it, as an instruction, and the others
+// state the cause and start with no verb of an instruction.
+func TestTheTextsOfTheSubmitStepHaveAShortLineOne(t *testing.T) {
+	fixFirst := map[string]string{
+		"textPushNoReadProxy": "Take ",
+		"textLocalPushFailed": "Fix ",
+		"textLocalNoRemote":   "Set ",
+	}
 	texts := map[string]string{
 		"textHandoffIgnored":    textHandoffIgnored,
 		"textHandoffDropped":    textHandoffDropped,
@@ -35,8 +40,15 @@ func TestTheTextsOfTheSubmitStepStateTheCauseInLineOne(t *testing.T) {
 		if n := utf8.RuneCountInString(line); n > 100 {
 			t.Errorf("%s: line 1 has %d characters, want at most 100: %q", name, n, line)
 		}
+		first := strings.TrimPrefix(line, "qory run: ")
+		if fix, ok := fixFirst[name]; ok {
+			if !strings.HasPrefix(first, fix) {
+				t.Errorf("%s: line 1 is %q, want the fix first, starting with %q", name, line, fix)
+			}
+			continue
+		}
 		for _, advice := range []string{"Check ", "Read ", "Run ", "Shorten ", "Set ", "Let ", "Take "} {
-			if strings.HasPrefix(strings.TrimPrefix(line, "qory run: "), advice) {
+			if strings.HasPrefix(first, advice) {
 				t.Errorf("%s: line 1 starts with the advice %q", name, advice)
 			}
 		}
