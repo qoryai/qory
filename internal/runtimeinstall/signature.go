@@ -128,7 +128,8 @@ func decodeSignatures(b []byte, strict bool) ([]Signature, error) {
 // verify checks rel's signatures with keys at now: one signature by a key of keys that
 // has not expired must verify over <rel.Signed>:<rel.Integrity>. what is the release as
 // an error shows it, such as codex 0.170.0. A bad signature by a key qory has is
-// refused first, then a key qory does not have, then an expired key.
+// refused first, then a key qory does not have, then an expired key. The key's id is on
+// the last line, so the cause's first line stays short.
 func verify(rel Release, keys []SigningKey, now time.Time, what string) error {
 	if len(rel.Signatures) == 0 {
 		return fmt.Errorf(textRelease+"npm has no signature of %s", what)
@@ -152,11 +153,11 @@ func verify(rel Release, keys []SigningKey, now time.Time, what string) error {
 	}
 	switch {
 	case bad != "":
-		return fmt.Errorf(textRelease+"npm's signature of %s with key %s does not verify", what, bad)
+		return fmt.Errorf(textRelease+"npm's signature of %s does not verify\nThe key is %s", what, bad)
 	case unknown != "":
-		return fmt.Errorf("Update qory.\nnpm signed %s with key %s, which this qory does not have.", what, unknown)
+		return fmt.Errorf("Update qory.\nnpm signed %s with a key that this qory does not have.\nThe key is %s.", what, unknown)
 	}
-	return fmt.Errorf("Update qory.\nnpm signed %s with key %s, which expired on %s.", what, expired, keysExpiry(keys, expired))
+	return fmt.Errorf("Update qory.\nnpm signed %s with a key that expired on %s.\nThe key is %s.", what, keysExpiry(keys, expired), expired)
 }
 
 // keysExpiry is the expiry date of the key keyid of keys, as 2006-01-02.

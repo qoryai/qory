@@ -975,7 +975,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				in, err := installRuntime(installCtx, run, conf.Forager, machine, walled || remote, name, state, said)
 				if err != nil {
-					return &runLineError{codeLine(installFailed(err))}
+					err = installFailed(err)
+					if dispatched {
+						err = causeOnly(err)
+					}
+					return &runLineError{codeLine(err)}
 				}
 				if in != nil {
 					said(installedLine(*in))

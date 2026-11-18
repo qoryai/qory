@@ -92,6 +92,10 @@ release may change what an existing document does, and states it under Upgrading
   the run with `Remove the version's folder once no run uses it, then run again`. The session starts `bin/codex`, and behind a wall Forager mounts the
   version's folder read-only at `/qory/runtime/codex`. Before, a session of Codex started
   the program from the image, which no agent image has.
+- A run from a run key or a run code whose runtime's install fails prints the cause of
+  the failure alone, such as `qory run: npm has no signature of claude 2.1.320`, with no
+  fix line: Qory Apiary shows that output, and the fix line, such as `Update qory.`,
+  advises a person who runs qory. A person's run prints the fix line, then the cause.
 - Every install of a runtime checks npm's signature of the version before it reads the
   tarball, with npm's public keys built into qory: from npm, `dist.signatures`; from a
   registry's runtime cache, the layer's annotation `dev.qory.runtime.signatures`. A

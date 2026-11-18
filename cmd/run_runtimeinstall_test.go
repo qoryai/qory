@@ -262,18 +262,17 @@ func codexFolderIs(t *testing.T, dir, version string) {
 	}
 }
 
-// TestARuntimeTheRegistryNeverHeldEndsTheRunWithItsFix has an empty registry: the run
-// prints the fix first, closes failed with -1 before the image's fetch, no session
-// joins, and qory run exits 1.
-func TestARuntimeTheRegistryNeverHeldEndsTheRunWithItsFix(t *testing.T) {
+// TestARuntimeTheRegistryNeverHeldEndsTheRunWithItsCause has an empty registry: the
+// run, a dispatched one, prints the cause with no fix line, closes failed with -1 before
+// the image's fetch, no session joins, and qory run exits 1.
+func TestARuntimeTheRegistryNeverHeldEndsTheRunWithItsCause(t *testing.T) {
 	r := runInstalling(t, installSetup{reg: rt.StartRegistry(t), proxy: rt.StartProxy(t), walled: true})
 	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
-	want := "qory run: Check that the instance's registry reaches the publisher of claude, then run again\n" +
-		"The registry has never held claude and could not fetch it: shared/runtimes/claude:newest returned 404.\n"
-	if !strings.Contains(r.out, want) {
-		t.Fatalf("the output has no fix-first line:\n%s", r.out)
+	want := "qory run: the registry has never held claude and could not fetch it: shared/runtimes/claude:newest returned 404\n"
+	if !strings.Contains(r.out, want) || strings.Contains(r.out, "then run again") {
+		t.Fatalf("the output has no cause line, or has the fix line:\n%s", r.out)
 	}
 	for _, c := range r.calls {
 		if c == "fetch image" {
@@ -342,8 +341,9 @@ func TestARunWithNoControlPlaneInstallsFromNpmDirectly(t *testing.T) {
 }
 
 // TestATarballThatDoesNotMatchItsChecksumEndsTheRun publishes a tarball on npm whose
-// dist.integrity is another tarball's: the run stops with the checksum line, exit 1,
-// before any session, and no version's folder is written.
+// dist.integrity is another tarball's: the run, a dispatched one, stops with the
+// checksum line and no fix line, exit 1, before any session, and no version's folder is
+// written.
 func TestATarballThatDoesNotMatchItsChecksumEndsTheRun(t *testing.T) {
 	npm := rt.StartNpm(t)
 	other := rt.PlainTarball(t, "other")
@@ -355,8 +355,8 @@ func TestATarballThatDoesNotMatchItsChecksumEndsTheRun(t *testing.T) {
 	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
-	want := "qory run: Check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum " + rt.Integrity(other)
-	if !strings.Contains(r.out, want) {
+	want := "qory run: the tarball of claude 2.1.320 does not match the checksum " + rt.Integrity(other)
+	if !strings.Contains(r.out, want) || strings.Contains(r.out, "Check the source") {
 		t.Fatalf("the output has no checksum line:\n%s", r.out)
 	}
 	if _, err := os.Lstat(filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "claude", "2.1.320")); err == nil {
@@ -698,6 +698,66 @@ func TestAnOrphanContainerKeepsItsVersionWithNoWall(t *testing.T) {
 			if _, err := os.Lstat(old); (err == nil) != c.kept {
 				t.Errorf("1.0.0 is kept: %v, want %v (%v)", err == nil, c.kept, err)
 			}
+		})
+	}
+}
+
+// signatureCases are the npm signatures of claude 2.1.320 that stop an install, with the
+// cause of each, and the fix line that a person's run prints before it.
+var signatureCases = []struct {
+	name, fix, cause string
+	sign             func(signed, integrity string) any
+}{
+	{"no signature", "Check the source of the runtime's releases", "npm has no signature of claude 2.1.320",
+		func(string, string) any { return nil }},
+	{"a key qory does not have", "Update qory.", "npm signed claude 2.1.320 with a key that this qory does not have.\nThe key is SHA256:another.",
+		func(s, i string) any {
+			return []map[string]string{{"keyid": "SHA256:another", "sig": rt.Sign(s + ":" + i)}}
+		}},
+}
+
+// TestADispatchedRunShowsOnlyTheCauseOfAFailedInstall runs claude with a run key, whose
+// output Qory Apiary shows, on an npm whose signature of claude 2.1.320 stops the
+// install: qory run prints the cause, its first letter in lower case, with no fix line,
+// and exits 1 with no session.
+func TestADispatchedRunShowsOnlyTheCauseOfAFailedInstall(t *testing.T) {
+	for _, c := range signatureCases {
+		t.Run(c.name, func(t *testing.T) {
+			npm := rt.StartNpm(t)
+			npm.Publish("2.1.320")
+			npm.SignWith(c.sign)
+			r := runInstalling(t, installSetup{npm: npm, proxy: rt.StartProxy(t)})
+			if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
+				t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+			}
+			cause := strings.TrimSuffix(c.cause, ".")
+			wants(t, r.out, "qory run: "+strings.ToLower(cause[:1])+cause[1:]+"\n")
+			lacks(t, r.out, c.fix)
+		})
+	}
+}
+
+// TestAPersonsRunShowsTheFixAndTheCauseOfAFailedInstall runs claude in a checkout on a
+// person's machine, with no run key, on an npm whose signature of claude 2.1.320 stops
+// the install: qory run prints the fix line, then the cause.
+func TestAPersonsRunShowsTheFixAndTheCauseOfAFailedInstall(t *testing.T) {
+	for _, c := range signatureCases {
+		t.Run(c.name, func(t *testing.T) {
+			defer cmd.SetInstallRuntimes(true)()
+			defer cmd.SetRuntimeKeys(rt.Keys())()
+			npm := rt.StartNpm(t)
+			npm.Publish("2.1.320")
+			npm.SignWith(c.sign)
+			defer cmd.SetNpmRegistry(npm.URL())()
+			root := newCheckout(t)
+			copyFixture(t, "two-modules", root)
+			composedForFake(t, root, fakeRuntime(t))
+			t.Setenv("QORY_RUN_KEY", "")
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			if err == nil || cmd.ExitCode(err) != 1 {
+				t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+			}
+			wants(t, out+err.Error(), c.fix+"\n"+c.cause)
 		})
 	}
 }

@@ -146,6 +146,19 @@ func installFailed(err error) error {
 	return errors.New(strings.Join(lines, "\n"))
 }
 
+// causeOnly is err, an install's error of a fix line and the cause on the lines after it,
+// as a dispatched run shows it, under the user's ruling 771 (a): the cause alone, with
+// its first letter in lower case, as [fetchImage] shows a refused image, and no full stop
+// at its end, since [codeUsed] may follow. Qory Apiary shows the run's output, and the
+// fix line advises a person who runs qory. An error of one line stays as it is.
+func causeOnly(err error) error {
+	_, cause, ok := strings.Cut(err.Error(), "\n")
+	if !ok || cause == "" {
+		return err
+	}
+	return errors.New(strings.TrimSuffix(lowerFirst(cause), "."))
+}
+
 // useInstalledRuntime is the one place where the session's spec gets the installed
 // runtime, before [wrapAgentEnv] wraps the session's command for the wall. It sets
 // RuntimeInstall to the version's folder and Command to the installed program, which

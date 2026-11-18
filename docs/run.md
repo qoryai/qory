@@ -1019,14 +1019,16 @@ it reads the tarball:
 
   ```text
   qory run: Check the source of the runtime's releases
-  npm's signature of codex 0.170.0 with key SHA256:<keyid> does not verify
+  npm's signature of codex 0.170.0 does not verify
+  The key is SHA256:<keyid>
   ```
 
 - only keys that qory does not have, or that expired: a newer qory has npm's new key.
 
   ```text
   qory run: Update qory.
-  npm signed codex 0.170.0 with key SHA256:<keyid>, which this qory does not have.
+  npm signed codex 0.170.0 with a key that this qory does not have.
+  The key is SHA256:<keyid>.
   ```
 
 A version's folder that an earlier run installed is used only after the same check.
@@ -1115,8 +1117,11 @@ qory run: installed claude 2.1.320
 ```
 
 If the install fails, no session starts and `qory run` exits 1 with the error, whose first
-line is the fix; a run with a control plane closes `failed` with -1. A tarball that does
-not match its sha512 checksum stops the run with:
+line is the fix; a run with a control plane closes `failed` with -1. A run from a run key
+or a run code, which Qory Apiary started, prints the cause alone, with no fix line, its
+first letter in lower case: `qory run: the tarball of claude 2.1.320 does not match the
+checksum sha512-<checksum>`. A tarball that does not match its sha512 checksum stops a
+person's run with:
 
 ```text
 qory run: Check the source of the runtime's releases

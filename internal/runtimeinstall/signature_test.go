@@ -70,16 +70,16 @@ func TestNpmsSignatureIsCheckedBeforeTheInstall(t *testing.T) {
 			"Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: it has no signature"},
 		{"a key qory does not have", func(s, i string) any {
 			return []runtimeinstall.Signature{{KeyID: "SHA256:another", Sig: rt.Sign(s + ":" + i)}}
-		}, nil, "Update qory.\nnpm signed claude 2.1.320 with key SHA256:another, which this qory does not have."},
+		}, nil, "Update qory.\nnpm signed claude 2.1.320 with a key that this qory does not have.\nThe key is SHA256:another."},
 		{"a key that expired", func(s, i string) any { return sig(s + ":" + i) }, expired,
-			"Update qory.\nnpm signed claude 2.1.320 with key " + rt.KeyID + ", which expired on 2025-01-29."},
+			"Update qory.\nnpm signed claude 2.1.320 with a key that expired on 2025-01-29.\nThe key is " + rt.KeyID + "."},
 		{"a bad signature", func(string, string) any {
 			return []runtimeinstall.Signature{{KeyID: rt.KeyID, Sig: "MEUCIQDnotasignature"}}
-		}, nil, "Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 with key " + rt.KeyID + " does not verify"},
+		}, nil, "Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID},
 		{"a signature of another version", func(_, i string) any { return sig("@anthropic-ai/claude-code-linux-x64@2.1.319:" + i) }, nil,
-			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 with key " + rt.KeyID + " does not verify"},
+			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID},
 		{"a signature of another checksum", func(s, _ string) any { return sig(s + ":" + rt.Integrity([]byte("another tarball"))) }, nil,
-			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 with key " + rt.KeyID + " does not verify"},
+			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID},
 		{"more than 16 signatures", func(string, string) any { return many }, nil,
 			"Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: it has 17 signatures, and qory reads at most 16"},
 		{"a keyid of more than 1 KiB", func(string, string) any {
@@ -175,9 +175,9 @@ func TestTheRegistrysSignaturesAreReadStrictly(t *testing.T) {
 		{"no sig", text([]map[string]string{{"keyid": rt.KeyID}}), cache + bad + "its signature 1 has no keyid or no sig"},
 		{"no JSON", text("x"), cache + bad + "it is not a JSON array"},
 		{"a signature of another version", text(rt.Signatures("@anthropic-ai/claude-code-linux-x64@2.1.319", rt.Integrity(rt.PlainTarball(t, "2.1.320")))),
-			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 with key " + rt.KeyID + " does not verify"},
+			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID},
 		{"a signature of the arm64 build", text(rt.Signatures("@anthropic-ai/claude-code-linux-arm64@2.1.320", rt.Integrity(rt.PlainTarball(t, "2.1.320")))),
-			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 with key " + rt.KeyID + " does not verify"},
+			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFromRegistry(t)
