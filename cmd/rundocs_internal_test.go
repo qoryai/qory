@@ -807,3 +807,23 @@ func TestARunCodeRunsOnlyOnRuntimesWithADescriptorAndAnInstall(t *testing.T) {
 		}
 	}
 }
+
+// TestTheRuntimeRefusalsListTheSetTheCheckUses is the refusal of no runtime and of a
+// runtime a run code does not run on: each lists exactly [runRuntimes], the set that
+// codeRunOf accepts, joined by [listOf], so both change with the set.
+func TestTheRuntimeRefusalsListTheSetTheCheckUses(t *testing.T) {
+	set := runRuntimes()
+	list := listOf(set)
+	if !strings.HasSuffix(noRuntime().Error(), "\n  qory runs one of "+list+".") {
+		t.Errorf("the refusal of no runtime is %q, want it to list %q", noRuntime(), list)
+	}
+	if got := notRunRuntime("gemini").Error(); !strings.Contains(got, "on one of "+list+", and not on gemini;") {
+		t.Errorf("the refusal of gemini is %q, want it to list %q", got, list)
+	}
+	for _, name := range append([]string{"gemini", "cursor", "opencode"}, set...) {
+		_, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: name}})
+		if accepted := slices.Contains(set, name); accepted != (err == nil) || !accepted && strings.Count(err.Error(), list) != 1 {
+			t.Errorf("%s: %v, want it accepted: %v", name, err, accepted)
+		}
+	}
+}
