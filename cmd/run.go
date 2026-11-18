@@ -153,8 +153,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			maskServerSecrets()
 			streams := newRunStreams(cmd.OutOrStdout(), cmd.ErrOrStderr())
 			defer streams.flush()
-			// The drafts of a local run print as the last lines of the run, after every line of
-			// the other defers: this one is registered first among them, so it runs last.
+			// The drafts of a local run print as the last lines of the run. Defers run last in, first
+			// out: this one runs after every defer registered below it, and before streams.flush,
+			// which writes only what the masking writers still hold.
 			var drafts []string
 			defer func() {
 				for _, address := range drafts {

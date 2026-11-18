@@ -568,14 +568,16 @@ release may change what an existing document does, and states it under Upgrading
   draft pull request. A composed harness has one; a second declaration stops the compose.
 - A session hands its title, description and the step of each commit to the submit step in
   the file that `QORY_SUBMISSION_HANDOFF` names. A commit with no step is `unreviewed`. qory
-  reads the file inside the checkout and follows no link, and drops a title with a control
-  character, a title, description or step that is over a limit of the submission format, and a
-  step whose key is not a full lower-case commit id, with a line that states the
-  cause and the values.
+  reads the file inside the checkout, and a link that leads out of the checkout ends the read.
+  It drops a title with a control character or with no character that is not a space, a title,
+  description or step that is over a limit of the submission format, a description with a NUL
+  character or a line that is a marker of the draft's block (`<!-- qory:start -->` or
+  `<!-- qory:end -->`), a step with a control character, and a step whose key is not a full
+  lower-case commit id, with a line that states the cause and the values.
 - qory adds `/.qory/handoff/` to the checkout's `.git/info/exclude` for a run on a work
   item's branch, so `git add -A` and `git commit -a` leave the hand-off file out of a commit.
-  A commit of the run that has a path under `.qory/handoff/`, as `git add -f` makes one,
-  stops the push step before any push, and the run closes `failed`.
+  A commit of the run that has a path under `.qory/handoff/`, in any letter case, as
+  `git add -f` makes one, stops the push step before any push, and the run closes `failed`.
 - A run from a run code starts no submit program, relay, container or write token for the
   forge's API: the push step pushes and stores the submission, with the draft `no-program`,
   and the forge's adapter opens the draft pull request from it. The `submit_program` of the
@@ -585,7 +587,12 @@ release may change what an existing document does, and states it under Upgrading
   outside the wall, with the person's login of the forge's command line, once for each
   repository. The program never pushes. A run whose session did not pass, or that wrote no
   hand-off text, gets the draft `none`. For each repository whose program returned a draft,
-  `qory run` prints `Draft: <address>` as its last lines. The program gets the inputs `QORY_SUBMIT_*` and
+  `qory run` prints `Draft: <address>` as its last lines. qory pushes to `origin` by its name,
+  so git's `insteadOf` rules apply once. It pushes nothing, and runs no program, when the
+  remote has several push addresses or an address that is not a host and a repository path of
+  a forge. The program runs in a new session with no terminal, with the person's environment
+  without any `QORY_` variable, and with `GIT_TERMINAL_PROMPT=0` and `GH_PROMPT_DISABLED=1`.
+  The program gets the inputs `QORY_SUBMIT_*` and
   prints plain lines: the five `draft_` lines and a `commit_url` line for each commit. qory
   stores them as the draft and the commit addresses, checks each value, and leaves out a line
   that it cannot use. A program that ends with status 3 means that the person has no login of

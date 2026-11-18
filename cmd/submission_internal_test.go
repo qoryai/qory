@@ -362,13 +362,31 @@ func TestAHandoffDescriptionWithANulOrAMarkerLineDropsTheText(t *testing.T) {
 // TestAHandoffStepWithAControlCharacterIsDropped is a step with a tab or a NUL: the step is
 // dropped with a line that has the commit, its commit is unreviewed, and a step without one stays.
 func TestAHandoffStepWithAControlCharacterIsDropped(t *testing.T) {
-	bad, bad2, good := strings.Repeat("a", 40), strings.Repeat("b", 40), strings.Repeat("c", 40)
-	h, err := readHandoff(handoffIn(t, `{"steps":{"`+bad+`":"plan\tb","`+bad2+`":"x\u0000","`+good+`":"plan"}}`))
+	bad, bad2, bad3, bad4, good := strings.Repeat("a", 40), strings.Repeat("b", 40), strings.Repeat("d", 40), strings.Repeat("e", 40), strings.Repeat("c", 40)
+	h, err := readHandoff(handoffIn(t, `{"steps":{"`+bad+`":"plan\tb","`+bad2+`":"x\u0000","`+bad3+`":"a\u202eb","`+bad4+`":"a\u200bb","`+good+`":"plan"}}`))
 	if err != nil || h == nil {
 		t.Fatalf("%v, %v", h, err)
 	}
-	want := []string{fmt.Sprintf(textDroppedStepControl, bad), fmt.Sprintf(textDroppedStepControl, bad2)}
-	if !slices.Equal(h.dropped, want) || h.stepOf(bad) != stepUnreviewed || h.stepOf(good) != "plan" {
-		t.Errorf("the lines are %q, steps %q and %q, want %q, unreviewed and plan", h.dropped, h.stepOf(bad), h.stepOf(good), want)
+	want := []string{fmt.Sprintf(textDroppedStepControl, bad), fmt.Sprintf(textDroppedStepControl, bad2), fmt.Sprintf(textDroppedStepControl, bad4), fmt.Sprintf(textDroppedStepControl, bad3)}
+	slices.Sort(want)
+	got := slices.Clone(h.dropped)
+	slices.Sort(got)
+	if !slices.Equal(got, want) || h.stepOf(bad3) != stepUnreviewed || h.stepOf(bad4) != stepUnreviewed || h.stepOf(good) != "plan" {
+		t.Errorf("the lines are %q, want %q, with the bidirectional and the zero-width steps unreviewed and plan kept", got, want)
+	}
+}
+
+// TestAHandoffTitleOfSpacesDropsTheText is a title of spaces only, of U+0020, U+00A0 or another
+// space of the draft title's rule: the draft title would be refused, so the text is dropped with a
+// line and the draft has no title. A title with one other character stays.
+func TestAHandoffTitleOfSpacesDropsTheText(t *testing.T) {
+	for title, kept := range map[string]bool{`   `: false, `\u00a0\u00a0`: false, ` \u3000\u2009 `: false, ` a `: true} {
+		h, err := readHandoff(handoffIn(t, `{"text":{"title":"`+title+`","description":"d"}}`))
+		if err != nil || h == nil {
+			t.Fatalf("%v, %v", h, err)
+		}
+		if got := h.text() != nil; got != kept || (!kept && !slices.Equal(h.dropped, []string{textDroppedBlank})) || (kept && len(h.dropped) != 0) {
+			t.Errorf("title %q: kept %v with the lines %q, want kept %v", title, got, h.dropped, kept)
+		}
 	}
 }

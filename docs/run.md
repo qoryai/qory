@@ -2639,8 +2639,8 @@ The step does this, in order:
    The commits of all repositories come before the first push, so a failed commit pushes
    nothing.
 4. qory checks each commit from the start commit to `HEAD`, merges included, in each
-   repository. A commit that has a path under `.qory/handoff/`, as `git add -f` makes one,
-   stops the step before any push, in any repository, and the run closes `failed`. qory
+   repository. A commit that has a path under `.qory/handoff/`, in any letter case such as
+   `.QORY/Handoff/`, as `git add -f` makes one, stops the step before any push, in any repository, and the run closes `failed`. qory
    prints `qory run: A commit of this run has a path under .qory/handoff/, so qory did not
    push.`, then three lines indented by two spaces: `Repository <system>/<path>.`, `Commit
    <commit>.` and `Path <path>.` A commit that added the path and a later commit that
@@ -2903,7 +2903,7 @@ full commit id of 40 or 64 lower-case hexadecimal digits. qory prints `qory run:
 file has a part the submission format does not allow, so qory dropped it.`, then one line
 indented by two spaces for each part: `Title: <n> characters, over the limit of 256. qory
 dropped the text.`, `Description: <n> characters, over the limit of 20000. qory dropped the
-text.`, `Title: has a control character at character <n>. qory dropped the text.`, `Description: has a NUL character at character <n>. qory dropped the text.`, `Description: line <n> is a marker line of the draft's block. qory dropped the text.`, `Step of commit <commit>: has a control character. qory dropped the step.`, `<n> step
+text.`, `Title: has a control character at character <n>. qory dropped the text.`, `Description: has a NUL character at character <n>. qory dropped the text.`, `Description: line <n> is a marker line of the draft's block. qory dropped the text.`, `Step of commit <commit>: has a control character. qory dropped the step.`, `<n> further steps have a control character. qory dropped them.`, `Title: has no character that is not a space. qory dropped the text.`, `<n> step
 keys are not a full commit id of 40 or 64 lower-case hexadecimal digits. qory dropped them.`, and `Step of commit <commit>: <n> characters, over the limit of 128. qory dropped the
 step.`, for at most 5 steps, then `<n> further steps are over the limit of 128 characters.
 qory dropped them.` It prints no content of the file. A step for a commit that this run did not make is not used. The run
@@ -2923,17 +2923,20 @@ program, no container, no relay and no write token for the forge's API: the push
 git's push alone, and the forge's adapter opens or updates the draft pull request from the
 stored submission.
 
-A run with no run code has no work item and no run API, so qory stores no submission for it.
+A run with no run code has no work item and no run API, so qory stores no submission for it. A run
+that has a run key and no run code, and whose composed harness has a submit program, is a local run
+too: qory does the same for it.
 After the run's commits are back in your repositories on a branch `qory/run-<run id>`, qory
 pushes the head commit of that branch for each repository, as it was when the checks ran, to
 the push address of the remote `origin` (`git remote get-url --push origin`, after git's
-`insteadOf` and `pushInsteadOf` rewrites), with your git login and configuration. The push has
-no force, no pre-push hook, no submodule push and no tag that follows the commit. The remote
+`insteadOf` and `pushInsteadOf` rewrites), with your git login and configuration. qory pushes to
+`origin` by its name, so git applies its rewrites once, and the push goes to the address that the
+checks and the program got. The push has no force, no pre-push hook, no submodule push and no tag that follows the commit. The remote
 must have one push address: with two or more, qory pushes nothing and prints `qory run: The
 remote origin has <n> push addresses, so qory pushed nothing and opened no draft.` with the
 branch and the command `git remote set-url --push origin <address>`. The push address must be a
 host and a repository path of a forge, over `https`, `http`, `ssh`, `git` or the form
-`git@host:owner/repo`, with a host name of lower-case dotted labels. Any other address, such as
+`git@host:owner/repo`, with a host name of dotted labels of letters, digits and hyphens, which qory writes in lower case, so `GitHub.com` is `github.com`. Any other address, such as
 `file://`, a path or a host with no dot, stops the run the same way with `qory run: The remote
 origin is not a forge address, so qory pushed nothing and opened no draft.`, and the line never
 shows the address. `QORY_SUBMIT_SYSTEM` and
@@ -2960,7 +2963,10 @@ output, one line for each such repository in the order of the repositories, as t
 that qory accepted: `https` on the repository's system, of the characters that RFC 3986 allows,
 so it has no control character. A repository whose draft is `none`, whose program failed or
 timed out with no whole draft, or whose lines qory could not use, prints no line. A program that
-printed all five lines and then exited with 1 or 2 has a draft, so its line is printed.
+printed all five lines and then exited with 1 or 2 has a draft, so its line is printed. The
+`Draft:` lines are for a person to read. Standard output also has the output of the session, which
+can print a line that looks the same, so a script must not take a `Draft:` line as the record of a
+draft.
 
 qory runs the command once for each repository that it pushed, in a new empty folder, with the
 arguments that the manifest's `submit_program.command` lists after the program's path, and with

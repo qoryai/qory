@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/preparation"
@@ -123,6 +122,7 @@ func readHandoff(root string) (*handoff, error) {
 const (
 	textDroppedTitle       = "Title: %d characters, over the limit of %d. qory dropped the text."
 	textDroppedDescription = "Description: %d characters, over the limit of %d. qory dropped the text."
+	textDroppedBlank       = "Title: has no character that is not a space. qory dropped the text."
 	textDroppedControl     = "Title: has a control character at character %d. qory dropped the text."
 	textDroppedNUL         = "Description: has a NUL character at character %d. qory dropped the text."
 	textDroppedMarker      = "Description: line %d is a marker line of the draft's block. qory dropped the text."
@@ -192,6 +192,9 @@ func (h *handoff) limit() {
 			at := controlAt(h.Text.Title)
 			h.Text = nil
 			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedControl, at))
+		case title > 0 && !visibleTitle(h.Text.Title):
+			h.Text = nil
+			h.dropped = append(h.dropped, textDroppedBlank)
 		case title > maxTitle:
 			h.Text = nil
 			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedTitle, title, maxTitle))
@@ -220,7 +223,7 @@ func (h *handoff) limit() {
 	}
 	var controlled []string
 	for commit, step := range h.Steps {
-		if strings.ContainsFunc(step, unicode.IsControl) {
+		if strings.ContainsFunc(step, refusedInTitle) {
 			controlled = append(controlled, commit)
 		}
 	}
@@ -251,6 +254,11 @@ func (h *handoff) limit() {
 	if len(over) > maxDroppedSteps {
 		h.dropped = append(h.dropped, fmt.Sprintf(textDroppedFurther, len(over)-maxDroppedSteps, maxStep))
 	}
+}
+
+// visibleTitle reports whether title has a character that is not a space of [titleSpaces].
+func visibleTitle(title string) bool {
+	return strings.ContainsFunc(title, func(r rune) bool { return !slices.Contains(titleSpaces, r) })
 }
 
 // shownCommit is commit as a line shows it: printable, masked and at most 64 characters.
