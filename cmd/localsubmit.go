@@ -23,14 +23,15 @@ import (
 // The words of the local submit step. Line 1 is the fix, and the cause and the values follow on
 // indented lines.
 const (
-	textPushChecksMissing = "qory run: Push the branch and open the draft by hand: this qory version has no push checks.\n  Branch: %s.\n  qory pushed nothing and opened no draft."
+	textPushChecksMissing = "qory run: Push each branch by hand: the key and scope push checks of qory run are not registered.\n  qory pushed nothing and opened no draft; open each draft by hand if you want one."
+	textPushChecksBranch  = "\n  Branch: %s in %s."
 	textPushRefused       = "qory run: Fix the cause below, then run again: a push check refused the push.\n  qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalPushFailed   = "qory run: Fix the cause below, then run again: the push failed, so qory opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalNoHistory    = "qory run: Fix the cause below, then run again: qory could not read the branch or its origin.\n  qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
-	textLocalNoCommits    = "qory run: Open the draft by hand: qory pushed the branch but could not list the run's commits.\n  qory ran no program, so it opened no draft.\n  Branch: %s.\n  Cause: %s"
+	textLocalNoCommits    = "qory run: Open a draft by hand if you want one: qory pushed the branch but could not list commits.\n  qory ran no program for the repository named by Branch:, so it opened no draft for it.\n  Branch: %s.\n  Cause: %s"
 	textDraftLine         = "Draft: "
 	textLocalNoRemote     = "qory run: Set remote origin to a forge repository address, then run again; qory pushed nothing.\n  qory opened no draft.\n  Branch: %s.\n  Cause: %s"
-	textLocalPushURLs     = "qory run: Remove the extra push addresses of remote origin, so it has one.\n  The remote origin has %d push addresses, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  If remote.origin.url has several values, run: git remote set-url --push origin <address>\n  If remote.origin.pushurl has several values, run once for each address to drop: git remote set-url --delete --push origin <address-to-drop>"
+	textLocalPushURLs     = "qory run: Remove the extra push addresses of remote origin, so it has one.\n  The remote origin has %d push addresses, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  List the configured addresses with git config --get-all remote.origin.pushurl, or with git config --get-all remote.origin.url when that prints none.\n  Do not use git remote get-url --push --all: it shows the addresses after the insteadOf rewrites of git.\n  Then run git config --unset-all remote.origin.pushurl (exit status 5 means it had no value), and git remote set-url --push origin <address> with the address to keep."
 )
 
 // localPushCheck is a check of a push that a local run makes: it gets the repository and the
@@ -103,7 +104,13 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 	}
 	checks, ok := pushChecks()
 	if !ok {
-		fmt.Fprintf(w, textPushChecksMissing+"\n", shownText(strings.Join(c.landedBranches(), ", ")))
+		fmt.Fprint(w, textPushChecksMissing)
+		for _, r := range c.repos {
+			if branch := c.landed[r.Path]; branch != "" {
+				fmt.Fprintf(w, textPushChecksBranch, shownText(branch), shownText(filepath.Join(c.root, filepath.FromSlash(r.Path))))
+			}
+		}
+		fmt.Fprintln(w)
 		return nil
 	}
 	given := readHandoffPrinting(w, c.dir.Work())
@@ -171,18 +178,6 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 		}
 	}
 	return drafts
-}
-
-// landedBranches is the branches that the run's commits landed on, sorted, each once.
-func (c *runCopy) landedBranches() []string {
-	var out []string
-	for _, branch := range c.landed {
-		if branch != "" && !slices.Contains(out, branch) {
-			out = append(out, branch)
-		}
-	}
-	slices.Sort(out)
-	return out
 }
 
 // draftAddress is the address of the draft that the program returned for the one repository of

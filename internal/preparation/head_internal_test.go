@@ -54,7 +54,8 @@ func TestAMissingBranchTakesAFirstPushOnly(t *testing.T) {
 	_, _, err := pushOf(dir, b)
 	changed := headError(t, err)
 	want := "qory run: Create the branch at the expected commit on the forge; it is not there.\n" +
-		"  Branch qory/wi_1. Repository git.example.com/acme/shop. Head: none. Expected: " + start + ", the start commit. qory did not push."
+		"  Branch qory/wi_1. Repository git.example.com/acme/shop. Head: none. Expected: " + start + ", the start commit. qory did not push.\n" +
+		"  Run git push <remote> " + start + ":refs/heads/qory/wi_1, with the remote of that repository; fetch the commit first if the checkout has no such commit."
 	if err.Error() != want {
 		t.Errorf("the refusal is\n%s\nwant\n%s", err, want)
 	}
@@ -491,6 +492,8 @@ func TestTheRefusalOfAMovedBranchSaysWhatIsLostAndWhatApiaryRecorded(t *testing.
 		fixMissing = "qory run: Create the branch at the expected commit on the forge; it is not there.\n"
 		loss       = "\n  Setting the branch to that commit or deleting it loses the commits on it that no version has."
 		recorded   = "\n  Expected is this run's last push: moving the branch to it works only if Qory Apiary recorded that push."
+		created    = "\n  Expected is this run's last push: creating the branch at it works only if Qory Apiary recorded that push."
+		push       = "\n  Run git push <remote> %s:refs/heads/qory/wi_1, with the remote of that repository; fetch the commit first if the checkout has no such commit."
 	)
 	line2 := func(head, from string) string {
 		return "  Branch qory/wi_1. Repository git.example.com/acme/shop. Head: " + head + ". Expected: " + expected + ", " + from + ". qory did not push."
@@ -502,8 +505,8 @@ func TestTheRefusalOfAMovedBranchSaysWhatIsLostAndWhatApiaryRecorded(t *testing.
 	}{
 		{"moved, start commit", &HeadChanged{Head: head}, fixMoved + line2(head, "the start commit") + loss},
 		{"moved, last push", &HeadChanged{Head: head, LastPush: true}, fixMoved + line2(head, "this run's last push") + loss + recorded},
-		{"missing, start commit", &HeadChanged{}, fixMissing + line2("none", "the start commit")},
-		{"missing, last push", &HeadChanged{LastPush: true}, fixMissing + line2("none", "this run's last push") + recorded},
+		{"missing, start commit", &HeadChanged{}, fixMissing + line2("none", "the start commit") + fmt.Sprintf(push, expected)},
+		{"missing, last push", &HeadChanged{LastPush: true}, fixMissing + line2("none", "this run's last push") + fmt.Sprintf(push, expected) + created},
 	} {
 		c.err.Branch, c.err.System, c.err.Path, c.err.Expected = "qory/wi_1", "git.example.com", "acme/shop", expected
 		if got := c.err.Error(); got != c.want {

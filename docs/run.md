@@ -2733,7 +2733,7 @@ push`, the next run starts at the newest push that Qory Apiary recorded: moving 
 back works only when Apiary recorded that push, and otherwise the next run refuses again,
 so delete the branch. A branch that is not on the forge, with `Head: none`, cannot be deleted:
 the refusal starts with `Create the branch at the expected commit on the forge; it is not
-there.` It occurs when the work item has a version or a pushed commit and the forge has no
+there.` and gives the `git push` command that creates it. It occurs when the work item has a version or a pushed commit and the forge has no
 such branch. When the work
 item has no version, the next run creates a deleted branch at `target_version`, not at the
 commit that the deleted branch had; with a version, it starts from the last one.
@@ -2773,7 +2773,10 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   it works only if Qory Apiary recorded that push.` When the branch is not on the forge, the
   text starts with `Create the branch at the expected commit on the forge; it is not there.`,
   has `Head: none` on its second line, and has no sentence of loss, as no commit is on the
-  branch. The step
+  branch. Its third line is `Run git push <remote> <expected commit>:refs/heads/<branch>, with
+  the remote of that repository; fetch the commit first if the checkout has no such commit.`,
+  with the values of the second line. For `this run's last push`, a fourth line has
+  `creating the branch at it` in place of `moving the branch to it`. The step
   pushes nothing in any repository, and ends the run as
   [The head check](#the-head-check) describes. A push that the forge rejects with the status
   `[rejected]`, such as a lease that no longer matches, ends the step with the same text,
@@ -2867,9 +2870,9 @@ a stop or the time limit cut closes the run as the sections above say.
 After the push and the report of the pushed commits, the push step stores the submission,
 the document of the [submission format](../contracts/harness/v1/README.md#the-submission-format),
 as a version of the artifact `main` of the type `submission`. A `write-no-push` run and a
-read run have no submit step. The step stores one version for each pushing session that ends
-with a verdict. Until reviewer runs exist, such a session is the whole review round; the call
-moves to the end of the round with them. The document has:
+read run have no submit step. The step stores one version for each pushing session, with the
+verdict `none` when the session wrote none. Until reviewer runs exist (Q-35), such a session is
+the whole review round. Q-35 moves the call to the end of the round. The document has:
 
 - `ref`: `qory/<work item id>`.
 - `verdict`: the newest verdict of the work item, `passed`, `changes-requested` or
@@ -2988,13 +2991,20 @@ indented by two spaces:
 
 - `The remote origin has <n> push addresses, so qory pushed nothing and opened no draft.`
 - `Branch: <branch>.`
-- `If remote.origin.url has several values, run: git remote set-url --push origin <address>`
-- `If remote.origin.pushurl has several values, run once for each address to drop: git remote
-  set-url --delete --push origin <address-to-drop>`
+- `List the configured addresses with git config --get-all remote.origin.pushurl, or with git
+  config --get-all remote.origin.url when that prints none.`
+- `Do not use git remote get-url --push --all: it shows the addresses after the insteadOf
+  rewrites of git.`
+- `Then run git config --unset-all remote.origin.pushurl (exit status 5 means it had no value),
+  and git remote set-url --push origin <address> with the address to keep.`
 
 Git has one push address for each `pushurl` value, and with no `pushurl` it has one for each
-`url` value. The first command sets one `pushurl` and leaves the `url` values as they are. It fails
-when the remote has several `pushurl` values, so the second command drops the extra ones.
+`url` value. The two commands leave one push address in each case: several `url` values,
+several `pushurl` values, and both. `git remote set-url --push origin <address>` alone fails
+when the remote has several `pushurl` values (`remote.origin.pushurl has multiple values`).
+`git remote set-url --delete --push origin <address>` is not in the text: it reads its address as
+a regular expression that matches part of an address, so deleting `.../p1` also deletes
+`.../p10`.
 
 If qory cannot read the branch or the push address of `origin`, it pushes nothing and prints `qory
 run: Fix the cause below, then run again: qory could not read the branch or its origin.`, then
@@ -3023,18 +3033,22 @@ again: a push check refused the push.`, then `qory pushed nothing and opened no 
 again: the push failed, so qory opened no draft.` and leaves that repository out of the program.
 
 If the push lands and qory then cannot list the run's commits on the branch, it runs no program
-for that repository and prints `qory run: Open the draft by hand: qory pushed the branch but could not list the run's commits.`, then
-`qory ran no program, so it opened no draft.`, `Branch: <branch>.` and `Cause: <cause>` on lines
-indented by two spaces. The branch is on the forge with the run's commits, so a second run would push
-again: open the draft from the branch by hand.
+for that repository and prints `qory run: Open a draft by hand if you want one: qory pushed the
+branch but could not list commits.`, then `qory ran no program for the repository named by
+Branch:, so it opened no draft for it.`, `Branch: <branch>.` and `Cause: <cause>` on lines
+indented by two spaces. Programs of earlier repositories of the run may have run. The branch is
+on the forge with the run's commits. A second run does the work again on a new branch, so open
+the draft for this branch by hand.
 
 In this build neither check is registered, so a run with no run code and no run key pushes
-nothing, runs no program and prints `qory run: Push the branch and open the draft by hand: this
-qory version has no push checks.`, then `Branch: <branch>.` and `qory pushed nothing and opened no
-draft.` on lines indented by two spaces. `<branch>` is the branch in the line `the run's commits
-are on <branch> in <path>.`, or the branches, separated by `, `, for a run with commits in
-several repositories. A run with no run code and no run key opens no draft until
-the checks are registered.
+nothing, runs no program and prints `qory run: Push each branch by hand: the key and scope push
+checks of qory run are not registered.`, then `qory pushed nothing and opened no draft; open each
+draft by hand if you want one.` and one line `Branch: <branch> in <folder>.` for each repository
+with commits, on lines indented by two spaces. `<branch>` and `<folder>` are the values of the line
+`the run's commits are on <branch> in <folder>.` for that repository. These are the checks that
+`qory run` registers for a run with no run code, not the push checks that `push-checks.json`
+lists for a run from a run code. A run with no run code and no
+run key opens no draft until the checks are registered.
 
 When the program returns a draft for a repository, qory prints `Draft: <address>` on standard
 output, one line for each such repository in the order of the repositories, as the last lines of

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -204,7 +205,7 @@ func TestALocalRunWithARefusingCheckPushesNothing(t *testing.T) {
 // line that says so, of at most 100 characters, and one line after it, and nothing else, and
 // nothing is pushed or started.
 func TestALocalRunWithNoCheckPushesNothing(t *testing.T) {
-	_, bare, started := localProgramCheckout(t)
+	root, bare, started := localProgramCheckout(t)
 	agentInCopy(t, func(spec session.SessionSpec) {
 		handsOffText(t)(spec)
 		// A hand-off file that is not usable would print its warning line if the step read it.
@@ -214,15 +215,14 @@ func TestALocalRunWithNoCheckPushesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	const line = "qory run: Push the branch and open the draft by hand: this qory version has no push checks."
+	const line = "qory run: Push each branch by hand: the key and scope push checks of qory run are not registered."
 	if len(line) > 100 {
 		t.Fatalf("the line has %d characters", len(line))
 	}
 	if n := strings.Count(out, line); n != 1 {
 		t.Errorf("the output has the line %d times, want 1:\n%s", n, out)
 	}
-	wants(t, out, line+"\n  Branch: qory/run-")
-	wants(t, out, ".\n  qory pushed nothing and opened no draft.\n")
+	wants(t, out, line+"\n  qory pushed nothing and opened no draft; open each draft by hand if you want one.\n  Branch: "+runBranchOf(t, out)+" in "+root+".\n")
 	lacks(t, out, "hand-off")
 	if got := pushedBranches(t, bare); got != "" {
 		t.Errorf("the bare repository has %q, want none", got)
@@ -331,6 +331,47 @@ func TestALocalRunPushesAndSubmitsEachRepository(t *testing.T) {
 	}
 }
 
+// TestALocalRunWithNoCheckNamesEachBranchWithItsRepository is a run of two repositories with
+// commits, where a branch named qory appears in the second while the run goes on, so the run's
+// commits land on a branch with another name there: the text has one Branch line for each repository, with the branch of that repository
+// and its folder.
+func TestALocalRunWithNoCheckNamesEachBranchWithItsRepository(t *testing.T) {
+	root, bare, started := localProgramCheckout(t)
+	further := filepath.Join(root, ".qory", "repositories", "other")
+	if err := os.MkdirAll(further, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, further, "init", "--quiet", "--initial-branch=main")
+	runGit(t, further, "config", "user.name", "Tester")
+	runGit(t, further, "config", "user.email", "tester@example.com")
+	writeFile(t, filepath.Join(further, "README.md"), "first\n")
+	runGit(t, further, "add", "README.md")
+	runGit(t, further, "commit", "--quiet", "-m", "first")
+	runGit(t, further, "remote", "add", "origin", "https://git.example.com/acme/other.git")
+	out := runLocal(t, func(spec session.SessionSpec) {
+		handsOffText(t)(spec)
+		// A branch named qory blocks the run's branch name in the second repository, after qory
+		// chose the name at the start.
+		runGit(t, further, "branch", "qory")
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "repositories", "other", "there.txt"), "there\n")
+		in := filepath.Join(spec.Dir, ".qory", "repositories", "other")
+		gitOutput(t, in, "add", "there.txt")
+		gitOutput(t, in, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "Add there")
+	})
+	var lines []string
+	for _, m := range regexp.MustCompile(`the run's commits are on (\S+) in (\S+)\.`).FindAllStringSubmatch(out, -1) {
+		lines = append(lines, "  Branch: "+m[1]+" in "+m[2]+".")
+	}
+	if len(lines) != 2 || strings.HasPrefix(lines[0], "  Branch: qory/run-") == strings.HasPrefix(lines[1], "  Branch: qory/run-") {
+		t.Fatalf("the output has the commit lines %q, want two with different branch names:\n%s", lines, out)
+	}
+	wants(t, out, "qory run: Push each branch by hand: the key and scope push checks of qory run are not registered.\n"+
+		"  qory pushed nothing and opened no draft; open each draft by hand if you want one.\n"+strings.Join(lines, "\n")+"\n")
+	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 {
+		t.Errorf("pushed %q and started %d programs, want none", got, timesStarted(t, started))
+	}
+}
+
 // TestALocalRunNeedsEveryPushCheck is a local run with a hand-off text, with no push check, with
 // the check key only, and with the check scope only: each ends with the one line that says the
 // checks are not available, and nothing is pushed or started. With both, qory pushes.
@@ -340,7 +381,7 @@ func TestALocalRunNeedsEveryPushCheck(t *testing.T) {
 		t.Fatalf("the required checks are %v, want key and scope", names)
 	}
 	pass := func(context.Context, string, string) error { return nil }
-	const line = "qory run: Push the branch and open the draft by hand: this qory version has no push checks."
+	const line = "qory run: Push each branch by hand: the key and scope push checks of qory run are not registered."
 	for _, c := range []struct {
 		name  string
 		given []string
@@ -437,22 +478,28 @@ func TestALocalRunWithTwoPushAddressesPushesNothing(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wants(t, out, pushURLsText(2))
+	wants(t, out, pushURLsHow)
 	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 {
 		t.Errorf("pushed %q and started %d programs, want none", got, timesStarted(t, started))
 	}
 }
 
-// pushURLsText is the text of a remote origin with n push addresses, up to the branch and from
-// the line after it: the fix for each way to have several, then the cause and the values.
+// pushURLsText is the text of a remote origin with n push addresses: the fix, the cause and the
+// branch, then how to list the configured addresses and the two commands that leave one.
 func pushURLsText(n int) string {
 	return fmt.Sprintf("qory run: Remove the extra push addresses of remote origin, so it has one.\n"+
 		"  The remote origin has %d push addresses, so qory pushed nothing and opened no draft.\n  Branch: qory/run-", n)
 }
 
+// pushURLsHow is the lines of the text of a remote origin with several push addresses that follow
+// the branch.
+const pushURLsHow = ".\n  List the configured addresses with git config --get-all remote.origin.pushurl, or with git config --get-all remote.origin.url when that prints none.\n" +
+	"  Do not use git remote get-url --push --all: it shows the addresses after the insteadOf rewrites of git.\n" +
+	"  Then run git config --unset-all remote.origin.pushurl (exit status 5 means it had no value), and git remote set-url --push origin <address> with the address to keep.\n"
+
 // TestALocalRunWithTwoUrlValuesPushesNothing is a remote origin with two url values and no pushurl:
-// git has two push addresses then, and qory pushes nothing and gives the commands of both ways to
-// have several: git remote set-url --push origin <address> leaves one push address of several
-// url values, and git remote set-url --delete --push origin <address> removes one of several pushurl values.
+// git has two push addresses then, and qory pushes nothing and gives the same text as for two
+// pushurl values, whose two commands leave one push address in both cases.
 func TestALocalRunWithTwoUrlValuesPushesNothing(t *testing.T) {
 	root, bare, started := localProgramCheckout(t)
 	runGit(t, root, "remote", "set-url", "--add", "origin", "https://git.example.com/acme/second.git")
@@ -463,8 +510,7 @@ func TestALocalRunWithTwoUrlValuesPushesNothing(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wants(t, out, pushURLsText(2))
-	wants(t, out, ".\n  If remote.origin.url has several values, run: git remote set-url --push origin <address>\n"+
-		"  If remote.origin.pushurl has several values, run once for each address to drop: git remote set-url --delete --push origin <address-to-drop>\n")
+	wants(t, out, pushURLsHow)
 	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 {
 		t.Errorf("pushed %q and started %d programs, want none", got, timesStarted(t, started))
 	}
@@ -636,8 +682,8 @@ func TestALocalRunThatCannotListItsCommitsAfterThePushSaysThePushLanded(t *testi
 	}
 	passingCheck(t)
 	out := runLocal(t, handsOffText(t))
-	wants(t, out, "qory run: Open the draft by hand: qory pushed the branch but could not list the run's commits.\n"+
-		"  qory ran no program, so it opened no draft.\n  Branch: qory/run-")
+	wants(t, out, "qory run: Open a draft by hand if you want one: qory pushed the branch but could not list commits.\n"+
+		"  qory ran no program for the repository named by Branch:, so it opened no draft for it.\n  Branch: qory/run-")
 	wants(t, out, ".\n  Cause: ")
 	lacks(t, out, "then run again")
 	if got := pushedBranches(t, bare); !strings.HasPrefix(got, "qory/run-") || timesStarted(t, started) != 0 {

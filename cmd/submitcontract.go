@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"github.com/qoryai/integrations/contracts"
 	"net/url"
 	"regexp"
 	"slices"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/qoryai/integrations/contracts"
 )
 
 // The submit program contract of the integrations module that go.mod pins: the README
@@ -22,7 +23,7 @@ const qoryEnvPrefix = "QORY_"
 
 // The limits of the contract: commits in the one input, characters of a title, and bytes of an
 // address. They are copies: the pinned package does not export them, so a pin that changes one is
-// read in the README's tables, and TestTheSubmitContractNamesAreThePinnedOnes checks their values against its numbers.
+// read in the README's tables, and no test compares them.
 const (
 	maxSubmitCommits = 100
 	maxSubmitTitle   = 256
@@ -37,8 +38,8 @@ type submitInput struct {
 	Branch, BaseBranch, BaseCommit string
 	// Commits is each commit of the run, oldest first, the head last.
 	Commits []string
-	// Draft is [contracts.DraftOpen] or [contracts.SubmitDraftNone]. Title and DescriptionFile are set unless Draft is
-	// contracts.SubmitDraftNone.
+	// Draft is [contracts.DraftOpen] or [contracts.SubmitDraftNone]. Title and DescriptionFile
+	// are set unless Draft is [contracts.SubmitDraftNone].
 	Draft           string
 	Title           string
 	DescriptionFile string
@@ -98,8 +99,8 @@ var submitDraftKeys = []string{contracts.SubmitKeyDraftNumber, contracts.SubmitK
 
 // parseSubmitLines reads the standard output of the program for a repository on system, and the
 // commits that qory gave it, the base among them. draft is the value that qory gave the program
-// in QORY_SUBMIT_DRAFT: with contracts.SubmitDraftNone every draft line is left out. qory strips one
-// carriage return at the end of each line first. A line that is not valid is left out and the
+// in QORY_SUBMIT_DRAFT: with contracts.SubmitDraftNone every draft line is left out. qory strips
+// one carriage return at the end of each line first. A line that is not valid is left out and the
 // lines around it count; a blank line is left out and is not listed. The draft is set only when
 // the five lines are there and valid.
 func parseSubmitLines(output, system, draft string, commits []string) submitLines {
