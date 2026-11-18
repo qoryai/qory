@@ -890,7 +890,11 @@ A verdict of any kind may propose a track:
 {"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one config file."}}
 ```
 
-`qory run verdict` sends no track.
+`qory run verdict --track <id> --track-reason <text>` sends the track. It sends `id` and
+`reason` together or not at all, and checks both against this schema before it sends or
+keeps anything. It exits 2 for an id, a reason or a pair that breaks a rule. It exits 4
+when Qory Apiary refuses the verdict with 422 `invalid_artifact`, such as for a track that
+the gate does not offer.
 
 A document has no member other than `verdict`, `points` and `track`, a point has no member
 other than `text`, `action`, `question` and `fix`, and a track has no member other than

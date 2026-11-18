@@ -808,6 +808,8 @@ func TestVerdictSchema(t *testing.T) {
 	}{
 		{verdictDocument, true},
 		{`{"verdict": "passed"}`, true},
+		{`{"verdict": "passed", "track": {"id": "small-change", "reason": "One file."}}`, true},
+		{`{"verdict": "passed", "track": {"id": "small-change", "kind": "A text that the product shows", "reason": "One file."}}`, false},
 		{`{"verdict": "changes-requested"}`, true},
 		{`{}`, false},
 		{`[]`, false},

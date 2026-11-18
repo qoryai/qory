@@ -1606,8 +1606,8 @@ const (
 	// collision: the harness verbs use the same number for ExitCollision.
 	ExitNoWorkItem = 3
 	// ExitArtifactRefused is a push that failed the run API's check of its type or a
-	// limit, on a command that has no foreign path: the harness verbs use the same number
-	// for ExitForeign.
+	// limit, or a verdict that the run API refused with 422 invalid_artifact, on a command
+	// that has no foreign path: the harness verbs use the same number for ExitForeign.
 	ExitArtifactRefused = 4
 )
 

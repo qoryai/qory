@@ -18,6 +18,17 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- `qory run verdict` proposes a track for the work item: `--track <id>` is the id of a
+  track that the gate of the run's stage offers, and `--track-reason <text>` is the
+  reason, one sentence on one line of 1 to 300 characters. Pass both or neither. A track's
+  id is lower-case words joined by hyphens, at most 40 characters. A track is the `id` and
+  the `reason`. A mistake in the id, the reason or the pair exits 2, with the fix on line
+  1; nothing is sent or kept. Outside a run, the kept `verdict.json` has the track. `qory
+  run verdict` exits 4 for every 422 `invalid_artifact` from Qory Apiary, such as a track
+  that the gate does not offer, a point about a question that is not open, or a verdict
+  that breaks the schema. Line 1 of the error is the fix, with at most 98 characters, and
+  Qory Apiary's text follows on line 2. `qory artifact push` still exits 1 for
+  `invalid_artifact`. See The verdict format in `contracts/harness/v1/README.md`.
 - After each push of its push step, qory reports the repositories the push moved to Qory
   Apiary, one entry for each repository with `system`, `path` and the full head commit, in
   push order, at most 64 in a call and at most 65536 bytes in a body. qory sends the report
@@ -222,8 +233,8 @@ release may change what an existing document does, and states it under Upgrading
   each with the action `run_again`; `qory run verdict` sends points only with
   `escalate`. A verdict of any kind may have a `track`, with an `id` and a `reason` of 1
   to 300 characters, which Qory Apiary checks against the tracks of the run's stage;
-  `qory run verdict` sends none. The text member `gaps` is gone. See The verdict format in
-  `contracts/harness/v1/README.md`.
+  `qory run verdict` sends one with `--track` and `--track-reason`. The text member
+  `gaps` is gone. See The verdict format in `contracts/harness/v1/README.md`.
 - `-f` on `qory harness compose`, `qory run` and `qory worktree add` takes a stack by
   reference, `<https URL>#<ref>:<folder>`: qory fetches the folder as it fetches a git
   module and composes its `qory-stack.yaml`. `examples/hello` has one, so a run takes it
