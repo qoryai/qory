@@ -588,3 +588,88 @@ func TestALocalRunWithAMarkerLineInItsDescriptionGivesTheProgramNoDraft(t *testi
 		t.Errorf("the program got %q, want the draft none", got)
 	}
 }
+
+// TestALocalRunWithACommittedHandoffPushesNothing is an agent that force-adds the hand-off file to
+// a commit: the commit would send the file to the remote, so qory pushes nothing, runs no program,
+// and the line says which commit and path.
+func TestALocalRunWithACommittedHandoffPushesNothing(t *testing.T) {
+	_, bare, started := localProgramCheckout(t)
+	calls := passingCheck(t)
+	out := runLocal(t, func(spec session.SessionSpec) {
+		handsOffText(t)(spec)
+		gitOutput(t, spec.Dir, "add", "-f", ".qory/handoff/submission.json")
+		gitOutput(t, spec.Dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "Add the hand-off")
+	})
+	wants(t, out, "qory run: A commit of this run has a path under .qory/handoff/, so qory did not push.")
+	wants(t, out, "\n  Repository git.example.com/acme/app.\n  Commit ")
+	wants(t, out, "\n  Path .qory/handoff/submission.json.")
+	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 || *calls != 0 {
+		t.Errorf("pushed %q, started %d programs and ran %d checks, want none", got, timesStarted(t, started), *calls)
+	}
+}
+
+// TestAGitAddAllOfTheAgentLeavesTheHandoffOut is an agent that stages everything with git add -A
+// and commits with git commit -a after it wrote the hand-off: the file is in no commit, so the run
+// pushes and the program starts with the draft open.
+func TestAGitAddAllOfTheAgentLeavesTheHandoffOut(t *testing.T) {
+	_, bare, started := localProgramCheckout(t)
+	passingCheck(t)
+	out := runLocal(t, func(spec session.SessionSpec) {
+		makeProgramRunnable(t)
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "handoff", "submission.json"), `{"text":{"title":"Add a file","description":"A file."}}`)
+		writeFile(t, filepath.Join(spec.Dir, "committed.txt"), "committed\n")
+		gitOutput(t, spec.Dir, "add", "-A")
+		gitOutput(t, spec.Dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-a", "-m", "Add a file")
+	})
+	branch := runBranchOf(t, out)
+	if files := gitOutput(t, bare, "ls-tree", "-r", "--name-only", branch); strings.Contains(files, ".qory") || !strings.Contains(files, "committed.txt") {
+		t.Errorf("the pushed branch has the files %q, want committed.txt and nothing under .qory", files)
+	}
+	if got := strings.TrimSpace(readText(t, started)); got != "acme/app "+branch+" open 1" {
+		t.Errorf("the program got %q, want the draft open\n%s", got, out)
+	}
+}
+
+// TestALocalRunWhoseSecondRepositoryIsRefusedPushesNothingAtAll is a run of two repositories with
+// commits, where the check passes for the first and refuses the second: no repository is pushed,
+// and no program starts, because every check comes before the first push.
+func TestALocalRunWhoseSecondRepositoryIsRefusedPushesNothingAtAll(t *testing.T) {
+	root, bare, started := localProgramCheckout(t)
+	further := filepath.Join(root, ".qory", "repositories", "other")
+	if err := os.MkdirAll(further, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, further, "init", "--quiet", "--initial-branch=main")
+	runGit(t, further, "config", "user.name", "Tester")
+	runGit(t, further, "config", "user.email", "tester@example.com")
+	writeFile(t, filepath.Join(further, "README.md"), "first\n")
+	runGit(t, further, "add", "README.md")
+	runGit(t, further, "commit", "--quiet", "-m", "first")
+	otherBare := filepath.Join(tempDir(t), "other.git")
+	runGit(t, further, "init", "--quiet", "--bare", "--initial-branch=main", otherBare)
+	runGit(t, further, "remote", "add", "origin", "https://git.example.com/acme/other.git")
+	routePush(t, "https://git.example.com/acme/other.git", otherBare)
+	writeFile(t, started+".bares", bare+"\n"+otherBare+"\n")
+	calls := bothChecks(t, func(context.Context, string, string) error { return nil })
+	names := cmd.PushChecksRequired()
+	count := 0
+	t.Cleanup(cmd.RegisterPushCheck(names[0], func(context.Context, string, string) error {
+		count++
+		if count == 2 {
+			return errors.New("a key is in a commit of the second repository")
+		}
+		return nil
+	}))
+	_ = calls
+	out := runLocal(t, func(spec session.SessionSpec) {
+		handsOffText(t)(spec)
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "repositories", "other", "there.txt"), "there\n")
+		in := filepath.Join(spec.Dir, ".qory", "repositories", "other")
+		gitOutput(t, in, "add", "there.txt")
+		gitOutput(t, in, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "Add there")
+	})
+	wants(t, out, "a key is in a commit of the second repository")
+	if a, b := pushedBranches(t, bare), pushedBranches(t, otherBare); a != "" || b != "" || count != 2 || timesStarted(t, started) != 0 {
+		t.Errorf("pushed %q and %q after %d checks and %d programs, want nothing after 2 checks", a, b, count, timesStarted(t, started))
+	}
+}

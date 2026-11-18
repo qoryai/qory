@@ -128,7 +128,10 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 			return nil
 		}
 		if err := preparation.HandoffCommitted(ctx, repo.Dir, repo.System, repo.Path, repo.Start, repo.Head); err != nil {
-			fmt.Fprintln(w, shownError(err))
+			// The refusal is a line with its cause and the values on indented lines.
+			for line := range strings.SplitSeq(err.Error(), "\n") {
+				fmt.Fprintln(w, shownErrorText(line))
+			}
 			return nil
 		}
 		for _, check := range checks {
