@@ -538,8 +538,6 @@ release may change what an existing document does, and states it under Upgrading
   characters is left out.
 - A module manifest can declare `submit_program`, a command of the module that opens the
   draft pull request. A composed harness has one; a second declaration stops the compose.
-- A run adds the module that Qory Apiary sends as `submit_module` by its manifest name, in
-  place of the module of that name in the harness, and prints a line for the replacement.
 - A session hands its title, description and the step of each commit to the submit step in
   the file that `QORY_SUBMISSION_HANDOFF` names. A commit with no step is `unreviewed`. qory
   reads the file inside the checkout and follows no link, and drops a title with a control

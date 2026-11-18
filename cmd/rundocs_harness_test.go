@@ -179,13 +179,7 @@ func (c codeHarness) run(t *testing.T) harnessRun {
 		r.tools = h.server.RepositoryWithLinks(t, "example-org/tools", toolsRef, c.tools, c.toolsLinks)
 	}
 	r.url = h.server.URL("example-org/hello")
-	// The documents' submit_module is read from this repository, at its commit.
-	forgeURL := h.server.URL("example-org/forge")
-	forgeCommit := h.server.RepositoryWithLinks(t, "example-org/forge", "forge-r1", map[string]string{
-		"modules/forge-submit/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: forge-submit\n",
-		"modules/forge-submit/AGENTS.md":        "# Forge\n",
-	}, nil)
-	r.addresses = []string{r.url, strings.TrimSuffix(r.url, ".git"), "example-org/hello", "example-org/tools", "example-org/forge", "other.test", namedRef, toolsRef, string(filepath.Separator) + "sources" + string(filepath.Separator)}
+	r.addresses = []string{r.url, strings.TrimSuffix(r.url, ".git"), "example-org/hello", "example-org/tools", "other.test", namedRef, toolsRef, string(filepath.Separator) + "sources" + string(filepath.Separator)}
 	section := map[string]any{"extends": map[string]any{"git": r.url, "ref": namedRef, "path": folder}}
 	if c.defines != nil {
 		section = map[string]any{
@@ -205,9 +199,6 @@ func (c codeHarness) run(t *testing.T) harnessRun {
 		d["harness_hidden"] = !c.shown
 		if c.change != nil {
 			c.change(d)
-		}
-		if sm, ok := d["submit_module"].(map[string]any); ok {
-			sm["source"] = map[string]any{"git": forgeURL, "ref": forgeCommit, "path": "modules/forge-submit"}
 		}
 	})
 	if c.relay != nil {

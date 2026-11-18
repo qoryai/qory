@@ -18,7 +18,6 @@ import (
 	"github.com/qoryai/integrations/contracts"
 	"github.com/spf13/cobra"
 
-	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
@@ -121,10 +120,8 @@ type codeRun struct {
 	workItem string
 	// submit is the documents' submit, the run's submit settings, type and send: the one
 	// place qory takes them from, never the composed harness's process.yaml, see
-	// [codeRun.submitLine]. nil when the documents have no submit. submitModule is the
-	// documents' submit_module, nil for none.
-	submit       *contracts.Submit
-	submitModule *contracts.SubmitModule
+	// [codeRun.submitLine]. nil when the documents have no submit.
+	submit *contracts.Submit
 
 	// runNumber is the run's number on the server, set by [codeRun.readBranch].
 	runNumber int
@@ -204,7 +201,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if hidden {
 		r.named = source.NewNamed(r.phrase())
 	}
-	r.submit, r.submitModule = doc.Submit, doc.SubmitModule
+	r.submit = doc.Submit
 	return r, nil
 }
 
@@ -702,16 +699,6 @@ func entryKeys(rep report.Report) []string {
 		keys = append(keys, e.Kind+"/"+e.Name)
 	}
 	return keys
-}
-
-// submitSource is the documents' submit_module as the compose takes it, nil for none. The
-// source's ref is the full commit that Qory Apiary pins.
-func (r *codeRun) submitSource() *compose.SubmitModule {
-	if r == nil || r.submitModule == nil {
-		return nil
-	}
-	src := r.submitModule.Source
-	return &compose.SubmitModule{Name: r.submitModule.Name, Source: stack.Source{Git: src.Git, Ref: src.Ref, Path: src.Path, Module: src.Module}}
 }
 
 // submitLine is the line that shows the harness's submit, the first module's in stack

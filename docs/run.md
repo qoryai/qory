@@ -2908,17 +2908,9 @@ never fails because of the file.
 
 A module manifest can declare `submit_program`, a command of the module: a file in the
 module, then its arguments (see `contracts/harness/v1/README.md`). A composed harness has at
-most one, and a second declaration fails the compose. The run's documents can set
-`submit_module`: a module's `name` in its manifest, and its git `source`, whose `ref` is a
-full commit id. qory adds that module after the modules of the stack. When a module of the
-stack, or of the base stack that the checkout extends, has the same name in its manifest and
-the same git source, qory reads that module at the commit in place of its ref, and prints
-`qory run: A module of the stack was read at the commit of the submit module, not at its
-ref.`, then two lines indented by two spaces: `Module <module> from <url> at <commit>.`
-and `The stack lists ref <ref> in <place>.` A module of that name
-from another git source fails the compose. qory composes this module before it knows the
-run's access level, so a run that its stack or its documents lower to `write-no-push` or
-`read` still composes it, and a name clash still refuses the run, but the run runs no program.
+most one, and a second declaration fails the compose. The run's documents have no member for
+the module of a submit program. A run with no run code gets the program from a module that the
+`qory.yaml` of the person's checkout composes, and a run from a run code runs no program.
 
 #### The submit program
 

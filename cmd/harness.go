@@ -524,9 +524,6 @@ type composeOptions struct {
 	// fromCode is set for the compose of a run from a run code: a line of
 	// [pushChecksWritable] ends with [codeUsed].
 	fromCode bool
-	// submit, when set, is the module of the run's submit program, see
-	// [compose.Options.Submit]; nil for a run with none.
-	submit *compose.SubmitModule
 }
 
 // named is the harness o composes with no address shown, see [source.Named]; nil for any
@@ -687,8 +684,6 @@ type composed struct {
 	workflows map[string]stack.Workflow
 	// checkoutOnly is, per runtime composed for, what [render.CheckoutOnly] lists.
 	checkoutOnly map[string][]string
-	// replaced is the module whose ref the run's submit module replaced, nil for none.
-	replaced *compose.Replacement
 	// submitProgram is the composed harness's submit program, its command with the home's
 	// path in it; nil when no module declares one.
 	submitProgram *compose.SubmitProgram
@@ -757,7 +752,7 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 	for _, rt := range targets {
 		checkoutOnly[rt.Name()] = render.CheckoutOnly(rt, res)
 	}
-	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, checkoutOnly: checkoutOnly, replaced: res.Replaced, submitProgram: res.SubmitProgramFor(at.home)}, nil
+	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, checkoutOnly: checkoutOnly, submitProgram: res.SubmitProgramFor(at.home)}, nil
 }
 
 // pushChecksWritable stops a walled run before the home is written when a module
@@ -1007,7 +1002,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 			pins[l.Source] = l.Pin
 		}
 	}
-	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env, Memo: memo, Tiers: resolveTiers(flagTiers, conf), Copies: copies(at, o.walled || o.hidden), Walled: o.walled, Hidden: o.hidden, Checkout: at.root, Submit: o.submit}
+	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env, Memo: memo, Tiers: resolveTiers(flagTiers, conf), Copies: copies(at, o.walled || o.hidden), Walled: o.walled, Hidden: o.hidden, Checkout: at.root}
 	if o.fromDocuments && o.checkedAs != "" {
 		opts.StackAs = o.checkedAs + " in Qory Apiary"
 	}
