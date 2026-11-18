@@ -236,40 +236,48 @@ func TestACheckoutModulesScopeCheckDoesNotCount(t *testing.T) {
 	const checkoutDeclares = "apiVersion: qory.dev/v1alpha1\nname: app\nscope_checks:\n  change-plan:\n    - [checks/check.js, scope, --plan]\n"
 	const baseDeclares = "apiVersion: qory.dev/v1alpha1\nname: a\nscope_checks:\n  change-plan:\n    - [checks/check.js, scope, --plan]\n"
 	const baseSilent = "apiVersion: qory.dev/v1alpha1\nname: a\n"
-	_, err := composeCheckout(t, checkoutScopeTree(baseSilent, checkoutDeclares))
-	const want = "Add a scope check for change-plan to a module's scope_checks.\n" +
-		"  You can also remove `plan: change-plan` from fix in the stack."
-	if err == nil || err.Error() != want {
-		t.Errorf("checkout only: %v, want %q", err, want)
-	}
-	res, err := composeCheckout(t, checkoutScopeTree(baseDeclares, checkoutDeclares))
-	if err != nil {
-		t.Fatalf("both: %v", err)
-	}
-	defer res.Close()
-	got := res.ScopeChecks["change-plan"]
-	if got.Module != "a" || len(got.Commands) != 1 || got.Commands[0][0] != "$QORY_HARNESS_HOME/modules/a/checks/check.js" {
-		t.Errorf("both: scope check %+v, want the one of module a", got)
-	}
-	// With no workflow that names a plan, the refusal cannot catch a check of the checkout:
-	// the result must have none of it.
-	noPlan := checkoutScopeTree(baseSilent, checkoutDeclares)
-	noPlan["base/"+stack.FileName] = strings.Replace(noPlan["base/"+stack.FileName], "    plan: change-plan\n", "", 1)
-	res3, err := composeCheckout(t, noPlan)
-	if err != nil {
-		t.Fatalf("no plan: %v", err)
-	}
-	if res3.ScopeChecks != nil {
-		t.Errorf("no plan: scope checks %+v, want none, since the module of the checkout declares them", res3.ScopeChecks)
-	}
-	res3.Close()
+	t.Run("checkout only is refused", func(t *testing.T) {
+		_, err := composeCheckout(t, checkoutScopeTree(baseSilent, checkoutDeclares))
+		const want = "Add a scope check for change-plan to a module's scope_checks.\n" +
+			"  You can also remove `plan: change-plan` from fix in the stack."
+		if err == nil || err.Error() != want {
+			t.Errorf("%v, want %q", err, want)
+		}
+	})
+	t.Run("the base's check is the result", func(t *testing.T) {
+		res, err := composeCheckout(t, checkoutScopeTree(baseDeclares, checkoutDeclares))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Close()
+		got := res.ScopeChecks["change-plan"]
+		if got.Module != "a" || len(got.Commands) != 1 || got.Commands[0][0] != "$QORY_HARNESS_HOME/modules/a/checks/check.js" {
+			t.Errorf("scope check %+v, want the one of module a", got)
+		}
+	})
+	// With no workflow that names a plan, the refusal cannot catch a check of the
+	// checkout: the result must have none of it.
+	t.Run("no plan gives no scope check", func(t *testing.T) {
+		files := checkoutScopeTree(baseSilent, checkoutDeclares)
+		files["base/"+stack.FileName] = strings.Replace(files["base/"+stack.FileName], "    plan: change-plan\n", "", 1)
+		res, err := composeCheckout(t, files)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Close()
+		if res.ScopeChecks != nil {
+			t.Errorf("scope checks %+v, want none: only the module of the checkout declares one", res.ScopeChecks)
+		}
+	})
 	// The checkout's program is not read: a file that is not there does not fail the compose.
-	files := checkoutScopeTree(baseDeclares, strings.ReplaceAll(checkoutDeclares, "checks/check.js", "gone.js"))
-	res2, err := composeCheckout(t, files)
-	if err != nil {
-		t.Fatalf("a program the checkout lacks: %v", err)
-	}
-	res2.Close()
+	t.Run("a program the checkout lacks", func(t *testing.T) {
+		files := checkoutScopeTree(baseDeclares, strings.ReplaceAll(checkoutDeclares, "checks/check.js", "gone.js"))
+		res, err := composeCheckout(t, files)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Close()
+	})
 }
 
 // TestThePlanRefusalIsOneLineWhenItFits is a plan type and a workflow name short enough
