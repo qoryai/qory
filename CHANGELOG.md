@@ -26,6 +26,18 @@ release may change what an existing document does, and states it under Upgrading
   type no module of the base stack declares a scope check for. A module that a checkout
   adds to the base declares none that counts. `qory run` does not read `plan` or
   `scope_checks`.
+- A skill with the frontmatter keys `notes_for` (a role or a list of roles) and `paths` (one
+  glob or more from the checkout root) is a note. The compose exits 2, with the fix as
+  line 1, for a note with any of these:
+  - a `notes_for` that is no role or list of roles;
+  - a role that no agent fills;
+  - no `paths`, or `paths` with an empty glob;
+  - a `paths` value that is no string or list of strings.
+  Note `paths` use the glob form of agent `paths`. The home has `role-notes.json`, always
+  written, with one row per note: `name`, `roles`, `paths`, `module` and `layer` (0 for a
+  module of the checkout's `qory.yaml`, 1 for a module of its base stack). With no note it
+  is `{"notes": []}`. It is not the `notes.json` of a push check. See "Notes" in
+  `docs/harness.md`.
 - `qory run verdict` proposes a track for the work item: `--track <id>` is the id of a
   track that the gate of the run's stage offers, and `--track-reason <text>` is the
   reason, one sentence on one line of 1 to 300 characters. Pass both or neither. A track's
@@ -62,7 +74,7 @@ release may change what an existing document does, and states it under Upgrading
   When the run is already closed and Forager sends nothing (`session.ErrRunClosed`), qory
   sends the call once and prints the same two lines as for a 410 with the code `run_closed`,
   with no `Contact support` line and no end code of qory's.
-- A stack's workflow may set `tier` to `light`, `fast` or `thinking`, which names the
+- A stack's workflow may set `tier` to `light`, `balanced` or `thinking`, which names the
   main session's model and effort for a dispatched run. Any other value refuses the
   stack. `qory run` does not read it.
 - The `agent` image has the Node packages `typescript` 5.9.3, `libpg-query` 18.2.4,
@@ -206,15 +218,29 @@ release may change what an existing document does, and states it under Upgrading
 - Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
   item's branch, `qory/<work item id>`, and the commit in each repository. A software
   factory can use it as the `json_schema` of a custom artifact type `branch`.
+- Version 1 of the acceptance criteria format,
+  `contracts/harness/v1/acceptance-criteria.schema.json`: a `summary` and `criteria`, each
+  with `id`, `text` and `check` (free text). A removed criterion has `removed` with its
+  `reason`. It names no kind of work, so a workspace that does not produce software uses it
+  as it is. Every criterion id has the form `ac-` and a number from 1 to 9999 with no
+  leading zero. See The acceptance criteria format in `contracts/harness/v1/README.md`.
+- Version 1 of the verification format, `contracts/harness/v1/verification.schema.json`:
+  the `target_version` that was checked, the `matrix` of rows (`criterion`, `state` of `met`
+  or `not_met`, `evidence`), `not_verified` with the criteria that were not checked and the
+  `reason` for each, and `model_families`. See The verification format in
+  `contracts/harness/v1/README.md`.
 - Version 1 of the questions format, `contracts/harness/v1/questions.schema.json`: every
   question of a work item and its answer or a run's decision, the file of the artifact
   type `questions`. A run adds, decides, withdraws or reopens questions with `qory artifact
   push`, and the control plane writes the answers. At most one option of a question has
   `recommended` set to `true`. A decided question has `state: decided` and `decision`
   (`option`, `reason`, `run`, `at`), and at least one option and none with `recommended`;
-  `decision` stays when the state changes. A question may have `criterion`, the id of
-  the acceptance criterion it is about, such as `ac-3`. See The questions format in
-  `contracts/harness/v1/README.md`.
+  `decision` stays when the state changes. A question has `about`, what it is about:
+  `{"work_item": true}` for the work item itself, or an output given as `type` and `name`,
+  with `item` for one entry of it. `about` replaces `criterion`. An option may have
+  `proposal`, the new wording of the entry that `about.item` names, for a member to edit
+  before sending, 1 to 2000 characters, and only in a question whose `about` has `item`.
+  See The questions format in `contracts/harness/v1/README.md`.
 - Version 1 of the review comments format,
   `contracts/harness/v1/review-comments.schema.json`: the members' review comments on a
   work item's artifact versions and the replies to them, the file of the artifact type
@@ -297,7 +323,7 @@ release may change what an existing document does, and states it under Upgrading
   wrote it, in the place the runtime's descriptor in Forager lists for the effort, and
   only a value the descriptor lists: for Claude Code, its `--effort` flag, with `low`,
   `medium`, `high`, `xhigh` or `max`.
-- Map a tier to a model id for agents whose `model` is `${qory:light}`, `${qory:fast}` or
+- Map a tier to a model id for agents whose `model` is `${qory:light}`, `${qory:balanced}` or
   `${qory:thinking}`, with `--tier`, `harness.tiers` in your `qory.yaml`, or
   `harness.tiers` in the repository's `qory.yaml`.
 - Give the agents of a tier an effort value with `--tier-effort <tier>=<effort>` on
@@ -549,6 +575,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The middle model tier is named `balanced` in place of `fast`. The tiers are `light`,
+  `balanced` and `thinking`. `${qory:balanced}`, `--tier balanced=<model id>`,
+  `--tier-effort balanced=<effort>`, `harness.tiers.balanced`, a workflow's `tier: balanced`
+  and the key `balanced` in the `run_settings.tiers` of a run's documents take it. qory
+  refuses `fast` as it refuses any name that is not a tier, with the list of the tiers.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
   qory stops a run whose documents have one. A run whose documents set no
@@ -601,7 +632,7 @@ release may change what an existing document does, and states it under Upgrading
   files, settings, and tier placeholders, of a module's source and name, of a base stack,
   of a stack that `-f` fetches by reference, and of the URL checks of a run. A module that
   cannot be read starts with `Check that you can read the files of module <name>.`, and a
-  tier list reads `light, fast, and thinking`. Which input fails, and the exit status,
+  tier list reads `light, balanced, and thinking`. Which input fails, and the exit status,
   stay the same.
 - The first line of each error of a stack file, a stack reference (`-f`), a target, `qory.yaml`
   and `forager.yaml` that `qory run` and `qory harness compose` print at start, of the

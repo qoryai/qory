@@ -15,14 +15,15 @@
   },
   "$defs": {
     "question": {
-      "description": "One question. answer is present exactly when state is answered. decision is present when state is decided, and stays when the state changes after that.",
+      "description": "One question. An option has proposal only when about has item. answer is present exactly when state is answered. decision is present when state is decided, and stays when the state changes after that.",
       "type": "object",
-      "required": ["id", "question", "options", "state", "asked"],
+      "required": ["id", "question", "about", "options", "state", "asked"],
       "additionalProperties": false,
       "properties": {
         "id": {"description": "The question's id, unique in the document: 1 to 32 lower-case letters, digits and hyphens, such as q1.", "$ref": "#/$defs/id"},
         "question": {"description": "The question, plain text on one line: one sentence, 1 to 500 characters.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500},
         "context": {"description": "What a person needs to know to answer, as Markdown: absent when the question needs none.", "$ref": "#/$defs/long_text"},
+        "about": {"description": "What the question is about: the work item itself, or one output of the work item.", "$ref": "#/$defs/about"},
         "options": {
           "description": "The answers a member can pick, 0 to 4, and at most one with recommended set to true: empty when the run lists no option and the member writes the answer. A decided question has at least one option, and none has recommended.",
           "type": "array",
@@ -41,11 +42,6 @@
           "type": "array",
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/id"}
-        },
-        "criterion": {
-          "description": "The id of the acceptance criterion the question is about, in the form of the criteria of mockup.schema.json: ac- and a number from 1 to 9999 with no leading zero, such as ac-3. Absent when the question is about no acceptance criterion.",
-          "type": "string",
-          "pattern": "^ac-[1-9][0-9]{0,3}$"
         },
         "history": {
           "description": "The earlier answers of the question, oldest first: each one ended when a run reopened the question.",
@@ -74,6 +70,10 @@
           "else": {"not": {"required": ["answer"]}}
         },
         {
+          "if": {"required": ["options"], "properties": {"options": {"contains": {"required": ["proposal"]}}}},
+          "then": {"properties": {"about": {"required": ["item"]}}}
+        },
+        {
           "if": {"required": ["state"], "properties": {"state": {"const": "decided"}}},
           "then": {
             "required": ["decision"],
@@ -81,6 +81,42 @@
           }
         }
       ]
+    },
+    "about": {
+      "description": "What a question is about. {\"work_item\": true} is the work item itself, before any output: the ticket. Otherwise it is one output, an artifact of the work item, given as type and name, with item when the question is about one entry of it. A document is for one work item, so no member contains a work item id.",
+      "oneOf": [{"$ref": "#/$defs/about_work_item"}, {"$ref": "#/$defs/about_output"}]
+    },
+    "about_work_item": {
+      "description": "The work item itself.",
+      "type": "object",
+      "required": ["work_item"],
+      "additionalProperties": false,
+      "properties": {
+        "work_item": {"description": "Always true.", "const": true}
+      }
+    },
+    "about_output": {
+      "description": "One output of the work item: an artifact, with the entry of it that the question concerns, if one. The item of an artifact of the type acceptance-criteria is a criterion id.",
+      "type": "object",
+      "required": ["type", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {"description": "The artifact type's name, such as proposal: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+        "name": {"description": "The artifact's name, such as main: 1 to 64 characters on one line. A JSON Schema cannot check that the work item has that artifact.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 64},
+        "item": {
+          "description": "The id of the entry of the artifact that the question concerns: 1 to 32 characters on one line. When type is acceptance-criteria, it is a criterion id: ac- and a number from 1 to 9999 with no leading zero, such as ac-3. A JSON Schema cannot check that the artifact has that entry.",
+          "$ref": "#/$defs/line",
+          "minLength": 1,
+          "maxLength": 32
+        }
+      },
+      "if": {"required": ["type"], "properties": {"type": {"const": "acceptance-criteria"}}},
+      "then": {"properties": {"item": {"$ref": "#/$defs/criterion_id"}}}
+    },
+    "criterion_id": {
+      "description": "A criterion's id: ac- and a number from 1 to 9999 with no leading zero, such as ac-3, the form of acceptance-criteria.schema.json.",
+      "type": "string",
+      "pattern": "^ac-[1-9][0-9]{0,3}$"
     },
     "option": {
       "description": "An answer a member can pick.",
@@ -90,7 +126,8 @@
       "properties": {
         "title": {"description": "The option's title.", "$ref": "#/$defs/option_title"},
         "explanation": {"description": "A short explanation of the option, plain text.", "$ref": "#/$defs/short_text"},
-        "recommended": {"description": "true when the run recommends this option: absent or false otherwise.", "type": "boolean"}
+        "recommended": {"description": "true when the run recommends this option: absent or false otherwise.", "type": "boolean"},
+        "proposal": {"description": "The new wording of the entry that the question is about, which about.item names, that the run proposes, for a member to edit before sending.", "$ref": "#/$defs/short_text"}
       }
     },
     "answer": {

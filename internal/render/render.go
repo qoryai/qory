@@ -635,9 +635,9 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 // writes AGENTS.md at the staging root with its references resolved the same way, since
 // every checkout link reads them, push-checks.json beside it when a module declares a
 // push check, [PushChecksFile], hooks.json when the checkout lists a workflow hook,
-// [HooksFile], and roles.json when the harness has a role, [RolesFile], then calls each
-// runtime's Render for the subdirectory
-// named after it and links the runtime's files entries into that subdirectory. The links
+// [HooksFile], roles.json when the harness has a role, [RolesFile], and role-notes.json,
+// [RoleNotesFile], then calls each runtime's Render for the subdirectory named after it and
+// links the runtime's files entries into that subdirectory. The links
 // point at the modules by absolute path, so a tree staged anywhere contains the same
 // links. A module the home holds a copy of, see [compose.Module.Copy], is copied in place
 // of each link, and its modules/<name> comes first: a copy of one of its entries leaves
@@ -672,6 +672,9 @@ func BuildAt(res *compose.Result, stage, home string, runtimes ...Runtime) error
 		return err
 	}
 	if err := writeRoles(res, stage); err != nil {
+		return err
+	}
+	if err := writeRoleNotes(res, stage); err != nil {
 		return err
 	}
 	for _, p := range runtimes {
@@ -788,6 +791,47 @@ func writeRoles(res *compose.Result, stage string) error {
 		return err
 	}
 	return WriteFile(stage, RolesFile, append(data, '\n'))
+}
+
+// RoleNotesFile is the file at the root of a home with the notes of the composed harness,
+// for a script that attaches them to the start of an agent. It is always written, with an
+// empty list when the harness has no note. It is not the notes.json of a push check.
+const RoleNotesFile = "role-notes.json"
+
+// RoleNotes is the content of [RoleNotesFile].
+type RoleNotes struct {
+	Notes []RoleNoteRow `json:"notes"`
+}
+
+// RoleNoteRow is one row of [RoleNotes]: a skill that is a note.
+type RoleNoteRow struct {
+	// Name is the skill's name; the body is skills/<name>/SKILL.md in the home.
+	Name string `json:"name"`
+	// Roles are the roles the note is for, each <kind>/<role> as roles.json writes a role,
+	// a group role such as agents/reviewers as written.
+	Roles []string `json:"roles"`
+	// Paths are the globs of the skill's frontmatter paths, from the checkout root, as
+	// written.
+	Paths []string `json:"paths"`
+	// Module is the module the skill comes from.
+	Module string `json:"module"`
+	// Layer is 0 for a module of the checkout's qory.yaml, or of the stack composed when
+	// it extends none, and 1 for a module of the base stack it extends.
+	Layer int `json:"layer"`
+}
+
+// writeRoleNotes writes [RoleNotesFile] into stage: one row per note, in the order of the
+// composed entries, and {"notes": []} when there is none.
+func writeRoleNotes(res *compose.Result, stage string) error {
+	rows := []RoleNoteRow{}
+	for _, n := range res.RoleNotes() {
+		rows = append(rows, RoleNoteRow{Name: n.Name, Roles: n.Roles, Paths: n.Paths, Module: n.Module, Layer: n.Layer})
+	}
+	data, err := json.MarshalIndent(RoleNotes{Notes: rows}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return WriteFile(stage, RoleNotesFile, append(data, '\n'))
 }
 
 // Difference is one path at which two trees differ, as [Diff] reports it.

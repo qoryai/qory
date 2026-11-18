@@ -290,7 +290,7 @@ func TestAManifestValueWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 func TestAReferenceWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct{ file, body, want string }{
-		{"agents/a.md", "---\nmodel: ${qory:qak_t}\n---\n", "Use one of the tiers light, fast, and thinking.\n  " + accessKeyPhrase + " is not a tier.\n  The name is in model " + accessKeyValuePhrase + ".\n  The model is in agents/a.md of module core."},
+		{"agents/a.md", "---\nmodel: ${qory:qak_t}\n---\n", "Use one of the tiers light, balanced, and thinking.\n  " + accessKeyPhrase + " is not a tier.\n  The name is in model " + accessKeyValuePhrase + ".\n  The model is in agents/a.md of module core."},
 		{"skills/s/SKILL.md", "${qory:qrk_kind/x}\n", "Change " + runKeyValuePhrase + " to a reference.\n  " + runKeyValuePhrase + " is not a reference: after ${qory: comes one of agents, commands, skills, then /<name>.\n  The reference is in skills/s/SKILL.md of module core."},
 		{"commands/c.md", "${qory:skills/qak_x y}\n", "Change " + accessKeyValuePhrase + " to a reference.\n  " + accessKeyValuePhrase + " refers to " + accessKeyPhrase + ", which is not an entry name: a name is one path segment.\n  The reference is in commands/c.md of module core."},
 		{"agents/qrk_a.md", "${qory:prompts/x}\n", "Change ${qory:prompts/x} to a reference.\n  ${qory:prompts/x} is not a reference: after ${qory: comes one of agents, commands, skills, then /<name>.\n  The reference is in agents/" + runKeyPhrase + " of module core."},
@@ -305,7 +305,7 @@ func TestAReferenceWithASecretIsLeftOutOfItsRefusal(t *testing.T) {
 			t.Errorf("%s: %v, want %q", c.body, err, inModuleCore(c.want))
 		}
 	}
-	if err := NotATier("--tier light=x", "QRK_t"); err == nil || err.Error() != "Use one of the tiers light, fast, and thinking.\n  "+runKeyPhrase+" is not a tier.\n  The name is in --tier light=x." {
+	if err := NotATier("--tier light=x", "QRK_t"); err == nil || err.Error() != "Use one of the tiers light, balanced, and thinking.\n  "+runKeyPhrase+" is not a tier.\n  The name is in --tier light=x." {
 		t.Errorf("NotATier: %v", err)
 	}
 }

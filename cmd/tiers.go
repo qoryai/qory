@@ -44,7 +44,7 @@ func tierFlags(values, efforts []string) (map[string]stack.Tier, error) {
 			return nil, fmt.Errorf("--tier %s is given twice; give each tier once", name)
 		}
 		if _, placeholder := module.TierOf(model); placeholder {
-			return nil, fmt.Errorf("--tier %s: write a model id; %s is a tier placeholder, which goes only in an agent's model", exports.Value(value, false), exports.Value(model, false))
+			return nil, exports.Refuse(fmt.Sprintf("--tier %s: write a model id, not a tier placeholder.", exports.Value(value, false)), fmt.Sprintf("%s goes only in an agent's model.", exports.Value(model, false)))
 		}
 		tiers[name] = stack.Tier{Model: model, From: tierFlag}
 	}
@@ -89,13 +89,17 @@ func resolveTiers(flags map[string]stack.Tier, conf config.Config) map[string]st
 // mainModelTier refuses a main model that is a tier placeholder, from the document's
 // target.model, the configuration's harness.model or --model, each with where it is set.
 func mainModelTier(p *stack.Stack, conf config.Config, model string) error {
-	for _, c := range []struct{ where, value string }{
-		{p.File + ": target.model", p.Target.Model},
-		{conf.Origin("harness.model") + ": harness.model", conf.Model},
-		{"--model", model},
+	for _, c := range []struct{ key, file, value string }{
+		{"target.model", p.File, p.Target.Model},
+		{"harness.model", conf.Origin("harness.model"), conf.Model},
+		{"--model", "", model},
 	} {
 		if _, ok := module.TierOf(c.value); ok {
-			return fmt.Errorf("%s %s is a tier placeholder; set the main model by its id, and a tier only in an agent's model", c.where, exports.Value(c.value, false))
+			lines := []string{fmt.Sprintf("%s is a tier placeholder, which goes only in an agent's model.", exports.Value(c.value, false))}
+			if c.file != "" {
+				lines = append(lines, c.key+" is in "+exports.HidePath(c.file)+".")
+			}
+			return exports.Refuse("Set "+c.key+" to a model id, not a tier placeholder.", lines...)
 		}
 	}
 	return nil

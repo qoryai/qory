@@ -97,13 +97,13 @@ func TestLowerAccessTakesTheLowerOfTwoLevels(t *testing.T) {
 func TestLoadReadsTheTier(t *testing.T) {
 	isolate(t)
 	p, err := Load(write(t, withWorkflows("  deep:\n    tier: thinking\n"+
-		"  quick:\n    tier: fast\n  small:\n    tier: light\n"+
+		"  quick:\n    tier: balanced\n  small:\n    tier: light\n"+
 		"  plain:\n    access: write\n    time_limit: 45m\n")))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, want := range map[string]string{
-		"deep": "thinking", "quick": "fast", "small": "light", "plain": "", "none": "",
+		"deep": "thinking", "quick": "balanced", "small": "light", "plain": "", "none": "",
 	} {
 		if got := p.Workflows[name].Tier; got != want {
 			t.Errorf("%s: tier %q, want %q", name, got, want)
@@ -118,15 +118,15 @@ func TestLoadReadsTheTier(t *testing.T) {
 	}
 }
 
-// TestLoadRefusesATierThatIsNoTier refuses a tier that is not light, fast or thinking,
+// TestLoadRefusesATierThatIsNoTier refuses a tier that is not light, balanced or thinking,
 // with the fix first and the file last.
 func TestLoadRefusesATierThatIsNoTier(t *testing.T) {
 	isolate(t)
-	for _, value := range []string{"fastest", "Thinking", "${qory:light}"} {
+	for _, value := range []string{"fast", "fastest", "Thinking", "${qory:light}"} {
 		path := write(t, withWorkflows("  hello:\n    tier: \""+value+"\"\n"))
 		_, err := Load(path)
 		want := "Set workflows.hello.tier to a valid tier.\n" +
-			"  The tiers are light, fast, and thinking.\n  The value is \"" + value + "\".\n" +
+			"  The tiers are light, balanced, and thinking.\n  The value is \"" + value + "\".\n" +
 			"  workflows.hello is in " + path + "."
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v, want %q", value, err, want)
@@ -204,7 +204,7 @@ func TestLoadRefusesABrokenWorkflow(t *testing.T) {
 			"  workflows.hello is in {path}."},
 		{"  hello:\n    access: write\n    time_limit: 0s\n", "Set workflows.hello.time_limit to a duration above zero"},
 		{"  hello:\n    tier: fastest\n", "Set workflows.hello.tier to a valid tier.\n" +
-			"  The tiers are light, fast, and thinking.\n  The value is \"fastest\".\n" +
+			"  The tiers are light, balanced, and thinking.\n  The value is \"fastest\".\n" +
 			"  workflows.hello is in {path}."},
 		{"  hello:\n    prompt: x\n", `Key "prompt" is not one qory-stack.yaml reads.`},
 	} {
@@ -258,7 +258,7 @@ func TestTheSchemaTakesTheWorkflows(t *testing.T) {
 		{"  hello:\n    access: admin\n", false},
 		{"  hello:\n    access: Write\n", false},
 		{"  hello:\n    tier: light\n", true},
-		{"  hello:\n    tier: fast\n", true},
+		{"  hello:\n    tier: balanced\n", true},
 		{"  hello:\n    tier: thinking\n    access: read\n", true},
 		{"  hello:\n    tier: fastest\n", false},
 		{"  hello:\n    tier: Thinking\n", false},

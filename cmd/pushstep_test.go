@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -1465,6 +1466,43 @@ func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 	}
 }
 
+// gitCredentialHelperOrigin is the file from which git reads a credential.helper outside
+// the test's configuration file, or "" if it reads none. It runs git with an empty system
+// file, no global file and an empty home, and with no repository, so what it finds comes
+// from a file that GIT_CONFIG_SYSTEM does not replace, such as Apple's
+// /Library/Developer/CommandLineTools/usr/share/git-core/gitconfig.
+func gitCredentialHelperOrigin(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	dir := tempDir(t)
+	empty := filepath.Join(dir, "empty")
+	writeFile(t, empty, "")
+	git := exec.Command("git", "config", "--show-origin", "--get-all", "credential.helper")
+	git.Dir = dir
+	git.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + dir,
+		"GIT_CONFIG_NOSYSTEM=0",
+		"GIT_CONFIG_SYSTEM=" + empty,
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CEILING_DIRECTORIES=" + dir,
+		"GIT_TERMINAL_PROMPT=0",
+	}
+	out, err := git.Output()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 && len(out) == 0 {
+		return ""
+	}
+	if err != nil {
+		t.Fatalf("git config credential.helper failed: %v", err)
+	}
+	line, _, _ := strings.Cut(string(out), "\n")
+	origin, _, _ := strings.Cut(line, "\t")
+	return origin
+}
+
 // TestACredentialHelperOfAConfigFileIsNotRead has a system or global configuration file
 // with a helper that writes a file. The helper does not run in a run that fetches and
 // pushes through a proxy with a password. A plain git with the same file and the same
@@ -1472,6 +1510,11 @@ func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 func TestACredentialHelperOfAConfigFileIsNotRead(t *testing.T) {
 	for name, variable := range map[string]string{"system": "GIT_CONFIG_SYSTEM", "global": "GIT_CONFIG_GLOBAL"} {
 		t.Run(name, func(t *testing.T) {
+			if variable == "GIT_CONFIG_SYSTEM" && runtime.GOOS == "darwin" {
+				if origin := gitCredentialHelperOrigin(t); origin != "" {
+					t.Skipf("git reads credential.helper from %s even with GIT_CONFIG_SYSTEM set, so the plain git would open the macOS keychain; CI on Linux runs this subtest", origin)
+				}
+			}
 			p := newPushRepo(t, "write")
 			marker := filepath.Join(tempDir(t), "helper-ran")
 			helper := filepath.Join(tempDir(t), "helper")
@@ -1484,6 +1527,8 @@ func TestACredentialHelperOfAConfigFileIsNotRead(t *testing.T) {
 			t.Setenv(variable, config)
 			if variable == "GIT_CONFIG_SYSTEM" {
 				t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
+			} else {
+				t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 			}
 			recordGit(t, config)
 			r := p.run(t, func(dir string) {

@@ -82,7 +82,7 @@ const userConfig = `apiVersion: qory.dev/v1alpha1
 harness:
   #runtime: claude             # render for this runtime, or a list, instead of the document's
   #model: opus                 # write this model instead of the document's
-  #tiers: {light: claude-haiku-5-5}   # the model id for agents whose model is ${qory:light}; also fast, thinking
+  #tiers: {light: claude-haiku-5-5}   # the model id for agents whose model is ${qory:light}; also balanced, thinking
   force: false                 # replace a tracked, unmodified file where a link goes
   update: never                # always: fetch every git source again on each compose
 worktree:

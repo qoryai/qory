@@ -1,0 +1,4 @@
+agents/base-developer core
+agents/code-reviewer core
+skills/app-naming app
+skills/python-naming python
