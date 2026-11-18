@@ -1078,9 +1078,11 @@ func TestTheHandoffGivesTheTextAndTheSteps(t *testing.T) {
 // succeeds.
 func TestAHandoffOverTheFormatsLimitsIsDroppedAndTheRunStores(t *testing.T) {
 	p := newPushRepo(t, "write")
+	var commit string
 	r := p.run(t, func(dir string) {
 		writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
 		commitAll(t, dir, "Add a file")
+		commit = gitHead(t, dir)
 		writeFile(t, filepath.Join(dir, ".qory", "handoff", "submission.json"),
 			`{"text":{"title":"`+strings.Repeat("t", 257)+`","description":"A file."},"steps":{"`+gitHead(t, dir)+`":"`+strings.Repeat("s", 129)+`"}}`)
 	}, nil)
@@ -1094,7 +1096,9 @@ func TestAHandoffOverTheFormatsLimitsIsDroppedAndTheRunStores(t *testing.T) {
 			t.Errorf("the commit %s has the step %q, want unreviewed", c.Commit, c.Step)
 		}
 	}
-	wants(t, r.log(), "qory run: Shorten what the file at the path in QORY_SUBMISSION_HANDOFF gives: qory dropped the text, whose title has more than 256 characters and a step of more than 128 characters and stored")
+	head := "qory run: The hand-off file has a part the submission format does not allow, so qory dropped it.\n"
+	wants(t, r.log(), head+"  Title: 257 characters, over the limit of 256. qory dropped the text.\n"+
+		"  Step of commit "+commit+": 129 characters, over the limit of 128. qory dropped the step.\n")
 	lacks(t, r.log(), "ttttt", "sssss")
 }
 
@@ -1119,7 +1123,8 @@ func TestALinkedHandoffFolderIsNotRead(t *testing.T) {
 	if doc := p.api.document(t, 1); doc.Text != nil {
 		t.Errorf("the text is %+v, want none", doc.Text)
 	}
-	wants(t, r.log(), "qory run: Check the file at the path in QORY_SUBMISSION_HANDOFF: qory ignored it")
+	wants(t, r.log(), "qory run: The hand-off file is not usable, so the submission has no text and no steps.\n"+
+		"  File: .qory/handoff/submission.json, from QORY_SUBMISSION_HANDOFF.\n  Cause: ")
 	lacks(t, r.log(), "From the host")
 }
 

@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -39,9 +40,9 @@ const (
 	textPushStepMany     = "push %s to %s and %d further repositories"
 	textPushNoProxy      = "take the work item in again in Qory Apiary: the run's push proxy, through which qory pushes the run's commits, did not open: %s" + codeUsed
 	textPushNoCred       = "Contact support: this run has no push credential, so qory pushed nothing.\n  The run configuration has no credential with purpose push, so qory pushed nothing" + codeUsed
-	textPushNoReadProxy  = "take the work item in again in Qory Apiary: the run's host proxy, through which qory reads the head of the branch before it pushes, did not open: %s" + codeUsed
-	textHandoffIgnored   = "qory run: Check the file at the path in " + handoffEnv + ": qory ignored it and stored the submission with no text, and each commit as unreviewed. %s"
-	textHandoffDropped   = "qory run: Shorten what the file at the path in " + handoffEnv + " gives: qory dropped %s and stored the submission without them, with no text or with the step unreviewed"
+	textPushNoReadProxy  = "The run's host proxy did not open, so qory could not read the head of the branch.\n  Cause: %s" + codeUsed
+	textHandoffIgnored   = "qory run: The hand-off file is not usable, so the submission has no text and no steps.\n  File: %s, from " + handoffEnv + ".\n  Cause: %s"
+	textHandoffDropped   = "qory run: The hand-off file has a part the submission format does not allow, so qory dropped it."
 	textPushNoRunAPI     = "take the work item in again in Qory Apiary: the run API, which stores the version of the artifact " + submissionType + ", is not reachable from this run: %s" + codeUsed
 	textNoSubmissionType = "Define the artifact type " + submissionType + " in the workspace's Artifact types, then %s, then run the round again"
 	textNotStored        = "%s, then take the work item in again: qory pushed %s, and the version of the artifact " + submissionType + " was not stored: %s" + codeUsed
@@ -326,10 +327,13 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		}
 		given, err := readHandoff(handoffRoot)
 		if err != nil {
-			fmt.Fprintf(w, textHandoffIgnored+"\n", shownError(err))
+			fmt.Fprintf(w, textHandoffIgnored+"\n", filepath.ToSlash(handoffRel), shownError(err))
 		}
 		if given != nil && len(given.dropped) > 0 {
-			fmt.Fprintf(w, textHandoffDropped+"\n", strings.Join(given.dropped, " and "))
+			fmt.Fprintln(w, textHandoffDropped)
+			for _, line := range given.dropped {
+				fmt.Fprintln(w, "  "+line)
+			}
 		}
 		document := assembleSubmission(branch, repositories, verdict, given)
 		if program != nil {

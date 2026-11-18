@@ -290,9 +290,10 @@ type Replacement struct {
 	Module, Git, Commit, Ref, Place string
 }
 
-// Line is the line of qory run for the replacement.
+// Line is the text of qory run for the replacement, without its prefix: line 1 states what
+// happened, and the values follow on indented lines.
 func (r Replacement) Line() string {
-	return fmt.Sprintf("%s from %s@%s, in place of %s in %s", r.Module, exports.URL(r.Git), r.Commit, exports.Value(r.Ref, false), r.Place)
+	return fmt.Sprintf("A module of the stack was read at the commit of the submit module, not at its ref.\n  Module %s from %s at %s.\n  The stack lists ref %s in %s.", r.Module, exports.URL(r.Git), r.Commit, exports.Value(r.Ref, false), r.Place)
 }
 
 // beforeManifest and afterManifest, when a test sets them, run with each module's

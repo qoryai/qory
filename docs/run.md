@@ -2735,11 +2735,11 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   [The head check](#the-head-check) says. A push that the forge rejects with the status
   `[rejected]`, such as a lease that no longer matches, ends the step with the same text,
   with the head read again
-- `Let the run's gateway read <system>, then take the work item in again.`, then a line
-  indented by two spaces: `The read of the head of <path> through the run's host proxy
-  failed: <error>; the code is used`
-- `take the work item in again in Qory Apiary: the run's host proxy, through which qory
-  reads the head of the branch before it pushes, did not open: <error>; the code is used`
+- `The run's host proxy could not read the head of the branch, so qory did not push.`, then
+  two lines indented by two spaces: `Repository <system>/<path>.` and `Cause: <error>; the
+  code is used`
+- `The run's host proxy did not open, so qory could not read the head of the branch.`, then
+  a line indented by two spaces: `Cause: <error>; the code is used`
 - `change the rule on <system> that stops a push to qory/<work item id> of <path>, then take
   the work item in again: the push failed: <error>; the code is used`, when a rule or a
   hook on the system stops the update
@@ -2801,8 +2801,8 @@ credential alone. The result of each repository is one of these:
 
 A push that the forge rejects with the status `[rejected]`, such as a lease that no longer
 matches, also fails the step with that refusal, with the head read again. When the read of a
-head fails, the step fails with the line `Let the run's gateway read <system>`, also in the
-list above.
+head fails, the step fails with the line `The run's host proxy could not read the head of the branch,
+so qory did not push.`, also in the list above.
 
 After a session that succeeded, a refusal closes the run `failed` with the end code
 `push_head_changed`. A session that did not succeed keeps its end, and a step that a stop or
@@ -2857,18 +2857,22 @@ of this form, and it reads it inside the checkout: a link at any part of the pat
 qory read another file. With no file, the submission has no `text`, and each commit is
 `unreviewed`. With a link, any other file that is not a regular file, a larger file, or a file
 that is not this JSON, qory ignores the file, stores the submission the same way, and prints
-`qory run: Check the file at the path in QORY_SUBMISSION_HANDOFF: qory ignored it and stored
-the submission with no text, and each commit as unreviewed. <cause>`. `<cause>` is `the path
-is not a regular file`, `the file has more than 262144 bytes, and qory reads at most 262144`,
-or the error of the file read or of the JSON reader.
+`qory run: The hand-off file is not usable, so the submission has no text and no steps.`,
+then two lines indented by two spaces: `File: .qory/handoff/submission.json, from
+QORY_SUBMISSION_HANDOFF.` and `Cause: <cause>`. `<cause>` is `the path is not a regular
+file`, `the file has more than 262144 bytes, and qory reads at most 262144`, or the error of
+the file read or of the JSON reader.
 
 qory also checks the file against the limits of the submission format, and drops the part
 that is over a limit and keeps the rest: a `text` whose `title` has more than 256 characters or
 whose `description` has more than 20000 is dropped whole, and a step of more than 128
-characters is dropped, so its commit is `unreviewed`. qory prints one line for what it dropped,
-`qory run: Shorten what the file at the path in QORY_SUBMISSION_HANDOFF gives: qory dropped
-<what> and stored the submission without them, with no text or with the step unreviewed`, and
-no content of the file. A step for a commit that this run did not make is not used. The run
+characters is dropped, so its commit is `unreviewed`. qory prints `qory run: The hand-off
+file has a part the submission format does not allow, so qory dropped it.`, then one line
+indented by two spaces for each part: `Title: <n> characters, over the limit of 256. qory
+dropped the text.`, `Description: <n> characters, over the limit of 20000. qory dropped the
+text.`, and `Step of commit <commit>: <n> characters, over the limit of 128. qory dropped the
+step.`, for at most 5 steps, then `<n> further steps are over the limit of 128 characters.
+qory dropped them.` It prints no content of the file. A step for a commit that this run did not make is not used. The run
 never fails because of the file.
 
 A module manifest can declare `submit_program`, a command of the module: a file in the
@@ -2878,7 +2882,9 @@ most one, and a second declaration fails the compose. The run's documents can se
 full commit id. qory adds that module after the modules of the stack. When a module of the
 stack, or of the base stack that the checkout extends, has the same name in its manifest and
 the same git source, qory reads that module at the commit in place of its ref, and prints
-`qory run: <module> from <url>@<commit>, in place of <ref> in <place>`. A module of that name
+`qory run: A module of the stack was read at the commit of the submit module, not at its
+ref.`, then two lines indented by two spaces: `Module <module> from <url> at <commit>.`
+and `The stack lists ref <ref> in <place>.` A module of that name
 from another git source fails the compose. qory composes this module before it knows the
 run's access level, so a run that its stack or its documents lower to `write-no-push` or
 `read` still composes it, and a name clash still refuses the run, but the run runs no program.
@@ -2913,9 +2919,22 @@ has one, the CA bundle `ca.pem`. The program gets these variables:
 | `SSL_CERT_FILE` | `/qory-submit/net/ca.pem`, the bundle that signs the proxy's certificates. |
 
 qory passes the password in a file that no container mounts, never on a command line. The
-program may run for 120 seconds, and qory prints at most 20 lines of what it printed, masked
-and of at most 300 characters each, standard output first. The program's exit status says how
-it ended:
+container still has the password as an environment variable, so anyone who can run `docker
+inspect` on this host reads it until qory removes the container. The program may run for 120
+seconds, and qory prints at most 20 lines of what it printed, masked and of at most 300
+characters each, standard output first. When the program ends, qory prints one of these, each
+with line 1 as the cause, then lines indented by two spaces:
+
+- `qory run: The submit program failed, so a repository it did not finish has no draft.`,
+  `Exit code: <code>.`, `Draft of the repository: program-failed.`
+- `qory run: The submit program ran past its limit, so a repository it did not finish has no
+  draft.`, `Limit: <limit>.`, `Draft of the repository: program-timeout.`
+- `qory run: The submit program did not start, so a repository has no draft.`, `Cause:
+  <cause>`, `Draft of the repository: program-failed.`
+- `qory run: The submit program could not run in the wall, so a repository has no draft.`,
+  `Cause: <cause>`, `Draft of the repository: program-failed.`
+
+The program's exit status says how it ended:
 
 | Exit | The step stores |
 |---|---|
@@ -2930,9 +2949,10 @@ of a repository, and its `draft`, from `no-program` to a draft pull request. A f
 changes anything else (the ref, the verdict, the text, a commit, a step, another draft, or the
 list of repositories), a file that is not a submission, and a file that is missing or is not a
 regular file of at most 4 MiB, are discarded: qory stores the submission it gave the program,
-with `program-failed` in each `no-program` draft, and prints `qory run: Check the submit
-program: <cause>, so qory kept the submission it gave the program and a repository has no
-draft (program-failed).`
+with `program-failed` in each `no-program` draft, and prints `qory run: The submit
+program left a result qory cannot use, so a repository has no draft.`, then lines indented by
+two spaces: `Cause: <cause>`, `qory kept the submission it gave the program.` and `Draft of
+the repository: program-failed.`
 
 `QORY_SUBMIT_BASES`, which the program `open-draft` of the module `github` reads for the base
 branch of each pull request, is not set: qory does not build that file. That program stops

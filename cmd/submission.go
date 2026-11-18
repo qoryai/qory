@@ -44,8 +44,8 @@ const stepUnreviewed = "unreviewed"
 type handoff struct {
 	Text  *submission.Text  `json:"text"`
 	Steps map[string]string `json:"steps"`
-	// dropped says what [readHandoff] left out because it is over a limit of the format, as
-	// one phrase for each part; nil for none.
+	// dropped is one line for each part that [readHandoff] left out because the format does
+	// not allow it, with its values; nil for none.
 	dropped []string
 }
 
@@ -105,30 +105,49 @@ func readHandoff(root string) (*handoff, error) {
 	return &h, nil
 }
 
+// The lines that [handoff.limit] lists for a part it dropped, each with its values; the
+// caller indents them under [textHandoffDropped]. maxDroppedSteps is how many dropped steps
+// get a line each.
+const (
+	textDroppedTitle       = "Title: %d characters, over the limit of %d. qory dropped the text."
+	textDroppedDescription = "Description: %d characters, over the limit of %d. qory dropped the text."
+	textDroppedStep        = "Step of commit %s: %d characters, over the limit of %d. qory dropped the step."
+	textDroppedFurther     = "%d further steps are over the limit of %d characters. qory dropped them."
+	maxDroppedSteps        = 5
+)
+
 // limit drops the parts of h that are over a limit of the submission format.
 func (h *handoff) limit() {
 	if h.Text != nil {
-		switch {
-		case utf8.RuneCountInString(h.Text.Title) > maxTitle:
+		switch title, description := utf8.RuneCountInString(h.Text.Title), utf8.RuneCountInString(h.Text.Description); {
+		case title > maxTitle:
 			h.Text = nil
-			h.dropped = append(h.dropped, fmt.Sprintf("the text, whose title has more than %d characters", maxTitle))
-		case utf8.RuneCountInString(h.Text.Description) > maxDescription:
+			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedTitle, title, maxTitle))
+		case description > maxDescription:
 			h.Text = nil
-			h.dropped = append(h.dropped, fmt.Sprintf("the text, whose description has more than %d characters", maxDescription))
+			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedDescription, description, maxDescription))
 		}
 	}
-	bad := 0
+	var over []string
 	for commit, step := range h.Steps {
 		if utf8.RuneCountInString(step) > maxStep {
-			delete(h.Steps, commit)
-			bad++
+			over = append(over, commit)
 		}
 	}
-	switch {
-	case bad == 1:
-		h.dropped = append(h.dropped, fmt.Sprintf("a step of more than %d characters", maxStep))
-	case bad > 1:
-		h.dropped = append(h.dropped, fmt.Sprintf("%d steps of more than %d characters", bad, maxStep))
+	slices.Sort(over)
+	for i, commit := range over {
+		step := h.Steps[commit]
+		delete(h.Steps, commit)
+		if i < maxDroppedSteps {
+			shown := []rune(shownText(commit))
+			if len(shown) > 64 {
+				shown = shown[:64]
+			}
+			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedStep, string(shown), utf8.RuneCountInString(step), maxStep))
+		}
+	}
+	if len(over) > maxDroppedSteps {
+		h.dropped = append(h.dropped, fmt.Sprintf(textDroppedFurther, len(over)-maxDroppedSteps, maxStep))
 	}
 }
 

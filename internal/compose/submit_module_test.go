@@ -139,7 +139,7 @@ func TestSubmitModuleReplacesTheRefOfTheSameModule(t *testing.T) {
 	if strings.Join(skills, ",") != "a,b" {
 		t.Errorf("forge ships %v, want the skills of the second commit", skills)
 	}
-	want := "forge from " + url + "@" + second + ", in place of " + first + " in qory.yaml"
+	want := "A module of the stack was read at the commit of the submit module, not at its ref.\n  Module forge from " + url + " at " + second + ".\n  The stack lists ref " + first + " in qory.yaml."
 	if res.Replaced == nil || res.Replaced.Line() != want {
 		t.Errorf("replaced %+v, line %q, want %q", res.Replaced, res.Replaced.Line(), want)
 	}
@@ -276,7 +276,7 @@ func TestSubmitModuleOfTheSameNameAsABaseStacksModule(t *testing.T) {
 	if !res.Modules[0].Base {
 		t.Error("the replaced module is not marked as the base's")
 	}
-	want := "forge from " + url + "@" + second + ", in place of " + first + " in stack web@main"
+	want := "A module of the stack was read at the commit of the submit module, not at its ref.\n  Module forge from " + url + " at " + second + ".\n  The stack lists ref " + first + " in stack web@main."
 	if res.Replaced == nil || res.Replaced.Line() != want {
 		t.Errorf("replaced %+v, want the line %q", res.Replaced, want)
 	}

@@ -337,7 +337,7 @@ func TestAProgramThatFailedAfterItsLinksKeepsTheLinks(t *testing.T) {
 		t.Errorf("the repository is %+v, want the link and program-failed with exit 1", repo)
 	}
 	wants(t, r.log(), "qory run: submit program: Give the GitHub App pull_requests: write on acme/site: POST pulls returned 403\n",
-		"qory run: Read the lines of the submit program above, then run the round again: it exited with 1, so a repository it did not finish has no draft (program-failed).\n")
+		"qory run: The submit program failed, so a repository it did not finish has no draft.\n  Exit code: 1.\n  Draft of the repository: program-failed.\n")
 }
 
 // TestAProgramThatRefusedItsInputLeavesTheFile is an exit 2 with the file as the step gave it:
@@ -350,7 +350,7 @@ func TestAProgramThatRefusedItsInputLeavesTheFile(t *testing.T) {
 	if repo.CommitURL != "" || string(repo.Draft) != `{"none":"program-failed","exit":2}` {
 		t.Errorf("the repository is %+v, want no link and program-failed with exit 2", repo)
 	}
-	wants(t, r.log(), "qory run: submit program: Add acme/site to the run documents' targets: no base branch for it\n", "it exited with 2")
+	wants(t, r.log(), "qory run: submit program: Add acme/site to the run documents' targets: no base branch for it\n", "  Exit code: 2.\n")
 }
 
 // TestAProgramThatChangedAnotherFieldIsDiscarded is a program that exits 0 and changed the
@@ -368,7 +368,7 @@ func TestAProgramThatChangedAnotherFieldIsDiscarded(t *testing.T) {
 	if repo.CommitURL != "" || string(repo.Draft) != `{"none":"program-failed","exit":1}` {
 		t.Errorf("the repository is %+v, want no link and program-failed with exit 1", repo)
 	}
-	wants(t, r.log(), "qory run: Check the submit program: it changed the ref, the verdict, the text or the list of repositories, so qory kept the submission it gave the program and a repository has no draft (program-failed).\n")
+	wants(t, r.log(), "qory run: The submit program left a result qory cannot use, so a repository has no draft.\n  Cause: it changed the ref, the verdict, the text or the list of repositories\n  qory kept the submission it gave the program.\n")
 }
 
 // TestAProgramPastItsLimitHasNoDraft is a program that runs past the limit: the container is
@@ -382,7 +382,7 @@ func TestAProgramPastItsLimitHasNoDraft(t *testing.T) {
 	if string(repo.Draft) != `{"none":"program-timeout"}` {
 		t.Errorf("the draft is %s, want program-timeout", repo.Draft)
 	}
-	wants(t, r.log(), "qory run: Run the round again: the submit program ran past 300ms, so a repository it did not finish has no draft (program-timeout).\n")
+	wants(t, r.log(), "qory run: The submit program ran past its limit, so a repository it did not finish has no draft.\n  Limit: 300ms.\n  Draft of the repository: program-timeout.\n")
 	if !strings.Contains(checkLog(t, log), "rm --force --volumes qory-push-check-") {
 		t.Errorf("the container was not removed:\n%s", checkLog(t, log))
 	}

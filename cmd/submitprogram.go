@@ -25,19 +25,21 @@ import (
 	"github.com/qoryai/qory/internal/submission"
 )
 
-// The words of the submit program's run. Each starts with the fix. textProgramLine is a
-// line of the program's output, masked.
+// The words of the submit program's run. Each states the cause only: line 1 has at most 100
+// characters with its prefix, and the values follow on indented lines. textProgramLine is a
+// line of the program's output, masked. The last four are the causes that
+// [textProgramNotReady] shows, as errors with no prefix.
 const (
 	textProgramLine     = "qory run: submit program: %s"
-	textProgramFailed   = "qory run: Read the lines of the submit program above, then run the round again: it exited with %d, so a repository it did not finish has no draft (program-failed)."
-	textProgramTimeout  = "qory run: Run the round again: the submit program ran past %s, so a repository it did not finish has no draft (program-timeout)."
-	textProgramNoStart  = "qory run: Check the submit program: it did not start (%s), so a repository has no draft (program-failed)."
-	textProgramNotReady = "qory run: Check the wall for the submit program: %s, so a repository has no draft (program-failed)."
-	textProgramDiscards = "qory run: Check the submit program: %s, so qory kept the submission it gave the program and a repository has no draft (program-failed)."
-	textProgramNoWall   = "set wall.adapter to docker, because the submit program runs in a container of the docker wall alone"
-	textProgramNoImage  = "set wall.image in forager.yaml, because the submit program runs in the wall's default image"
-	textProgramBadImage = "set wall.image or --image to an image reference, because the submit program cannot start from %s"
-	textProgramEngine   = "switch the engine back to the one the run started on, because the submit program would run on the engine %s and the run's containers are on the engine %s"
+	textProgramFailed   = "qory run: The submit program failed, so a repository it did not finish has no draft.\n  Exit code: %d.\n  Draft of the repository: program-failed."
+	textProgramTimeout  = "qory run: The submit program ran past its limit, so a repository it did not finish has no draft.\n  Limit: %s.\n  Draft of the repository: program-timeout."
+	textProgramNoStart  = "qory run: The submit program did not start, so a repository has no draft.\n  Cause: %s\n  Draft of the repository: program-failed."
+	textProgramNotReady = "qory run: The submit program could not run in the wall, so a repository has no draft.\n  Cause: %s\n  Draft of the repository: program-failed."
+	textProgramDiscards = "qory run: The submit program left a result qory cannot use, so a repository has no draft.\n  Cause: %s\n  qory kept the submission it gave the program.\n  Draft of the repository: program-failed."
+	textProgramNoWall   = "the submit program runs in a container of the docker wall alone, and this run's wall is not docker"
+	textProgramNoImage  = "the submit program runs in the wall's default image, and this run has none (wall.image in forager.yaml)"
+	textProgramBadImage = "the submit program runs in the wall's default image, and %s is not an image reference"
+	textProgramEngine   = "the submit program would run on the engine %s, and the run's containers are on the engine %s"
 )
 
 // submitLimit, when not 0, is how long the submit program may run, in place of

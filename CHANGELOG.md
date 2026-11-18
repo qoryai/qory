@@ -540,7 +540,8 @@ release may change what an existing document does, and states it under Upgrading
 - A session hands its title, description and the step of each commit to the submit step in
   the file that `QORY_SUBMISSION_HANDOFF` names. A commit with no step is `unreviewed`. qory
   reads the file inside the checkout and follows no link, and drops a title, description or
-  step that is over a limit of the submission format, with one line.
+  step that is over a limit of the submission format, with a line that states the
+  cause and the values.
 - The push step runs the `submit_program` of the composed harness after the push of a run at
   the access `write` and before it stores the version. The program runs in a container of the
   wall's default image with no network, as the run's user, for at most 120 seconds, and
