@@ -62,7 +62,7 @@ release may change what an existing document does, and states it under Upgrading
   the order `read`, `write-no-push`, `write`. A workflow's `access` in a stack takes
   `write-no-push` in both schemas and in the stack check, and documents may have it. A
   `write-no-push` run has a writable checkout, no push step, no submit, and no version
-  of the artifact `branch`. With no wall, it stops with `write_needs_wall`. The error
+  of the artifact `submission`. With no wall, it stops with `write_needs_wall`. The error
   for another workflow value now starts
   `Set workflows.<name>.access to a valid level.`
 - Every run of Claude Code installs the runtime's program before its session: from the
@@ -106,14 +106,14 @@ release may change what an existing document does, and states it under Upgrading
   `tools` key keeps the shell. An agent without write tools can still write files through Codex's
   `apply_patch` tool.
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
-  artifact `branch` that its stage starts from. The harness still comes from
+  artifact `submission` that its stage starts from. The harness still comes from
   `target_version`. A commit on the branch reaches a run's harness after you merge the
   branch into the target's default branch, the branch that its `HEAD` points to. Qory
   Apiary reads `target_version` there, so the next run's `target_version` contains the
   commit.
 - A write run of a work item ends with a push step: qory commits what the agent left,
   pushes each repository with new commits to `qory/<work item id>`, and stores a new
-  version of the artifact `branch`. The next run in the same stage starts at that commit. A
+  version of the artifact `submission`. The next run in the same stage starts at that commit. A
   session that failed, timed out or was cancelled gets the same step, and its commit and
   version show how it ended. See The push step of a write run in `docs/run.md`.
 - A skill reads its work item and stores what it made with `qory work-item show`, `qory
@@ -642,7 +642,7 @@ release may change what an existing document does, and states it under Upgrading
   newest version that the run API's artifact index does not mark `cancelled`. A version
   that a cancelled run made counts for no stage, and an artifact whose versions are all
   cancelled gets no folder. The start commit of a run skips a cancelled version of the
-  artifact `branch` too. Before, all three took the newest version, cancelled or not. An
+  artifact `submission` too. Before, all three took the newest version, cancelled or not. An
   index without the field `cancelled` reads as no version cancelled.
 - qory builds with Forager f344b7a7.
   - A run keeps its wall only when a container of the run may still run; a network or

@@ -8,7 +8,7 @@ import (
 	"github.com/qoryai/qory/internal/runapi"
 )
 
-// branchIndex is an index with the versions of the artifact branch, name main, each given
+// branchIndex is an index with the versions of the artifact submission, name main, each given
 // as its id and the stage that wrote it, numbered from 1.
 func branchIndex(versions ...[2]string) *runapi.Index {
 	artifact := runapi.Artifact{Type: submissionType, Name: defaultName, NewestVersion: len(versions)}

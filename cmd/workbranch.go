@@ -174,7 +174,7 @@ func chosenSubmission(snapshot *runapi.Snapshot, index *runapi.Index) (*runapi.V
 }
 
 // readBranchVersion downloads the one file of version and returns it, checked against the
-// branch format.
+// submission format.
 func readBranchVersion(ctx context.Context, client *runapi.Client, version *runapi.Version) (*submission.Submission, error) {
 	if len(version.Files) != 1 || version.Files[0].Size > maxSubmissionFile {
 		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary with one file of at most %d bytes: version %d has another size.",

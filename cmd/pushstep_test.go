@@ -249,7 +249,7 @@ func (a *pushAPI) counts() (posts, reads, stored int) {
 	return a.posts, a.reads, len(a.files)
 }
 
-// document is the stored version number n, from 1, checked against the branch format.
+// document is the stored version number n, from 1, checked against the submission format.
 func (a *pushAPI) document(t *testing.T, n int) submission.Submission {
 	t.Helper()
 	a.mu.Lock()
@@ -555,7 +555,7 @@ func writesAndCommits(t *testing.T) func(string) {
 // TestAWriteRunPushesWhatTheAgentLeft is a write run whose agent made a commit and left a
 // new file and a change uncommitted, from a depth-1 fetch: the branch on the forge has
 // both, one more commit than the agent made with the run's id in its message, on the
-// target version, and the run posts one version in the branch format at that commit.
+// target version, and the run posts one version in the submission format at that commit.
 func TestAWriteRunPushesWhatTheAgentLeft(t *testing.T) {
 	p := newPushRepo(t, "write")
 	r := p.run(t, writesAndCommits(t), nil)

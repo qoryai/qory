@@ -377,7 +377,7 @@ func pushStepName(branch *preparation.WorkBranch, system string) string {
 	}
 }
 
-// storeSubmission stores document as a new version of the artifact main of the type branch.
+// storeSubmission stores document as a new version of the artifact main of the type submission.
 // The gateway never retries a POST and Qory Apiary does not detect one sent twice, so:
 // a 429, which neither forwarded nor stored the POST, sends it again after Retry-After;
 // a POST with no response sends it again only when [submissionStored] reads that no
@@ -461,7 +461,7 @@ func retryAfter(err error) time.Duration {
 }
 
 // submissionStored reports whether the index of the work item has a version of the artifact
-// main of the type branch that the run runID wrote, with one file of the SHA-256 sum. A
+// main of the type submission that the run runID wrote, with one file of the SHA-256 sum. A
 // 429 or a request with no response reads the index again, at most [maxSubmissionTries] times.
 func submissionStored(ctx context.Context, client *runapi.Client, runID, sum string) (bool, error) {
 	var last error

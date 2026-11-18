@@ -490,7 +490,7 @@ func TierList() string {
 const (
 	AccessRead = "read"
 	// AccessWriteNoPush is a writable checkout, no push step, no submit, and no version of
-	// the artifact branch.
+	// the artifact submission.
 	AccessWriteNoPush = "write-no-push"
 	AccessWrite       = "write"
 )
