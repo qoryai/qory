@@ -5043,14 +5043,25 @@ each plan type (see `scope_checks` in `contracts/harness/v1/README.md`).
 two cases:
 
 - The workflow has a `plan` and its access is `read`, `write-no-push` or left out:
-  `` Remove `plan` from <workflow>, or set its access to write. ``
+  `` Remove `plan` from <workflow>, or set its access to write. ``, then `Only a workflow
+  with access write has a plan, and the access of <workflow> is <access>.` and
+  `workflows.<workflow> is in <file>.` on the next two lines.
 - No module of the base stack declares a scope check for the type: `Add a scope check for
-  <type> to a module's scope_checks.` with `` You can also remove `plan: <type>` from
-  <workflow> in the stack. `` on the next line, or both on one line when the first line has at most 98 characters.
+  <type> to a module's scope_checks.`, then `` You can also remove `plan: <type>` from
+  <workflow> in the stack. `` on the next line, or both on one line when the first line
+  has at most 98 characters. Two lines follow: `No module of the stack declares a scope
+  check for <type>.` and `workflows.<workflow> is in <file>.`
 
 Only a module of the base stack counts. A module that the checkout's `qory.yaml` adds to
 the base can declare `scope_checks`, and the compose uses none of it: the repository under
-work cannot supply the check of its plan. A stack with no `plan` composes as before.
+work cannot supply the check of its plan. The compose also refuses a scope check whose
+program is no file in the module, is a folder, or is in an entry that an `exclude` or an
+`only` of the module leaves out, and a type that two modules declare a scope check for. The
+fix is line 1 of each refusal, and the module, the type and the path are on line 2.
+
+A stack in which no workflow names a plan needs no scope check: the compose accepts it, the
+result has no scope check unless a module declares one, and a `scope_checks` of a module is
+still read and checked.
 
 `qory run` reads neither `plan` nor `scope_checks`: a run does not run a scope check, and
 the push step does not read the plan type.

@@ -128,8 +128,8 @@ func TestLoadRefusesATierThatIsNoTier(t *testing.T) {
 		want := "Set workflows.hello.tier to a valid tier.\n" +
 			"  The tiers are light, balanced, and thinking.\n  The value is \"" + value + "\".\n" +
 			"  workflows.hello is in " + path + "."
-		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("%q: %v, want %q", value, err, want)
+		if err == nil || err.Error() != want {
+			t.Errorf("%q:\n%v\nwant:\n%s", value, err, want)
 		}
 	}
 }
@@ -154,14 +154,18 @@ func TestLoadReadsThePlan(t *testing.T) {
 }
 
 // TestLoadRefusesAPlanOnAWorkflowThatDoesNotWrite refuses a plan on a workflow whose
-// access is read, write-no-push, or left out, with the one fix line.
+// access is read, write-no-push, or left out, with the fix first, the access, and the file
+// last. The error is compared whole.
 func TestLoadRefusesAPlanOnAWorkflowThatDoesNotWrite(t *testing.T) {
 	isolate(t)
-	for _, access := range []string{"", "    access: read\n", "    access: write-no-push\n"} {
-		_, err := Load(write(t, withWorkflows("  hello:\n"+access+"    plan: change-plan\n")))
-		want := "Remove `plan` from hello, or set its access to write."
+	for _, c := range []struct{ access, level string }{{"", "read"}, {"    access: read\n", "read"}, {"    access: write-no-push\n", "write-no-push"}} {
+		path := write(t, withWorkflows("  hello:\n"+c.access+"    plan: change-plan\n"))
+		_, err := Load(path)
+		want := "Remove `plan` from hello, or set its access to write.\n" +
+			"  Only a workflow with access write has a plan, and the access of hello is " + c.level + ".\n" +
+			"  workflows.hello is in " + path + "."
 		if err == nil || err.Error() != want {
-			t.Errorf("access %q: %v, want %q", access, err, want)
+			t.Errorf("access %q:\n%v\nwant:\n%s", c.access, err, want)
 		}
 	}
 }
@@ -176,8 +180,8 @@ func TestLoadRefusesAPlanThatIsNoArtifactType(t *testing.T) {
 		want := "Set workflows.hello.plan to an artifact type.\n" +
 			"  An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n" +
 			"  The value is \"" + value + "\".\n  workflows.hello is in " + path + "."
-		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("%q: %v, want %q", value, err, want)
+		if err == nil || err.Error() != want {
+			t.Errorf("%q:\n%v\nwant:\n%s", value, err, want)
 		}
 	}
 }

@@ -1,6 +1,8 @@
 package compose_test
 
 import (
+	"fmt"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -46,7 +48,9 @@ func TestAPlanWithAScopeCheckComposes(t *testing.T) {
 // declares one for another type: the compose fails with the one fix line.
 func TestAPlanNoModuleCheckedIsRefused(t *testing.T) {
 	const want = "Add a scope check for change-plan to a module's scope_checks.\n" +
-		"  You can also remove `plan: change-plan` from fix in the stack."
+		"  You can also remove `plan: change-plan` from fix in the stack.\n" +
+		"  No module of the stack declares a scope check for change-plan.\n" +
+		"  workflows.fix is in qory-stack.yaml."
 	for name, manifest := range map[string]string{
 		"no scope_checks": "apiVersion: qory.dev/v1alpha1\nname: core\n",
 		"another type":    strings.Replace(scopeManifest, "change-plan", "build-plan", 1),
@@ -94,16 +98,21 @@ func TestAStackWithNoPlanComposesAsBefore(t *testing.T) {
 // read, write-no-push, or left out: the stack is refused, though a module declares the
 // scope check.
 func TestAPlanOnAWorkflowThatDoesNotWriteIsRefused(t *testing.T) {
-	for _, access := range []string{"", "    access: read\n", "    access: write-no-push\n"} {
+	for _, c := range []struct{ access, level string }{{"", "read"}, {"    access: read\n", "read"}, {"    access: write-no-push\n", "write-no-push"}} {
 		const head = "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source: {path: modules/core}\nworkflows:\n  fix:\n"
-		_, err := composeTree(t, map[string]string{
-			stack.FileName:                     head + access + "    plan: change-plan\n",
+		dir := writeTree(t, map[string]string{
+			stack.FileName:                     head + c.access + "    plan: change-plan\n",
 			"modules/core/skills/fix/SKILL.md": "text\n",
 			"modules/core/qory-module.yaml":    scopeManifest,
 			"modules/core/checks/check.js":     "#!/usr/bin/env node\n",
 		})
-		if want := "Remove `plan` from fix, or set its access to write."; err == nil || err.Error() != want {
-			t.Errorf("access %q: %v, want %q", access, err, want)
+		file := filepath.Join(dir, stack.FileName)
+		_, err := loadFor(file, "claude")
+		want := "Remove `plan` from fix, or set its access to write.\n" +
+			"  Only a workflow with access write has a plan, and the access of fix is " + c.level + ".\n" +
+			"  workflows.fix is in " + file + "."
+		if err == nil || err.Error() != want {
+			t.Errorf("access %q:\n%v\nwant:\n%s", c.access, err, want)
 		}
 	}
 }
@@ -130,20 +139,20 @@ func TestScopeCheckProblemsOfAModuleAreRefused(t *testing.T) {
 			stack.FileName:                     planStack,
 			"modules/core/qory-module.yaml":    scopeManifest,
 			"modules/core/skills/fix/SKILL.md": "text\n",
-		}, "Add checks/check.js to module core, or change its scope check for change-plan.\n  Module core has no file at checks/check.js."},
+		}, "Add the program of the scope check to its module, or change its path.\n  Module core has no file at checks/check.js, the program of the scope check for change-plan."},
 		{"a program that is a directory", map[string]string{
 			stack.FileName:                     planStack,
 			"modules/core/qory-module.yaml":    scopeManifest,
 			"modules/core/skills/fix/SKILL.md": "text\n",
 			"modules/core/checks/check.js/":    "",
-		}, "Set the scope check for change-plan of module core to a program file.\n  checks/check.js is not a file."},
+		}, "Set the program of the scope check to a file in its module.\n  checks/check.js of module core is not a file, and it is the program of the scope check for change-plan."},
 		{"a program left out by an exclude", map[string]string{
 			stack.FileName:                       strings.Replace(planStack, "source: {path: modules/core}", "source: {path: modules/core}\n    exclude: {skills: [tools]}", 1),
 			"modules/core/qory-module.yaml":      strings.ReplaceAll(scopeManifest, "checks/check.js", "skills/tools/check.js"),
 			"modules/core/skills/fix/SKILL.md":   "text\n",
 			"modules/core/skills/tools/SKILL.md": "text\n",
 			"modules/core/skills/tools/check.js": "x\n",
-		}, "Keep skills/tools in module core, or move skills/tools/check.js out of it.\n  The program of the scope check for change-plan is in skills/tools, and an exclude or only of module core leaves skills/tools out."},
+		}, "Keep the program of the scope check in its module, or move it out of the left-out entry.\n  The program skills/tools/check.js of the scope check for change-plan is in skills/tools, and an exclude or only of module core leaves skills/tools out."},
 	} {
 		_, err := composeTree(t, c.files)
 		if err == nil || err.Error() != c.want {
@@ -192,14 +201,15 @@ func TestTheDuplicateScopeCheckRefusalFixFitsInAHundredCharacters(t *testing.T) 
 			t.Errorf("%s: first line %q has %d characters", c.name, first, n)
 		}
 		// With 98 characters or fewer in the full fix, line 1 has the type and both names.
+		// The whole text is compared.
 		full := "Remove the scope check for " + c.typ + " from module " + c.first + " or " + c.other + "."
-		if named := first == full; named != (printedLength(full) <= 100) {
-			t.Errorf("%s: first line %q, the full fix has %d characters", c.name, first, len([]rune(full)))
+		want := full + "\n  A type has one scope check, and both modules declare one."
+		if printedLength(full) > 100 {
+			want = "Remove the scope check for the type from one of the two modules.\n" +
+				"  Modules " + c.first + " and " + c.other + " both declare one for " + c.typ + ", and a type has one scope check."
 		}
-		for _, value := range []string{c.first, c.other, c.typ} {
-			if !strings.Contains(text, value) {
-				t.Errorf("%s: the refusal lacks %q:\n%s", c.name, value, text)
-			}
+		if text != want {
+			t.Errorf("%s:\n%s\nwant:\n%s", c.name, text, want)
 		}
 	}
 }
@@ -245,7 +255,9 @@ func TestACheckoutModulesScopeCheckDoesNotCount(t *testing.T) {
 	t.Run("checkout only is refused", func(t *testing.T) {
 		_, err := composeCheckout(t, checkoutScopeTree(baseSilent, checkoutDeclares))
 		const want = "Add a scope check for change-plan to a module's scope_checks.\n" +
-			"  You can also remove `plan: change-plan` from fix in the stack."
+			"  You can also remove `plan: change-plan` from fix in the stack.\n" +
+			"  No module of the stack declares a scope check for change-plan.\n" +
+			"  workflows.fix is in qory-stack.yaml."
 		if err == nil || err.Error() != want {
 			t.Errorf("%v, want %q", err, want)
 		}
@@ -303,15 +315,22 @@ func TestThePlanRefusalIsOneLineWhenItFits(t *testing.T) {
 		}
 		return err.Error()
 	}
-	const want = "Add a scope check for a1 to a module's scope_checks, or remove `plan: a1` from x in the stack."
+	const want = "Add a scope check for a1 to a module's scope_checks, or remove `plan: a1` from x in the stack.\n" +
+		"  No module of the stack declares a scope check for a1.\n" +
+		"  workflows.x is in qory-stack.yaml."
 	if got := refuse("a1", "x"); got != want {
 		t.Errorf("short names: %q, want %q", got, want)
 	}
-	const at98 = "Add a scope check for abcd to a module's scope_checks, or remove `plan: abcd` from x in the stack."
-	if got := refuse("abcd", "x"); got != at98 || printedLength(got) != 100 {
-		t.Errorf("98 characters: %q (%d characters), want %q", got, len([]rune(got)), at98)
+	const at98 = "Add a scope check for abcd to a module's scope_checks, or remove `plan: abcd` from x in the stack.\n" +
+		"  No module of the stack declares a scope check for abcd.\n" +
+		"  workflows.x is in qory-stack.yaml."
+	if got := refuse("abcd", "x"); got != at98 || printedLength(strings.SplitN(got, "\n", 2)[0]) != 100 {
+		t.Errorf("98 characters: %q, want %q", got, at98)
 	}
-	const at99 = "Add a scope check for abcd to a module's scope_checks.\n  You can also remove `plan: abcd` from xy in the stack."
+	const at99 = "Add a scope check for abcd to a module's scope_checks.\n" +
+		"  You can also remove `plan: abcd` from xy in the stack.\n" +
+		"  No module of the stack declares a scope check for abcd.\n" +
+		"  workflows.xy is in qory-stack.yaml."
 	if got := refuse("abcd", "xy"); got != at99 {
 		t.Errorf("99 characters: %q, want %q", got, at99)
 	}
@@ -319,5 +338,66 @@ func TestThePlanRefusalIsOneLineWhenItFits(t *testing.T) {
 	first, _, _ := strings.Cut(long, "\n")
 	if n := printedLength(first); n > 100 || !strings.HasPrefix(first, "Add a scope check for ") {
 		t.Errorf("longest names: first line %q has %d characters", first, n)
+	}
+}
+
+// TestAProgramRefusalHasNoValueInLine1 is each refusal about the program of a scope check,
+// and the refusal about the program of a push check that is no file, with the longest
+// values: a module name of 40 characters, a type of 64 characters and the path of the
+// program in the software-factory module, 53 characters. Line 1 has the fix alone, at
+// most 100 characters under the "✗ ", and the values are on line 2, whole.
+func TestAProgramRefusalHasNoValueInLine1(t *testing.T) {
+	module := strings.Repeat("m", 40)
+	typ := strings.Repeat("p", 64)
+	program := "skills/running-a-software-workflow/workflow-checks.cjs"
+	const head = "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: %s\n    source: {path: modules/core}\n%sworkflows:\n  fix:\n    access: write\n    plan: %s\n"
+	manifest := func(program string) string {
+		return "apiVersion: qory.dev/v1alpha1\nname: " + module + "\nscope_checks:\n  " + typ + ": [" + program + ", scope, --plan]\n"
+	}
+	folder := "checks/running-a-software-workflow/workflow-checks.cjs"
+	for _, c := range []struct {
+		name     string
+		files    map[string]string
+		program  string
+		excluded string
+		want     string
+	}{
+		{"no file", map[string]string{"modules/core/skills/fix/SKILL.md": "text\n"}, program, "",
+			"Add the program of the scope check to its module, or change its path.\n" +
+				"  Module " + module + " has no file at " + program + ", the program of the scope check for " + typ + "."},
+		{"not a file", map[string]string{"modules/core/skills/fix/SKILL.md": "text\n", "modules/core/" + folder + "/x": "x\n"}, folder, "",
+			"Set the program of the scope check to a file in its module.\n" +
+				"  " + folder + " of module " + module + " is not a file, and it is the program of the scope check for " + typ + "."},
+		{"left out", map[string]string{"modules/core/skills/fix/SKILL.md": "text\n", "modules/core/" + program: "x\n", "modules/core/skills/running-a-software-workflow/SKILL.md": "text\n"}, program,
+			"exclude: {skills: [running-a-software-workflow]}\n",
+			"Keep the program of the scope check in its module, or move it out of the left-out entry.\n" +
+				"  The program " + program + " of the scope check for " + typ + " is in skills/running-a-software-workflow, and an exclude or only of module " + module + " leaves skills/running-a-software-workflow out."},
+	} {
+		files := c.files
+		files["modules/core/qory-module.yaml"] = manifest(c.program)
+		extra := ""
+		if c.excluded != "" {
+			extra = "    " + c.excluded
+		}
+		files[stack.FileName] = fmt.Sprintf(head, module, extra, typ)
+		_, err := composeTree(t, files)
+		if err == nil || err.Error() != c.want {
+			t.Errorf("%s:\n%v\nwant:\n%s", c.name, err, c.want)
+			continue
+		}
+		if first, _, _ := strings.Cut(err.Error(), "\n"); printedLength(first) > 100 {
+			t.Errorf("%s: line 1 has %d characters with the cross: %s", c.name, printedLength(first), first)
+		}
+	}
+	// A push check.
+	files := map[string]string{
+		stack.FileName:                     "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + module + "\n    source: {path: modules/core}\n",
+		"modules/core/qory-module.yaml":    "apiVersion: qory.dev/v1alpha1\nname: " + module + "\npush_checks:\n  - type: " + typ + "\n    command: [" + program + ", push]\n",
+		"modules/core/skills/fix/SKILL.md": "text\n",
+	}
+	want := "Add the program of the push check to its module, or change its path.\n" +
+		"  Module " + module + " has no file at " + program + ", the program of the push check for " + typ + "."
+	if _, err := composeTree(t, files); err == nil || err.Error() != want {
+		t.Errorf("push check:\n%v\nwant:\n%s", err, want)
 	}
 }

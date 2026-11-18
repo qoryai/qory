@@ -535,7 +535,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	if err := workflowsShipped(p, declared, opts.Base, opts.StackAs); err != nil {
 		return nil, err
 	}
-	if err := checkPlans(res, p); err != nil {
+	if err := checkPlans(res, p, opts.Base, opts.StackAs); err != nil {
 		return nil, err
 	}
 	if err := checkHooks(res, p, opts); err != nil {
@@ -604,7 +604,7 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 		shownProgram := exports.Value(filepath.ToSlash(program), false)
 		info, err := root.Stat(program)
 		if err != nil {
-			return exports.Errorf("Add %s to module %s, or change its push check for %s.\n  Module %s has no file at %s.", shownProgram, shown(name), c.Type, shown(name), shownProgram)
+			return exports.Errorf("Add the program of the push check to its module, or change its path.\n  Module %s has no file at %s, the program of the push check for %s.", shown(name), shownProgram, c.Type)
 		}
 		if !info.Mode().IsRegular() {
 			return exports.Errorf("Set the push check for %s of module %s to a program file.\n  %s is not a file.", c.Type, shown(name), shownProgram)
@@ -673,14 +673,14 @@ func addScopeChecks(res *Result, dir string, root *os.Root, name string, checks 
 		shownProgram := exports.Value(filepath.ToSlash(program), false)
 		info, err := root.Stat(program)
 		if err != nil {
-			return exports.Errorf("Add %s to module %s, or change its scope check for %s.\n  Module %s has no file at %s.", shownProgram, shown(name), typ, shown(name), shownProgram)
+			return exports.Errorf("Add the program of the scope check to its module, or change its path.\n  Module %s has no file at %s, the program of the scope check for %s.", shown(name), shownProgram, typ)
 		}
 		if !info.Mode().IsRegular() {
-			return exports.Errorf("Set the scope check for %s of module %s to a program file.\n  %s is not a file.", typ, shown(name), shownProgram)
+			return exports.Errorf("Set the program of the scope check to a file in its module.\n  %s of module %s is not a file, and it is the program of the scope check for %s.", shownProgram, shown(name), typ)
 		}
 		if e, ok := excludedProgram(res, dir, name, program); ok {
-			return exports.Errorf("%s\n  The program of the scope check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
-				altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), typ, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
+			return exports.Errorf("Keep the program of the scope check in its module, or move it out of the left-out entry.\n  The program %s of the scope check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
+				shownProgram, typ, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
 		}
 		if res.ScopeChecks == nil {
 			res.ScopeChecks = map[string]ScopeCheck{}
@@ -706,17 +706,32 @@ func duplicateScopeCheck(typ, first, second string) error {
 // goes unchecked. The refusal is one line when it fits in 98 characters, and the
 // alternative moves to a second line otherwise, as [altFix] does. The check is the compose's, since the stack alone does not
 // know its modules.
-func checkPlans(res *Result, p *stack.Stack) error {
+func checkPlans(res *Result, p *stack.Stack, base *Base, as string) error {
 	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
 		plan := p.Workflows[name].Plan
 		if plan == "" {
 			continue
 		}
 		if _, ok := res.ScopeChecks[plan]; !ok {
-			return exports.Errorf("%s", altFix(fmt.Sprintf("Add a scope check for %s to a module's scope_checks", plan), fmt.Sprintf("remove `plan: %s` from %s in the stack", plan, name)))
+			return exports.Errorf("%s\n  No module of the stack declares a scope check for %s.\n  workflows.%s is in %s.", altFix(fmt.Sprintf("Add a scope check for %s to a module's scope_checks", plan), fmt.Sprintf("remove `plan: %s` from %s in the stack", plan, name)), plan, name, stackFile(p, base, as))
 		}
 	}
 	return nil
+}
+
+// stackFile is the file that defines the stack as a refusal names it: the qory-stack.yaml
+// of the base stack a checkout extends, the name the caller gives a stack it did not read
+// from a file, or the file of the stack.
+func stackFile(p *stack.Stack, base *Base, as string) string {
+	switch {
+	case base != nil:
+		return stack.FileName
+	case as != "":
+		return as
+	case p.File != "":
+		return filepath.Base(p.File)
+	}
+	return "the stack"
 }
 
 // PushChecksFor is a copy of the push checks rendered for a home, with every

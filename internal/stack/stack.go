@@ -809,7 +809,10 @@ func (p *Stack) validate(compose bool) error {
 					fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 			}
 			if p.AccessOf(name) != AccessWrite {
-				return exports.Refuse(fmt.Sprintf("Remove `plan` from %s, or set its access to write.", name))
+				return exports.Refuse(
+					fmt.Sprintf("Remove `plan` from %s, or set its access to write.", name),
+					fmt.Sprintf("Only a workflow with access write has a plan, and the access of %s is %s.", name, p.AccessOf(name)),
+					fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 			}
 		}
 		if w.TimeLimitText == "" {
