@@ -212,7 +212,7 @@ schema is [config.schema.json](config.schema.json).
 | `workflows.<name>.hook_points` | no | the points of the workflow where a checkout extending the stack may add workflow hooks, by the point's name: `{at: end, kinds: [check, review]}`. `at` is where the point sits in the workflow's session, `end`, `start` or `inside`; `kinds` is one or more of `check`, `review` and `enrich`, each once. A point's name has the form of a workflow's name, and is unique in the stack, since a hook selects a point by its name alone. Only a `qory-stack.yaml` declares points: a `qory.yaml` that defines a stack, which nothing extends, is refused with `Remove hook_points from the workflows in qory.yaml.` (§Workflow hooks) |
 | `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on: `read`, `write-no-push`, or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access to a valid level.` with `The levels are read, write-no-push, and write.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. A run takes the lower of this access and `access` in the run's documents, in the order `read`, `write-no-push`, `write`; documents with no target have no `access`, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A `write-no-push` run has a writable checkout, no push step, no submit, and no version of the artifact `branch`. At `write` the checkout is writable and qory pushes what the agent left |
 | `workflows.<name>.tier` | no | the tier that names the main session's model and effort for a dispatched run of the workflow: `light`, `balanced`, or `thinking`; none when left out. qory stops with an error on any other value: `Set workflows.<name>.tier to a valid tier.` with `The tiers are light, balanced, and thinking.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. qory passes nothing new to the run: Qory Apiary resolves the session's model and effort from the tier, and sends them as it sends the session's model. `qory run` does not read it |
-| `workflows.<name>.plan` | no | the artifact type whose launch version sets what a dispatched run of the workflow may push, such as `build-plan`: lowercase letters and digits in groups joined by single hyphens, 64 bytes at most; none when left out. Only a workflow with `access: write` names one. qory stops with an error on a value that is no artifact type: `Set workflows.<name>.plan to an artifact type.` with `An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines; and on a `plan` in a workflow whose access is `read`, `write-no-push` or left out: `` Remove `plan` from <name>, or set its access to write. `` with `Only a workflow with access write has a plan, and the access of <name> is <access>.` and `workflows.<name> is in <file>.` on the next two lines The compose stops when no module of the stack declares the scope check for the type in `scope_checks` (§The module manifest): `Add a scope check for <type> to a module's scope_checks.` with `` You can also remove `plan: <type>` from <name> in the stack. `` on the next line, or both on one line when the first line has at most 98 characters, then `No module of the stack declares a scope check for <type>.` and `workflows.<name> is in <file>.` `qory run` does not read `plan` |
+| `workflows.<name>.plan` | no | the artifact type whose launch version sets what a dispatched run of the workflow may push, such as `build-plan`: lowercase letters and digits in groups joined by single hyphens, 64 bytes at most; none when left out. Only a workflow with `access: write` names one. qory stops with an error on a value that is no artifact type: `Set workflows.<name>.plan to an artifact type.` with `An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines; and on a `plan` in a workflow whose access is `read`, `write-no-push` or left out: `` Remove `plan` from <name>, or set its access to write. `` with `Only a workflow with access write has a plan, and the access of <name> is <access>.` and `workflows.<name> is in <file>.` on the next two lines. The compose stops when no module of the stack declares the scope check for the type in `scope_checks` (§The module manifest): `Add a scope check for <type> to a module's scope_checks.` with `` You can also remove `plan: <type>` from <name> in the stack. `` on the next line, or both on one line when the first line has at most 98 characters, then `No module of the stack declares a scope check for <type>.` and `workflows.<name> is in <file>.` on the next lines. `qory run` does not read `plan` |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 | `extending.hooks` | no | lets a checkout extending the stack add workflow hooks at the points of its workflows: `per_point`, the most hooks one point takes, 3 when left out; `per_workflow`, the most the points of one workflow take together, 10 when left out; `timeout`, a duration in whole seconds, 1s or more, the longest a hook may run and the timeout of a hook that sets none, 10 minutes when left out. A count below 1 is refused. Without the block a checkout adds no workflow hook (§Workflow hooks) |
 | `extending.target` | no | the runtimes and the models the stack is written for, `runtime` and `model`, each one name or a list, one of the two at least. A checkout's resolved target outside either list fails the compose; listed models make the model required, since a target without one runs whatever the runtime defaults to, which is a model the stack did not list. Left out, every target is accepted, a model left out included (§Extending a stack) |
@@ -1127,12 +1127,19 @@ also fails for a check of the type `verdict`, `Remove the push check for verdict
 module core.` with `qory run verdict sends a verdict, and push checks do not cover it.` on
 the next line; when two modules declare a check for one type, `Remove the push check for
 spec from module core or module web.` with `A type has one push check, and both modules
-declare one.`; when the program is not a file in the module, `Add the program of the push check
-to its module, or change its path.` with `Module core has no file at checks/check.js, the
-program of the push check for spec.`; and when the program is in an entry an `exclude` or an `only` of its
-module leaves out, `Keep skills/running in module core, or move skills/running/checks.js
-out of it.` with `The program of the push check for spec is in skills/running, and an
-exclude or only of module core leaves skills/running out.` The home contains
+declare one.` (when the first line would have more than 98 characters, it is `Remove the
+push check for the type from one of the two modules.`, and the next line has the type and
+both module names, whole); when the program is not a file in the module, `Add the program
+of the push check to its module, or change its path.` with `Module core has no file at
+checks/check.js, the program of the push check for spec.`; when it is a folder or another
+thing that is no file, `Set the program of the push check to a file in its module.` with
+`checks/check.js of module core is not a file, and it is the program of the push check for
+spec.`; and when the program is in an entry an `exclude` or an `only` of its module leaves
+out, `Keep the program of the push check in its module, or move it out of the left-out
+entry.` with `The program skills/running/checks.js of the push check for spec is in
+skills/running, and an exclude or only of module core leaves skills/running out.` In these
+errors the fix is line 1 and has no module name, type or path, except for the two modules
+with one type, so a long value never pushes line 1 past 98 characters. The home contains
 `push-checks.json` with each check, sorted by type, with its `reads` and its program's
 absolute path in the home; a harness whose modules declare no check has no such file.
 
@@ -1147,8 +1154,10 @@ effect: the compose reads its form, as for any manifest, and uses nothing from i
 section of a `qory.yaml` defines the stack and extends none, every module of the section is a module of
 the stack. A key that does not
 match `^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 64 bytes, one type twice in one module, a
-value that is not a list or is empty, a word of the command that is not a string, and a program that is empty, absolute or has a `..` part fail
-the compose, each with the manifest's path. The compose also fails when two modules declare
+value that is not a list or is empty, a word of the command that is not a string, a list of lists
+(`Give each plan type of scope_checks one command, a list of strings, not a list of lists.`
+with `scope_checks.<type>[<n>] is a list.` on the next line), and a program that is empty,
+absolute or has a `..` part fail the compose, each with the manifest's path. The compose also fails when two modules declare
 one type, `Remove the scope check for build-plan from module core or web.` with `A
 type has one scope check, and both modules declare one.` on the next line (when the first line
 would have more than 98 characters, it is `Remove the scope check for the type from one of the
@@ -1159,10 +1168,10 @@ build-plan.`; when it is a folder or another thing that is no file, `Set the pro
 scope check to a file in its module.` with `checks/check.js of module core is not a file, and
 it is the program of the scope check for build-plan.`; and when the program is in an entry
 an `exclude` or an `only` of its module leaves out, `Keep the program of the scope check in
-its module, or move it out of the left-out entry.` with `The program checks/check.js of the
-scope check for build-plan is in checks, and an exclude or only of module core leaves checks
-out.` Line 1 of each of these refusals has no module name, type or path, so a long value
-cannot push it past 98 characters; the values are on line 2.
+its module, or move it out of the left-out entry.` with `The program skills/tools/check.js
+of the scope check for build-plan is in skills/tools, and an exclude or only of module core
+leaves skills/tools out.` In the last three errors, line 1 has no module name, type or path,
+so a long value never pushes it past 98 characters; the values are on line 2.
 
 **Push checks.** A push check runs in a run behind a wall, before a push of its type
 reaches Qory Apiary: for every push to the run API from inside the wall, through `qory

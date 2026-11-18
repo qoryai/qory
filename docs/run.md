@@ -5054,10 +5054,12 @@ two cases:
 
 Only a module of the base stack counts. A module that the checkout's `qory.yaml` adds to
 the base can declare `scope_checks`, and the compose uses none of it: the repository under
-work cannot supply the check of its plan. The compose also refuses a scope check whose
-program is no file in the module, is a folder, or is in an entry that an `exclude` or an
-`only` of the module leaves out, and a type that two modules declare a scope check for. The
-fix is line 1 of each refusal, and the module, the type and the path are on line 2.
+work cannot supply the check of its plan. `qory harness compose` and `qory run` end with
+an error when the program of a scope check is no file in the module, is a folder, or is in
+an entry that an `exclude` or an `only` of the module leaves out. Line 1 of each of these
+errors is the fix alone, and the module, the type and the path are on line 2. They also end
+with an error when two modules declare a scope check for one type: line 1 names the type
+and both modules when it has at most 98 characters, and otherwise line 2 names them.
 
 A stack in which no workflow names a plan needs no scope check: the compose accepts it, the
 result has no scope check unless a module declares one, and a `scope_checks` of a module is
