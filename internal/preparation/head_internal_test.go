@@ -284,3 +284,57 @@ func TestARunStartsAtTheNewestPushedCommitThatDescends(t *testing.T) {
 		})
 	}
 }
+
+// TestAPushOfTwoCancelledCommitsHasOneRecordedHead is the shape the recorder has: a cancelled run
+// pushed 2 commits in one push, so one head is recorded and its parent is not. The next run's
+// first push replaces both with a lease on the branch head.
+func TestAPushOfTwoCancelledCommitsHasOneRecordedHead(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop")
+	bare := filepath.Join(base, "acme", "shop.git")
+	first := bareCommit(t, bare, b.Ref, b.Repositories[0].Commit, "cancelled one")
+	second := bareCommit(t, bare, b.Ref, first, "cancelled two")
+	b.Cancelled = []Landed{{System: "git.example.com", Path: "acme/shop", Commit: second}}
+	leave(t, dir)
+	doc, _, err := pushOf(dir, b)
+	if err != nil || doc == nil {
+		t.Fatalf("push: %v", err)
+	}
+	if got, mine := run(t, bare, "rev-parse", b.Ref), run(t, dir, "rev-parse", "HEAD"); got != mine {
+		t.Errorf("the branch is at %s, want the run's %s", got, mine)
+	}
+}
+
+// TestACommitThatNoRecordedHeadHoldsStopsThePush is a branch with a cancelled push of one commit
+// and a commit of another push on top of it, and a branch where the one recorded head is a commit
+// that does not descend from the start commit or that the forge does not have: each stops the push
+// and leaves the branch, because a commit that no recorded head that descends from the start
+// commit has in its history is not a cancelled run's.
+func TestACommitThatNoRecordedHeadHoldsStopsThePush(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		record func(t *testing.T, bare, first string) string
+	}{
+		{"a commit on top of the recorded head", func(_ *testing.T, _, first string) string { return first }},
+		{"a recorded head that does not descend from the start commit", func(t *testing.T, bare, _ string) string {
+			return run(t, bare, "rev-parse", "main~1")
+		}},
+		{"a recorded head that the forge does not have", func(*testing.T, string, string) string { return strings.Repeat("a", 40) }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir, b, base := onBranchIn(t, "acme/shop")
+			bare := filepath.Join(base, "acme", "shop.git")
+			start := b.Repositories[0].Commit
+			first := bareCommit(t, bare, b.Ref, start, "cancelled")
+			second := bareCommit(t, bare, b.Ref, first, "another push")
+			b.Cancelled = []Landed{{System: "git.example.com", Path: "acme/shop", Commit: c.record(t, bare, first)}}
+			leave(t, dir)
+			_, _, err := pushOf(dir, b)
+			if changed := headError(t, err); changed.Head != second || changed.Expected != start {
+				t.Errorf("refusal %+v, want head %s expected %s", changed, second, start)
+			}
+			if got := run(t, bare, "rev-parse", b.Ref); got != second {
+				t.Errorf("the branch moved to %s", got)
+			}
+		})
+	}
+}

@@ -2801,7 +2801,9 @@ credential alone. The result of each repository is one of these:
   (no version of the artifact `submission` and no commit that a person did not cancel was
   pushed before) and has not pushed yet: qory pushes with no lease and creates the branch.
 - The head is past the start commit, the run has not pushed yet, and every commit past the
-  start commit is recorded as pushed by a run that a person cancelled: qory pushes with
+  start commit is the head that a run which a person cancelled pushed, or an ancestor of that
+  head from the start commit on (the work item's record has one head for each push, and a push
+  sends the head with its history): qory pushes with
   `--force-with-lease=refs/heads/qory/<work item id>:<head>`, so the push replaces
   those commits only while the branch is still at the head qory read.
 - Any other head, the branch missing where the run did not start at the checkout, or a head

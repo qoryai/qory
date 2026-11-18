@@ -108,7 +108,8 @@ func TestALaterSessionWhoseHeadMovedAboveTheLastPushIsRefused(t *testing.T) {
 }
 
 // TestARunReplacesTwoCancelledCommits is a branch with 2 commits above the start that a run
-// which a person cancelled pushed: the next run's first push replaces both, the branch
+// which a person cancelled pushed in one push, so the work item's record has one row, with the
+// head: the next run's first push replaces both, the branch
 // descends from the start commit and holds neither, and the version's base is the start.
 func TestARunReplacesTwoCancelledCommits(t *testing.T) {
 	p := newPushRepo(t, "write")
@@ -124,7 +125,7 @@ func TestARunReplacesTwoCancelledCommits(t *testing.T) {
 	if len(old) != 2 {
 		t.Fatalf("the cancelled run pushed %d commits, want 2", len(old))
 	}
-	p.api.pushedCommits = "[" + pushedRow(old[0], true) + "," + pushedRow(old[1], true) + "]"
+	p.api.pushedCommits = "[" + pushedRow(old[1], true) + "]"
 
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
