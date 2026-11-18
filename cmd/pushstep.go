@@ -39,7 +39,7 @@ const (
 	textPushStepMany     = "push %s to %s and %d further repositories"
 	textPushNoProxy      = "take the work item in again in Qory Apiary: the run's push proxy, through which qory pushes the run's commits, did not open: %s" + codeUsed
 	textPushNoCred       = "Contact support: this run has no push credential, so qory pushed nothing.\n  The run configuration has no credential with purpose push, so qory pushed nothing" + codeUsed
-	textPushNoReadProxy  = "The run's host proxy did not open, so qory could not read the head of the branch.\n  Cause: %s" + codeUsed
+	textPushNoReadProxy  = "Take the work item in again in Qory Apiary: the run's host proxy did not open.\n  qory could not read the head of the branch, so it pushed nothing.\n  Cause: %s" + codeUsed
 	textHandoffIgnored   = "qory run: The hand-off file is not usable, so the submission has no text and no steps.\n  File: %s, from " + handoffEnv + ".\n  Cause: %s"
 	textHandoffDropped   = "qory run: The hand-off file has a part the submission format does not allow, so qory dropped it."
 	textPushNoRunAPI     = "take the work item in again in Qory Apiary: the run API, which stores the version of the artifact " + submissionType + ", is not reachable from this run: %s" + codeUsed

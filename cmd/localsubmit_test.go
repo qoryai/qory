@@ -566,7 +566,7 @@ func TestALocalRunWithAnAddressThatIsNotAForgePushesNothing(t *testing.T) {
 	runGit(t, root, "config", "remote.origin.pushurl", "file://"+bare+"/needle")
 	passingCheck(t)
 	out := runLocal(t, handsOffText(t))
-	wants(t, out, "qory run: The remote origin is not a forge address, so qory pushed nothing and opened no draft.")
+	wants(t, out, "qory run: Set remote origin to a forge repository address, then run again; qory pushed nothing.\n  qory opened no draft.")
 	lacks(t, out, "needle")
 	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 {
 		t.Errorf("pushed %q and started %d programs, want none", got, timesStarted(t, started))
@@ -604,7 +604,7 @@ func TestALocalRunWithACommittedHandoffPushesNothing(t *testing.T) {
 		gitOutput(t, spec.Dir, "add", "-f", ".qory/handoff/submission.json")
 		gitOutput(t, spec.Dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "Add the hand-off")
 	})
-	wants(t, out, "qory run: A commit of this run has a path under .qory/handoff/, so qory did not push.")
+	wants(t, out, "qory run: Keep .qory/handoff/ out of the commits of this run; qory pushed nothing.\n  A commit of this run has a path under .qory/handoff/.")
 	wants(t, out, "\n  Repository git.example.com/acme/app.\n  Commit ")
 	wants(t, out, "\n  Path .qory/handoff/submission.json.")
 	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 || *calls != 0 {
@@ -725,7 +725,7 @@ func TestAPushIsNotRewrittenAgainByInsteadOf(t *testing.T) {
 	runGit(t, root, "config", "url."+base+".insteadOf", "http://127.0.0.1:1/")
 	passingCheck(t)
 	out := runLocal(t, handsOffText(t))
-	wants(t, out, "qory run: The push of the branch failed, so qory opened no draft.")
+	wants(t, out, "qory run: Fix the cause below, then run again: the push failed, so qory opened no draft.")
 	if got := gitOutput(t, elsewhere, "for-each-ref", "refs/heads/"); got != "" {
 		t.Errorf("the push reached the repository of the second rewrite: %q", got)
 	}
@@ -749,7 +749,7 @@ func TestAPushIsNotRewrittenAgainByPushInsteadOf(t *testing.T) {
 		return nil
 	})
 	out := runLocal(t, handsOffText(t))
-	wants(t, out, "qory run: The push of the branch failed, so qory opened no draft.")
+	wants(t, out, "qory run: Fix the cause below, then run again: the push failed, so qory opened no draft.")
 	if len(seen) != 1 || strings.TrimSpace(seen[0]) != "http://127.0.0.1:2/acme/app" {
 		t.Errorf("the push address is %q, want http://127.0.0.1:2/acme/app", seen)
 	}
@@ -778,7 +778,7 @@ func TestARunWithARunKeyAndNoRunCodeNeverPushesLocally(t *testing.T) {
 	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 || *calls != 0 {
 		t.Errorf("pushed %q, started %d programs and ran %d checks, want none\n%s", got, timesStarted(t, started), *calls, out)
 	}
-	for _, line := range []string{"Draft: ", "qory pushed nothing", "The push of the branch failed", "A push check refused"} {
+	for _, line := range []string{"Draft: ", "qory pushed nothing", "the push failed, so qory opened no draft", "A push check refused"} {
 		if strings.Contains(out, line) {
 			t.Errorf("the output has %q:\n%s", line, out)
 		}

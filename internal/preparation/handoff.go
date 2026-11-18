@@ -13,8 +13,8 @@ import (
 const HandoffDir = ".qory/handoff"
 
 // textHandoffCommitted is the refusal of a push whose commits have a path under
-// [HandoffDir]: line 1 states the cause, and the values follow on indented lines.
-const textHandoffCommitted = "qory run: A commit of this run has a path under " + HandoffDir + "/, so qory did not push.\n  Repository %s.\n  Commit %s.\n  Path %s."
+// [HandoffDir]: line 1 is the fix, then the cause and the values on indented lines.
+const textHandoffCommitted = "qory run: Keep " + HandoffDir + "/ out of the commits of this run; qory pushed nothing.\n  A commit of this run has a path under " + HandoffDir + "/.\n  Repository %s.\n  Commit %s.\n  Path %s."
 
 // HandoffCommitted is the refusal for a local run, whose commits are in the repository at dir
 // with the path path on system: the check of [Push] on the commits from start, not included, to

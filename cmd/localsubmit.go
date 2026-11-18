@@ -20,15 +20,15 @@ import (
 	"github.com/qoryai/qory/internal/submission"
 )
 
-// The words of the local submit step. Line 1 of each states the cause, and the values follow
-// on indented lines.
+// The words of the local submit step. Line 1 of a text with a fix is the fix, and the cause and
+// the values follow on indented lines.
 const (
 	textPushChecksMissing = "qory run: The push checks are not available yet, so qory pushed nothing and opened no draft."
 	textPushRefused       = "qory run: A push check refused the push, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
-	textLocalPushFailed   = "qory run: The push of the branch failed, so qory opened no draft.\n  Branch: %s.\n  Cause: %s"
+	textLocalPushFailed   = "qory run: Fix the cause below, then run again: the push failed, so qory opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalNoHistory    = "qory run: qory could not read the branch or its origin, so it pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textDraftLine         = "Draft: "
-	textLocalNoRemote     = "qory run: The remote origin is not a forge address, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
+	textLocalNoRemote     = "qory run: Set remote origin to a forge repository address, then run again; qory pushed nothing.\n  qory opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalPushURLs     = "qory run: The remote origin has %d push addresses, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  Fix: keep one with git remote set-url --push origin <address>."
 )
 

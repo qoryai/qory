@@ -2662,9 +2662,9 @@ The step does this, in order:
 4. qory checks each commit from the start commit to `HEAD`, merges included, in each
    repository. A commit that has a path under `.qory/handoff/`, in any letter case such as
    `.QORY/Handoff/`, as `git add -f` makes one, stops the step before any push, in any repository, and the run closes `failed`. qory
-   prints `qory run: A commit of this run has a path under .qory/handoff/, so qory did not
-   push.`, then three lines indented by two spaces: `Repository <system>/<path>.`, `Commit
-   <commit>.` and `Path <path>.` A commit that added the path and a later commit that
+   prints `qory run: Keep .qory/handoff/ out of the commits of this run; qory pushed
+   nothing.`, then four lines indented by two spaces: `A commit of this run has a path under
+   .qory/handoff/.`, `Repository <system>/<path>.`, `Commit <commit>.` and `Path <path>.` A commit that added the path and a later commit that
    removed it counts too, since the push would send the file in the history.
 5. qory checks the head of the branch on the forge, for each repository whose `HEAD` is past
    the commit the run expected, as [The head check](#the-head-check) says. When one
@@ -2765,14 +2765,15 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   [The head check](#the-head-check) says. A push that the forge rejects with the status
   `[rejected]`, such as a lease that no longer matches, ends the step with the same text,
   with the head read again
-- `A commit of this run has a path under .qory/handoff/, so qory did not push.`, then three
-  lines indented by two spaces: `Repository <system>/<path>.`, `Commit <commit>.` and `Path
-  <path>.`
-- `The run's host proxy could not read the head of the branch, so qory did not push.`, then
-  two lines indented by two spaces: `Repository <system>/<path>.` and `Cause: <error>; the
-  code is used`
-- `The run's host proxy did not open, so qory could not read the head of the branch.`, then
-  a line indented by two spaces: `Cause: <error>; the code is used`
+- `Keep .qory/handoff/ out of the commits of this run; qory pushed nothing.`, then four
+  lines indented by two spaces: `A commit of this run has a path under .qory/handoff/.`,
+  `Repository <system>/<path>.`, `Commit <commit>.` and `Path <path>.`
+- `Take the work item in again in Qory Apiary: the proxy could not read the branch head.`,
+  then three lines indented by two spaces: `qory pushed nothing.`, `Repository
+  <system>/<path>.` and `Cause: <error>; the code is used`
+- `Take the work item in again in Qory Apiary: the run's host proxy did not open.`, then two
+  lines indented by two spaces: `qory could not read the head of the branch, so it pushed
+  nothing.` and `Cause: <error>; the code is used`
 - `change the rule on <system> that stops a push to qory/<work item id> of <path>, then take
   the work item in again: the push failed: <error>; the code is used`, when a rule or a
   hook on the system stops the update
@@ -2835,8 +2836,8 @@ credential alone. The result of each repository is one of these:
 
 A push that the forge rejects with the status `[rejected]`, such as a lease that no longer
 matches, also fails the step with that refusal, with the head read again. When the read of a
-head fails, the step fails with the line `The run's host proxy could not read the head of the branch,
-so qory did not push.`, also in the list above.
+head fails, the step fails with the line `Take the work item in again in Qory Apiary: the proxy could not
+read the branch head.`, also in the list above.
 
 A refusal because the branch moved closes the run `failed` with the end code
 `push_head_changed`, after a session that succeeded, failed or timed out; after a session that
@@ -2969,9 +2970,10 @@ remote origin has <n> push addresses, so qory pushed nothing and opened no draft
 branch and the command `git remote set-url --push origin <address>`. The push address must be a
 host and a repository path of a forge, over `https`, `http`, `ssh`, `git` or the form
 `git@host:owner/repo`, with a host name of dotted labels of letters, digits and hyphens, which qory writes in lower case, so `GitHub.com` is `github.com`. Any other address, such as
-`file://`, a path or a host with no dot, stops the run the same way with `qory run: The remote
-origin is not a forge address, so qory pushed nothing and opened no draft.`, and the line never
-shows the address. `QORY_SUBMIT_SYSTEM` and
+`file://`, a path or a host with no dot, stops the run the same way with `qory run: Set remote
+origin to a forge repository address, then run again; qory pushed nothing.`, then `qory opened
+no draft.`, the branch and the cause on lines indented by two spaces. The lines never show the
+address. `QORY_SUBMIT_SYSTEM` and
 `QORY_SUBMIT_PATH` come from that address.
 
 The order is fixed: the checks of every repository, then the pushes of every repository, then
@@ -2983,8 +2985,8 @@ Two push checks must be registered by name before qory pushes: `key` (a key or a
 the run's commits) and `scope` (a change to a file that the session may not change). If one
 refuses, qory pushes nothing and runs no program, and prints `qory run: A push check refused the
 push, so qory pushed nothing and opened no draft.` with `Branch: <branch>.` and `Cause: <cause>`
-indented by two spaces. A push that fails prints `qory run: The push of the branch failed, so qory
-opened no draft.` and leaves that repository out of the program. In this build neither check is
+indented by two spaces. A push that fails prints `qory run: Fix the cause below, then run
+again: the push failed, so qory opened no draft.` and leaves that repository out of the program. In this build neither check is
 registered, so a run with no run code and no run key pushes nothing, runs no program and prints one line:
 `qory run: The push checks are not available yet, so qory pushed nothing and opened no draft.`
 Until the checks exist, a run with no run code and no run key opens no draft.

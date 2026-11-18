@@ -1182,8 +1182,8 @@ func TestAForcedAddOfTheHandoffFileStopsThePush(t *testing.T) {
 		commit = gitHead(t, dir)
 	}, nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "qory run: A commit of this run has a path under .qory/handoff/, so qory did not push.\n"+
-		"  Repository "+proxygittest.Host+"/acme/site.\n  Commit "+commit+".\n  Path .qory/handoff/submission.json.")
+	wants(t, r.out, "qory run: Keep .qory/handoff/ out of the commits of this run; qory pushed nothing.\n"+
+		"  A commit of this run has a path under .qory/handoff/.\n  Repository "+proxygittest.Host+"/acme/site.\n  Commit "+commit+".\n  Path .qory/handoff/submission.json.")
 	if got := p.branchHead(t); got != "" {
 		t.Errorf("the forge has the branch at %s, want none", got)
 	}

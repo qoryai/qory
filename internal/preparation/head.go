@@ -20,7 +20,7 @@ const (
 	textHeadStart    = "the start commit"
 	textHeadLastPush = "this run's last push"
 	textHeadNone     = "none"
-	textHeadNoRead   = "qory run: The run's host proxy could not read the head of the branch, so qory did not push.\n  Repository %[2]s/%[1]s.\n  Cause: %[3]s; the code is used"
+	textHeadNoRead   = "qory run: Take the work item in again in Qory Apiary: the proxy could not read the branch head.\n  qory pushed nothing.\n  Repository %[2]s/%[1]s.\n  Cause: %[3]s; the code is used"
 )
 
 // HeadChanged is the error of a push that qory did not make because the head of the

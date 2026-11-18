@@ -30,7 +30,7 @@ func TestACommitThatHadTheHandoffFolderIsFoundAfterALaterCommitRemovedIt(t *test
 	git := stepGit(noRemote, "")
 	r := WorkRepository{Path: "acme/site"}
 	err := handoffCommitted(context.Background(), git, dir, "git.test", r, start, removed)
-	want := "qory run: A commit of this run has a path under .qory/handoff/, so qory did not push.\n  Repository git.test/acme/site.\n  Commit " + added + ".\n  Path .qory/handoff/submission.json."
+	want := "qory run: Keep .qory/handoff/ out of the commits of this run; qory pushed nothing.\n  A commit of this run has a path under .qory/handoff/.\n  Repository git.test/acme/site.\n  Commit " + added + ".\n  Path .qory/handoff/submission.json."
 	if err == nil || err.Error() != want {
 		t.Errorf("the refusal is %v, want\n%s", err, want)
 	}
