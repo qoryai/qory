@@ -2988,10 +2988,19 @@ The container has no network. It reaches the push proxy only through a relay, a 
 that qory listens on in a temporary folder and that forwards to the proxy's address. The
 threat model has five limits:
 
-1. The folder is mode 0700 and the socket mode 0600, so only this user and the container that
-   mounts the folder connect. When the run's user is another user, the folder lists nothing
-   to it and the socket is open to it.
-2. The relay copies bytes both ways to one address, the push proxy's. It reads and adds
+1. The folder is a new folder of the system's temporary folder, with a random name and mode
+   0700, and the work and net folders below it are mode 0700 too, so no other user lists or
+   opens a path in it. The socket is mode 0600, and the files of the work and net folders
+   are mode 0600. The password file is created with mode 0600 and no container mounts it.
+   When the run's user is another user and `qory` runs as root, qory gives the two folders,
+   the socket and the files to that user. When the run's user is another user and `qory`
+   cannot give files to it, the work folder is mode 0777, the net folder 0755, the socket
+   and `submission.json` 0666 and `ca.pem` 0644: the engine binds them from the folder
+   above, which only this user and root open, so the container's user reaches them and
+   no other user of this machine does.
+2. The relay copies bytes both ways to one address, the push proxy's. A client that closes
+   its writing side after its request still reads the reply: each direction ends on its own,
+   and the connection closes when both have ended. It reads and adds
    nothing, so the push proxy's rules, its credential's hosts and paths and its refusal of
    a push that is not a plain push to the work item's branch, are the only limit on what the
    program reaches, and the program holds the proxy's password, not the push credential.
@@ -3000,7 +3009,9 @@ threat model has five limits:
 4. The relay stops when the container exits and before qory reads the file. The socket and
    the folder are removed in every case, including a timeout.
 5. qory reads the file the program leaves inside the work folder, so a link the program
-   made there to a file of this machine is not followed.
+   made there to a file of this machine is not followed. A link, a pipe or any other file
+   that is not a regular file there ends the read with the cause `the file is not a regular
+   file`, and qory never waits for a writer of a pipe.
 
 #### The report of a push
 

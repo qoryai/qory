@@ -388,8 +388,12 @@ func (c *Checker) Check(ctx context.Context, artifactType string, files []File) 
 // writeNew writes content to a new file at path, and fails with an error that is
 // [fs.ErrExist] when a file is there: on a file system that ignores case or the form of
 // an accent, also one whose name differs in those alone.
-func writeNew(path string, content []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+func writeNew(path string, content []byte) error { return writeNewMode(path, content, 0o644) }
+
+// writeNewMode is [writeNew] with the mode of the new file, which it has from its creation: a
+// umask can only narrow it.
+func writeNewMode(path string, content []byte, mode os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		return err
 	}

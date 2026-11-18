@@ -9,11 +9,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/relay"
+	"github.com/qoryai/qory/internal/render"
 )
 
 // The limits of the submit program's run.
@@ -73,6 +75,12 @@ type ProgramEnd struct {
 // program's container. It returns how the program ended and the file it left. A failure of
 // the engine or of a temporary folder is an error; so is a ctx that ended. The container and
 // the folders are removed in every case.
+//
+// The proxy's password reaches the program as the variable QORY_PROXY_PASSWORD, through an env
+// file that qory creates with mode 0600 and no container mounts. The engine keeps the variable
+// in the container's configuration, so anyone who can run docker inspect on this host reads it
+// until the container is removed. The program's contract reads the variable, so the exposure
+// stays; docs/run.md says so.
 func (c *Checker) RunProgram(ctx context.Context, p Program) (ProgramEnd, error) {
 	proxy, err := url.Parse(p.ProxyURL)
 	if err != nil || proxy.Host == "" || proxy.User == nil {
@@ -81,36 +89,23 @@ func (c *Checker) RunProgram(ctx context.Context, p Program) (ProgramEnd, error)
 	password, _ := proxy.User.Password()
 	// The folder is in the system's temporary folder, not in [Checker.Dir]: a unix socket's
 	// path has at most 104 bytes on macOS and 108 on Linux, which the run directory's path
-	// can pass.
+	// can pass. os.MkdirTemp makes it mode 0700 with a random name, so no other user lists it
+	// or reaches a path below it. The engine binds work and net from here, whatever their
+	// modes, so the container's user needs no access to the folders above them.
 	root, err := os.MkdirTemp("", "qory-submit-")
 	if err != nil {
 		return ProgramEnd{}, fmt.Errorf("making a temporary folder for the submit program failed: %w", exports.HideError(err))
 	}
 	defer os.RemoveAll(root)
 	work, net := filepath.Join(root, "work"), filepath.Join(root, "net")
-	// The folder is this user's alone. A run's user that is another user passes through the
-	// root, which it cannot list, and writes the work folder; the socket and the files of the
-	// net folder are open to it.
-	socket, workMode, netMode, fileMode := os.FileMode(0o600), os.FileMode(0o700), os.FileMode(0o700), os.FileMode(0o600)
-	if c.otherUser() {
-		socket, workMode, netMode, fileMode = 0o666, 0o777, 0o755, 0o666
-		if err := os.Chmod(root, 0o711); err != nil {
-			return ProgramEnd{}, fmt.Errorf("opening the submit program's folder to the run's user failed: %w", exports.HideError(err))
-		}
-	}
-	for dir, mode := range map[string]os.FileMode{work: workMode, net: netMode} {
+	for _, dir := range []string{work, net} {
 		if err := os.Mkdir(dir, 0o700); err != nil {
 			return ProgramEnd{}, fmt.Errorf("making a folder for the submit program failed: %w", exports.HideError(err))
 		}
-		if err := os.Chmod(dir, mode); err != nil {
-			return ProgramEnd{}, fmt.Errorf("making a folder for the submit program failed: %w", exports.HideError(err))
-		}
 	}
+	access := c.programAccess(work)
 	file := filepath.Join(work, SubmissionFile)
-	if err := writeNew(file, p.Submission); err != nil {
-		return ProgramEnd{}, fmt.Errorf("writing the submission for the submit program failed: %w", exports.HideError(err))
-	}
-	if err := os.Chmod(file, fileMode); err != nil {
+	if err := access.writeFile(file, p.Submission, access.file); err != nil {
 		return ProgramEnd{}, fmt.Errorf("writing the submission for the submit program failed: %w", exports.HideError(err))
 	}
 	env := []string{
@@ -123,29 +118,26 @@ func (c *Checker) RunProgram(ctx context.Context, p Program) (ProgramEnd, error)
 		if err != nil {
 			return ProgramEnd{}, fmt.Errorf("reading the CA bundle for the submit program failed: %w", exports.HideError(err))
 		}
-		copied := filepath.Join(net, caFile)
-		if err := writeNew(copied, bundle); err != nil {
-			return ProgramEnd{}, fmt.Errorf("copying the CA bundle for the submit program failed: %w", exports.HideError(err))
-		}
-		if err := os.Chmod(copied, 0o644); err != nil {
+		if err := access.writeFile(filepath.Join(net, caFile), bundle, access.ca); err != nil {
 			return ProgramEnd{}, fmt.Errorf("copying the CA bundle for the submit program failed: %w", exports.HideError(err))
 		}
 		env = append(env, "SSL_CERT_FILE="+ProgramNetDir+"/"+caFile)
 	}
 	// The password goes through a file that no container mounts, not through the command
-	// line, which any user of this machine can read.
+	// line, which any user of this machine can read. The file is created with mode 0600, so
+	// it never has a wider mode, and it is not given to the run's user.
 	envFile := filepath.Join(root, "env")
-	if err := writeNew(envFile, []byte(strings.Join(env, "\n")+"\n")); err != nil {
+	if err := writeNewMode(envFile, []byte(strings.Join(env, "\n")+"\n"), 0o600); err != nil {
 		return ProgramEnd{}, fmt.Errorf("writing the submit program's environment failed: %w", exports.HideError(err))
 	}
-	if err := os.Chmod(envFile, 0o600); err != nil {
-		return ProgramEnd{}, fmt.Errorf("writing the submit program's environment failed: %w", exports.HideError(err))
-	}
-	forward, err := relay.Start(net, proxy.Host, RelayConnections, socket)
+	forward, err := relay.Start(net, proxy.Host, RelayConnections, access.socket)
 	if err != nil {
 		return ProgramEnd{}, fmt.Errorf("opening the relay to the push proxy failed: %w", exports.HideError(err))
 	}
 	defer forward.Close()
+	if err := access.finish(work, net, forward.Path); err != nil {
+		return ProgramEnd{}, fmt.Errorf("opening the submit program's folders to the run's user failed: %w", exports.HideError(err))
+	}
 	name, err := containerName()
 	if err != nil {
 		return ProgramEnd{}, err
@@ -187,24 +179,34 @@ func (c *Checker) RunProgram(ctx context.Context, p Program) (ProgramEnd, error)
 }
 
 // readProgramFile reads submission.json of dir, which the program could write as a link to a
-// file of this machine: the read stays inside dir, and takes a regular file of at most
-// [maxProgramFile] bytes alone. A file it cannot take is nil with the cause.
+// file of this machine, or as a pipe: the read stays inside dir, takes a regular file of at
+// most [maxProgramFile] bytes alone, and never waits for a writer. The kind of the file is
+// read with Lstat before the file is opened, and the open does not block, so a pipe, a link or
+// a device there never stops the run. A file it cannot take is nil with the cause.
 func readProgramFile(dir string) ([]byte, string) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, "the folder cannot be opened"
 	}
 	defer root.Close()
-	f, err := root.Open(SubmissionFile)
+	info, err := root.Lstat(SubmissionFile)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, "the file is not there"
 	}
 	if err != nil {
 		return nil, "the file cannot be opened"
 	}
+	if !info.Mode().IsRegular() {
+		return nil, "the file is not a regular file"
+	}
+	f, err := root.OpenFile(SubmissionFile, os.O_RDONLY|render.OpenFlags, 0)
+	if err != nil {
+		return nil, "the file cannot be opened"
+	}
 	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
+	// The file may be swapped for another kind after the Lstat: the open did not block, and
+	// the opened file is checked again.
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
 		return nil, "the file is not a regular file"
 	}
 	data, err := io.ReadAll(io.LimitReader(f, maxProgramFile+1))
@@ -224,4 +226,86 @@ func bindMountMode(src, dst string, readonly bool) (string, error) {
 		return mount, err
 	}
 	return strings.TrimSuffix(mount, ",readonly"), nil
+}
+
+// programAccess is how the folders of the submit program's container are given to the run's
+// user. owned: this process can give each folder and file to the user, so they keep the
+// modes 0700 and 0600 and only that user and this one open them. Otherwise, with a run's user
+// that is another user and no right to give files to it, the folders and files get the wider
+// modes that user needs, below the folder of [Checker.RunProgram], which is mode 0700 and
+// which no other user opens. The engine mounts work and net from there as they are.
+type programAccess struct {
+	// uid and gid are the run's user; chown is set when this process gives paths to it.
+	uid, gid int
+	chown    bool
+	// widen is whether the modes below are wider than 0700 and 0600.
+	widen bool
+	// file is the mode of submission.json, ca of the CA bundle and socket of the relay's
+	// socket; work and net are the modes of the folders.
+	file, ca, socket, work, net os.FileMode
+}
+
+// programAccess chooses the modes for the run's user, with probe, a folder this process made,
+// as the test of whether it can give a path to that user.
+func (c *Checker) programAccess(probe string) *programAccess {
+	a := &programAccess{file: 0o600, ca: 0o600, socket: 0o600, work: 0o700, net: 0o700}
+	if !c.otherUser() {
+		return a
+	}
+	uid, gid, ok := c.numericUser()
+	if ok && os.Lchown(probe, uid, gid) == nil {
+		a.uid, a.gid, a.chown = uid, gid, true
+		return a
+	}
+	a.widen = true
+	a.file, a.ca, a.socket, a.work, a.net = 0o666, 0o644, 0o666, 0o777, 0o755
+	return a
+}
+
+// numericUser is the run's user as a user id and a group id; the group is -1, which leaves
+// it as it is, when the user has none. A user given by name is not numeric.
+func (c *Checker) numericUser() (uid, gid int, ok bool) {
+	u, g, hasGroup := strings.Cut(c.User, ":")
+	uid, err := strconv.Atoi(u)
+	if err != nil {
+		return 0, 0, false
+	}
+	gid = -1
+	if hasGroup {
+		if gid, err = strconv.Atoi(g); err != nil {
+			return 0, 0, false
+		}
+	}
+	return uid, gid, true
+}
+
+// writeFile writes a new file at path with mode: it is created with mode 0600, and given to the
+// run's user or widened to mode after the content is written.
+func (a *programAccess) writeFile(path string, content []byte, mode os.FileMode) error {
+	if err := writeNewMode(path, content, 0o600); err != nil {
+		return err
+	}
+	return a.give(path, mode)
+}
+
+// give gives path to the run's user when this process can, and otherwise sets mode on it.
+func (a *programAccess) give(path string, mode os.FileMode) error {
+	if a.chown {
+		return os.Lchown(path, a.uid, a.gid)
+	}
+	if a.widen {
+		return os.Chmod(path, mode)
+	}
+	return nil
+}
+
+// finish gives the folders and the socket to the run's user, or sets their modes, after the
+// socket exists: a socket cannot be made in a folder that another user owns.
+func (a *programAccess) finish(work, net, socket string) error {
+	for path, mode := range map[string]os.FileMode{work: a.work, net: a.net, socket: a.socket} {
+		if err := a.give(path, mode); err != nil {
+			return err
+		}
+	}
+	return nil
 }

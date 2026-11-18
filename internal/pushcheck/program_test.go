@@ -357,7 +357,7 @@ func TestAFileThatIsNotAFileOfTheFolderIsNotRead(t *testing.T) {
 		leave func(path string)
 		cause string
 	}{
-		{"a link", func(p string) { os.Remove(p); os.Symlink(secret, p) }, "the file cannot be opened"},
+		{"a link", func(p string) { os.Remove(p); os.Symlink(secret, p) }, "the file is not a regular file"},
 		{"a folder", func(p string) { os.Remove(p); os.Mkdir(p, 0o700) }, "the file is not a regular file"},
 		{"too large", func(p string) { os.WriteFile(p, make([]byte, 4<<20+1), 0o600) }, "the file has more than 4194304 bytes"},
 		{"none", func(p string) { os.Remove(p) }, "the file is not there"},
@@ -402,24 +402,53 @@ func TestAnEngineThatFailsIsAnError(t *testing.T) {
 	}
 }
 
-// TestAnotherUserGetsFoldersItCanUse is a run's user that is not this process's: the root
-// passes it through without a listing, it writes the work folder, and reads the net folder
-// and the socket.
-func TestAnotherUserGetsFoldersItCanUse(t *testing.T) {
-	var modes = map[string]fs.FileMode{}
-	f := newProgramFixture(t, func(_ *programFixture, w, n string) (string, string, int) {
-		for name, p := range map[string]string{"root": filepath.Dir(w), "work": w, "net": n, "socket": filepath.Join(n, "proxy.sock"), "file": filepath.Join(w, "submission.json")} {
+// modesSeen reads the mode of the folders and files of a program's run while its container
+// runs, by name: root, work, net, socket, file, ca and env.
+func modesSeen(modes map[string]fs.FileMode) func(*programFixture, string, string) (string, string, int) {
+	return func(_ *programFixture, w, n string) (string, string, int) {
+		for name, p := range map[string]string{
+			"root": filepath.Dir(w), "work": w, "net": n, "socket": filepath.Join(n, "proxy.sock"),
+			"file": filepath.Join(w, "submission.json"), "ca": filepath.Join(n, "ca.pem"), "env": filepath.Join(filepath.Dir(w), "env"),
+		} {
 			if info, err := os.Lstat(p); err == nil {
 				modes[name] = info.Mode().Perm()
 			}
 		}
 		return "", "", 0
-	})
+	}
+}
+
+// TestTheFoldersAreThisUsersAlone is a run whose user is this process's: the folder, the work
+// and net folders and each file and the socket have mode 0700 or 0600, the CA bundle too.
+func TestTheFoldersAreThisUsersAlone(t *testing.T) {
+	modes := map[string]fs.FileMode{}
+	f := newProgramFixture(t, modesSeen(modes))
+	if _, err := f.c.RunProgram(context.Background(), f.program("{}")); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]fs.FileMode{"root": 0o700, "work": 0o700, "net": 0o700, "socket": 0o600, "file": 0o600, "ca": 0o600, "env": 0o600}
+	for name, mode := range want {
+		if modes[name] != mode {
+			t.Errorf("%s has mode %o, want %o", name, modes[name], mode)
+		}
+	}
+}
+
+// TestAnotherUserWithNoRightToGiveFilesGetsWiderModesBelowAClosedFolder is a run's user that
+// is not this process's, to whom this process cannot give a file: the work folder is open to
+// it and the net folder and the socket readable, but the folder above them stays mode 0700,
+// so no other user passes through it, and the env file, which no container mounts, stays 0600.
+func TestAnotherUserWithNoRightToGiveFilesGetsWiderModesBelowAClosedFolder(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can give files to the run's user: see TestAnotherUserGetsTheFilesGiven")
+	}
+	modes := map[string]fs.FileMode{}
+	f := newProgramFixture(t, modesSeen(modes))
 	f.c.User = fmt.Sprintf("%d:%d", os.Getuid()+1, os.Getgid())
 	if _, err := f.c.RunProgram(context.Background(), f.program("{}")); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]fs.FileMode{"root": 0o711, "work": 0o777, "net": 0o755, "socket": 0o666, "file": 0o666}
+	want := map[string]fs.FileMode{"root": 0o700, "work": 0o777, "net": 0o755, "socket": 0o666, "file": 0o666, "ca": 0o644, "env": 0o600}
 	for name, mode := range want {
 		if modes[name] != mode {
 			t.Errorf("%s has mode %o, want %o", name, modes[name], mode)
