@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -274,8 +273,9 @@ func references(root string, e Entry) (documentRefs, error) {
 			}
 		}
 		if e.Kind == "skills" && filepath.Base(f) == "SKILL.md" && filepath.Dir(f) == e.Path {
-			if out.note, err = skillNote(data, rel, e.Name); err != nil {
-				return out, exports.AtPath(shown, err)
+			out.note = skillNote(data, rel, e.Name)
+			if out.note != nil && out.note.Err != nil {
+				out.note.Err = exports.AtPath(shown, out.note.Err)
 			}
 		}
 		keys, err := References(string(data))
@@ -338,20 +338,8 @@ func agentPaths(data []byte, name string) ([]string, error) {
 	}
 	notGlobs := exports.Refuse("Set paths to globs, such as [\"**/*.py\"], or remove it.", "The value is not a glob or a list of globs.",
 		"The agent is in "+exports.FilePlace+" of "+exports.ModulePlace+".")
-	var globs []string
-	switch v := v.(type) {
-	case string:
-		globs = []string{v}
-	case []any:
-		for _, item := range v {
-			s, ok := item.(string)
-			if !ok {
-				return nil, notGlobs
-			}
-			globs = append(globs, s)
-		}
-	}
-	if len(globs) == 0 || slices.Contains(globs, "") {
+	globs, ok := stringList(v)
+	if !ok {
 		return nil, notGlobs
 	}
 	return globs, nil
@@ -359,48 +347,45 @@ func agentPaths(data []byte, name string) ([]string, error) {
 
 // skillNote returns the note a skill's SKILL.md is: nil for a file whose frontmatter has no
 // notes_for key, and for one that does not parse, which the renderer refuses. A note whose
-// notes_for is no role or list of roles, or whose paths are missing, empty or no globs, is
-// an error; the refusal has [exports.ModulePlace] for the module the caller fills in.
-func skillNote(data []byte, name, skill string) (*Note, error) {
+// notes_for is no role or list of roles, or whose paths are missing, empty or no globs, has
+// [Note.Err], a refusal with [exports.ModulePlace] and [exports.FilePlace] for the caller
+// to fill in.
+func skillNote(data []byte, name, skill string) *Note {
 	if !bytes.Contains(data, []byte("notes_for:")) {
-		return nil, nil
+		return nil
 	}
 	doc, err := ParseDocument(data, name)
 	if err != nil {
-		return nil, nil
+		return nil
 	}
 	v, ok := doc.Front["notes_for"]
 	if !ok {
-		return nil, nil
+		return nil
 	}
 	shown := accesskey.ShownName(skill, false)
+	where := "The skill is in " + exports.FilePlace + " of " + exports.ModulePlace + "."
 	roles, ok := stringList(v)
 	if !ok {
-		return nil, exports.Refuse("Set notes_for in "+shown+" of "+exports.ModulePlace+" to a role or a list of roles.",
-			"The value is not a role or a list of roles.", "The skill is in "+exports.FilePlace+" of "+exports.ModulePlace+".")
+		return &Note{Err: exports.Refuse("Set notes_for in "+shown+" of "+exports.ModulePlace+" to a role or a list of roles.",
+			"The value is not a role or a list of roles.", where)}
 	}
-	noPaths := func(cause string) error {
-		return exports.Refuse("Add paths to "+shown+" of "+exports.ModulePlace+".", cause,
-			"The skill is in "+exports.FilePlace+" of "+exports.ModulePlace+".")
+	noPaths := func(cause string) *Note {
+		return &Note{Err: exports.Refuse("Add paths to "+shown+" of "+exports.ModulePlace+".", cause, where)}
 	}
 	raw, ok := doc.Front["paths"]
 	if !ok {
-		return nil, noPaths("A note needs one path or more.")
+		return noPaths("A note needs one path or more.")
 	}
 	globs, ok := stringList(raw)
 	if !ok {
-		return nil, noPaths("A note needs one path or more, and the value is not a glob or a list of globs.")
+		return noPaths("A note needs one path or more, and the value is not a glob or a list of globs.")
 	}
-	for _, g := range globs {
-		if _, err := path.Match(g, ""); err != nil {
-			return nil, noPaths("A note needs one path or more, and " + exports.Value(g, true) + " is no glob.")
-		}
-	}
-	return &Note{Roles: roles, Paths: globs}, nil
+	return &Note{Roles: roles, Paths: globs}
 }
 
-// stringList reads v as one non-empty string or a non-empty list of non-empty strings; the
-// result is false for any other value.
+// stringList reads v, the value of a frontmatter key paths, as one non-empty string or a
+// non-empty list of non-empty strings; the result is false for any other value. An agent's
+// paths and a note's paths are read by this function, so they have one grammar.
 func stringList(v any) ([]string, bool) {
 	var out []string
 	switch v := v.(type) {

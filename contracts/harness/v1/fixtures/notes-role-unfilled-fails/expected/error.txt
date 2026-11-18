@@ -1,2 +1,3 @@
-Set notes_for in app-naming of module app to a role the stack fills, such as developer.
+Set notes_for in app-naming of module app to a role the stack fills.
   tester is none.
+  The stack fills developer and reviewers.

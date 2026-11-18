@@ -314,16 +314,25 @@ paths: ["**/*.py", pyproject.toml]
 ```
 
 Technology modules and the modules of a repository write notes. A skill with `paths`
-and no `notes_for` is no note. The compose checks both keys of each note it composes and
-stops with exit 2 when:
+and no `notes_for` is no note. `paths` has the grammar of an agent's `paths`, which [the
+contract](../contracts/harness/v1/README.md#the-module-manifest) states: `**` matches any
+number of directories, `*` and `?` match within one directory, and every other character,
+`[`, `{` and `\` included, is literal. The compose checks both keys of each note it
+composes, and not a skill that an `exclude` or an `only` leaves out. It stops with exit 2
+when:
 
-- a role in `notes_for` is one that no agent fills: `Set notes_for in python-naming of module
-  python to a role the stack fills, such as developer.`, then `tester is none.`;
-- a note has no `paths`, or a glob that does not parse: `Add paths to python-naming of module
-  python.`, then `A note needs one path or more.`
+- a role in `notes_for` is one that no agent fills: `Set notes_for in python-naming of
+  module python to a role the stack fills.`, then `tester is none.` and `The stack fills
+  developer and reviewers.`;
+- the stack fills no role: `Remove notes_for from python-naming of module python.`, then
+  `The stack fills no role.`;
+- a note has no `paths`, or an empty one: `Add paths to python-naming of module python.`,
+  then `A note needs one path or more.`
 
 The home has `role-notes.json`, written for every harness, with `{"notes": []}` when there is
-no note. It is not the `notes.json` of a push check. Each row is:
+no note. It is not the `notes.json` of a push check. A home that an earlier qory composed has
+no `role-notes.json`, and `qory harness compose --check` reports it as differing until you
+compose again. Each row is:
 
 ```json
 {"name": "python-naming", "roles": ["agents/developer"], "paths": ["**/*.py", "pyproject.toml"], "module": "python", "layer": 1}

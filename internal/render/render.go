@@ -635,9 +635,8 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 // writes AGENTS.md at the staging root with its references resolved the same way, since
 // every checkout link reads them, push-checks.json beside it when a module declares a
 // push check, [PushChecksFile], hooks.json when the checkout lists a workflow hook,
-// [HooksFile], roles.json when the harness has a role, [RolesFile], and role-notes.json, [RoleNotesFile], then calls each
-// runtime's Render for the subdirectory
-// named after it and links the runtime's files entries into that subdirectory. The links
+// [HooksFile], roles.json when the harness has a role, [RolesFile], and role-notes.json,
+// [RoleNotesFile], then calls each runtime's Render for the subdirectory named after it and links the runtime's files entries into that subdirectory. The links
 // point at the modules by absolute path, so a tree staged anywhere contains the same
 // links. A module the home holds a copy of, see [compose.Module.Copy], is copied in place
 // of each link, and its modules/<name> comes first: a copy of one of its entries leaves

@@ -30,7 +30,7 @@ type RoleNote struct {
 func (r *Result) RoleNotes() []RoleNote {
 	var out []RoleNote
 	for _, e := range r.Entries {
-		if e.Kind != "skills" || e.Note == nil {
+		if e.Kind != "skills" || e.Note == nil || e.Note.Err != nil {
 			continue
 		}
 		note := RoleNote{Name: e.Name, Paths: e.Note.Paths, Module: e.Module}
@@ -46,8 +46,8 @@ func (r *Result) RoleNotes() []RoleNote {
 }
 
 // checkNotes returns an error for the first composed note, in the order of the entries,
-// that is for a role the stack fills nowhere. The keys of a note are checked when the
-// module is read, see [module.Note].
+// whose keys are wrong, or that is for a role the stack fills nowhere. A skill that an
+// exclude or an only left out is no entry, so it is not checked.
 func checkNotes(res *Result) error {
 	var filled []string
 	for _, r := range res.Roles {
@@ -59,15 +59,18 @@ func checkNotes(res *Result) error {
 		if e.Kind != "skills" || e.Note == nil {
 			continue
 		}
+		module := checkoutName(res, e.Module)
+		if e.Note.Err != nil {
+			return exports.Prefixed("module "+module, e.Note.Err)
+		}
 		for _, role := range e.Note.Roles {
 			if slices.Contains(filled, role) {
 				continue
 			}
-			such := ""
-			if len(filled) > 0 {
-				such = ", such as " + shown(filled[0])
+			if len(filled) == 0 {
+				return exports.Errorf("Remove notes_for from %s of module %s.\n  The stack fills no role.", shown(e.Name), module)
 			}
-			return exports.Errorf("Set notes_for in %s of module %s to a role the stack fills%s.\n  %s is none.", shown(e.Name), checkoutName(res, e.Module), such, shown(role))
+			return exports.Errorf("Set notes_for in %s of module %s to a role the stack fills.\n  %s is none.\n  The stack fills %s.", shown(e.Name), module, shown(role), andList(shownAll(filled)))
 		}
 	}
 	return nil

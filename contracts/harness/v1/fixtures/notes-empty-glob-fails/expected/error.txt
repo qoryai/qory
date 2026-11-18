@@ -1,3 +1,3 @@
 Add paths to app-naming of module app.
-  A note needs one path or more, and "src/[a" is no glob.
+  A note needs one path or more, and the value is not a glob or a list of globs.
   The skill is in skills/app-naming/SKILL.md of module app.

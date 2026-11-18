@@ -202,8 +202,14 @@ type Note struct {
 	// agents/developer. A single value reads as a list of one. None is empty.
 	Roles []string
 	// Paths are the globs of the frontmatter key paths, from the checkout root, as
-	// written, at least one, each a glob that parses.
+	// written, at least one, none empty, in the grammar of an agent's paths.
 	Paths []string
+	// Err is the refusal of a note whose keys are wrong, with [exports.ModulePlace] for
+	// the module and the file filled in; nil for a note that reads. Reading a module
+	// refuses nothing: the compose returns Err only for a skill it includes, so a skill
+	// that an exclude or an only leaves out is never checked. Roles and Paths are empty
+	// with Err.
+	Err error
 }
 
 // Module is a module read from disk.

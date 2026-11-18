@@ -82,8 +82,7 @@ func TestAHarnessWithoutANoteHasNone(t *testing.T) {
 }
 
 // TestABadNoteIsRefusedWithItsFixFirst is a note for a role no agent fills, a note with no
-// paths, with an empty list, with a value that is no glob, and with a glob that does not
-// parse, and a notes_for that is no role: each fails the compose with the fix as line 1, at
+// paths, with an empty list, with an empty glob, and a notes_for that is no role: each fails the compose with the fix as line 1, at
 // most 100 characters, then the cause on the next line.
 func TestABadNoteIsRefusedWithItsFixFirst(t *testing.T) {
 	const fillsDeveloper = "paths: [\"**/*.py\"]\n"
@@ -93,9 +92,9 @@ func TestABadNoteIsRefusedWithItsFixFirst(t *testing.T) {
 		want  string
 	}{
 		{"a role no agent fills", "notes_for: tester\n" + fillsDeveloper,
-			"Set notes_for in app-naming of module app to a role the stack fills, such as developer.\n  tester is none."},
+			"Set notes_for in app-naming of module app to a role the stack fills.\n  tester is none.\n  The stack fills developer and reviewers."},
 		{"one role of a list that no agent fills", "notes_for: [developer, tester]\n" + fillsDeveloper,
-			"Set notes_for in app-naming of module app to a role the stack fills, such as developer.\n  tester is none."},
+			"Set notes_for in app-naming of module app to a role the stack fills.\n  tester is none.\n  The stack fills developer and reviewers."},
 		{"a group role with a member", "notes_for: reviewers\n" + fillsDeveloper, ""},
 		{"no paths", "notes_for: developer\n",
 			"Add paths to app-naming of module app.\n  A note needs one path or more.\n  The skill is in skills/app-naming/SKILL.md of module app."},
@@ -103,8 +102,10 @@ func TestABadNoteIsRefusedWithItsFixFirst(t *testing.T) {
 			"Add paths to app-naming of module app.\n  A note needs one path or more, and the value is not a glob or a list of globs.\n  The skill is in skills/app-naming/SKILL.md of module app."},
 		{"a path that is no string", "notes_for: developer\npaths: 3\n",
 			"Add paths to app-naming of module app.\n  A note needs one path or more, and the value is not a glob or a list of globs.\n  The skill is in skills/app-naming/SKILL.md of module app."},
-		{"a glob that does not parse", "notes_for: developer\npaths: [\"**/*.py\", \"src/[a\"]\n",
-			"Add paths to app-naming of module app.\n  A note needs one path or more, and \"src/[a\" is no glob.\n  The skill is in skills/app-naming/SKILL.md of module app."},
+		{"an empty glob", "notes_for: developer\npaths: [\"src/**\", \"\"]\n",
+			"Add paths to app-naming of module app.\n  A note needs one path or more, and the value is not a glob or a list of globs.\n  The skill is in skills/app-naming/SKILL.md of module app."},
+		{"an empty string for paths", "notes_for: developer\npaths: \"\"\n",
+			"Add paths to app-naming of module app.\n  A note needs one path or more, and the value is not a glob or a list of globs.\n  The skill is in skills/app-naming/SKILL.md of module app."},
 		{"a notes_for that is no role", "notes_for: {a: b}\n" + fillsDeveloper,
 			"Set notes_for in app-naming of module app to a role or a list of roles.\n  The value is not a role or a list of roles.\n  The skill is in skills/app-naming/SKILL.md of module app."},
 	} {
@@ -133,15 +134,15 @@ func TestABadNoteIsRefusedWithItsFixFirst(t *testing.T) {
 // stack provides or binds.
 func TestANoteForARoleNothingProvidesIsRefused(t *testing.T) {
 	_, err := composeExtending(t, notesTree(t, "notes_for: planners\npaths: src/**\n"))
-	want := "Set notes_for in app-naming of module app to a role the stack fills, such as developer.\n  planners is none."
+	want := "Set notes_for in app-naming of module app to a role the stack fills.\n  planners is none.\n  The stack fills developer and reviewers."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v, want:\n%s", err, want)
 	}
 }
 
 // TestANoteTheCheckoutExcludesIsNotChecked is a note of the base's module python for a role
-// nothing fills, left out by an exclude in the checkout's qory.yaml: the entry is no note,
-// so the compose does not check it and RoleNotes does not list it.
+// nothing fills, with an empty glob, left out by an exclude in the checkout's qory.yaml: the
+// entry is no note, so the compose checks neither key and RoleNotes does not list it.
 func TestANoteTheCheckoutExcludesIsNotChecked(t *testing.T) {
 	dir := notesTree(t, "notes_for: developer\npaths: src/**\n")
 	write := func(name, body string) {
@@ -149,9 +150,9 @@ func TestANoteTheCheckoutExcludesIsNotChecked(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("base/modules/python/skills/python-naming/SKILL.md", "---\nname: python-naming\ndescription: n\nnotes_for: tester\npaths: [\"*.py\"]\n---\n\nNotes.\n")
+	write("base/modules/python/skills/python-naming/SKILL.md", "---\nname: python-naming\ndescription: n\nnotes_for: tester\npaths: [\"\"]\n---\n\nNotes.\n")
 	if _, err := composeExtending(t, dir); err == nil {
-		t.Fatal("a note for a role no agent fills composed")
+		t.Fatal("a note with an empty glob composed")
 	}
 	write("app/"+config.FileName, "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  target: {runtime: claude}\n  modules:\n    - name: python\n      exclude: {skills: [python-naming]}\n    - name: app\n")
 	res, err := composeExtending(t, dir)
@@ -160,5 +161,56 @@ func TestANoteTheCheckoutExcludesIsNotChecked(t *testing.T) {
 	}
 	if got := res.RoleNotes(); len(got) != 1 || got[0].Name != "app-naming" {
 		t.Errorf("RoleNotes = %+v, want app-naming alone", got)
+	}
+}
+
+// TestNotePathsAreReadLikeAnAgentsPaths is a note whose globs have a class, a brace and a
+// backslash: only * ? and ** mean something in the grammar of an agent's paths, so every
+// other character is literal, the compose accepts the globs, and RoleNotes lists them as
+// written.
+func TestNotePathsAreReadLikeAnAgentsPaths(t *testing.T) {
+	res, err := composeExtending(t, notesTree(t, "notes_for: developer\npaths: [\"src/**/[a-c]*.py\", \"{a,b}/x\\\\y\", \"[\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"src/**/[a-c]*.py", "{a,b}/x\\y", "["}
+	for _, n := range res.RoleNotes() {
+		if n.Name == "app-naming" && !reflect.DeepEqual(n.Paths, want) {
+			t.Errorf("paths = %q, want %q", n.Paths, want)
+			return
+		}
+	}
+	if len(res.RoleNotes()) != 2 {
+		t.Errorf("RoleNotes = %+v, want app-naming and python-naming", res.RoleNotes())
+	}
+}
+
+// TestANoteInAStackThatFillsNoRoleIsToldToDropNotesFor is a note in a stack with no role.
+func TestANoteInAStackThatFillsNoRoleIsToldToDropNotesFor(t *testing.T) {
+	_, err := composeTree(t, map[string]string{
+		stack.FileName:                    "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: a\n    source:\n      path: modules/a\n",
+		"modules/a/skills/style/SKILL.md": "---\nname: style\ndescription: s\nnotes_for: developer\npaths: [\"*.go\"]\n---\n\nNotes.\n",
+	})
+	want := "Remove notes_for from style of module a.\n  The stack fills no role."
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want:\n%s", err, want)
+	}
+}
+
+// TestTheFixLineOfANoteForAnUnfilledRoleFitsWithRealisticNames is the refusal with the skill
+// python-naming-rules in the module technology-python: line 1 has at most 98 characters, so
+// it has at most 100 under the "✗ " that qory prints before it.
+func TestTheFixLineOfANoteForAnUnfilledRoleFitsWithRealisticNames(t *testing.T) {
+	_, err := composeTree(t, map[string]string{
+		stack.FileName: "apiVersion: qory.dev/v1alpha1\nbind:\n  agents:\n    developer: dev\nmodules:\n  - name: technology-python\n    source:\n      path: modules/technology-python\n",
+		"modules/technology-python/agents/dev.md":                       "---\nname: dev\ndescription: d\n---\n\nWrites.\n",
+		"modules/technology-python/skills/python-naming-rules/SKILL.md": "---\nname: python-naming-rules\ndescription: s\nnotes_for: tester\npaths: [\"*.py\"]\n---\n\nNotes.\n",
+	})
+	if err == nil {
+		t.Fatal("composed without an error")
+	}
+	first, _, _ := strings.Cut(err.Error(), "\n")
+	if want := "Set notes_for in python-naming-rules of module technology-python to a role the stack fills."; first != want || utf8.RuneCountInString(first) > 98 {
+		t.Errorf("line 1 = %q (%d characters), want %q", first, utf8.RuneCountInString(first), want)
 	}
 }
