@@ -1,260 +1,339 @@
 package cmd
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/qoryai/qory/internal/pushcheck"
 	"github.com/qoryai/qory/internal/submission"
 )
 
-// programDocument is the document the step gives the program: two commits in one repository,
-// the text of the session, and the draft [placeholder], which the program may fill.
-func programDocument(t *testing.T, draft string) *submission.Submission {
+const (
+	baseID   = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	middleID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	headID   = "cccccccccccccccccccccccccccccccccccccccc"
+)
+
+// programScript writes a shell script with body in a new folder and returns its path.
+func programScript(t *testing.T, body string) string {
 	t.Helper()
-	raw := `{"ref":"qory/wi_1","verdict":"passed","text":{"title":"Add a page","description":"The page lists orders."},"repositories":[` +
-		`{"system":"git.example.com","path":"acme/shop","commit":"` + commitC + `","base":{"commit":"` + commitA + `"},` +
-		`"commits":[{"commit":"` + commitB + `","step":"implement"},{"commit":"` + commitC + `","step":"unreviewed"}],"draft":` + draft + `}]}`
-	if err := submission.Check([]byte(raw)); err != nil {
-		t.Fatalf("%v\n%s", err, raw)
-	}
-	var doc submission.Submission
-	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+	path := filepath.Join(t.TempDir(), "open-draft")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return &doc
+	return path
 }
 
-// programFile is the document as a file with replace applied to its text: each pair of
-// replace is a string and what takes its place.
-func programFile(t *testing.T, doc *submission.Submission, replace ...string) []byte {
+// passedDocument is a submission of a passed round with a text and one repository on
+// git.example.com with two commits, whose draft is the placeholder.
+func passedDocument() *submission.Submission {
+	return &submission.Submission{
+		Ref: "qory/wi_1", Verdict: submission.VerdictPassed,
+		Text: &submission.Text{Title: "Add a page", Description: "The page lists orders.\nIt has a second line."},
+		Repositories: []submission.Repository{{
+			System: "git.example.com", Path: "acme/shop", Commit: headID,
+			Base:    &submission.Base{Commit: baseID, Branch: "main"},
+			Commits: []submission.Commit{{Commit: middleID, Step: "implement"}, {Commit: headID, Step: "unreviewed"}},
+			Draft:   placeholder,
+		}},
+	}
+}
+
+// commitLink is the address of a commit of acme/shop on git.example.com.
+func commitLink(commit string) string { return "https://git.example.com/acme/shop/commit/" + commit }
+
+// fillScript is a program that prints a whole draft and an address for the base, the middle
+// commit and the head.
+const fillScript = `echo "draft_number 7"
+echo "draft_url https://git.example.com/acme/shop/pull/7"
+echo "draft_title $QORY_SUBMIT_TITLE"
+echo "draft_state draft"
+echo "draft_action opened"
+for c in $QORY_SUBMIT_BASE_COMMIT $QORY_SUBMIT_COMMITS; do echo "commit_url $c https://git.example.com/acme/shop/commit/$c"; done
+`
+
+// runProgram is [submitProgram.apply] of a program with command on document, with the lines it printed.
+func runProgram(t *testing.T, p *submitProgram, document *submission.Submission) (*submission.Submission, string) {
 	t.Helper()
-	raw, err := json.Marshal(doc)
+	var out bytes.Buffer
+	got, err := p.apply(context.Background(), &out, document)
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(raw)
-	for i := 0; i < len(replace); i += 2 {
-		if !strings.Contains(text, replace[i]) {
-			t.Fatalf("the document has no %q:\n%s", replace[i], text)
-		}
-		text = strings.Replace(text, replace[i], replace[i+1], 1)
+	if err := checkDocument(got); err != nil {
+		t.Errorf("the stored document is not a submission: %v", err)
 	}
-	return []byte(text)
+	return got, out.String()
 }
 
-// TestAfterProgramByHowTheProgramEnded is the document that the step stores for each way the
-// submit program ends and each file it leaves: its links and a draft are taken, a file that
-// changes more than the links and the draft is discarded, and a failure or a timeout turns the
-// draft none no-program into its reason, with the links the program wrote when its file is
-// good.
-func TestAfterProgramByHowTheProgramEnded(t *testing.T) {
-	placeholder := string(submission.None(submission.NoneNoProgram, 0))
-	pr := `{"number":7,"url":"https://git.example.com/acme/shop/pull/7","title":"Add a page","state":"draft","action":"opened"}`
-	doc := programDocument(t, placeholder)
-	linked := programFile(t, doc, `"commit":"`+commitC+`","base"`, `"commit":"`+commitC+`","commit_url":"https://git.example.com/acme/shop/commit/`+commitC+`","base"`)
-	drafted := programFile(t, doc, placeholder, pr)
-	for _, c := range []struct {
-		name   string
-		end    pushcheck.ProgramEnd
-		draft  string // the draft of the repository in the result, compact JSON
-		linked bool   // whether the result has the program's commit_url
-		whyHas string // a part of the cause, "" for none
-	}{
-		{"links only, exit 0", pushcheck.ProgramEnd{Submission: linked}, placeholder, true, ""},
-		{"a draft, exit 0", pushcheck.ProgramEnd{Submission: drafted}, pr, false, ""},
-		{"links, exit 1", pushcheck.ProgramEnd{Submission: linked, Exit: 1}, `{"none":"program-failed","exit":1}`, true, ""},
-		{"no file, exit 2", pushcheck.ProgramEnd{FileErr: "the file is not there", Exit: 2}, `{"none":"program-failed","exit":2}`, false, "left no file"},
-		{"a crash, exit 137", pushcheck.ProgramEnd{Submission: linked, Exit: 137}, `{"none":"program-failed","exit":1}`, true, ""},
-		{"the engine could not start it", pushcheck.ProgramEnd{StartErr: "no such file"}, `{"none":"program-failed","exit":1}`, false, "left no file"},
-		{"a timeout", pushcheck.ProgramEnd{TimedOut: true, Submission: linked}, `{"none":"program-timeout"}`, true, ""},
-		{"a timeout with no file", pushcheck.ProgramEnd{TimedOut: true, FileErr: "the file is not there"}, `{"none":"program-timeout"}`, false, "left no file"},
-		{"another commit, exit 0", pushcheck.ProgramEnd{Submission: programFile(t, doc, `"commit":"`+commitC+`","base"`, `"commit":"`+commitB+`","base"`)}, `{"none":"program-failed","exit":1}`, false, "system, the path or the commit"},
-		{"another title, exit 0", pushcheck.ProgramEnd{Submission: programFile(t, doc, `"title":"Add a page"`, `"title":"Another"`)}, `{"none":"program-failed","exit":1}`, false, "the text"},
-		{"another step, exit 0", pushcheck.ProgramEnd{Submission: programFile(t, doc, `"step":"implement"`, `"step":"review"`)}, `{"none":"program-failed","exit":1}`, false, "the commits"},
-		{"another verdict, exit 0", pushcheck.ProgramEnd{Submission: programFile(t, doc, `"verdict":"passed"`, `"verdict":"escalate"`)}, `{"none":"program-failed","exit":1}`, false, "the verdict"},
-		{"a reason it chose, exit 0", pushcheck.ProgramEnd{Submission: programFile(t, doc, placeholder, `{"none":"escalated"}`)}, `{"none":"program-failed","exit":1}`, false, "the draft"},
-		{"not JSON, exit 0", pushcheck.ProgramEnd{Submission: []byte("{")}, `{"none":"program-failed","exit":1}`, false, "not a submission"},
-		{"an unknown field, exit 0", pushcheck.ProgramEnd{Submission: programFile(t, doc, `"ref":`, `"extra":1,"ref":`)}, `{"none":"program-failed","exit":1}`, false, "not a submission"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			got, why := afterProgram(doc, c.end)
-			if got == nil || len(got.Repositories) != 1 {
-				t.Fatalf("the result is %+v", got)
-			}
-			var want, have any
-			json.Unmarshal([]byte(c.draft), &want)
-			json.Unmarshal(got.Repositories[0].Draft, &have)
-			if !equalJSON(want, have) {
-				t.Errorf("the draft is %s, want %s", got.Repositories[0].Draft, c.draft)
-			}
-			if has := got.Repositories[0].CommitURL != ""; has != c.linked {
-				t.Errorf("the result has the program's link: %v, want %v", has, c.linked)
-			}
-			if (c.whyHas == "") != (why == "") || !strings.Contains(why, c.whyHas) {
-				t.Errorf("the cause is %q, want one with %q", why, c.whyHas)
-			}
-			// The part of the document that the program may not change is the document's.
-			if got.Ref != doc.Ref || got.Verdict != doc.Verdict || got.Text == nil || got.Text.Title != "Add a page" || len(got.Repositories[0].Commits) != 2 {
-				t.Errorf("the result changed what the program may not: %+v", got)
-			}
-			if err := checkDocument(got); err != nil {
-				t.Errorf("the result fails the format's check: %v", err)
-			}
-		})
-	}
-}
-
-// checkDocument checks doc against the submission format.
-func checkDocument(doc *submission.Submission) error {
-	raw, err := json.Marshal(doc)
+// checkDocument checks document against the submission format.
+func checkDocument(document *submission.Submission) error {
+	content, err := json.Marshal(document)
 	if err != nil {
 		return err
 	}
-	return submission.Check(raw)
+	return submission.Check(content)
 }
 
-// equalJSON reports whether a and b, each decoded JSON, are equal.
-func equalJSON(a, b any) bool {
-	x, _ := json.Marshal(a)
-	y, _ := json.Marshal(b)
-	return string(x) == string(y)
+// TestTheProgramRunsOutsideTheWallWithThePersonsEnvironment is a program on the person's
+// machine: it gets the contract's inputs, the person's variables, closed standard input and the
+// description in a file, and its draft and addresses are in the stored document.
+func TestTheProgramRunsOutsideTheWallWithThePersonsEnvironment(t *testing.T) {
+	t.Setenv("GH_TOKEN", "person-login")
+	t.Setenv("QORY_SUBMIT_TITLE", "from the shell")
+	t.Setenv("QORY_SUBMIT_DRAFT_NUMBER", "99")
+	seen := filepath.Join(t.TempDir(), "seen")
+	program := &submitProgram{command: []string{programScript(t, `
+{
+echo "gh=$GH_TOKEN"
+echo "system=$QORY_SUBMIT_SYSTEM path=$QORY_SUBMIT_PATH branch=$QORY_SUBMIT_BRANCH"
+echo "base=$QORY_SUBMIT_BASE_BRANCH@$QORY_SUBMIT_BASE_COMMIT"
+echo "commits=$QORY_SUBMIT_COMMITS"
+echo "draft=$QORY_SUBMIT_DRAFT number=${QORY_SUBMIT_DRAFT_NUMBER-unset} previous=${QORY_SUBMIT_PREVIOUS_TITLE-unset}"
+echo "title=$QORY_SUBMIT_TITLE"
+cat "$QORY_SUBMIT_DESCRIPTION_FILE"
+echo "stdin=$(cat | wc -c | tr -d ' ')"
+} > `+seen+"\n"+fillScript)}}
+	got, printed := runProgram(t, program, passedDocument())
+	data, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "gh=person-login\nsystem=git.example.com path=acme/shop branch=qory/wi_1\n" +
+		"base=main@" + baseID + "\ncommits=" + middleID + " " + headID + "\ndraft=open number=unset previous=unset\n" +
+		"title=Add a page\nThe page lists orders.\nIt has a second line.stdin=0\n"
+	if string(data) != want {
+		t.Errorf("the program saw:\n%s\nwant:\n%s", data, want)
+	}
+	r := got.Repositories[0]
+	if r.CommitURL != commitLink(headID) || r.Base.CommitURL != commitLink(baseID) || r.Commits[0].CommitURL != commitLink(middleID) || r.Commits[1].CommitURL != commitLink(headID) {
+		t.Errorf("the addresses are %+v", r)
+	}
+	if want := `{"number":7,"url":"https://git.example.com/acme/shop/pull/7","title":"Add a page","state":"draft","action":"opened"}`; string(r.Draft) != want {
+		t.Errorf("the draft is %s, want %s", r.Draft, want)
+	}
+	if printed != "" {
+		t.Errorf("the step printed %q, want nothing for a program that printed no error line", printed)
+	}
 }
 
-// TestADraftThatIsNotThePlaceholderStaysWhatItWas is a repository whose draft is a reason
-// other than no-program: the program may leave it and may not replace it, and a failure of
-// the program does not change it.
-func TestADraftThatIsNotThePlaceholderStaysWhatItWas(t *testing.T) {
-	notPassed := string(submission.None(submission.NoneNotPassed, 0))
-	doc := programDocument(t, notPassed)
-	same := programFile(t, doc)
-	if got, why := afterProgram(doc, pushcheck.ProgramEnd{Submission: same, Exit: 1}); why != "" || string(got.Repositories[0].Draft) != notPassed {
-		t.Errorf("a program that failed: %s, %q, want the draft kept", got.Repositories[0].Draft, why)
+// TestTheProgramUpdatesTheDraftOfThePreviousVersion is a work item whose previous version has
+// a draft: the program gets its number and the previous title, and the draft is an update.
+func TestTheProgramUpdatesTheDraftOfThePreviousVersion(t *testing.T) {
+	previous := passedDocument()
+	previous.Text.Title = "Add a first page"
+	previous.Repositories[0].Draft = json.RawMessage(`{"number":7,"url":"https://git.example.com/acme/shop/pull/7","title":"Add a first page","state":"draft","action":"opened"}`)
+	seen := filepath.Join(t.TempDir(), "seen")
+	program := &submitProgram{previous: previous, command: []string{programScript(t,
+		`echo "$QORY_SUBMIT_DRAFT $QORY_SUBMIT_DRAFT_NUMBER $QORY_SUBMIT_PREVIOUS_TITLE" > `+seen+"\n")}}
+	got, _ := runProgram(t, program, passedDocument())
+	data, _ := os.ReadFile(seen)
+	if string(data) != "update 7 Add a first page\n" {
+		t.Errorf("the program saw %q", data)
 	}
-	pr := `{"number":7,"url":"https://git.example.com/acme/shop/pull/7","title":"Add a page","state":"draft","action":"opened"}`
-	if got, why := afterProgram(doc, pushcheck.ProgramEnd{Submission: programFile(t, doc, notPassed, pr)}); !strings.Contains(why, "the draft") || string(got.Repositories[0].Draft) != notPassed {
-		t.Errorf("a program that opened a draft where none was due: %s, %q, want the draft kept and the cause", got.Repositories[0].Draft, why)
+	if string(got.Repositories[0].Draft) != string(placeholder) {
+		t.Errorf("a program that printed no draft changed the draft to %s", got.Repositories[0].Draft)
 	}
 }
 
-// TestTheValuesThatTheProgramLeavesAreChecked is each link and draft value that the program
-// may write: an https link on the repository's system at the path of the commit or the pull
-// request, a plain number, and a title with no control character. A value that breaks a rule
-// discards the program's file, with a cause that names the field and none of its content.
-func TestTheValuesThatTheProgramLeavesAreChecked(t *testing.T) {
-	placeholder := string(submission.None(submission.NoneNoProgram, 0))
-	doc := programDocument(t, placeholder)
-	site := "https://git.example.com/acme/shop"
-	draftOf := func(fields string) string { return `{` + fields + `}` }
-	const tail = `,"title":"Add a page","state":"draft","action":"opened"`
-	pull := func(url string) string { return `"number":7,"url":"` + url + `"` + tail }
-	commit := func(link string) []byte {
-		return programFile(t, doc, `"commit":"`+commitC+`","base"`, `"commit":"`+commitC+`","commit_url":"`+link+`","base"`)
+// TestARoundThatDidNotPassGetsTheAddressesAndNoDraft is a repository whose draft is not the
+// placeholder: the program gets the draft none and no title, its draft lines are not read, and
+// the addresses are stored.
+func TestARoundThatDidNotPassGetsTheAddressesAndNoDraft(t *testing.T) {
+	document := passedDocument()
+	document.Verdict = submission.VerdictChangesRequested
+	document.Repositories[0].Draft = submission.None(submission.NoneNotPassed, 0)
+	seen := filepath.Join(t.TempDir(), "seen")
+	program := &submitProgram{command: []string{programScript(t,
+		`echo "$QORY_SUBMIT_DRAFT title=${QORY_SUBMIT_TITLE-unset} file=${QORY_SUBMIT_DESCRIPTION_FILE-unset}" > `+seen+"\n"+fillScript)}}
+	got, _ := runProgram(t, program, document)
+	data, _ := os.ReadFile(seen)
+	if string(data) != "none title=unset file=unset\n" {
+		t.Errorf("the program saw %q", data)
 	}
-	cases := []struct {
-		name string
-		file []byte
-		ok   bool
-		why  string
+	r := got.Repositories[0]
+	if string(r.Draft) != `{"none":"not-passed"}` || r.CommitURL != commitLink(headID) || r.Base.CommitURL != commitLink(baseID) {
+		t.Errorf("the repository is %+v, want the addresses and not-passed", r)
+	}
+}
+
+// TestAProgramByHowItEnded is each end of a program for the repository whose draft is the
+// placeholder: the draft and the lines the step prints.
+func TestAProgramByHowItEnded(t *testing.T) {
+	for _, c := range []struct {
+		name, body, draft string
+		urls              bool
+		printed           []string
 	}{
-		{"a good commit link", commit(site + "/commit/" + commitC), true, ""},
-		{"the path in another letter case", commit("https://git.example.com/ACME/Shop/commit/" + commitC), true, ""},
-		{"the link of another commit", commit(site + "/commit/" + commitB), false, "commit_url"},
-		{"javascript:", commit("javascript:alert(1)"), false, "commit_url"},
-		{"file:", commit("file:///etc/passwd"), false, "commit_url"},
-		{"http", commit("http://git.example.com/acme/shop/commit/" + commitC), false, "commit_url"},
-		{"another host", commit("https://evil.example/acme/shop/commit/" + commitC), false, "commit_url"},
-		{"a user in the link", commit("https://user:pw@git.example.com/acme/shop/commit/" + commitC), false, "commit_url"},
-		{"a port", commit("https://git.example.com:8443/acme/shop/commit/" + commitC), false, "commit_url"},
-		{"a query", commit(site + "/commit/" + commitC + "?x=1"), false, "commit_url"},
-		{"a fragment", commit(site + "/commit/" + commitC + "#x"), false, "commit_url"},
-		{"another repository", commit("https://git.example.com/acme/other/commit/" + commitC), false, "commit_url"},
-		{"a control character", commit(site + "/commit/" + commitC + `\u0007`), false, "commit_url"},
-		{"a base link of another commit", programFile(t, doc, `"base":{"commit":"`+commitA+`"}`, `"base":{"commit":"`+commitA+`","commit_url":"`+site+`/commit/`+commitC+`"}`), false, "commit_url"},
-		{"a good draft", programFile(t, doc, placeholder, draftOf(pull(site+"/pull/7"))), true, ""},
-		{"a draft with javascript:", programFile(t, doc, placeholder, draftOf(pull("javascript:alert(1)"))), false, "url"},
-		{"a draft with file:", programFile(t, doc, placeholder, draftOf(pull("file:///etc/passwd"))), false, "url"},
-		{"a draft on another host", programFile(t, doc, placeholder, draftOf(pull("https://evil.example/acme/shop/pull/7"))), false, "url"},
-		{"a draft with another number", programFile(t, doc, placeholder, draftOf(pull(site+"/pull/8"))), false, "url"},
-		{"a draft with a control character in the title", programFile(t, doc, placeholder, draftOf(`"number":7,"url":"`+site+`/pull/7","title":"Add\u0007 page","state":"draft","action":"opened"`)), false, "title"},
-		{"a draft with a tab in the title", programFile(t, doc, placeholder, draftOf(`"number":7,"url":"`+site+`/pull/7","title":"Add\tpage","state":"draft","action":"opened"`)), false, "title"},
-		{"a number written 7.0", programFile(t, doc, placeholder, draftOf(`"number":7.0,"url":"`+site+`/pull/7","title":"t","state":"draft","action":"opened"`)), false, "number"},
-		{"a number written 1e0", programFile(t, doc, placeholder, draftOf(`"number":1e0,"url":"`+site+`/pull/1","title":"t","state":"draft","action":"opened"`)), false, "number"},
-		{"a number of 0", programFile(t, doc, placeholder, draftOf(`"number":0,"url":"`+site+`/pull/0","title":"t","state":"draft","action":"opened"`)), false, "number"},
-		{"a number that is too large", programFile(t, doc, placeholder, draftOf(`"number":1234567890123456789,"url":"`+site+`/pull/1234567890123456789","title":"t","state":"draft","action":"opened"`)), false, "number"},
-	}
-	for _, c := range cases {
+		{"finished with no draft", `echo done >&2`, `{"none":"no-program"}`, false, []string{"qory run: submit program: done"}},
+		{"failed call after its lines", fillScript + "echo 'no permission' >&2\nexit 1", `{"number":7,"url":"https://git.example.com/acme/shop/pull/7","title":"Add a page","state":"draft","action":"opened"}`, true,
+			[]string{"qory run: submit program: no permission"}},
+		{"failed call, no draft", "echo 'no permission' >&2\nexit 1", `{"none":"program-failed","exit":1}`, false,
+			[]string{"qory run: submit program: no permission", "qory run: The submit program failed, so a repository it did not finish has no draft.", "  Exit code: 1.", "  Draft of the repository: program-failed."}},
+		{"bad input", "exit 2", `{"none":"program-failed","exit":2}`, false,
+			[]string{"qory run: The submit program failed, so a repository it did not finish has no draft.", "  Exit code: 2.", "  Draft of the repository: program-failed."}},
+		{"another status", fillScript + "exit 137", `{"none":"program-failed","exit":1}`, false,
+			[]string{"qory run: The submit program failed, so a repository it did not finish has no draft.", "  Exit code: 137.", "  Draft of the repository: program-failed."}},
+		{"no login", "echo 'not logged in' >&2\nexit 3", `{"none":"program-failed","exit":1}`, false,
+			[]string{"qory run: submit program: not logged in", "qory run: Run `gh auth login`, then `qory run` again.", "  The draft was not opened. The branch qory/wi_1 is pushed.", "  Draft of the repository: program-failed."}},
+	} {
 		t.Run(c.name, func(t *testing.T) {
-			got, why := afterProgram(doc, pushcheck.ProgramEnd{Submission: c.file})
-			if c.ok != (why == "") {
-				t.Fatalf("the cause is %q, want a good file: %v", why, c.ok)
+			got, printed := runProgram(t, &submitProgram{command: []string{programScript(t, c.body)}}, passedDocument())
+			r := got.Repositories[0]
+			if string(r.Draft) != c.draft {
+				t.Errorf("the draft is %s, want %s", r.Draft, c.draft)
 			}
-			if c.ok {
-				return
+			if (r.CommitURL != "") != c.urls {
+				t.Errorf("the address of the head is %q, want one: %v", r.CommitURL, c.urls)
 			}
-			if !strings.Contains(why, c.why) || strings.Contains(why, "evil.example") || strings.Contains(why, "javascript") {
-				t.Errorf("the cause is %q, want the field %q and no value", why, c.why)
-			}
-			if string(got.Repositories[0].Draft) != `{"none":"program-failed","exit":1}` || got.Repositories[0].CommitURL != "" {
-				t.Errorf("the program's file is kept: %+v", got.Repositories[0])
+			if lines := strings.Split(strings.TrimSuffix(printed, "\n"), "\n"); strings.Join(lines, "\n") != strings.Join(c.printed, "\n") {
+				t.Errorf("the step printed:\n%s\nwant:\n%s", printed, strings.Join(c.printed, "\n"))
 			}
 		})
 	}
 }
 
-// TestTheDraftIsWrittenAgainAndAMemberTwiceDoesNotSurvive is a draft with a member twice, in
-// each order: the draft that is stored is the one that qory writes from the five members, so
-// a second url never reaches the stored version, and the first one is not hidden from the check.
-func TestTheDraftIsWrittenAgainAndAMemberTwiceDoesNotSurvive(t *testing.T) {
-	placeholder := string(submission.None(submission.NoneNoProgram, 0))
-	doc := programDocument(t, placeholder)
-	site := "https://git.example.com/acme/shop"
-	good := `"url":"` + site + `/pull/7"`
-	bad := `"url":"javascript:alert(1)"`
-	for name, members := range map[string]string{"good last": bad + `,` + good, "bad last": good + `,` + bad} {
-		t.Run(name, func(t *testing.T) {
-			file := programFile(t, doc, placeholder, `{"number":7,`+members+`,"title":"Add a page","state":"draft","action":"opened"}`)
-			got, why := afterProgram(doc, pushcheck.ProgramEnd{Submission: file})
-			draft := string(got.Repositories[0].Draft)
-			if strings.Count(draft, `"url"`) > 1 || strings.Contains(draft, "javascript") {
-				t.Errorf("the stored draft is %s", draft)
-			}
-			if name == "bad last" && why == "" {
-				t.Errorf("the draft with a last url of javascript: is taken")
-			}
-			if name == "good last" && (why != "" || draft != `{"number":7,"url":"`+site+`/pull/7","title":"Add a page","state":"draft","action":"opened"}`) {
-				t.Errorf("the draft is %s with the cause %q, want the one that qory writes", draft, why)
-			}
-		})
+// TestAProgramPastItsLimitHasNoDraft is a program that sleeps past the limit: it is stopped,
+// the draft is program-timeout, and the step prints the limit.
+func TestAProgramPastItsLimitHasNoDraft(t *testing.T) {
+	program := &submitProgram{command: []string{programScript(t, "exec sleep 30\n")}, limit: 300 * time.Millisecond}
+	started := time.Now()
+	got, printed := runProgram(t, program, passedDocument())
+	if time.Since(started) > 20*time.Second {
+		t.Errorf("the program ran %s", time.Since(started))
+	}
+	if string(got.Repositories[0].Draft) != `{"none":"program-timeout"}` {
+		t.Errorf("the draft is %s", got.Repositories[0].Draft)
+	}
+	if !strings.Contains(printed, "Limit: 300ms.") {
+		t.Errorf("the step printed %q", printed)
 	}
 }
 
-// TestTheProgramMayNotChangeTheBaseBranch is a file whose base.branch is not the one qory
-// gave the program: another name, none where there was one, and one where there was none. The
-// file is discarded, with a cause that names the base.
-func TestTheProgramMayNotChangeTheBaseBranch(t *testing.T) {
-	placeholder := string(submission.None(submission.NoneNoProgram, 0))
-	doc := programDocument(t, placeholder)
-	doc.Repositories[0].Base.Branch = "main"
-	cases := map[string][]byte{
-		"another name": programFile(t, doc, `"branch":"main"`, `"branch":"other"`),
-		"none":         programFile(t, doc, `,"branch":"main"`, ``),
+// TestAProgramThatDoesNotStartHasNoDraft is a command that is not there.
+func TestAProgramThatDoesNotStartHasNoDraft(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	got, printed := runProgram(t, &submitProgram{command: []string{missing}}, passedDocument())
+	if string(got.Repositories[0].Draft) != `{"none":"program-failed","exit":1}` {
+		t.Errorf("the draft is %s", got.Repositories[0].Draft)
 	}
-	for name, file := range cases {
-		t.Run(name, func(t *testing.T) {
-			_, why := afterProgram(doc, pushcheck.ProgramEnd{Submission: file})
-			if !strings.Contains(why, "the base") {
-				t.Errorf("the cause is %q, want one about the base", why)
+	if !strings.HasPrefix(printed, "qory run: The submit program did not start, so a repository has no draft.\n  Cause: ") {
+		t.Errorf("the step printed %q", printed)
+	}
+}
+
+// TestALineThatQoryCannotUseIsLeftOutAndListed is a program that prints a draft whose number is
+// wrong, an address on another host and a good address: the draft is not stored, the good
+// address is, and the step lists the lines that qory left out.
+func TestALineThatQoryCannotUseIsLeftOutAndListed(t *testing.T) {
+	body := `echo "draft_number 0"
+echo "draft_url https://git.example.com/acme/shop/pull/7"
+echo "commit_url $QORY_SUBMIT_BASE_COMMIT https://other.example.com/acme/shop/commit/x"
+echo "commit_url $QORY_SUBMIT_BASE_COMMIT https://git.example.com/acme/shop/commit/$QORY_SUBMIT_BASE_COMMIT"
+`
+	got, printed := runProgram(t, &submitProgram{command: []string{programScript(t, body)}}, passedDocument())
+	r := got.Repositories[0]
+	if string(r.Draft) != `{"none":"no-program"}` || r.Base.CommitURL != commitLink(baseID) {
+		t.Errorf("the repository is %+v", r)
+	}
+	for _, want := range []string{
+		"qory run: The submit program printed a line that qory cannot use, so qory left it out.\n  Line 1: the number is not a whole number of 1 to 9 digits, 1 or more.",
+		"  Line 3: the address is not on the repository's system.",
+	} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("the step did not print %q:\n%s", want, printed)
+		}
+	}
+}
+
+// TestARepositoryWithTooManyCommitsGetsNoProgram is 101 commits, over the contract's 100.
+func TestARepositoryWithTooManyCommitsGetsNoProgram(t *testing.T) {
+	document := passedDocument()
+	r := &document.Repositories[0]
+	r.Commits = nil
+	for range maxSubmitCommits + 1 {
+		r.Commits = append(r.Commits, submission.Commit{Commit: headID, Step: "unreviewed"})
+	}
+	started := filepath.Join(t.TempDir(), "started")
+	got, printed := runProgram(t, &submitProgram{command: []string{programScript(t, "touch "+started+"\n")}}, document)
+	if _, err := os.Stat(started); err == nil {
+		t.Error("the program started")
+	}
+	if string(got.Repositories[0].Draft) != `{"none":"program-failed","exit":2}` || !strings.Contains(printed, "the repository has 101 commits, and the program takes at most 100.") {
+		t.Errorf("the draft is %s and the step printed %q", got.Repositories[0].Draft, printed)
+	}
+}
+
+// TestARepositoryThatTheRunDidNotPushGetsNoProgram is an entry with its commit alone.
+func TestARepositoryThatTheRunDidNotPushGetsNoProgram(t *testing.T) {
+	document := passedDocument()
+	document.Repositories = append(document.Repositories, submission.Repository{System: "git.example.com", Path: "acme/lib", Commit: baseID, Draft: placeholder})
+	started := filepath.Join(t.TempDir(), "count")
+	_, _ = runProgram(t, &submitProgram{command: []string{programScript(t, "echo x >> "+started+"\n")}}, document)
+	data, _ := os.ReadFile(started)
+	if string(data) != "x\n" {
+		t.Errorf("the program ran %q times for 2 entries, 1 of them pushed", data)
+	}
+}
+
+// TestTheProgramsErrorLinesHideASecret is a program that prints a registered secret.
+func TestTheProgramsErrorLinesHideASecret(t *testing.T) {
+	got, printed := runProgram(t, &submitProgram{command: []string{programScript(t, "echo 'token ghp_abcdefghijklmnopqrstuvwxyz0123456789 end' >&2\n")}}, passedDocument())
+	_ = got
+	if strings.Contains(printed, "ghp_abcdefghijklmnopqrstuvwxyz0123456789") {
+		t.Errorf("the step printed a token: %q", printed)
+	}
+}
+
+// TestParseSubmitLines is the contract's rules for the lines of the program: a whole draft, an
+// address for a commit that qory gave, and the lines that qory leaves out with the reason.
+func TestParseSubmitLines(t *testing.T) {
+	commits := []string{baseID, headID}
+	good := "draft_number 34\ndraft_url https://git.example.com/acme/shop/pull/34\ndraft_title A title\ndraft_state open\ndraft_action kept\n"
+	for _, c := range []struct {
+		name, out string
+		draft     bool
+		urls      int
+		reasons   []string
+	}{
+		{"whole", good + "commit_url " + headID + " https://git.example.com/acme/shop/commit/" + headID + "\n", true, 1, nil},
+		{"blank line", "\n" + good, true, 0, nil},
+		{"a draft key twice", good + "draft_state draft\n", true, 0, []string{"the key is there already"}},
+		{"four draft keys", strings.Replace(good, "draft_action kept\n", "", 1), false, 0, nil},
+		{"no line feed at the end", good + "commit_url " + headID, true, 0, []string{"the line has no line feed at its end"}},
+		{"control character", "draft_title a\tb\n", false, 0, []string{"the line has a control character"}},
+		{"no value", "draft_url\n", false, 0, []string{"the line is not a key and a value"}},
+		{"unknown key", "other 1\n", false, 0, []string{"the key is not one of the contract's"}},
+		{"unknown commit", "commit_url " + middleID + " https://git.example.com/a/b\n", false, 0, []string{"the commit is not one that qory gave the program"}},
+		{"commit twice", "commit_url " + headID + " https://git.example.com/a/b\ncommit_url " + headID + " https://git.example.com/a/c\n", false, 1, []string{"the commit has an address already"}},
+		{"no address", "commit_url " + headID + "\n", false, 0, []string{"the line has no address"}},
+		{"http", "draft_url http://git.example.com/a/b\n", false, 0, []string{"the address is not https"}},
+		{"port", "draft_url https://git.example.com:8443/a/b\n", false, 0, []string{"the address has a port"}},
+		{"user", "draft_url https://u@git.example.com/a/b\n", false, 0, []string{"the address has user information"}},
+		{"query", "draft_url https://git.example.com/a/b?x=1\n", false, 0, []string{"the address has a query or a fragment"}},
+		{"no path", "draft_url https://git.example.com/\n", false, 0, []string{"the address has no path"}},
+		{"state", "draft_state merged\n", false, 0, []string{"the state is neither draft nor open"}},
+		{"action", "draft_action closed\n", false, 0, []string{"the action is none of opened, updated and kept"}},
+		{"number with a zero", "draft_number 07\n", false, 0, []string{"the number is not a whole number of 1 to 9 digits, 1 or more"}},
+		{"number of 10 digits", "draft_number 1234567890\n", false, 0, []string{"the number is not a whole number of 1 to 9 digits, 1 or more"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := parseSubmitLines(c.out, "git.example.com", commits)
+			if (got.Draft != nil) != c.draft || len(got.CommitURLs) != c.urls {
+				t.Errorf("draft %v and %d addresses, want %v and %d", got.Draft, len(got.CommitURLs), c.draft, c.urls)
+			}
+			var reasons []string
+			for _, bad := range got.Invalid {
+				reasons = append(reasons, bad.Reason)
+			}
+			if strings.Join(reasons, "|") != strings.Join(c.reasons, "|") {
+				t.Errorf("the lines left out are %q, want %q", reasons, c.reasons)
 			}
 		})
-	}
-	plain := programDocument(t, placeholder)
-	file := programFile(t, plain, `"base":{"commit":"`+commitA+`"}`, `"base":{"commit":"`+commitA+`","branch":"main"}`)
-	if _, why := afterProgram(plain, pushcheck.ProgramEnd{Submission: file}); !strings.Contains(why, "the base") {
-		t.Errorf("a branch where there was none: the cause is %q, want one about the base", why)
-	}
-	if _, why := afterProgram(doc, pushcheck.ProgramEnd{Submission: programFile(t, doc)}); why != "" {
-		t.Errorf("a file with the same branch is refused: %q", why)
 	}
 }

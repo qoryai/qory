@@ -821,12 +821,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// Only a run at level write submits: a run at write-no-push or read has no
 				// submit program and no hand-off file.
 				if submitLevel == stack.AccessWrite {
-					if c.submitProgram != nil {
-						program = &submitProgram{
-							command: c.submitProgram.Command, home: at.home, run: run,
-							spec: &spec, fromCode: code != nil, limit: submitLimit,
-						}
-					}
 					if branch != nil {
 						// The hand-off file is in the checkout's .qory, which no commit has: a
 						// walled session writes it through the checkout's mount. Its folder is
@@ -838,6 +832,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						handoffRoot = at.root
 						spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{handoffEnv: handoffPath(at.root)})
 					}
+				}
+				// The composed harness's submit program runs on a run with no run code alone, on
+				// the person's machine and with the person's login of the forge's command line. A
+				// run with a run code has none: the forge's adapter opens its draft from the stored
+				// submission.
+				if code == nil && c.submitProgram != nil {
+					program = &submitProgram{command: c.submitProgram.Command, limit: submitLimit}
 				}
 				if line := fromCode.submitLine(rep, submitLevel); line != "" {
 					fmt.Fprintln(w, "qory run:", line)

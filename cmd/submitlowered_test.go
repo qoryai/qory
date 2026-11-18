@@ -9,20 +9,19 @@ import (
 )
 
 // TestARunLoweredBelowWriteRunsNoSubmitStep is a run whose documents have access write and a
-// submit, of a harness with a submit program, whose stack declares the workflow
-// write-no-push or read: the run sets no hand-off variable, starts no container for the
-// program, has no step of kind or name submit and stores no version. The same documents at
-// write run the program, so the others differ by the stack's level alone. The levels gate the
-// run at "submitLevel == stack.AccessWrite" in the run's setup. The submit line is not checked
-// here: this harness has no submit in its process, so the run prints none at any level, and
-// TestARunWhoseWorkflowLowersItBelowWritePrintsNoSubmitLine checks it.
+// submit, of a harness with a submit program, whose stack declares the workflow write,
+// write-no-push or read: the run starts no program. Only the run at write sets the hand-off
+// variable, and the others have no step of kind or name submit and store no version. The levels
+// gate the run at "submitLevel == stack.AccessWrite" in the run's setup. The submit line is not
+// checked here: this harness has no submit in its process, so the run prints none at any level,
+// and TestARunWhoseWorkflowLowersItBelowWritePrintsNoSubmitLine checks it.
 func TestARunLoweredBelowWriteRunsNoSubmitStep(t *testing.T) {
 	for _, c := range []struct {
 		access string
 		write  bool
 	}{{"write", true}, {"write-no-push", false}, {"read", false}} {
 		t.Run(c.access, func(t *testing.T) {
-			p, log, _ := newProgramRepo(t, c.access, "fill", 0)
+			p, log, marker := newProgramRepo(t, c.access)
 			p.change = func(d map[string]any) {
 				d["access"] = "write"
 				d["submit"] = map[string]any{"type": "code-change", "send": "after_gate"}
@@ -36,10 +35,10 @@ func TestARunLoweredBelowWriteRunsNoSubmitStep(t *testing.T) {
 			for _, v := range variables {
 				handoff = handoff || strings.HasPrefix(v, "QORY_SUBMISSION_HANDOFF=")
 			}
-			ran := strings.Contains(checkLog(t, log), "start")
-			if handoff != c.write || ran != c.write {
-				t.Errorf("hand-off variable %v and program run %v, want %v for both", handoff, ran, c.write)
+			if handoff != c.write {
+				t.Errorf("hand-off variable %v, want %v", handoff, c.write)
 			}
+			wantsNoProgram(t, p, log, marker)
 			if c.write {
 				return
 			}

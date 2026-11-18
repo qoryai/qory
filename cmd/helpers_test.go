@@ -29,11 +29,6 @@ func TestMain(m *testing.M) {
 	// No test reaches npm: qory run installs its runtime only in the tests of the
 	// install, which set a stub registry.
 	cmd.SetInstallRuntimes(false)
-	// The fake docker of the submit program's tests starts this binary as the program, in
-	// the mode that QORY_TEST_PROGRAM names.
-	if mode := os.Getenv("QORY_TEST_PROGRAM"); mode != "" {
-		os.Exit(testProgramMain(mode))
-	}
 	// A test that needs qory run prepare as a separate process starts this binary
 	// with QORY_TEST_PREPARE set, and the binary is that verb, which looks for the
 	// image's copy where QORY_TEST_PREPARE_SEED says when it is set.

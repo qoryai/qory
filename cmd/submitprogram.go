@@ -3,190 +3,291 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
-	"reflect"
-	"regexp"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/qoryai/forager/wall"
-
-	"github.com/qoryai/qory/internal/config"
-	"github.com/qoryai/qory/internal/exports"
-	"github.com/qoryai/qory/internal/proxygit"
-	"github.com/qoryai/qory/internal/pushcheck"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/submission"
 )
 
 // The words of the submit program's run. Each states the cause only: line 1 has at most 100
-// characters with its prefix, and the values follow on indented lines. textProgramLine is a
-// line of the program's output, masked. The last four are the causes that
-// [textProgramNotReady] shows, as errors with no prefix.
+// characters with its prefix, and the values follow on indented lines. textProgramLine is a line
+// of the program's standard error, masked.
 const (
 	textProgramLine     = "qory run: submit program: %s"
 	textProgramFailed   = "qory run: The submit program failed, so a repository it did not finish has no draft.\n  Exit code: %d.\n  Draft of the repository: program-failed."
 	textProgramTimeout  = "qory run: The submit program ran past its limit, so a repository it did not finish has no draft.\n  Limit: %s.\n  Draft of the repository: program-timeout."
 	textProgramNoStart  = "qory run: The submit program did not start, so a repository has no draft.\n  Cause: %s\n  Draft of the repository: program-failed."
-	textProgramNotReady = "qory run: The submit program could not run in the wall, so a repository has no draft.\n  Cause: %s\n  Draft of the repository: program-failed."
-	textProgramDiscards = "qory run: The submit program left a result qory cannot use, so a repository has no draft.\n  Cause: %s\n  qory kept the submission it gave the program.\n  Draft of the repository: program-failed."
-	textProgramNoWall   = "the submit program runs in a container of the docker wall alone, and this run's wall is not docker"
-	textProgramNoImage  = "the submit program runs in the wall's default image, and this run has none (wall.image in forager.yaml)"
-	textProgramBadImage = "the submit program runs in the wall's default image, and %s is not an image reference"
-	textProgramEngine   = "the submit program would run on the engine %s, and the run's containers are on the engine %s"
+	textProgramTooMany  = "qory run: The submit program did not run, so a repository has no draft.\n  Cause: the repository has %d commits, and the program takes at most %d.\n  Draft of the repository: program-failed."
+	textProgramNoLogin  = "qory run: Run `gh auth login`, then `qory run` again.\n  The draft was not opened. The branch %s is pushed.\n  Draft of the repository: program-failed."
+	textProgramLeftOut  = "qory run: The submit program printed a line that qory cannot use, so qory left it out.\n  Line %d: %s."
+	textProgramNoFolder = "qory run: The submit program did not run, so a repository has no draft.\n  Cause: %s\n  Draft of the repository: program-failed."
 )
 
-// submitLimit, when not 0, is how long the submit program may run, in place of
-// [pushcheck.ProgramLimit]; a test sets it.
+// maxProgramLines is how many lines of the program's standard error the step prints, and
+// maxProgramLine the longest one; maxProgramOutput is how much of each of its outputs qory
+// reads, and maxLeftOut how many lines that qory left out it lists.
+const (
+	maxProgramLines  = 20
+	maxProgramLine   = 300
+	maxProgramOutput = 1 << 20
+	maxLeftOut       = 5
+)
+
+// programLimit is how long the submit program may run, from its start; the contract has no
+// limit, and a program that waits on a login prompt would stop the run's end.
+const programLimit = 120 * time.Second
+
+// submitLimit, when not 0, is how long the submit program may run, in place of [programLimit]; a
+// test sets it.
 var submitLimit time.Duration
 
-// maxProgramLines is how many lines of the program's output the step prints, and
-// maxProgramLine the longest one.
-const (
-	maxProgramLines = 20
-	maxProgramLine  = 300
-)
-
-// submitProgram is the submit program of a run: the module's command, with the home's path in
-// it, and what starts its container. The container is built when the program runs, since the
-// image of a run with no default image comes in the run's image step, after the compose.
+// submitProgram is the submit program of a run with no run code: the module's command, with the
+// home's path in it, which runs on the person's machine, outside the wall, once for each
+// repository of the submission. The program uses the login of the forge's command line that the
+// person has, and gets no credential from qory. A run with a run code has none: the forge's
+// adapter opens its draft from the stored submission.
 type submitProgram struct {
-	command  []string
-	home     string
-	run      openedRun
-	spec     *runSpec
-	fromCode bool
-	// limit, when set, replaces [pushcheck.ProgramLimit]; a test sets it.
-	limit time.Duration
+	command []string
+	// previous is the previous version of the work item's submission, nil for none: it gives the
+	// number of the draft to update and the previous title.
+	previous *submission.Submission
+	limit    time.Duration
 }
 
-// checker is the container's checker, as the run's push checks have one: the wall's default
-// image, as the run's user, with the wall's limits and the run's label. An error starts with
-// its fix and has no final period.
-func (p *submitProgram) checker(ctx context.Context) (*pushcheck.Checker, error) {
-	d, ok := p.spec.Wall.(*wall.Docker)
-	if !ok {
-		return nil, errors.New(textProgramNoWall)
-	}
-	engine, err := programEngine(ctx, d)
-	if err != nil {
-		return nil, err
-	}
-	user := d.User
-	if user == "" {
-		user = fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
-	}
-	// A run from a run code runs the program in the wall's default image alone: its policy,
-	// from the server, may select an image built from the repository.
-	if p.fromCode && p.spec.Image == "" {
-		return nil, errors.New(textProgramNoImage)
-	}
-	image := checkImage(p.run, p.spec)
-	if !config.IsImageRef(image) {
-		return nil, fmt.Errorf(textProgramBadImage, exports.Value(image, true))
-	}
-	return &pushcheck.Checker{
-		Home: p.home, Image: image, Runtime: checkRuntime(p.run, p.spec), User: user, Engine: engine,
-		Limits: wall.Limits{CPUs: p.spec.Limits.CPUs, Memory: p.spec.Limits.Memory, PIDs: p.spec.Limits.PIDs},
-		Label:  runLabel + p.spec.RunID, Mask: secretmask.Default().Replace, ProgramLimit: p.limit,
-	}, nil
+// programEnd is how one run of the program ended.
+type programEnd struct {
+	exit     int
+	timedOut bool
+	startErr string
+	stdout   string
+	stderr   string
 }
 
-// programEngine is the engine of the program's container: d's command with the selection
-// that the wall recorded at the run's open. A new selection that reaches another engine than
-// the recorded one is an error: the program would run on another engine than the run's
-// containers.
-func programEngine(ctx context.Context, d *wall.Docker) (pushcheck.Engine, error) {
-	ctx, cancel := context.WithTimeout(ctx, engineSelectWait)
-	defer cancel()
-	e := pushcheck.Engine{Command: d.Command}
-	id, err := d.EngineID(ctx)
-	if err != nil || id == "" {
-		return e, nil
-	}
-	selected := (&wall.Docker{Command: d.Command}).Engine(ctx)
-	if selected.ID != id {
-		return pushcheck.Engine{}, fmt.Errorf(textProgramEngine, engineShown(selected.ID), engineShown(id))
-	}
-	return pushcheck.Engine{Command: selected.Command, Env: append([]string{}, selected.Env...)}, nil
-}
-
-// apply runs the program on document through proxy, the run's push proxy, which stays open
-// until it returns, and returns the document to store: what the program left, when it
-// changed only what it may, and otherwise document. A repository whose draft the program did
-// not fill gets the reason that the program's end gives. Each line it prints goes to w. An error is a
-// ctx that ended, which cuts the step.
-func (p *submitProgram) apply(ctx context.Context, w io.Writer, proxy proxygit.Proxy, document *submission.Submission) (*submission.Submission, error) {
-	content, err := json.Marshal(document)
-	if err != nil {
-		return nil, err
-	}
-	// The program sends the password as the user qory in a Basic header: both forms are secret.
-	if u, err := url.Parse(proxy.URL); err == nil && u.User != nil {
-		if password, ok := u.User.Password(); ok {
-			secretmask.Default().Add(base64.StdEncoding.EncodeToString([]byte(u.User.Username() + ":" + password)))
+// apply runs the program on document, once for each repository that the run pushed, and returns
+// the document to store: each repository with the addresses of its commits and its draft, as
+// the program's lines give them, or with the reason it has none. Each line that the program
+// printed on its standard error goes to w. An error is a ctx that ended, which cuts the step.
+func (p *submitProgram) apply(ctx context.Context, w io.Writer, document *submission.Submission) (*submission.Submission, error) {
+	out := *document
+	out.Repositories = slices.Clone(document.Repositories)
+	for i, r := range document.Repositories {
+		if r.Base == nil || len(r.Commits) == 0 {
+			continue
 		}
+		result, err := p.applyTo(ctx, w, document, r)
+		if err != nil {
+			return nil, err
+		}
+		out.Repositories[i] = result
 	}
-	var end pushcheck.ProgramEnd
-	checker, err := p.checker(ctx)
-	if err == nil {
-		end, err = checker.RunProgram(ctx, pushcheck.Program{Command: p.command, Submission: content, ProxyURL: proxy.URL, CABundle: proxy.CABundle})
+	return &out, nil
+}
+
+// placeholder is the draft of a repository that the program may fill: the verdict is passed,
+// the session wrote text, and no program has run yet.
+var placeholder = submission.None(submission.NoneNoProgram, 0)
+
+// applyTo runs the program for repository r of document and returns r with its results.
+func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *submission.Submission, r submission.Repository) (submission.Repository, error) {
+	fail := func(reason string, exit int) submission.Repository {
+		if bytes.Equal(r.Draft, placeholder) {
+			r.Draft = submission.None(reason, exit)
+		}
+		return r
 	}
+	commits := make([]string, len(r.Commits))
+	for i, c := range r.Commits {
+		commits[i] = c.Commit
+	}
+	if len(commits) > maxSubmitCommits {
+		fmt.Fprintf(w, textProgramTooMany+"\n", len(commits), maxSubmitCommits)
+		return fail(submission.NoneProgramFailed, submitExitInput), nil
+	}
+	dir, err := os.MkdirTemp("", "qory-submit-")
+	if err != nil {
+		fmt.Fprintf(w, textProgramNoFolder+"\n", shownError(err))
+		return fail(submission.NoneProgramFailed, submitExitForge), nil
+	}
+	defer os.RemoveAll(dir)
+	input, err := p.input(document, r, commits, dir)
+	if err != nil {
+		fmt.Fprintf(w, textProgramNoFolder+"\n", shownError(err))
+		return fail(submission.NoneProgramFailed, submitExitForge), nil
+	}
+	end := p.run(ctx, input, dir)
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return r, ctx.Err()
 	}
-	if err != nil {
-		fmt.Fprintf(w, textProgramNotReady+"\n", shownError(err))
-		return withDraftNone(document, submission.NoneProgramFailed, 1), nil
-	}
-	printProgramLines(w, end)
-	result, why := afterProgram(document, end)
-	switch {
-	case end.TimedOut:
-		fmt.Fprintf(w, textProgramTimeout+"\n", p.programLimit())
-	case end.StartErr != "":
-		fmt.Fprintf(w, textProgramNoStart+"\n", shownText(end.StartErr))
-	case end.Exit != 0:
-		fmt.Fprintf(w, textProgramFailed+"\n", end.Exit)
-	}
-	if why != "" {
-		fmt.Fprintf(w, textProgramDiscards+"\n", why)
-	}
-	return result, nil
-}
-
-// programLimit is how long the program may run.
-func (p *submitProgram) programLimit() time.Duration {
-	if p.limit != 0 {
-		return p.limit
-	}
-	return pushcheck.ProgramLimit
-}
-
-// printProgramLines writes the lines of the program's output, masked and cut: its standard
-// output first, which has the pull requests it opened, then its standard error, which has the
-// fixes. At most [maxProgramLines] lines go out.
-func printProgramLines(w io.Writer, end pushcheck.ProgramEnd) {
-	printed := 0
-	for _, out := range [][]byte{end.Stdout, end.Stderr} {
-		for line := range strings.Lines(string(out)) {
-			line = shownText(line)
-			if strings.TrimSpace(line) == "" {
-				continue
+	printProgramLines(w, end.stderr)
+	// The lines count after a finished program and after one that reports a failed call or a
+	// bad input; for any other end they record nothing.
+	var lines submitLines
+	if end.startErr == "" && !end.timedOut && (end.exit == submitExitDone || end.exit == submitExitForge || end.exit == submitExitInput) {
+		lines = parseSubmitLines(end.stdout, r.System, append([]string{r.Base.Commit}, commits...))
+		for i, bad := range lines.Invalid {
+			if i == maxLeftOut {
+				break
 			}
-			if printed == maxProgramLines {
-				return
-			}
-			printed++
-			fmt.Fprintf(w, textProgramLine+"\n", line)
+			fmt.Fprintf(w, textProgramLeftOut+"\n", bad.N, bad.Reason)
 		}
+	}
+	r.CommitURL = lines.CommitURLs[r.Commit]
+	r.Base = &submission.Base{Commit: r.Base.Commit, Branch: r.Base.Branch, CommitURL: lines.CommitURLs[r.Base.Commit]}
+	r.Commits = slices.Clone(r.Commits)
+	for i, c := range r.Commits {
+		r.Commits[i].CommitURL = lines.CommitURLs[c.Commit]
+	}
+	if !bytes.Equal(r.Draft, placeholder) {
+		return r, nil
+	}
+	switch {
+	case end.timedOut:
+		fmt.Fprintf(w, textProgramTimeout+"\n", p.limitOrDefault())
+		r.Draft = submission.None(submission.NoneProgramTimeout, 0)
+	case end.startErr != "":
+		fmt.Fprintf(w, textProgramNoStart+"\n", shownText(end.startErr))
+		r.Draft = submission.None(submission.NoneProgramFailed, submitExitForge)
+	case end.exit == submitExitNoLogin:
+		fmt.Fprintf(w, textProgramNoLogin+"\n", shownText(document.Ref))
+		r.Draft = submission.None(submission.NoneProgramFailed, submitExitForge)
+	case lines.Draft != nil:
+		draft, err := json.Marshal(lines.Draft)
+		if err != nil {
+			return r, err
+		}
+		r.Draft = draft
+	case end.exit == submitExitDone:
+		// A program that finished and printed no draft leaves the draft as it was.
+	default:
+		exit := end.exit
+		if exit != submitExitForge && exit != submitExitInput {
+			exit = submitExitForge
+		}
+		fmt.Fprintf(w, textProgramFailed+"\n", end.exit)
+		r.Draft = submission.None(submission.NoneProgramFailed, exit)
+	}
+	return r, nil
+}
+
+// input is the inputs for repository r of document, with its description in a file in dir.
+// The draft is none for a repository whose draft is not the [placeholder], as after a session
+// that did not pass; it is an update when the previous version has a draft of the repository.
+func (p *submitProgram) input(document *submission.Submission, r submission.Repository, commits []string, dir string) (submitInput, error) {
+	in := submitInput{
+		System: r.System, Path: r.Path, Branch: document.Ref, BaseBranch: r.Base.Branch, BaseCommit: r.Base.Commit,
+		Commits: commits, Draft: submitDraftNone,
+	}
+	if !bytes.Equal(r.Draft, placeholder) || document.Text == nil {
+		return in, nil
+	}
+	in.Draft, in.Title = submitDraftOpen, document.Text.Title
+	file := filepath.Join(dir, "description.md")
+	if err := os.WriteFile(file, []byte(document.Text.Description), 0o600); err != nil {
+		return in, err
+	}
+	in.DescriptionFile = file
+	if prev := p.previous; prev != nil {
+		if prev.Text != nil {
+			in.PreviousTitle = prev.Text.Title
+		}
+		for _, was := range prev.Repositories {
+			var pr pullRequest
+			if was.System == r.System && was.Path == r.Path && json.Unmarshal(was.Draft, &pr) == nil && pr.Number > 0 {
+				in.Draft, in.Number = submitDraftUpdate, pr.Number
+			}
+		}
+	}
+	return in, nil
+}
+
+// pullRequest is the draft pull request of a repository, as the submission format has it.
+type pullRequest struct {
+	Number int    `json:"number"`
+	URL    string `json:"url"`
+	Title  string `json:"title"`
+	State  string `json:"state"`
+	Action string `json:"action"`
+}
+
+// run starts the program in dir, outside the wall, with the person's environment and the
+// inputs, and closed standard input, and returns how it ended.
+func (p *submitProgram) run(ctx context.Context, in submitInput, dir string) programEnd {
+	ctx, cancel := context.WithTimeout(ctx, p.limitOrDefault())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, p.command[0], p.command[1:]...)
+	cmd.Dir = dir
+	cmd.Env = in.env(os.Environ())
+	stdout, stderr := &capped{limit: maxProgramOutput}, &capped{limit: maxProgramOutput}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	cmd.WaitDelay = 5 * time.Second
+	err := cmd.Run()
+	end := programEnd{stdout: stdout.String(), stderr: stderr.String()}
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+	case ctx.Err() != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
+		end.timedOut = true
+	case errors.As(err, &exit):
+		end.exit = exit.ExitCode()
+		if end.exit < 0 {
+			end.exit = submitExitForge
+		}
+	default:
+		end.startErr = err.Error()
+	}
+	return end
+}
+
+// limitOrDefault is how long the program may run.
+func (p *submitProgram) limitOrDefault() time.Duration {
+	switch {
+	case p.limit != 0:
+		return p.limit
+	case submitLimit != 0:
+		return submitLimit
+	}
+	return programLimit
+}
+
+// capped keeps at most limit bytes of what it is written and drops the rest, so a program that
+// prints without end does not fill the memory; it never fails a write.
+type capped struct {
+	limit int
+	buf   bytes.Buffer
+}
+
+func (c *capped) Write(p []byte) (int, error) {
+	if room := c.limit - c.buf.Len(); room > 0 {
+		c.buf.Write(p[:min(len(p), room)])
+	}
+	return len(p), nil
+}
+
+func (c *capped) String() string { return c.buf.String() }
+
+// printProgramLines writes the lines of the program's standard error, masked and cut. At most
+// [maxProgramLines] lines go out.
+func printProgramLines(w io.Writer, stderr string) {
+	printed := 0
+	for line := range strings.Lines(stderr) {
+		line = shownText(line)
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if printed == maxProgramLines {
+			return
+		}
+		printed++
+		fmt.Fprintf(w, textProgramLine+"\n", line)
 	}
 }
 
@@ -202,202 +303,3 @@ func shownText(line string) string {
 
 // shownErrorText is s as [shownError] shows an error.
 func shownErrorText(s string) string { return shownError(errors.New(s)) }
-
-// placeholder is the draft of a repository that the program may fill: the verdict is passed,
-// the session wrote text, and no program has run yet.
-var placeholder = submission.None(submission.NoneNoProgram, 0)
-
-// afterProgram is the document that the step stores after the program ended as end: the file
-// the program left when it changed only what it may, otherwise document; with, for a
-// repository whose draft is still the [placeholder], the reason that end gives. A program that
-// exited 0 leaves a placeholder as it is: no program handles that repository. why is the cause
-// when the program's file is not used, "" for none.
-func afterProgram(document *submission.Submission, end pushcheck.ProgramEnd) (result *submission.Submission, why string) {
-	reason, exit := "", 0
-	switch {
-	case end.TimedOut:
-		reason = submission.NoneProgramTimeout
-	case end.StartErr != "" || end.Exit != 0:
-		reason, exit = submission.NoneProgramFailed, end.Exit
-		if exit != 1 && exit != 2 {
-			exit = 1
-		}
-	}
-	left, err := programChanges(document, end.Submission, end.FileErr)
-	if err != nil {
-		left, why = document, err.Error()
-		if reason == "" {
-			reason, exit = submission.NoneProgramFailed, 1
-		}
-	}
-	if reason == "" {
-		return left, why
-	}
-	return withDraftNone(left, reason, exit), why
-}
-
-// withDraftNone is document with the draft {"none": reason} in each repository whose draft is
-// the [placeholder].
-func withDraftNone(document *submission.Submission, reason string, exit int) *submission.Submission {
-	out := *document
-	out.Repositories = slices.Clone(document.Repositories)
-	for i, r := range out.Repositories {
-		if bytes.Equal(r.Draft, placeholder) {
-			out.Repositories[i].Draft = submission.None(reason, exit)
-		}
-	}
-	return &out
-}
-
-// programChanges reads the file that the program left and checks that it differs from
-// document only in the commit links of each repository (commit_url, base.commit_url and each
-// commits[].commit_url), and in the draft of a repository whose draft is the [placeholder]:
-// there it may be a pull request, never another reason. fileErr is the cause when the file
-// could not be read.
-func programChanges(document *submission.Submission, left []byte, fileErr string) (*submission.Submission, error) {
-	if left == nil {
-		return nil, fmt.Errorf("it left no file the step can read: %s", fileErr)
-	}
-	var got submission.Submission
-	dec := json.NewDecoder(bytes.NewReader(left))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&got); err != nil {
-		return nil, fmt.Errorf("it left a file that is not a submission: %s", shownError(err))
-	}
-	if err := submission.Check(left); err != nil {
-		return nil, fmt.Errorf("it left a file that is not a submission: %s", shownError(err))
-	}
-	if got.Ref != document.Ref || got.Verdict != document.Verdict || !reflect.DeepEqual(got.Text, document.Text) ||
-		len(got.Repositories) != len(document.Repositories) {
-		return nil, errors.New("it changed the ref, the verdict, the text or the list of repositories")
-	}
-	for i, was := range document.Repositories {
-		now := &got.Repositories[i]
-		if now.System != was.System || now.Path != was.Path || now.Commit != was.Commit {
-			return nil, fmt.Errorf("it changed the system, the path or the commit of repository %d", i+1)
-		}
-		if (now.Base == nil) != (was.Base == nil) || was.Base != nil && (now.Base.Commit != was.Base.Commit || now.Base.Branch != was.Base.Branch) {
-			return nil, fmt.Errorf("it changed the base of repository %d", i+1)
-		}
-		if len(now.Commits) != len(was.Commits) {
-			return nil, fmt.Errorf("it changed the commits of repository %d", i+1)
-		}
-		for j, c := range was.Commits {
-			if now.Commits[j].Commit != c.Commit || now.Commits[j].Step != c.Step {
-				return nil, fmt.Errorf("it changed the commits of repository %d", i+1)
-			}
-		}
-		if err := checkLinks(&was, now); err != nil {
-			return nil, fmt.Errorf("%w of repository %d", err, i+1)
-		}
-		draft, err := draftAfterProgram(was.Draft, now.Draft, was)
-		if err != nil {
-			return nil, fmt.Errorf("%w of repository %d", err, i+1)
-		}
-		now.Draft = draft
-	}
-	return &got, nil
-}
-
-// draftAfterProgram is the draft the program left, as qory writes it, when it may stand: the
-// draft that was there, or, in place of the [placeholder], a pull request of repo that
-// [checkPullRequest] takes. Any other change is an error. A pull request is read into its
-// five members and written again, so a member twice in the file, or a number written as
-// 1.0, is never stored as the program wrote it.
-func draftAfterProgram(was, now json.RawMessage, repo submission.Repository) (json.RawMessage, error) {
-	var a, b any
-	if json.Unmarshal(was, &a) != nil || json.Unmarshal(now, &b) != nil {
-		return nil, errors.New("it left a draft that is not JSON")
-	}
-	if reflect.DeepEqual(a, b) {
-		return was, nil
-	}
-	fields, ok := b.(map[string]any)
-	if !bytes.Equal(was, placeholder) || !ok || fields["none"] != nil {
-		return nil, errors.New("it changed the draft")
-	}
-	var pr pullRequest
-	dec := json.NewDecoder(bytes.NewReader(now))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&pr); err != nil {
-		return nil, errors.New("it left a draft that is not a pull request")
-	}
-	if err := checkPullRequest(pr, repo); err != nil {
-		return nil, err
-	}
-	return json.Marshal(pr)
-}
-
-// pullRequest is the draft pull request of a repository, as the submission format has it.
-type pullRequest struct {
-	Number json.Number `json:"number"`
-	URL    string      `json:"url"`
-	Title  string      `json:"title"`
-	State  string      `json:"state"`
-	Action string      `json:"action"`
-}
-
-// plainNumber is a number of a pull request: digits with no sign, point, exponent or leading
-// zero, at most 15 of them, so it is also a whole number in any JSON reader.
-var plainNumber = regexp.MustCompile(`^[1-9][0-9]{0,14}$`)
-
-// checkPullRequest checks the draft pr that the program left for repo: a plain number of 1 or
-// more, a title with no control character, and a link that is https on the repository's
-// system, at /<path>/pull/<number>. The error is a cause that names no value of the program.
-func checkPullRequest(pr pullRequest, repo submission.Repository) error {
-	if !plainNumber.MatchString(pr.Number.String()) {
-		return errors.New("it left a draft whose number is not a whole number of 1 or more")
-	}
-	if strings.ContainsFunc(pr.Title, isControl) {
-		return errors.New("it left a draft whose title has a control character")
-	}
-	if !forgeLink(pr.URL, repo, "pull", pr.Number.String()) {
-		return fmt.Errorf("it left a draft whose url is not https://%s/%s/pull/<number>", shownText(repo.System), shownText(repo.Path))
-	}
-	return nil
-}
-
-// checkLinks checks the commit_url that the program left in now, the repository, its base and
-// each of its commits, against was, the repository that qory gave it: each is empty, or an
-// https link on the repository's system at /<path>/commit/<that commit's id>.
-func checkLinks(was, now *submission.Repository) error {
-	check := func(link, commit string) error {
-		if link != "" && !forgeLink(link, *was, "commit", commit) {
-			return fmt.Errorf("it left a commit_url that is not https://%s/%s/commit/<commit>", shownText(was.System), shownText(was.Path))
-		}
-		return nil
-	}
-	if err := check(now.CommitURL, was.Commit); err != nil {
-		return err
-	}
-	if now.Base != nil && was.Base != nil {
-		if err := check(now.Base.CommitURL, was.Base.Commit); err != nil {
-			return err
-		}
-	}
-	for j, c := range was.Commits {
-		if err := check(now.Commits[j].CommitURL, c.Commit); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// forgeLink reports whether link is https://<system>/<path>/<kind>/<id>, with the system as the
-// host and no port, user, query or fragment. The repository's path is compared in any letter
-// case, as a forge reads it; the id is compared as it is.
-func forgeLink(link string, repo submission.Repository, kind, id string) bool {
-	u, err := url.Parse(link)
-	if err != nil || u.Scheme != "https" || u.Opaque != "" || u.User != nil || u.RawQuery != "" || u.ForceQuery ||
-		u.Fragment != "" || u.RawPath != "" || strings.HasSuffix(link, "#") {
-		return false
-	}
-	if !strings.EqualFold(u.Host, repo.System) {
-		return false
-	}
-	prefix := "/" + repo.Path + "/" + kind + "/"
-	return len(u.Path) == len(prefix)+len(id) && strings.EqualFold(u.Path[:len(prefix)], prefix) && u.Path[len(prefix):] == id
-}
-
-// isControl reports whether r is a control character: U+0000 to U+001F or U+007F.
-func isControl(r rune) bool { return r < 0x20 || r == 0x7f }

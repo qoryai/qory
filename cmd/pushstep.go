@@ -301,12 +301,10 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 			message += "\n\n" + end
 		}
 		repositories, pushErr := preparation.Push(ctx, dir, os.Environ(), branch, message, read.proxy, h.proxy, agentStopped, w)
-		// The read proxy ends with the push, and the push proxy too, unless the submit program
-		// runs, which reaches the forge through it: the check and the store that follow reach none.
+		// The read proxy and the push proxy end with the push: the check and the store that
+		// follow reach no forge.
 		read.close()
-		if program == nil {
-			h.close()
-		}
+		h.close()
 		runEnded, recordErr := recordPushed(ctx, run, branch)
 		*ended = runEnded
 		switch {
@@ -337,8 +335,7 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		}
 		document := assembleSubmission(branch, repositories, verdict, given)
 		if program != nil {
-			document, err = program.apply(ctx, w, h.proxy, document)
-			h.close()
+			document, err = program.apply(ctx, w, document)
 			if err != nil {
 				return &runLineError{fmt.Errorf(textNotStored, branch.VersionWays(), branch.Ref, shownError(err))}
 			}
