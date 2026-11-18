@@ -572,11 +572,11 @@ release may change what an existing document does, and states it under Upgrading
   The step checks the head of the branch on the forge before it pushes. A head that is not
   the commit the run expected ends the run `failed` with the code `push_head_changed`, after a
   session that passed, failed or timed out. The push replaces the branch only when its head
-  is a head that the work item's record lists for a cancelled run (one head for each push)
+  is a head that the work item's record has for a cancelled run (one head for each push)
   and that descends from the start commit, with a lease on that head. qory fetches
   the history of the branch head only when a cancelled run recorded that head, and then
-  checks that it descends from the start commit. qory refuses a head below, above or
-  beside a recorded head with no fetch. A run starts at the newest commit that an earlier run
+  checks that it descends from the start commit. qory stops on a head below, above or
+  beside a recorded head, with no fetch. A run starts at the newest commit that an earlier run
   pushed and a person did not cancel.
 - The submission has `base.branch` for each repository the run pushed: the name of the
   repository's default branch, read when the run fetched it. A name of more than 255
@@ -628,10 +628,11 @@ release may change what an existing document does, and states it under Upgrading
   commit the run expected is refused before any push, with the line `Set the branch to the
   expected commit or delete it` and the branch, the head and the expected commit on the next
   line. To go on, do one of the two, then take the work item in again. Moving the branch back
-  works when that line ends the expected commit with `the start commit`; with `this run's last
+  works when the `Expected:` line shows `the start commit`; with `this run's last
   push` it works only when Qory Apiary recorded that push, and otherwise the next run refuses
-  again, so delete the branch. Either way the commits on the branch that no version has are
-  lost. The next run creates a deleted branch at `target_version` when no version exists, and
+  again, so delete the branch. A third line is the loss: either way, the commits on the branch that
+  no version has are lost. A branch that is not on the forge cannot be deleted: its refusal starts
+  with `Create the branch at the expected commit on the forge` and has `Head: none`. The next run creates a deleted branch at `target_version` when no version exists, and
   starts from the last version otherwise.
 - The lines that stopped a run on a stored branch version with a fix for Qory Apiary
   (a ref, a file, a format, a commit that is missing, is no commit, differs in `.qory` or

@@ -601,7 +601,8 @@ func TestPushEndingPrintsTheRefusalOfAMovedBranchAfterACut(t *testing.T) {
 	timedOut := session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
 	moved := &preparation.HeadChanged{Branch: "qory/w1", System: "git.example.com", Path: "acme/shop", Head: strings.Repeat("a", 40), Expected: strings.Repeat("b", 40)}
 	refusal := "Set the branch to the expected commit or delete it; its head is not that commit.\n" +
-		"  Branch qory/w1. Repository git.example.com/acme/shop. Head: " + strings.Repeat("a", 40) + ". Expected: " + strings.Repeat("b", 40) + ", the start commit. qory did not push."
+		"  Branch qory/w1. Repository git.example.com/acme/shop. Head: " + strings.Repeat("a", 40) + ". Expected: " + strings.Repeat("b", 40) + ", the start commit. qory did not push.\n" +
+		"  Setting the branch to that commit or deleting it loses the commits on it that no version has."
 	cutLine := "✗ take the work item in again in Qory Apiary: the run reached its time limit of 1h0m0s during the push step, and the run's commits may not have reached the branch; the code is used\n"
 	for _, c := range []struct {
 		name    string

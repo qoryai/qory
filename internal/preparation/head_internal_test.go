@@ -53,7 +53,7 @@ func TestAMissingBranchTakesAFirstPushOnly(t *testing.T) {
 	leave(t, dir)
 	_, _, err := pushOf(dir, b)
 	changed := headError(t, err)
-	want := "qory run: Set the branch to the expected commit or delete it; its head is not that commit.\n" +
+	want := "qory run: Create the branch at the expected commit on the forge; it is not there.\n" +
 		"  Branch qory/wi_1. Repository git.example.com/acme/shop. Head: none. Expected: " + start + ", the start commit. qory did not push."
 	if err.Error() != want {
 		t.Errorf("the refusal is\n%s\nwant\n%s", err, want)
@@ -443,13 +443,15 @@ func TestSeveralRecordedHeadsOfCancelledRuns(t *testing.T) {
 	}
 }
 
-// TestTheTextsOfTheHeadCheckStartWithTheFix is line 1 of each refusal of the head check, with
-// the longest branch that the contract allows (qory/wi_ and 64 characters): at most 100
-// characters with the prefix "qory run: ", and the fix first, as an instruction.
+// TestTheTextsOfTheHeadCheckStartWithTheFix is line 1 of each refusal of the head check: at most
+// 100 characters with the prefix "qory run: ", and the fix first, as an instruction. Line 1 has no
+// value of the run, so the branch with the longest name that the contract allows (qory/wi_ and 64
+// characters) does not change its length.
 func TestTheTextsOfTheHeadCheckStartWithTheFix(t *testing.T) {
 	branch := "qory/wi_" + strings.Repeat("a", 64)
 	for name, c := range map[string]struct{ text, start string }{
 		"textHeadChanged":   {(&HeadChanged{Branch: branch, System: "git.example.com", Path: "acme/shop", Head: strings.Repeat("a", 40), Expected: strings.Repeat("b", 40)}).Error(), "qory run: Set "},
+		"textHeadMissing":   {(&HeadChanged{Branch: branch, System: "git.example.com", Path: "acme/shop", Expected: strings.Repeat("b", 40)}).Error(), "qory run: Create "},
 		"textHeadNoRead":    {fmt.Sprintf(textHeadNoRead, "acme/shop", "git.example.com", "cause"), "qory run: Take "},
 		"textHandoffCommit": {fmt.Sprintf(textHandoffCommitted, "git.example.com/acme/shop", strings.Repeat("a", 40), ".qory/handoff/submission.json"), "qory run: Keep "},
 	} {
@@ -475,5 +477,37 @@ func TestAnUnreadableHeadStopsThePushWithTheFixFirst(t *testing.T) {
 		"  Cause: network down; the code is used"
 	if err == nil || err.Error() != want {
 		t.Errorf("the refusal is\n%v\nwant\n%s", err, want)
+	}
+}
+
+// TestTheRefusalOfAMovedBranchSaysWhatIsLostAndWhatApiaryRecorded is the whole text of a refusal
+// for each case: a head that moved, with the start commit and with the run's last push as the
+// expected commit, and a branch that is not on the forge, with the same two. The loss is on the
+// terminal for a head that exists, and the caveat of the record for the run's last push.
+func TestTheRefusalOfAMovedBranchSaysWhatIsLostAndWhatApiaryRecorded(t *testing.T) {
+	head, expected := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	const (
+		fixMoved   = "qory run: Set the branch to the expected commit or delete it; its head is not that commit.\n"
+		fixMissing = "qory run: Create the branch at the expected commit on the forge; it is not there.\n"
+		loss       = "\n  Setting the branch to that commit or deleting it loses the commits on it that no version has."
+		recorded   = "\n  Expected is this run's last push: moving the branch to it works only if Qory Apiary recorded that push."
+	)
+	line2 := func(head, from string) string {
+		return "  Branch qory/wi_1. Repository git.example.com/acme/shop. Head: " + head + ". Expected: " + expected + ", " + from + ". qory did not push."
+	}
+	for _, c := range []struct {
+		name string
+		err  *HeadChanged
+		want string
+	}{
+		{"moved, start commit", &HeadChanged{Head: head}, fixMoved + line2(head, "the start commit") + loss},
+		{"moved, last push", &HeadChanged{Head: head, LastPush: true}, fixMoved + line2(head, "this run's last push") + loss + recorded},
+		{"missing, start commit", &HeadChanged{}, fixMissing + line2("none", "the start commit")},
+		{"missing, last push", &HeadChanged{LastPush: true}, fixMissing + line2("none", "this run's last push") + recorded},
+	} {
+		c.err.Branch, c.err.System, c.err.Path, c.err.Expected = "qory/wi_1", "git.example.com", "acme/shop", expected
+		if got := c.err.Error(); got != c.want {
+			t.Errorf("%s: the refusal is\n%s\nwant\n%s", c.name, got, c.want)
+		}
 	}
 }

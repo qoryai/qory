@@ -2670,8 +2670,8 @@ The step does this, in order:
    the commit the run expected: see [The head check](#the-head-check). When one
    repository fails the check, qory pushes nothing in any repository.
 6. qory pushes each of these repositories to `refs/heads/qory/<work item id>`, through the
-   run's push proxy: a fast-forward push, or a push with a lease where the head check asks
-   for one. It prints `qory run: pushed qory/<work item id> to <path> at <commit>`, where
+   run's push proxy: a fast-forward push, or a push with a lease where the head check requires
+   one. It prints `qory run: pushed qory/<work item id> to <path> at <commit>`, where
    `<commit>` is the commit's first 12 characters. With no new commit in any repository,
    it prints `qory run: no new commits to push`, and the step ends with no push and no
    version.
@@ -2728,10 +2728,13 @@ the commit the next run starts at, and the next run ends `failed` with the end c
 `push_head_changed`, with the refusal that [The head check](#the-head-check) lists. To go on,
 delete the branch, or move it back to the commit that the second line of the refusal shows
 after `Expected:`. Both lose the commits on the branch that no version has. Moving it back works
-when the line ends that commit with `the start commit`. When it ends it with `this run's last
+when the `Expected:` line shows `the start commit`. When it shows `this run's last
 push`, the next run starts at the newest push that Qory Apiary recorded: moving the branch
 back works only when Apiary recorded that push, and otherwise the next run refuses again,
-so delete the branch. When the work
+so delete the branch. A branch that is not on the forge, with `Head: none`, cannot be deleted:
+the refusal starts with `Create the branch at the expected commit on the forge; it is not
+there.` It occurs when the work item has a version or a pushed commit and the forge has no
+such branch. When the work
 item has no version, the next run creates a deleted branch at `target_version`, not at the
 commit that the deleted branch had; with a version, it starts from the last one.
 
@@ -2764,7 +2767,13 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `Set the branch to the expected commit or delete it; its head is not that commit.`, then a
   line indented by two spaces: `Branch qory/<work item id>. Repository <system>/<path>. Head:
   <head>. Expected: <commit>, <the start commit or this run's last push>. qory did not push.`
-  `<head>` is `none` when the branch is not on the forge. Both commits are in full. The step
+  Both commits are in full. A second line indented by two spaces follows: `Setting the
+  branch to that commit or deleting it loses the commits on it that no version has.` For
+  `this run's last push`, a third one: `Expected is this run's last push: moving the branch to
+  it works only if Qory Apiary recorded that push.` When the branch is not on the forge, the
+  text starts with `Create the branch at the expected commit on the forge; it is not there.`,
+  has `Head: none` on its second line, and has no sentence of loss, as no commit is on the
+  branch. The step
   pushes nothing in any repository, and ends the run as
   [The head check](#the-head-check) describes. A push that the forge rejects with the status
   `[rejected]`, such as a lease that no longer matches, ends the step with the same text,
@@ -2836,7 +2845,8 @@ credential alone. The result of each repository is one of these:
   recorded head that does not descend from the start commit) or the branch missing where the
   run did not start at the checkout: qory pushes nothing in any repository, and the step
   fails with the refusal in the list above, which starts with `Set the branch to the
-  expected commit or delete it`.
+  expected commit or delete it`, or with `Create the branch at the expected commit on the
+  forge` for a missing branch.
 
 A push that the forge rejects with the status `[rejected]`, such as a lease that no longer
 matches, also fails the step with that refusal, with the head read again. When the read of a

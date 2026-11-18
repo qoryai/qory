@@ -1032,7 +1032,8 @@ func TestAMovedBranchEndsTheRunWithPushHeadChanged(t *testing.T) {
 		t.Errorf("the step ended %q, want failed", state)
 	}
 	wants(t, r.out, "qory run: Set the branch to the expected commit or delete it; its head is not that commit.\n"+
-		"  Branch qory/"+workItem+". Repository "+proxygittest.Host+"/acme/site. Head: "+moved+". Expected: "+p.first+", the start commit. qory did not push.")
+		"  Branch qory/"+workItem+". Repository "+proxygittest.Host+"/acme/site. Head: "+moved+". Expected: "+p.first+", the start commit. qory did not push.\n"+
+		"  Setting the branch to that commit or deleting it loses the commits on it that no version has.")
 	lacks(t, r.out, proxygittest.Password)
 	if got := p.branchHead(t); got != moved {
 		t.Errorf("the branch moved to %s", got)

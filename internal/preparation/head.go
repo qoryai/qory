@@ -17,6 +17,9 @@ import (
 // head that is not there reads "none".
 const (
 	textHeadChanged  = "qory run: Set the branch to the expected commit or delete it; its head is not that commit.\n  Branch %[1]s. Repository %[2]s/%[3]s. Head: %[4]s. Expected: %[5]s, %[6]s. qory did not push."
+	textHeadMissing  = "qory run: Create the branch at the expected commit on the forge; it is not there.\n  Branch %[1]s. Repository %[2]s/%[3]s. Head: %[4]s. Expected: %[5]s, %[6]s. qory did not push."
+	textHeadLoss     = "\n  Setting the branch to that commit or deleting it loses the commits on it that no version has."
+	textHeadRecorded = "\n  Expected is this run's last push: moving the branch to it works only if Qory Apiary recorded that push."
 	textHeadStart    = "the start commit"
 	textHeadLastPush = "this run's last push"
 	textHeadNone     = "none"
@@ -46,7 +49,17 @@ func (e *HeadChanged) Error() string {
 	if e.LastPush {
 		from = textHeadLastPush
 	}
-	text := fmt.Sprintf(textHeadChanged, e.Branch, shownPath(e.System), shownPath(e.Path), head, e.Expected, from)
+	format := textHeadChanged
+	if e.Head == "" {
+		format = textHeadMissing
+	}
+	text := fmt.Sprintf(format, e.Branch, shownPath(e.System), shownPath(e.Path), head, e.Expected, from)
+	if e.Head != "" {
+		text += textHeadLoss
+	}
+	if e.LastPush {
+		text += textHeadRecorded
+	}
 	return text
 }
 
