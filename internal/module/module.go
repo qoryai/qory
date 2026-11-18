@@ -631,6 +631,9 @@ func readScopeChecks(path string, node *yaml.Node) (map[string][]string, error) 
 		}
 		words := make([]string, len(command.Content))
 		for k, word := range command.Content {
+			if word.Kind == yaml.SequenceNode {
+				return nil, refuse("Give each plan type of scope_checks one command, a list of strings, not a list of lists.", fmt.Sprintf("%s[%d] is a list.", at, k))
+			}
 			if word.Kind != yaml.ScalarNode || word.Tag != "!!str" {
 				return nil, refuse(fmt.Sprintf("Set %s[%d] to a string, quoted when it reads as a number or a boolean.", at, k), "The item is not a string.")
 			}

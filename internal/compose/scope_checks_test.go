@@ -347,7 +347,7 @@ func TestThePlanRefusalIsOneLineWhenItFits(t *testing.T) {
 // TestAProgramRefusalHasNoValueInLine1 is each refusal about the program of a scope check,
 // and the refusal about the program of a push check that is no file, with the longest
 // values: a module name of 40 characters, a type of 64 characters and the path of the
-// program in the software-factory module, 53 characters. Line 1 has the fix alone, at
+// program in the software-factory module, 54 characters. Line 1 has the fix alone, at
 // most 100 characters under the "✗ ", and the values are on line 2, whole.
 func TestAProgramRefusalHasNoValueInLine1(t *testing.T) {
 	module := strings.Repeat("m", 40)
@@ -402,5 +402,82 @@ func TestAProgramRefusalHasNoValueInLine1(t *testing.T) {
 		"  Module " + module + " has no file at " + program + ", the program of the push check for " + typ + "."
 	if _, err := composeTree(t, files); err == nil || err.Error() != want {
 		t.Errorf("push check:\n%v\nwant:\n%s", err, want)
+	}
+}
+
+// TestPushCheckRefusalsAboutAProgramAndATypeKeepLine1ShortWithLongValues is the refusal for
+// one type that two modules declare a push check for, the one for a program that is no
+// file and the one for a program in an entry that an exclude leaves out, with a module name
+// and a type of 24 characters and with a module name of 40 characters and a type of 64:
+// line 1 has at most 100 characters under the "✗ ", and each text is compared whole.
+func TestPushCheckRefusalsAboutAProgramAndATypeKeepLine1ShortWithLongValues(t *testing.T) {
+	for _, c := range []struct{ module, typ int }{{24, 24}, {40, 64}} {
+		first, second := strings.Repeat("a", c.module), strings.Repeat("b", c.module)
+		typ := strings.Repeat("p", c.typ)
+		manifest := func(name, command string) string {
+			return "apiVersion: qory.dev/v1alpha1\nname: " + name + "\npush_checks:\n  - type: " + typ + "\n    command: [" + command + "]\n"
+		}
+		module := func(name string, extra string) string {
+			return "  - name: " + name + "\n    source: {path: modules/" + name[:1] + "}\n" + extra
+		}
+		skill := func(m string) map[string]string {
+			return map[string]string{"modules/" + m + "/skills/s/SKILL.md": "text\n"}
+		}
+		merge := func(parts ...map[string]string) map[string]string {
+			out := map[string]string{}
+			for _, p := range parts {
+				for k, v := range p {
+					out[k] = v
+				}
+			}
+			return out
+		}
+		const head = "apiVersion: qory.dev/v1alpha1\nmodules:\n"
+		// Two modules that declare the type.
+		full := "Remove the push check for " + typ + " from module " + first + " or module " + second + "."
+		wantDup := full + "\n  A type has one push check, and both modules declare one."
+		if printedLength(full) > 100 {
+			wantDup = "Remove the push check for the type from one of the two modules.\n" +
+				"  Modules " + first + " and " + second + " both declare one for " + typ + ", and a type has one push check."
+		}
+		_, err := composeTree(t, merge(skill("a"), map[string]string{
+			stack.FileName:                head + module(first, "") + module(second, ""),
+			"modules/a/qory-module.yaml":  manifest(first, "check.sh"),
+			"modules/a/check.sh":          "x\n",
+			"modules/b/qory-module.yaml":  manifest(second, "check.sh"),
+			"modules/b/check.sh":          "x\n",
+			"modules/b/skills/t/SKILL.md": "text\n",
+		}))
+		if err == nil || err.Error() != wantDup {
+			t.Errorf("%d/%d two modules:\n%v\nwant:\n%s", c.module, c.typ, err, wantDup)
+		}
+		// A program that is a folder.
+		wantFolder := "Set the program of the push check to a file in its module.\n" +
+			"  checks/check.js of module " + first + " is not a file, and it is the program of the push check for " + typ + "."
+		_, err = composeTree(t, merge(skill("a"), map[string]string{
+			stack.FileName:                head + module(first, ""),
+			"modules/a/qory-module.yaml":  manifest(first, "checks/check.js"),
+			"modules/a/checks/check.js/x": "x\n",
+		}))
+		if err == nil || err.Error() != wantFolder {
+			t.Errorf("%d/%d folder:\n%v\nwant:\n%s", c.module, c.typ, err, wantFolder)
+		}
+		// A program in an entry that the exclude leaves out.
+		wantExcluded := "Keep the program of the push check in its module, or move it out of the left-out entry.\n" +
+			"  The program skills/tools/check.js of the push check for " + typ + " is in skills/tools, and an exclude or only of module " + first + " leaves skills/tools out."
+		_, err = composeTree(t, merge(skill("a"), map[string]string{
+			stack.FileName:                    head + module(first, "    exclude: {skills: [tools]}\n"),
+			"modules/a/qory-module.yaml":      manifest(first, "skills/tools/check.js"),
+			"modules/a/skills/tools/SKILL.md": "text\n",
+			"modules/a/skills/tools/check.js": "x\n",
+		}))
+		if err == nil || err.Error() != wantExcluded {
+			t.Errorf("%d/%d excluded:\n%v\nwant:\n%s", c.module, c.typ, err, wantExcluded)
+		}
+		for _, text := range []string{wantDup, wantFolder, wantExcluded} {
+			if line, _, _ := strings.Cut(text, "\n"); printedLength(line) > 100 {
+				t.Errorf("%d/%d: line 1 has %d characters with the cross: %s", c.module, c.typ, printedLength(line), line)
+			}
+		}
 	}
 }

@@ -38,6 +38,7 @@ func TestReadManifestFailsOnScopeChecks(t *testing.T) {
 	typeRule := "An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes."
 	const notList = "Set scope_checks.plan to the program's path inside the module, then its arguments.\n  The value is not a list, or the list is empty."
 	badKey := "Set each key of scope_checks to an artifact type.\n  " + typeRule + "\n  The key is "
+	const oneCommand = "Give each plan type of scope_checks one command, a list of strings, not a list of lists."
 	const notString = "\n  The item is not a string."
 	for _, c := range []struct{ name, body, want string }{
 		{"upper case", "  Plan: [c.js]\n", badKey + "\"Plan\"."},
@@ -48,13 +49,14 @@ func TestReadManifestFailsOnScopeChecks(t *testing.T) {
 		{"an empty command", "  plan: []\n", notList},
 		{"no value", "  plan:\n", notList},
 		{"a string", "  plan: c.js\n", notList},
-		{"a list of commands", "  plan:\n    - [c.js]\n    - [d.js]\n", "Set scope_checks.plan[0] to a string, quoted when it reads as a number or a boolean." + notString},
+		{"a list of commands", "  plan:\n    - [c.js]\n    - [d.js]\n", oneCommand + "\n  scope_checks.plan[0] is a list."},
+		{"a list of commands under a 64-character type", "  " + strings.Repeat("p", 64) + ":\n    - [c.js]\n", oneCommand + "\n  scope_checks." + strings.Repeat("p", 64) + "[0] is a list."},
 		{"an empty program", "  plan: [\"\", scope]\n", "Set the first item of scope_checks.plan to a path inside the module.\n  \"\" is not one."},
 		{"an absolute program", "  plan: [/usr/bin/node]\n", "Set the first item of scope_checks.plan to a path inside the module.\n  \"/usr/bin/node\" is not one."},
 		{"a program above the module", "  plan: [../c.js]\n", "Set the first item of scope_checks.plan to a path inside the module.\n  \"../c.js\" is not one."},
 		{"a program with a .. part", "  plan: [a/../c.js]\n", "Set the first item of scope_checks.plan to a path inside the module.\n  \"a/../c.js\" is not one."},
 		{"a number", "  plan: [c.js, 3]\n", "Set scope_checks.plan[1] to a string, quoted when it reads as a number or a boolean." + notString},
-		{"a list", "  plan: [[c.js]]\n", "Set scope_checks.plan[0] to a string, quoted when it reads as a number or a boolean." + notString},
+		{"a list", "  plan: [[c.js]]\n", oneCommand + "\n  scope_checks.plan[0] is a list."},
 		{"a list instead of a map", "  - plan\n", "Set scope_checks to a map from an artifact type to a command.\n  The value is not a map."},
 	} {
 		dir := tree(t, map[string]string{ManifestName: head + c.body})

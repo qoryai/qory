@@ -597,7 +597,7 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 			return exports.Errorf("Remove the push check for %s from module %s.\n  qory run verdict sends a verdict, and push checks do not cover it.", verdictType, shown(name))
 		}
 		if other, ok := checkers[c.Type]; ok {
-			return exports.Errorf("Remove the push check for %s from module %s or module %s.\n  A type has one push check, and both modules declare one.", c.Type, shown(other), shown(name))
+			return duplicatePushCheck(c.Type, other, name)
 		}
 		checkers[c.Type] = name
 		program := c.Command[0]
@@ -607,16 +607,27 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 			return exports.Errorf("Add the program of the push check to its module, or change its path.\n  Module %s has no file at %s, the program of the push check for %s.", shown(name), shownProgram, c.Type)
 		}
 		if !info.Mode().IsRegular() {
-			return exports.Errorf("Set the push check for %s of module %s to a program file.\n  %s is not a file.", c.Type, shown(name), shownProgram)
+			return exports.Errorf("Set the program of the push check to a file in its module.\n  %s of module %s is not a file, and it is the program of the push check for %s.", shownProgram, shown(name), c.Type)
 		}
 		if e, ok := excludedProgram(res, dir, name, program); ok {
-			return exports.Errorf("%s\n  The program of the push check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
-				altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), c.Type, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
+			return exports.Errorf("Keep the program of the push check in its module, or move it out of the left-out entry.\n  The program %s of the push check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
+				shownProgram, c.Type, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
 		}
 		command := append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(program)}, c.Command[1:]...)
 		res.PushChecks = append(res.PushChecks, PushCheck{Type: c.Type, Module: name, Command: command, Reads: c.Reads})
 	}
 	return nil
+}
+
+// duplicatePushCheck is the refusal for a type that the modules first and second both
+// declare a push check for, shaped as [duplicateScopeCheck] is: the fix names the type and
+// the modules when it has at most [exports.LineMax] characters, and otherwise has none of
+// them, and the second line has them.
+func duplicatePushCheck(typ, first, second string) error {
+	if fix := fmt.Sprintf("Remove the push check for %s from module %s or module %s.", typ, shown(first), shown(second)); fits(fix) {
+		return exports.Errorf("%s\n  A type has one push check, and both modules declare one.", fix)
+	}
+	return exports.Errorf("Remove the push check for the type from one of the two modules.\n  Modules %s and %s both declare one for %s, and a type has one push check.", shown(first), shown(second), typ)
 }
 
 // excludedProgram is the entry that the exclude or only of module name at dir leaves out

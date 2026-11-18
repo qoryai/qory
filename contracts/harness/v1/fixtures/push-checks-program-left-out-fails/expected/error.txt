@@ -1,2 +1,2 @@
-Keep skills/running in module core, or move skills/running/checks.js out of it.
-  The program of the push check for spec is in skills/running, and an exclude or only of module core leaves skills/running out.
+Keep the program of the push check in its module, or move it out of the left-out entry.
+  The program skills/running/checks.js of the push check for spec is in skills/running, and an exclude or only of module core leaves skills/running out.
