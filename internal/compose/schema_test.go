@@ -750,6 +750,8 @@ func TestQuestionsSchema(t *testing.T) {
 		{withCriterion(withProposal(`"` + strings.Repeat("a", 2000) + `"`)), true},
 		{withCriterion(withProposal(`"Use PostgreSQL\n16."`)), true},
 		{withProposal(`"Use PostgreSQL 16."`), false},
+		{replace(`{"title": "None", "explanation": "Every read goes to the database."}`, `{"title": "None", "explanation": "Every read goes to the database.", "proposal": "Use no cache."}`), false},
+		{withCriterion(replace(redis, redis+`, "proposal": "Use Redis."`)), false},
 		{withCriterion(withProposal(`""`)), false},
 		{withCriterion(withProposal(`"` + strings.Repeat("a", 2001) + `"`)), false},
 		{withCriterion(withProposal(`null`)), false},
