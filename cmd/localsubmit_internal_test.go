@@ -21,3 +21,35 @@ func TestThePushArgumentsAreTheCheckedCommitToTheOneAddress(t *testing.T) {
 		}
 	}
 }
+
+// TestOnlyTheAddressOfAForgeHasASystemAndAPath is the push addresses that qory takes the system and
+// the path of the checks and the program from: a host and a repository path of a forge, over
+// https, http, ssh, git or the scp form. A file address, an ext address, a path, an address with no
+// host, a host with no dot and a path with a dot segment are refused.
+func TestOnlyTheAddressOfAForgeHasASystemAndAPath(t *testing.T) {
+	for _, c := range []struct {
+		address, system, path string
+	}{
+		{"https://github.com/acme/shop.git", "github.com", "acme/shop"},
+		{"https://user:pw@GitHub.com:8443/acme/shop", "github.com", "acme/shop"},
+		{"ssh://git@gitlab.example.org/group/sub/shop.git", "gitlab.example.org", "group/sub/shop"},
+		{"git@github.com:acme/shop.git", "github.com", "acme/shop"},
+		{"git://git.example.com/acme/shop", "git.example.com", "acme/shop"},
+		{"file:///srv/git/shop.git", "", ""},
+		{"file://host.example.com/srv/shop.git", "", ""},
+		{"ext::sh -c touch% /tmp/x", "", ""},
+		{"/srv/git/shop.git", "", ""},
+		{"../shop.git", "", ""},
+		{"C:/repos/shop.git", "", ""},
+		{"https://localhost/acme/shop.git", "", ""},
+		{"https://git.example.com/shop.git", "", ""},
+		{"https://git.example.com/acme/../shop.git", "", ""},
+		{"https://git.example.com/acme/shop name.git", "", ""},
+		{"https:///acme/shop.git", "", ""},
+	} {
+		system, path, ok := remoteSystemPath(c.address)
+		if ok != (c.system != "") || system != c.system || path != c.path {
+			t.Errorf("%q gives %q, %q, %v, want %q and %q", c.address, system, path, ok, c.system, c.path)
+		}
+	}
+}

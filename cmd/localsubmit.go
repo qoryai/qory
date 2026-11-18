@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/qoryai/qory/internal/preparation"
@@ -26,6 +28,7 @@ const (
 	textLocalPushFailed   = "qory run: The push of the branch failed, so qory opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalNoHistory    = "qory run: qory could not read the branch or its origin, so it pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textDraftLine         = "Draft: "
+	textLocalNoRemote     = "qory run: The remote origin is not a forge address, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalPushURLs     = "qory run: The remote origin has %d push addresses, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  Fix: keep one with git remote set-url --push origin <address>."
 )
 
@@ -112,9 +115,13 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 		}
 		repo, err := c.localRepository(ctx, r, branch)
 		var many *manyPushURLs
+		var plain *notForge
 		switch {
 		case errors.As(err, &many):
 			fmt.Fprintf(w, textLocalPushURLs+"\n", many.n, shownText(branch))
+			return nil
+		case errors.As(err, &plain):
+			fmt.Fprintf(w, textLocalNoRemote+"\n", shownText(branch), plain.Error())
 			return nil
 		case err != nil:
 			fmt.Fprintf(w, textLocalNoHistory+"\n", shownText(branch), shownError(err))
@@ -176,6 +183,11 @@ func draftAddress(document *submission.Submission) string {
 	return draft.URL
 }
 
+// notForge is the error of a push address that is not a host and a repository path of a forge.
+type notForge struct{}
+
+func (*notForge) Error() string { return "the address is not a host and a repository path of a forge" }
+
 // manyPushURLs is the error of a remote origin with more than one push address.
 type manyPushURLs struct{ n int }
 
@@ -206,7 +218,8 @@ func (c *runCopy) localRepository(ctx context.Context, r runcopy.Repository, bra
 	}
 	system, path, ok := remoteSystemPath(addresses[0])
 	if !ok {
-		return repo, fmt.Errorf("the address %s has no host and path", shownText(addresses[0]))
+		// The address is not in the error: it can have a password.
+		return repo, &notForge{}
 	}
 	repo.System, repo.Path, repo.PushURL = system, path, addresses[0]
 	return repo, nil
@@ -272,14 +285,32 @@ func lastOutputLine(out string, err error) string {
 	return err.Error()
 }
 
-// remoteSystemPath is the host and the repository path of a git remote address: https://host/a/b.git,
-// ssh://git@host/a/b and git@host:a/b.
+// forgeHost is a host name of a forge: dotted lower-case labels of letters, digits and hyphens, as
+// github.com is. A host with no dot, an address and anything with another character is not one.
+var forgeHost = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
+
+// forgePath is the path of a repository on a forge: at least two segments of letters, digits and
+// . _ ~ -, none of them . or ..
+var forgePath = regexp.MustCompile(`^[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)+$`)
+
+// remoteSystemPath is the host and the repository path of a git remote address of a forge:
+// https://host/a/b.git, http, ssh and git with a host, and git@host:a/b. It refuses any other
+// scheme, such as file or ext, an address with no host, and a host or path that is not one of a
+// forge, so the checks and the program never get a system such as file.
 func remoteSystemPath(remote string) (system, path string, ok bool) {
-	if u, err := url.Parse(remote); err == nil && u.Scheme != "" && u.Host != "" {
+	if strings.Contains(remote, "://") {
+		u, err := url.Parse(remote)
+		if err != nil || !slices.Contains([]string{"https", "http", "ssh", "git"}, u.Scheme) {
+			return "", "", false
+		}
 		system, path = u.Hostname(), strings.Trim(u.Path, "/")
-	} else if host, rest, found := strings.Cut(remote, ":"); found && !strings.Contains(host, "/") {
+	} else if host, rest, found := strings.Cut(remote, ":"); found && !strings.Contains(host, "/") && !strings.HasPrefix(rest, ":") {
 		system, path = host[strings.LastIndex(host, "@")+1:], strings.Trim(rest, "/")
 	}
 	path = strings.TrimSuffix(path, ".git")
-	return strings.ToLower(system), path, system != "" && path != ""
+	system = strings.ToLower(system)
+	if !forgeHost.MatchString(system) || !forgePath.MatchString(path) || slices.Contains(strings.Split(path, "/"), "..") || slices.Contains(strings.Split(path, "/"), ".") {
+		return "", "", false
+	}
+	return system, path, true
 }

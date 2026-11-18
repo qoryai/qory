@@ -202,7 +202,7 @@ func TestALocalRunWithNoCheckPushesNothing(t *testing.T) {
 	_, bare, started := localProgramCheckout(t)
 	agentInCopy(t, func(spec session.SessionSpec) {
 		handsOffText(t)(spec)
-		// A hand-off file that is not usable would print a line of its own if the step read it.
+		// A hand-off file that is not usable would print its warning line if the step read it.
 		writeFile(t, filepath.Join(spec.Dir, ".qory", "handoff", "submission.json"), "{")
 	})
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
@@ -552,5 +552,39 @@ func TestALocalRunPrintsADraftLineForEachRepositoryInOrder(t *testing.T) {
 	want := []string{"Draft: https://git.example.com/acme/app/pull/7", "Draft: https://git.example.com/acme/other/pull/7"}
 	if got := lastLines(out, 2); !slices.Equal(got, want) {
 		t.Errorf("the last lines are %q, want %q:\n%s", got, want, out)
+	}
+}
+
+// TestALocalRunWithAnAddressThatIsNotAForgePushesNothing is a remote origin that is a file address:
+// qory pushes nothing, runs no program, and the line has no part of the address.
+func TestALocalRunWithAnAddressThatIsNotAForgePushesNothing(t *testing.T) {
+	root, bare, started := localProgramCheckout(t)
+	runGit(t, root, "config", "remote.origin.pushurl", "file://"+bare+"/needle")
+	passingCheck(t)
+	out := runLocal(t, handsOffText(t))
+	wants(t, out, "qory run: The remote origin is not a forge address, so qory pushed nothing and opened no draft.")
+	lacks(t, out, "needle")
+	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 {
+		t.Errorf("pushed %q and started %d programs, want none", got, timesStarted(t, started))
+	}
+}
+
+// TestALocalRunWithAMarkerLineInItsDescriptionGivesTheProgramNoDraft is a hand-off whose description
+// has the end marker of the block on a line: qory drops the text with a line, pushes, and starts the
+// program with the draft none, so the program never gets a description with a marker line.
+func TestALocalRunWithAMarkerLineInItsDescriptionGivesTheProgramNoDraft(t *testing.T) {
+	_, bare, started := localProgramCheckout(t)
+	passingCheck(t)
+	out := runLocal(t, func(spec session.SessionSpec) {
+		handsOffText(t)(spec)
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "handoff", "submission.json"), `{"text":{"title":"Add a file","description":"A\n<!-- qory:end -->\nB"}}`)
+	})
+	branch := runBranchOf(t, out)
+	wants(t, out, "Description: line 2 is a marker line of the draft's block. qory dropped the text.")
+	if got := pushedBranches(t, bare); got != branch {
+		t.Errorf("pushed %q, want %s", got, branch)
+	}
+	if got := strings.TrimSpace(readText(t, started)); got != "acme/app "+branch+" none 1" {
+		t.Errorf("the program got %q, want the draft none", got)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/preparation"
@@ -123,6 +124,10 @@ const (
 	textDroppedTitle       = "Title: %d characters, over the limit of %d. qory dropped the text."
 	textDroppedDescription = "Description: %d characters, over the limit of %d. qory dropped the text."
 	textDroppedControl     = "Title: has a control character at character %d. qory dropped the text."
+	textDroppedNUL         = "Description: has a NUL character at character %d. qory dropped the text."
+	textDroppedMarker      = "Description: line %d is a marker line of the draft's block. qory dropped the text."
+	textDroppedStepControl = "Step of commit %s: has a control character. qory dropped the step."
+	textDroppedFurtherCtl  = "%d further steps have a control character. qory dropped them."
 	textDroppedKeys        = "%d step keys are not a full commit id of 40 or 64 lower-case hexadecimal digits. qory dropped them."
 	textDroppedStep        = "Step of commit %s: %d characters, over the limit of %d. qory dropped the step."
 	textDroppedFurther     = "%d further steps are over the limit of %d characters. qory dropped them."
@@ -193,6 +198,14 @@ func (h *handoff) limit() {
 		case description > maxDescription:
 			h.Text = nil
 			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedDescription, description, maxDescription))
+		case nulAt(h.Text.Description) > 0:
+			at := nulAt(h.Text.Description)
+			h.Text = nil
+			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedNUL, at))
+		case markerLineAt(h.Text.Description) > 0:
+			at := markerLineAt(h.Text.Description)
+			h.Text = nil
+			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedMarker, at))
 		}
 	}
 	badKeys := 0
@@ -205,6 +218,22 @@ func (h *handoff) limit() {
 	if badKeys > 0 {
 		h.dropped = append(h.dropped, fmt.Sprintf(textDroppedKeys, badKeys))
 	}
+	var controlled []string
+	for commit, step := range h.Steps {
+		if strings.ContainsFunc(step, unicode.IsControl) {
+			controlled = append(controlled, commit)
+		}
+	}
+	slices.Sort(controlled)
+	for i, commit := range controlled {
+		delete(h.Steps, commit)
+		if i < maxDroppedSteps {
+			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedStepControl, shownCommit(commit)))
+		}
+	}
+	if len(controlled) > maxDroppedSteps {
+		h.dropped = append(h.dropped, fmt.Sprintf(textDroppedFurtherCtl, len(controlled)-maxDroppedSteps))
+	}
 	var over []string
 	for commit, step := range h.Steps {
 		if utf8.RuneCountInString(step) > maxStep {
@@ -216,16 +245,50 @@ func (h *handoff) limit() {
 		step := h.Steps[commit]
 		delete(h.Steps, commit)
 		if i < maxDroppedSteps {
-			shown := []rune(shownText(commit))
-			if len(shown) > 64 {
-				shown = shown[:64]
-			}
-			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedStep, string(shown), utf8.RuneCountInString(step), maxStep))
+			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedStep, shownCommit(commit), utf8.RuneCountInString(step), maxStep))
 		}
 	}
 	if len(over) > maxDroppedSteps {
 		h.dropped = append(h.dropped, fmt.Sprintf(textDroppedFurther, len(over)-maxDroppedSteps, maxStep))
 	}
+}
+
+// shownCommit is commit as a line shows it: printable, masked and at most 64 characters.
+func shownCommit(commit string) string {
+	shown := []rune(shownText(commit))
+	if len(shown) > 64 {
+		shown = shown[:64]
+	}
+	return string(shown)
+}
+
+// nulAt is the 1-based position of the first NUL character of text, 0 for none: a description
+// with one is not text that a forge takes.
+func nulAt(text string) int {
+	i := 0
+	for _, r := range text {
+		i++
+		if r == 0 {
+			return i
+		}
+	}
+	return 0
+}
+
+// markerLineAt is the 1-based number of the first line of description that is a marker line of the
+// block that the submit program writes, 0 for none: `<!-- qory:start -->` or `<!-- qory:end -->`
+// followed by nothing but spaces, tabs or a carriage return. A description with one would end or
+// start the block early on the draft.
+func markerLineAt(description string) int {
+	n := 0
+	for line := range strings.Lines(description) {
+		n++
+		switch strings.TrimRight(strings.TrimSuffix(line, "\n"), " \t\r") {
+		case "<!-- qory:start -->", "<!-- qory:end -->":
+			return n
+		}
+	}
+	return 0
 }
 
 // stepOf is the ledger step of commit: the hand-off's, else [stepUnreviewed].

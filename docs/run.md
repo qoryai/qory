@@ -2877,9 +2877,11 @@ the hand-off cannot list, so a run that reached its time limit stores the edits 
 one commit with the step `unreviewed`.
 
 qory reads the file only when it is a regular file of at most 262144 bytes that holds JSON
-of this form, and it reads it inside the checkout: a link at any part of the path, such as
-`.qory/handoff` linked to a folder of this machine, ends the read, so the agent cannot make
-qory read another file. With no file, the submission has no `text`, and each commit is
+of this form, and it reads it inside the checkout: a link at any part of the path that leads out
+of the checkout, such as `.qory/handoff` linked to a folder of this machine, ends the read, so the
+agent cannot make qory read a file outside the checkout. A link inside the checkout, such as
+`.qory/handoff` linked to another folder of the checkout, is followed, and the file at the end
+must itself be a regular file, not a link. With no file, the submission has no `text`, and each commit is
 `unreviewed`. With a link, any other file that is not a regular file, a larger file, or a file
 that is not this JSON, qory ignores the file, stores the submission the same way, and prints
 `qory run: The hand-off file is not usable, so the submission has no text and no steps.`,
@@ -2893,7 +2895,7 @@ kind of the file first and opens it without blocking.
 
 qory also checks the file against the limits of the submission format, and drops the part
 that is over a limit and keeps the rest: a `text` whose `title` has more than 256 characters or
-whose `description` has more than 20000 is dropped whole, and a step of more than 128
+whose `description` has more than 20000, has a NUL character or has a marker line of the draft's block (`<!-- qory:start -->` or `<!-- qory:end -->`, alone on a line, or followed by spaces, tabs or a carriage return) is dropped whole, and a step with a control character is dropped, and a step of more than 128
 characters is dropped, so its commit is `unreviewed`. A `text` whose `title` has a control
 character, such as a tab or a line end, a bidirectional control or an invisible format character
 (Unicode classes Cc and Cf), or a line or paragraph separator, is dropped whole, and so is a step whose key is not a
@@ -2901,7 +2903,7 @@ full commit id of 40 or 64 lower-case hexadecimal digits. qory prints `qory run:
 file has a part the submission format does not allow, so qory dropped it.`, then one line
 indented by two spaces for each part: `Title: <n> characters, over the limit of 256. qory
 dropped the text.`, `Description: <n> characters, over the limit of 20000. qory dropped the
-text.`, `Title: has a control character at character <n>. qory dropped the text.`, `<n> step
+text.`, `Title: has a control character at character <n>. qory dropped the text.`, `Description: has a NUL character at character <n>. qory dropped the text.`, `Description: line <n> is a marker line of the draft's block. qory dropped the text.`, `Step of commit <commit>: has a control character. qory dropped the step.`, `<n> step
 keys are not a full commit id of 40 or 64 lower-case hexadecimal digits. qory dropped them.`, and `Step of commit <commit>: <n> characters, over the limit of 128. qory dropped the
 step.`, for at most 5 steps, then `<n> further steps are over the limit of 128 characters.
 qory dropped them.` It prints no content of the file. A step for a commit that this run did not make is not used. The run
@@ -2929,7 +2931,12 @@ the push address of the remote `origin` (`git remote get-url --push origin`, aft
 no force, no pre-push hook, no submodule push and no tag that follows the commit. The remote
 must have one push address: with two or more, qory pushes nothing and prints `qory run: The
 remote origin has <n> push addresses, so qory pushed nothing and opened no draft.` with the
-branch and the command `git remote set-url --push origin <address>`. `QORY_SUBMIT_SYSTEM` and
+branch and the command `git remote set-url --push origin <address>`. The push address must be a
+host and a repository path of a forge, over `https`, `http`, `ssh`, `git` or the form
+`git@host:owner/repo`, with a host name of lower-case dotted labels. Any other address, such as
+`file://`, a path or a host with no dot, stops the run the same way with `qory run: The remote
+origin is not a forge address, so qory pushed nothing and opened no draft.`, and the line never
+shows the address. `QORY_SUBMIT_SYSTEM` and
 `QORY_SUBMIT_PATH` come from that address.
 
 The order is fixed: the checks of every repository, then the pushes of every repository, then

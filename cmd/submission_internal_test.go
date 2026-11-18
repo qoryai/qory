@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -320,5 +321,54 @@ func TestAHandoffThatIsNotJSONNamesNoContent(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestAHandoffDescriptionWithANulOrAMarkerLineDropsTheText is a description with a NUL character,
+// or with a line of the block's marker, alone or followed by spaces, tabs or a carriage return:
+// the text is dropped with a line that has the position, so the draft's block cannot end early.
+// A marker inside a line, or with another character after it, stays.
+func TestAHandoffDescriptionWithANulOrAMarkerLineDropsTheText(t *testing.T) {
+	for _, c := range []struct {
+		name, description string
+		want              string
+	}{
+		{"a NUL", `Fix\u0000it`, fmt.Sprintf(textDroppedNUL, 4)},
+		{"the end marker", `A\n<!-- qory:end -->\nB`, fmt.Sprintf(textDroppedMarker, 2)},
+		{"the start marker", `<!-- qory:start -->`, fmt.Sprintf(textDroppedMarker, 1)},
+		{"a marker with spaces and a carriage return", `A\nB\n<!-- qory:end -->  \t\r\nC`, fmt.Sprintf(textDroppedMarker, 3)},
+		{"a marker inside a line", `see <!-- qory:end --> here`, ""},
+		{"a marker followed by text", `<!-- qory:end --> more`, ""},
+		{"a marker with a space before it", `A\n <!-- qory:end -->`, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h, err := readHandoff(handoffIn(t, `{"text":{"title":"T","description":"`+c.description+`"}}`))
+			if err != nil || h == nil {
+				t.Fatalf("%v, %v", h, err)
+			}
+			if c.want == "" {
+				if h.text() == nil || len(h.dropped) != 0 {
+					t.Errorf("the text is %v with the lines %v, want it kept", h.text(), h.dropped)
+				}
+				return
+			}
+			if h.text() != nil || len(h.dropped) != 1 || h.dropped[0] != c.want {
+				t.Errorf("the text is %v with the lines %q, want it dropped with %q", h.text(), h.dropped, c.want)
+			}
+		})
+	}
+}
+
+// TestAHandoffStepWithAControlCharacterIsDropped is a step with a tab or a NUL: the step is
+// dropped with a line that has the commit, its commit is unreviewed, and a step without one stays.
+func TestAHandoffStepWithAControlCharacterIsDropped(t *testing.T) {
+	bad, bad2, good := strings.Repeat("a", 40), strings.Repeat("b", 40), strings.Repeat("c", 40)
+	h, err := readHandoff(handoffIn(t, `{"steps":{"`+bad+`":"plan\tb","`+bad2+`":"x\u0000","`+good+`":"plan"}}`))
+	if err != nil || h == nil {
+		t.Fatalf("%v, %v", h, err)
+	}
+	want := []string{fmt.Sprintf(textDroppedStepControl, bad), fmt.Sprintf(textDroppedStepControl, bad2)}
+	if !slices.Equal(h.dropped, want) || h.stepOf(bad) != stepUnreviewed || h.stepOf(good) != "plan" {
+		t.Errorf("the lines are %q, steps %q and %q, want %q, unreviewed and plan", h.dropped, h.stepOf(bad), h.stepOf(good), want)
 	}
 }

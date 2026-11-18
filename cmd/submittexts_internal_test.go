@@ -27,6 +27,8 @@ func TestTheTextsOfTheSubmitStepStateTheCauseInLineOne(t *testing.T) {
 		"textPushRefused":       textPushRefused,
 		"textLocalPushFailed":   textLocalPushFailed,
 		"textLocalNoHistory":    textLocalNoHistory,
+		"textLocalNoRemote":     textLocalNoRemote,
+		"textLocalPushURLs":     textLocalPushURLs,
 	}
 	for name, text := range texts {
 		line, _, _ := strings.Cut(text, "\n")
