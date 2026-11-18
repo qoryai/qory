@@ -2078,11 +2078,12 @@ add a <kind> workflow-<workflow> to <harness>, or set another workflow in Qory A
 ```
 
 `<kind>` is `skill`, the kind that `claude` and `codex`, the runtimes a run code runs
-on, run from a headless start. `<harness>` is `the workspace's harness` for a run whose documents contain a
-harness. For one whose documents contain none, it is `the checkout's harness`, with the target's
-`path` after it when the documents have a target: `the checkout's harness in the
-repository <path>` when the target's `system` is `QORY_RUN_SYSTEM`, and `the checkout's
-harness for the target <path>` on any other system. A workflow whose skill or command
+on, run from a headless start. `<harness>` is `the workspace's harness` for a run whose
+documents contain a harness. For one whose documents contain none, it is `the checkout's
+harness`, with the target's `path` after it when the documents have a target: `the
+checkout's harness in the repository <path>` when the target's `system` is
+`QORY_RUN_SYSTEM`, and `the checkout's harness for the target <path>` on any other
+system. A workflow whose skill or command
 the runtime runs by no name from a headless start closes the run with `no_session`.
 
 A run sees the checkout read-only when `access` in its documents is `read`, or when
