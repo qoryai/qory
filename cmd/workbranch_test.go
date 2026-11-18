@@ -157,10 +157,11 @@ func TestARunStopsOnABrokenBranchVersion(t *testing.T) {
 	for name, c := range map[string]struct{ file, want string }{
 		"another work item": {
 			`{"ref":"qory/wi_other","repositories":[{"system":"git.test","path":"acme/site","commit":"` + commit + `"}]}`,
-			"Add a new version of the artifact branch in Qory Apiary with the ref qory/" + workItem + ": version 1 has another ref.",
+			"Version 1 of the artifact branch has a ref other than qory/" + workItem + ", so the run did not start; the code is used",
 		},
-		"not the format": {`{"ref":"main"}`, "Add a new version of the artifact branch in Qory Apiary in place of version 1: fix the branch document"},
-		"not JSON":       {"text", "Add a new version of the artifact branch in Qory Apiary in place of version 1: write the branch document"},
+		"not the format": {`{"ref":"main"}`, "Version 1 of the artifact branch does not match the branch format, so the run did not start: fix the branch document"},
+		"too big":        {strings.Repeat("a", 64<<10+1), "Version 1 of the artifact branch does not have exactly one file of at most 65536 bytes, so the run did not start; the code is used"},
+		"not JSON":       {"text", "Version 1 of the artifact branch does not match the branch format, so the run did not start: write the branch document"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h, first, _, _ := versionRepository(t)

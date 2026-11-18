@@ -84,8 +84,8 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, timeout time.Du
 	}
 
 	if document.Ref != branch.Ref {
-		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary with the ref %s: version %d has another ref.%s",
-			branchType, branch.Ref, version.Number, codeUsed)
+		return nil, fmt.Errorf("Version %d of the artifact %s has a ref other than %s, so the run did not start%s",
+			version.Number, branchType, branch.Ref, codeUsed)
 	}
 
 	branch.Version = document.Repositories
@@ -156,8 +156,8 @@ func chosenBranch(snapshot *runapi.Snapshot, index *runapi.Index) (*runapi.Versi
 // branch format.
 func readBranchVersion(ctx context.Context, client *runapi.Client, version *runapi.Version) (*branchformat.Branch, error) {
 	if len(version.Files) != 1 || version.Files[0].Size > maxBranchFile {
-		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary with one file of at most %d bytes: version %d has another size.",
-			branchType, maxBranchFile, version.Number)
+		return nil, fmt.Errorf("Version %d of the artifact %s does not have exactly one file of at most %d bytes, so the run did not start",
+			version.Number, branchType, maxBranchFile)
 	}
 
 	var content bytes.Buffer
@@ -166,12 +166,12 @@ func readBranchVersion(ctx context.Context, client *runapi.Client, version *runa
 	}
 
 	if err := branchformat.Check(content.Bytes()); err != nil {
-		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary in place of version %d: %w", branchType, version.Number, err)
+		return nil, fmt.Errorf("Version %d of the artifact %s does not match the branch format, so the run did not start: %w", version.Number, branchType, err)
 	}
 
 	var document branchformat.Branch
 	if err := json.Unmarshal(content.Bytes(), &document); err != nil {
-		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary in place of version %d: %w", branchType, version.Number, err)
+		return nil, fmt.Errorf("Version %d of the artifact %s cannot be read as a branch document, so the run did not start: %w", version.Number, branchType, err)
 	}
 
 	return &document, nil

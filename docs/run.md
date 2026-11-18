@@ -2044,6 +2044,29 @@ A run stops before the agent starts when:
 - the target's commit has another `.qory` than `target_version`;
 - git does not check out a commit.
 
+Each of these lines stops the run, exit 1. `<c>` is a commit's first 12 characters, and
+`<git line>` is the line that git wrote:
+
+- `Version <n> of the artifact branch has a ref other than <ref>, so the run did not start;
+  the code is used`
+- `Version <n> of the artifact branch does not have exactly one file of at most 65536
+  bytes, so the run did not start; the code is used`
+- `Version <n> of the artifact branch does not match the branch format, so the run did not
+  start: <cause>; the code is used`
+- `Version <n> of the artifact branch cannot be read as a branch document, so the run did
+  not start: <cause>; the code is used`
+- `The stored version of the artifact branch has commit <c>, which is not a commit on
+  <path> on <system>, so the run did not start; the code is used`, then a line indented by
+  two spaces: `The fetch through the run's gateway failed: <git line>`
+- `The stored version of the artifact branch has <value> for <path>, which is not a commit,
+  so the run did not start; the code is used`
+- `Commit <c> of <ref> has a .qory folder that differs from the one at target version <c>,
+  so the run did not start; the code is used`, then the line `qory keeps the files of the
+  run in .qory.` indented by two spaces
+- `git cannot check out commit <c> of <ref>, the stored version of the artifact branch, so
+  the run did not start; the code is used`, then a line indented by two spaces: `The
+  checkout in <path> failed: <git line>`
+
 An instance without the feature `workflow_model` returns 404 with no error code to the run
 API. The run then works on `target_version` with no branch.
 
@@ -2684,8 +2707,9 @@ its 15 seconds when the agent's runtime stops within the 10 seconds of the defau
 One repository can be pushed before another fails, and a push can succeed before its version
 is stored. The branch is then past every version of the artifact, and the next run's push
 fails as a branch that moved. Each line for that state gives one way out: delete the branch.
-Qory Apiary has no way to add a version by hand. After the delete, the next run pushes from
-the last version.
+Deleting it loses the commits on that branch that no version has. When the work item has no
+version, the next run creates the branch at `target_version`, not at the commit that the
+deleted branch had; with a version, it starts from the last one.
 
 On a run that can push, each of these lines stops the run after the setup, before the
 agent starts, and closes it `failed` with `no_session`:
