@@ -369,7 +369,7 @@ func extractFolder(r io.Reader, dir, runtime, prefix, what string) error {
 	// this qory's [folderFiles] is out of date.
 	for _, name := range folderFiles[runtime] {
 		if !runnable(filepath.Join(dir, filepath.FromSlash(name))) {
-			return fmt.Errorf("Update qory.\n  The tarball of %s has no\n  %s.", what, prefix+name)
+			return fmt.Errorf("Update qory.\nThe tarball of %s has no\n  %s.", what, prefix+name)
 		}
 	}
 	for name := range made {

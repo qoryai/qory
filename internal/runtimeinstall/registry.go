@@ -530,7 +530,7 @@ func (r *registry) failed(what string, err error) error {
 func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, error) {
 	params, ok := bearer(challenges)
 	if !ok {
-		return "", fmt.Errorf("Check that the registry at %s returns a Bearer challenge\nThe registry at %s returned 401 with no Bearer challenge", r.host, r.host)
+		return "", fmt.Errorf("Check that the registry at %s returns a Bearer challenge\nThe registry\n  at %s\n  returned 401 with no Bearer challenge", r.host, r.host)
 	}
 	realm, err := url.Parse(params["realm"])
 	if err != nil || realm.Host == "" || realm.User != nil ||
@@ -574,7 +574,7 @@ func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, e
 		AccessToken string `json:"access_token"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, maxToken)).Decode(&reply) != nil || reply.Token == "" && reply.AccessToken == "" {
-		return "", fmt.Errorf("Check the token realm at %s\nThe response of the token realm at %s contains no token", realm.Host, realm.Host)
+		return "", fmt.Errorf("Check the token realm at %s\nThe response of the token realm\n  at %s\n  contains no token", realm.Host, realm.Host)
 	}
 	if reply.Token == "" {
 		return reply.AccessToken, nil

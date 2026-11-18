@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -95,6 +96,41 @@ func TestEngineMountsFindsNoRunningContainerWithNoEngineProgram(t *testing.T) {
 	}
 }
 
+// registryStub starts a registry that returns 401 to every request but one for
+// /registry/token, which it returns {} to: with a Bearer challenge whose realm is realm()
+// when challenge is set, else with none. tls starts it with TLS.
+func registryStub(t *testing.T, challenge, tls bool, realm func() string) *httptest.Server {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/registry/token":
+			w.Write([]byte("{}"))
+		case challenge:
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm()+`",service="registry"`)
+			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	})
+	srv := httptest.NewUnstartedServer(h)
+	if tls {
+		srv.StartTLS()
+	} else {
+		srv.Start()
+	}
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// installStub installs claude with fetch into a new folder, and returns its error.
+func installStub(t *testing.T, fetch runtimeinstall.Fetch) error {
+	t.Helper()
+	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: fetch, Runtime: "claude", Folder: t.TempDir(), Keys: rt.Keys()})
+	if err == nil {
+		t.Fatal("the install succeeded")
+	}
+	return err
+}
+
 // TestTheInstallCausesStandAlone installs claude with a registry that returns 401 with
 // no Bearer challenge, a token realm whose response has no token, an instance address
 // that is no URL, one with a path, and a source that returns a release with no tarball.
@@ -106,28 +142,11 @@ func TestEngineMountsFindsNoRunningContainerWithNoEngineProgram(t *testing.T) {
 func TestTheInstallCausesStandAlone(t *testing.T) {
 	registry := func(t *testing.T, challenge bool, path string) (string, string) {
 		var srv *httptest.Server
-		srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.URL.Path == "/registry/token":
-				w.Write([]byte("{}"))
-			case challenge:
-				w.Header().Set("WWW-Authenticate", `Bearer realm="`+srv.URL+`/registry/token",service="registry"`)
-				w.WriteHeader(http.StatusUnauthorized)
-			default:
-				w.WriteHeader(http.StatusUnauthorized)
-			}
-		}))
-		t.Cleanup(srv.Close)
+		srv = registryStub(t, challenge, false, func() string { return srv.URL + "/registry/token" })
 		host := strings.TrimPrefix(srv.URL, "http://")
 		return host, srv.URL + path
 	}
-	install := func(t *testing.T, fetch runtimeinstall.Fetch) error {
-		_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: fetch, Runtime: "claude", Folder: t.TempDir(), Keys: rt.Keys()})
-		if err == nil {
-			t.Fatal("the install succeeded")
-		}
-		return err
-	}
+	install := installStub
 	noTarballOf := func(version string) runtimeinstall.Fetch {
 		return func(context.Context, string) (runtimeinstall.Release, error) {
 			integrity := rt.Integrity(rt.PlainTarball(t, version))
@@ -137,6 +156,10 @@ func TestTheInstallCausesStandAlone(t *testing.T) {
 	}
 	noTarball := noTarballOf("2.1.320")
 	long := "2.1.320-" + strings.Repeat("a", 56)
+	noURL := func(t *testing.T) error {
+		host, _ := registry(t, true, "")
+		return install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", "ftp://apiary.example.com"))
+	}
 	for _, c := range []struct {
 		name string
 		err  func(t *testing.T) (string, error)
@@ -144,18 +167,16 @@ func TestTheInstallCausesStandAlone(t *testing.T) {
 	}{
 		{"a 401 with no Bearer challenge", func(t *testing.T) (string, error) {
 			host, instance := registry(t, false, "")
-			return "the registry at " + host + " returned 401 with no Bearer challenge; the code is used",
+			return "the registry\n  at " + host + "\n  returned 401 with no Bearer challenge; the code is used",
 				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", instance))
-		}, false},
+		}, true},
 		{"a token response with no token", func(t *testing.T) (string, error) {
 			host, instance := registry(t, true, "")
-			return "the response of the token realm at " + host + " contains no token; the code is used",
+			return "the response of the token realm\n  at " + host + "\n  contains no token; the code is used",
 				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", instance))
-		}, false},
+		}, true},
 		{"an address of Qory Apiary that is no URL", func(t *testing.T) (string, error) {
-			host, _ := registry(t, true, "")
-			return "the run's address of Qory Apiary is not an http or https URL\n  with a host and no user; the code is used",
-				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", "ftp://apiary.example.com"))
+			return "the run's address of Qory Apiary is not an http or https URL\n  with a host and no user; the code is used", noURL(t)
 		}, true},
 		{"an address of Qory Apiary with a path", func(t *testing.T) (string, error) {
 			host, instance := registry(t, true, "/base")
@@ -181,8 +202,40 @@ func TestTheInstallCausesStandAlone(t *testing.T) {
 			}
 		})
 	}
-	person := installFailed(install(t, noTarball)).Error()
-	if want := "Check the source of the runtime's releases\nThe source of the runtime's releases returned no tarball\n  of claude 2.1.320"; person != want {
-		t.Errorf("a person's run shows %q, want %q", person, want)
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{install(t, noTarball), "Check the source of the runtime's releases\nThe source of the runtime's releases returned no tarball\n  of claude 2.1.320"},
+		{noURL(t), "Set the address of Qory Apiary to an https URL\nThe run's address of Qory Apiary is not an http or https URL\n  with a host and no user"},
+	} {
+		if person := installFailed(c.err).Error(); person != c.want {
+			t.Errorf("a person's run shows %q, want %q", person, c.want)
+		}
+	}
+}
+
+// TestALongRegistryHostIsOnASeparateLine installs claude from a registry whose host has
+// 253 characters, the most a DNS name has, that returns 401 with no Bearer challenge, and
+// from one whose token realm's response has no token: a dispatched run from a run code
+// shows the host on an indented line, which [installFailed] cuts at its limit of a line,
+// and the first line, with "qory run: ", has at most 100 characters.
+func TestALongRegistryHostIsOnASeparateLine(t *testing.T) {
+	host := strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 61)
+	for _, challenge := range []bool{false, true} {
+		srv := registryStub(t, challenge, true, func() string { return "https://" + host + "/registry/token" })
+		// Each connection goes to the stub, whose certificate is for example.com.
+		tlsConfig := srv.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+		tlsConfig.ServerName = "example.com"
+		client := &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig, DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, network, srv.Listener.Addr().String())
+		}}}
+		err := installStub(t, runtimeinstall.RegistryFetch(client, host, "amd64", "https://"+host))
+		got := causeOnly(installFailed(err)).Error() + codeUsed
+		first, rest, _ := strings.Cut(got, "\n")
+		if len("qory run: "+first) > 100 || !strings.HasPrefix(rest, "  at "+host[:64]) {
+			t.Errorf("a dispatched run shows %q, want a short first line and the host on the second", got)
+		}
 	}
 }

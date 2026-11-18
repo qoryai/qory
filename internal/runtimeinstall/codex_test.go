@@ -235,7 +235,7 @@ func TestACodexFolderWithoutAHelperIsRefused(t *testing.T) {
 			t.Run(kind+" "+helper, func(t *testing.T) {
 				folder := t.TempDir()
 				_, err := installCodexFolder(t, folder, edit)
-				want := "Update qory.\n  The tarball of codex 0.170.0 has no\n  package/vendor/aarch64-unknown-linux-musl/" + helper + "."
+				want := "Update qory.\nThe tarball of codex 0.170.0 has no\n  package/vendor/aarch64-unknown-linux-musl/" + helper + "."
 				if err == nil || err.Error() != want {
 					t.Fatalf("the error is %v, want %q", err, want)
 				}
