@@ -71,7 +71,7 @@ func checkNotes(res *Result) error {
 			if len(filled) == 0 {
 				return exports.Errorf("Remove notes_for from %s of module %s.\n  The stack fills no role.", shown(e.Name), module)
 			}
-			format := "Set notes_for in %s of module %s to a role the stack fills.\n  %s is none.\n  The stack fills %s."
+			format := "Set notes_for in %s of module %s to a role the stack fills.\n  The stack fills no %s role.\n  The stack fills %s."
 			skill, mod := shown(e.Name), module
 			var full []any
 			// Line 1 has at most 98 characters, so it has at most 100 under the "✗ " that

@@ -1197,8 +1197,8 @@ compose checks both keys of every note it composes. A skill that an `exclude` or
 leaves out is not checked. Each refusal has the fix as line 1, then the cause:
 
 - a role that no agent fills, a role with no row in `roles.json`: `Set notes_for in
-  python-naming of module python to a role the stack fills.` with `tester is none.` and
-  `The stack fills developer and reviewers.` on the next lines;
+  python-naming of module python to a role the stack fills.` with `The stack fills no
+  tester role.` and `The stack fills developer and reviewers.` on the next lines;
 - a stack that fills no role: `Remove notes_for from python-naming of module python.` with
   `The stack fills no role.` on the next line;
 - no `paths`, an empty list, an empty string, or a value that is no string or list of

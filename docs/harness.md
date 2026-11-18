@@ -322,8 +322,8 @@ composes, and not a skill that an `exclude` or an `only` leaves out. It stops wi
 when:
 
 - a role in `notes_for` is one that no agent fills: `Set notes_for in python-naming of
-  module python to a role the stack fills.`, then `tester is none.` and `The stack fills
-  developer and reviewers.`;
+  module python to a role the stack fills.`, then `The stack fills no tester
+  role.` and `The stack fills developer and reviewers.`;
 - the stack fills no role: `Remove notes_for from python-naming of module python.`, then
   `The stack fills no role.`;
 - a note has no `paths`, or an empty one: `Add paths to python-naming of module python.`,

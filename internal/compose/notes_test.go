@@ -92,9 +92,9 @@ func TestABadNoteIsRefusedWithItsFixFirst(t *testing.T) {
 		want  string
 	}{
 		{"a role no agent fills", "notes_for: tester\n" + fillsDeveloper,
-			"Set notes_for in app-naming of module app to a role the stack fills.\n  tester is none.\n  The stack fills developer and reviewers."},
+			"Set notes_for in app-naming of module app to a role the stack fills.\n  The stack fills no tester role.\n  The stack fills developer and reviewers."},
 		{"one role of a list that no agent fills", "notes_for: [developer, tester]\n" + fillsDeveloper,
-			"Set notes_for in app-naming of module app to a role the stack fills.\n  tester is none.\n  The stack fills developer and reviewers."},
+			"Set notes_for in app-naming of module app to a role the stack fills.\n  The stack fills no tester role.\n  The stack fills developer and reviewers."},
 		{"a group role with a member", "notes_for: reviewers\n" + fillsDeveloper, ""},
 		{"no paths", "notes_for: developer\n",
 			"Add paths to app-naming of module app.\n  A note needs one path or more.\n  The skill is in skills/app-naming/SKILL.md of module app."},
@@ -134,7 +134,7 @@ func TestABadNoteIsRefusedWithItsFixFirst(t *testing.T) {
 // stack provides or binds.
 func TestANoteForARoleNothingProvidesIsRefused(t *testing.T) {
 	_, err := composeExtending(t, notesTree(t, "notes_for: planners\npaths: src/**\n"))
-	want := "Set notes_for in app-naming of module app to a role the stack fills.\n  planners is none.\n  The stack fills developer and reviewers."
+	want := "Set notes_for in app-naming of module app to a role the stack fills.\n  The stack fills no planners role.\n  The stack fills developer and reviewers."
 	if err == nil || err.Error() != want {
 		t.Fatalf("error = %v, want:\n%s", err, want)
 	}
