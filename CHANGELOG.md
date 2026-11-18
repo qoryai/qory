@@ -24,8 +24,14 @@ release may change what an existing document does, and states it under Upgrading
   list of commands for each type. The compose refuses a workflow whose `plan` is not an
   artifact type, a `plan` on a workflow whose access is not `write`, and a `plan` whose
   type no module of the base stack declares a scope check for. A module that a checkout
-  adds to the base declares none that counts. `qory run` does not read `plan` or
-  `scope_checks`.
+  adds to the base declares none that counts. `qory run` does not read `scope_checks`.
+- The full suite of a session runs the `full` row of the plan type that the stack names in
+  `plan` for the run's workflow, from the file `<type>.md` of the launch version, no longer
+  the `build-plan` by name. A plan type with no `Commands` table or no `full` row stops the
+  suite with `The full suite did not start: <type> has no full command.` A write workflow with
+  no `plan` has no suite command: a session that left HEAD where it started is skipped, and
+  one that moved HEAD gets `The full suite did not start: the workflow <name> names no plan in
+  the stack.` and an `escalate` verdict.
 - `qory run verdict` proposes a track for the work item: `--track <id>` is the id of a
   track that the gate of the run's stage offers, and `--track-reason <text>` is the
   reason, one sentence on one line of 1 to 300 characters. Pass both or neither. A track's
