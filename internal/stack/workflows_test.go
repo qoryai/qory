@@ -134,6 +134,54 @@ func TestLoadRefusesATierThatIsNoTier(t *testing.T) {
 	}
 }
 
+// TestLoadReadsThePlan reads the plan of a write workflow as written, and a workflow with
+// no plan, or none listed, as none.
+func TestLoadReadsThePlan(t *testing.T) {
+	isolate(t)
+	p, err := Load(write(t, withWorkflows("  build:\n    access: write\n    plan: change-plan\n"+
+		"  fix:\n    access: write\n    plan: a1\n    tier: thinking\n"+
+		"  plain:\n    access: write\n  review:\n    access: read\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"build": "change-plan", "fix": "a1", "plain": "", "review": "", "none": "",
+	} {
+		if got := p.Workflows[name].Plan; got != want {
+			t.Errorf("%s: plan %q, want %q", name, got, want)
+		}
+	}
+}
+
+// TestLoadRefusesAPlanOnAWorkflowThatDoesNotWrite refuses a plan on a workflow whose
+// access is read, write-no-push, or left out, with the one fix line.
+func TestLoadRefusesAPlanOnAWorkflowThatDoesNotWrite(t *testing.T) {
+	isolate(t)
+	for _, access := range []string{"", "    access: read\n", "    access: write-no-push\n"} {
+		_, err := Load(write(t, withWorkflows("  hello:\n"+access+"    plan: change-plan\n")))
+		want := "Remove `plan` from hello, or set its access to write."
+		if err == nil || err.Error() != want {
+			t.Errorf("access %q: %v, want %q", access, err, want)
+		}
+	}
+}
+
+// TestLoadRefusesAPlanThatIsNoArtifactType refuses a plan that has not the form of an
+// artifact type, with the fix first and the file last.
+func TestLoadRefusesAPlanThatIsNoArtifactType(t *testing.T) {
+	isolate(t)
+	for _, value := range []string{"Change-Plan", "change_plan", "-plan", "plan-", "a--b", strings.Repeat("a", 65), "${qory:light}"} {
+		path := write(t, withWorkflows("  hello:\n    access: write\n    plan: \""+value+"\"\n"))
+		_, err := Load(path)
+		want := "Set workflows.hello.plan to an artifact type.\n" +
+			"  An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n" +
+			"  The value is \"" + value + "\".\n  workflows.hello is in " + path + "."
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: %v, want %q", value, err, want)
+		}
+	}
+}
+
 // TestLoadRefusesABrokenWorkflow refuses a workflow name outside the contract's form, a
 // time_limit that is no duration or not above zero, an access other than read,
 // write-no-push or write,
@@ -214,6 +262,16 @@ func TestTheSchemaTakesTheWorkflows(t *testing.T) {
 		{"  hello:\n    tier: thinking\n    access: read\n", true},
 		{"  hello:\n    tier: fastest\n", false},
 		{"  hello:\n    tier: Thinking\n", false},
+		{"  hello:\n    access: write\n    plan: change-plan\n", true},
+		{"  hello:\n    access: write\n    plan: " + strings.Repeat("a", 64) + "\n", true},
+		{"  hello:\n    access: write\n    plan: Change-Plan\n", false},
+		{"  hello:\n    access: write\n    plan: a--b\n", false},
+		{"  hello:\n    access: write\n    plan: " + strings.Repeat("a", 65) + "\n", false},
+		{"  hello:\n    access: write\n    plan: \"\"\n", false},
+		{"  hello:\n    access: write\n    plan: 3\n", false},
+		{"  hello:\n    plan: change-plan\n", false},
+		{"  hello:\n    access: read\n    plan: change-plan\n", false},
+		{"  hello:\n    access: write-no-push\n    plan: change-plan\n", false},
 		{"  hello:\n    prompt: x\n", false},
 	} {
 		var doc any

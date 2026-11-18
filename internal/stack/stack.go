@@ -19,6 +19,7 @@ import (
 
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/runapi"
 )
 
 // APIVersion is the format version this qory reads, [exports.APIVersion], and the one a
@@ -467,6 +468,11 @@ type Workflow struct {
 	// and effort for a dispatched run of the workflow, "" when the workflow sets none.
 	// Qory Apiary resolves it; qory reads it only to refuse a value that is no tier.
 	Tier string `yaml:"tier,omitempty"`
+	// Plan is plan as written, the artifact type whose launch version sets what the
+	// workflow's session may push, "" when the workflow names none. Only a workflow with
+	// access write names one. A module of the stack declares the scope check of the type
+	// in its manifest's scope_checks, which the compose requires.
+	Plan string `yaml:"plan,omitempty"`
 	// HookPoints are the points of the workflow where a checkout extending the stack
 	// may add workflow hooks, by the point's name; nil for none.
 	HookPoints map[string]HookPoint `yaml:"hook_points,omitempty"`
@@ -793,6 +799,18 @@ func (p *Stack) validate(compose bool) error {
 				"The tiers are "+TierList()+".",
 				fmt.Sprintf("The value is %s.", exports.Value(w.Tier, true)),
 				fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
+		}
+		if w.Plan != "" {
+			if !runapi.ArtifactName(w.Plan) {
+				return exports.Refuse(
+					fmt.Sprintf("Set workflows.%s.plan to an artifact type.", name),
+					"An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.",
+					fmt.Sprintf("The value is %s.", exports.Value(w.Plan, true)),
+					fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
+			}
+			if p.AccessOf(name) != AccessWrite {
+				return exports.Refuse(fmt.Sprintf("Remove `plan` from %s, or set its access to write.", name))
+			}
 		}
 		if w.TimeLimitText == "" {
 			continue
