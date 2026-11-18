@@ -286,8 +286,8 @@ func TestARunStartsAtTheNewestPushedCommitThatDescends(t *testing.T) {
 }
 
 // TestAPushOfTwoCancelledCommitsHasOneRecordedHead is the shape the recorder has: a cancelled run
-// pushed 2 commits in one push, so one head is recorded and its parent is not. The next run's
-// first push replaces both with a lease on the branch head.
+// pushed 2 commits in one push, so one head is recorded and its parent is not. The branch is at
+// that head, so the next run's first push replaces both with a lease on it.
 func TestAPushOfTwoCancelledCommitsHasOneRecordedHead(t *testing.T) {
 	dir, b, base := onBranchIn(t, "acme/shop")
 	bare := filepath.Join(base, "acme", "shop.git")
@@ -304,81 +304,119 @@ func TestAPushOfTwoCancelledCommitsHasOneRecordedHead(t *testing.T) {
 	}
 }
 
-// TestACommitThatNoRecordedHeadHoldsStopsThePush is a branch with a cancelled push of one commit
-// and a commit of another push on top of it, and a branch where the one recorded head is a commit
-// that is unrelated to the start commit (an orphan) or that the forge does not have: each stops the push
-// and leaves the branch, because a commit that no recorded head that descends from the start
-// commit has in its history is not a cancelled run's.
-func TestACommitThatNoRecordedHeadHoldsStopsThePush(t *testing.T) {
+// TestOnlyARecordedHeadOfACancelledRunIsReplaced is a branch whose head is, in turn: a commit on
+// top of the recorded head, a commit below it that the record does not list, a recorded head that
+// is unrelated to the start commit (an orphan that equals the branch head), a recorded head that
+// the forge does not serve, and an empty record. Each stops the push and leaves the branch, with the
+// head in the refusal. The rule is equality with a recorded head that descends from the start commit.
+func TestOnlyARecordedHeadOfACancelledRunIsReplaced(t *testing.T) {
 	for _, c := range []struct {
-		name   string
-		record func(t *testing.T, bare, first string) string
+		name string
+		// setup makes the branch and returns its head and the record.
+		setup    func(t *testing.T, bare, ref, start string) (head string, record []string)
+		notAbove bool
 	}{
-		{"a commit on top of the recorded head", func(_ *testing.T, _, first string) string { return first }},
-		{"a recorded head that is unrelated to the start commit", func(t *testing.T, bare, first string) string {
-			orphan := run(t, bare, "commit-tree", run(t, bare, "rev-parse", first+"^{tree}"), "-m", "orphan")
-			run(t, bare, "update-ref", "refs/heads/orphan", orphan)
-			return orphan
-		}},
-		{"a recorded head that the forge does not have", func(*testing.T, string, string) string { return strings.Repeat("a", 40) }},
+		{"a commit on top of the recorded head", func(t *testing.T, bare, ref, start string) (string, []string) {
+			first := bareCommit(t, bare, ref, start, "cancelled")
+			return bareCommit(t, bare, ref, first, "another push"), []string{first}
+		}, false},
+		{"a commit below the recorded head that the record does not list", func(t *testing.T, bare, ref, start string) (string, []string) {
+			first := bareCommit(t, bare, ref, start, "cancelled one")
+			second := bareCommit(t, bare, ref, first, "cancelled two")
+			bareCommit(t, bare, ref, second, "cancelled three")
+			run(t, bare, "update-ref", "refs/heads/"+ref, first)
+			return first, []string{second}
+		}, false},
+		{"a recorded head that is unrelated to the start commit", func(t *testing.T, bare, ref, start string) (string, []string) {
+			orphan := run(t, bare, "commit-tree", run(t, bare, "rev-parse", start+"^{tree}"), "-m", "orphan")
+			run(t, bare, "update-ref", "refs/heads/"+ref, orphan)
+			return orphan, []string{orphan}
+		}, true},
+		{"a recorded head that the forge does not have", func(t *testing.T, bare, ref, start string) (string, []string) {
+			return bareCommit(t, bare, ref, start, "cancelled"), []string{strings.Repeat("a", 40)}
+		}, false},
+		{"an empty record", func(t *testing.T, bare, ref, start string) (string, []string) {
+			return bareCommit(t, bare, ref, start, "cancelled"), nil
+		}, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir, b, base := onBranchIn(t, "acme/shop")
 			bare := filepath.Join(base, "acme", "shop.git")
 			start := b.Repositories[0].Commit
-			first := bareCommit(t, bare, b.Ref, start, "cancelled")
-			second := bareCommit(t, bare, b.Ref, first, "another push")
-			b.Cancelled = []Landed{{System: "git.example.com", Path: "acme/shop", Commit: c.record(t, bare, first)}}
+			head, record := c.setup(t, bare, b.Ref, start)
+			for _, commit := range record {
+				b.Cancelled = append(b.Cancelled, Landed{System: "git.example.com", Path: "acme/shop", Commit: commit})
+			}
 			leave(t, dir)
 			_, _, err := pushOf(dir, b)
-			if changed := headError(t, err); changed.Head != second || changed.Expected != start {
-				t.Errorf("refusal %+v, want head %s expected %s", changed, second, start)
+			if changed := headError(t, err); changed.Head != head || changed.Expected != start || changed.NotAbove != c.notAbove {
+				t.Errorf("refusal %+v, want head %s expected %s not above %v", changed, head, start, c.notAbove)
 			}
-			if got := run(t, bare, "rev-parse", b.Ref); got != second {
+			if got := run(t, bare, "rev-parse", b.Ref); got != head {
 				t.Errorf("the branch moved to %s", got)
 			}
 		})
 	}
 }
 
-// TestAMergeInACancelledPushIsCoveredByItsHead is a cancelled push whose head is a merge: the range
-// from the start commit to the head follows every parent, so the commit that the merge brought in
-// counts as cancelled with the others, and the push replaces the branch ref alone.
-func TestAMergeInACancelledPushIsCoveredByItsHead(t *testing.T) {
-	dir, b, base := onBranchIn(t, "acme/shop")
-	bare := filepath.Join(base, "acme", "shop.git")
-	start := b.Repositories[0].Commit
-	mine := bareCommit(t, bare, b.Ref, start, "cancelled work")
-	brought := run(t, bare, "commit-tree", run(t, bare, "rev-parse", start+"^{tree}"), "-p", start, "-m", "brought in from main")
-	run(t, bare, "update-ref", "refs/heads/brought", brought)
-	merge := run(t, bare, "commit-tree", run(t, bare, "rev-parse", mine+"^{tree}"), "-p", mine, "-p", brought, "-m", "merge main")
-	run(t, bare, "update-ref", "refs/heads/"+b.Ref, merge)
-	b.Cancelled = []Landed{{System: "git.example.com", Path: "acme/shop", Commit: merge}}
-	leave(t, dir)
-	doc, _, err := pushOf(dir, b)
-	if err != nil || doc == nil {
-		t.Fatalf("push: %v", err)
-	}
-	if got, want := run(t, bare, "rev-parse", b.Ref), run(t, dir, "rev-parse", "HEAD"); got != want {
-		t.Errorf("the branch is at %s, want the run's %s", got, want)
-	}
-	if got := run(t, bare, "rev-parse", "refs/heads/brought"); got != brought {
-		t.Errorf("the branch brought is at %s, want %s: the push replaces the ref of the branch alone", got, brought)
+// TestAMergeInACancelledPushIsReplacedAtItsHeadOnly is a cancelled push whose recorded head is a
+// merge of the run's commit with a commit X that the run did not write. The branch at the merge is
+// replaced, with the ref of the branch alone. The branch moved to X, a commit of the merge's
+// history that the record does not list, is refused: no history is read to cover X.
+func TestAMergeInACancelledPushIsReplacedAtItsHeadOnly(t *testing.T) {
+	for _, atMerge := range []bool{true, false} {
+		name := map[bool]string{true: "the branch at the merge", false: "the branch at the foreign commit"}[atMerge]
+		t.Run(name, func(t *testing.T) {
+			dir, b, base := onBranchIn(t, "acme/shop")
+			bare := filepath.Join(base, "acme", "shop.git")
+			start := b.Repositories[0].Commit
+			mine := bareCommit(t, bare, b.Ref, start, "cancelled work")
+			foreign := run(t, bare, "commit-tree", run(t, bare, "rev-parse", start+"^{tree}"), "-p", start, "-m", "a commit of another branch")
+			run(t, bare, "update-ref", "refs/heads/feature", foreign)
+			merge := run(t, bare, "commit-tree", run(t, bare, "rev-parse", mine+"^{tree}"), "-p", mine, "-p", foreign, "-m", "merge feature")
+			head := merge
+			if !atMerge {
+				head = foreign
+			}
+			run(t, bare, "update-ref", "refs/heads/"+b.Ref, head)
+			b.Cancelled = []Landed{{System: "git.example.com", Path: "acme/shop", Commit: merge}}
+			leave(t, dir)
+			doc, _, err := pushOf(dir, b)
+			if !atMerge {
+				if changed := headError(t, err); changed.Head != foreign {
+					t.Errorf("refusal %+v, want head %s", changed, foreign)
+				}
+				if got := run(t, bare, "rev-parse", b.Ref); got != foreign {
+					t.Errorf("the branch moved to %s", got)
+				}
+				return
+			}
+			if err != nil || doc == nil {
+				t.Fatalf("push: %v", err)
+			}
+			if got, want := run(t, bare, "rev-parse", b.Ref), run(t, dir, "rev-parse", "HEAD"); got != want {
+				t.Errorf("the branch is at %s, want the run's %s", got, want)
+			}
+			if got := run(t, bare, "rev-parse", "refs/heads/feature"); got != foreign {
+				t.Errorf("the branch feature is at %s, want %s: the push replaces the ref of the branch alone", got, foreign)
+			}
+		})
 	}
 }
 
 // TestSeveralRecordedHeadsOfCancelledRuns is two cancelled runs that each pushed once: the first
 // pushed one commit and the second 2 more on top of it, so the work item lists the heads A and C.
-// Both heads together cover the three commits and the push replaces them; with the head A and the
-// middle commit B listed, the commit C on top is covered by no head and the push stops.
+// The branch at C is replaced, and so is the branch at A, because each is a recorded head; the
+// branch at the middle commit B is refused, because the record does not list it.
 func TestSeveralRecordedHeadsOfCancelledRuns(t *testing.T) {
 	for _, c := range []struct {
 		name  string
-		heads func(a, b, c string) []string
+		at    int // 0 is A, 1 is B, 2 is C
 		stops bool
 	}{
-		{"the heads of both runs", func(a, _, c string) []string { return []string{a, c} }, false},
-		{"heads that leave the last commit out", func(a, b, _ string) []string { return []string{a, b} }, true},
+		{"the branch at the head of the second run", 2, false},
+		{"the branch at the head of the first run", 0, false},
+		{"the branch at a commit that no run recorded", 1, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir, b, base := onBranchIn(t, "acme/shop")
@@ -386,14 +424,14 @@ func TestSeveralRecordedHeadsOfCancelledRuns(t *testing.T) {
 			a := bareCommit(t, bare, b.Ref, b.Repositories[0].Commit, "first run")
 			mid := bareCommit(t, bare, b.Ref, a, "second run one")
 			last := bareCommit(t, bare, b.Ref, mid, "second run two")
-			for _, head := range c.heads(a, mid, last) {
-				b.Cancelled = append(b.Cancelled, Landed{System: "git.example.com", Path: "acme/shop", Commit: head})
-			}
+			at := []string{a, mid, last}[c.at]
+			run(t, bare, "update-ref", "refs/heads/"+b.Ref, at)
+			b.Cancelled = []Landed{{System: "git.example.com", Path: "acme/shop", Commit: a}, {System: "git.example.com", Path: "acme/shop", Commit: last}}
 			leave(t, dir)
 			doc, _, err := pushOf(dir, b)
 			if c.stops {
-				if changed := headError(t, err); changed.Head != last {
-					t.Errorf("refusal %+v, want head %s", changed, last)
+				if changed := headError(t, err); changed.Head != at {
+					t.Errorf("refusal %+v, want head %s", changed, at)
 				}
 				return
 			}

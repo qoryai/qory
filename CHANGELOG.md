@@ -571,11 +571,11 @@ release may change what an existing document does, and states it under Upgrading
 - The push step stores a version of the artifact type `submission`, in place of `branch`.
   The step checks the head of the branch on the forge before it pushes. A head that is not
   the commit the run expected ends the run `failed` with the code `push_head_changed`, after a
-  session that passed, failed or timed out. The push replaces commits of cancelled runs only,
-  with a lease on the head it checked. The work item's record lists one head for each push, so a
-  commit counts as cancelled when it is that head or an ancestor of it from the start commit
-  on; a commit on top of a recorded head, or beside it, refuses. A run starts at the newest
-  commit that an earlier run pushed and a person did not cancel.
+  session that passed, failed or timed out. The push replaces the branch only when its head
+  is a head that the work item's record lists for a cancelled run (one head for each push)
+  and that descends from the start commit, with a lease on that head. qory reads no history:
+  a head below, above or beside a recorded head refuses. A run starts at the newest commit
+  that an earlier run pushed and a person did not cancel.
 - The submission has `base.branch` for each repository the run pushed: the name of the
   repository's default branch, read when the run fetched it. A name of more than 255
   characters is left out.
