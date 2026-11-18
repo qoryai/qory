@@ -463,7 +463,7 @@ func TestARunWithNoAddressOfQoryApiaryStopsAtTheRegistrysRealm(t *testing.T) {
 	reg := rt.StartRegistry(t)
 	reg.PublishPlain("2.1.320")
 	r := runInstalling(t, installSetup{reg: reg, proxy: rt.StartProxy(t), walled: true, noInstance: true})
-	want := "qory run: the realm is " + reg.Instance() + "/registry/token, and the run has no address of Qory Apiary to check it against\n"
+	want := "qory run: the pool's forager.yaml sets no gateway.server.url,\n  so qory cannot check the registry's token realm " + reg.Instance() + "/registry/token\n"
 	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 || !strings.Contains(r.out, want) || reg.BlobGets() != 0 {
 		t.Fatalf("%d joins, %v (exit %d), %d blobs\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), reg.BlobGets(), r.out)
 	}
@@ -478,7 +478,7 @@ func TestARunCodeFileWithNoApiaryLineStopsAtTheRegistrysRealm(t *testing.T) {
 	reg.PublishPlain("2.1.320")
 	lines := "registry " + reg.Host() + "\nruntimes " + filepath.Join(t.TempDir(), "runtimes") + "\n"
 	_, err := runCodeInstalling(t, lines, proxy, "")
-	if err == nil || !strings.HasPrefix(err.Error(), "the realm is "+reg.Instance()+"/registry/token, and the run has no address of Qory Apiary to check it against; the code is used") || reg.BlobGets() != 0 {
+	if err == nil || err.Error() != "the pool's forager.yaml sets no gateway.server.url,\n  so qory cannot check the registry's token realm "+reg.Instance()+"/registry/token; the code is used" || reg.BlobGets() != 0 {
 		t.Fatalf("err = %v, %d blobs", err, reg.BlobGets())
 	}
 }
@@ -517,7 +517,7 @@ func TestTheApiaryLineOfARunCodeFileWinsOverTheServersURL(t *testing.T) {
 	}
 	t.Chdir(pkg)
 	_, err = runCodeInstalling(t, lines("http://127.0.0.1:1"), proxy, reg.Instance())
-	if err == nil || err.Error() != "it is "+reg.Instance()+"/registry/token; the code is used" {
+	if err == nil || err.Error() != "the registry's token realm is "+reg.Instance()+"/registry/token,\n  and the instance's token route is http://127.0.0.1:1/registry/token; the code is used" {
 		t.Fatalf("a wrong line: %v", err)
 	}
 }

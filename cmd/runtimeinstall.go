@@ -147,16 +147,28 @@ func installFailed(err error) error {
 }
 
 // causeOnly is err, an install's error of a fix line and the cause on the lines after it,
-// as a dispatched run shows it, under the user's ruling 771 (a): the cause alone, with
-// no indent on its first line and its first letter in lower case, as [fetchImage] shows a refused image, and no full stop
-// at its end, since [codeUsed] may follow. Qory Apiary shows the run's output, and the
-// fix line advises a person who runs qory. An error of one line stays as it is.
+// as a dispatched run shows it, under the user's ruling 771 (a): the cause alone, with no
+// indent on its first line and its first letter in lower case, as [fetchImage] shows a
+// refused image, and no full stop at its end, since [codeUsed] may follow. A long first
+// line goes on after its first comma, on an indented line. Qory Apiary shows the run's
+// output, and the fix line advises a person who runs qory. An error of one line stays as
+// it is.
 func causeOnly(err error) error {
 	_, cause, ok := strings.Cut(err.Error(), "\n")
 	if !ok || cause == "" {
 		return err
 	}
-	return errors.New(strings.TrimSuffix(lowerFirst(strings.TrimLeft(cause, " ")), "."))
+	cause = strings.TrimSuffix(lowerFirst(strings.TrimLeft(cause, " ")), ".")
+	// A first line that, with "qory run: " and [codeUsed], has more than 100 characters
+	// goes on at its first comma, with the words after it on an indented line.
+	first, rest, _ := strings.Cut(cause, "\n")
+	if before, after, ok := strings.Cut(first, ", "); ok && len("qory run: ")+len(first)+len(codeUsed) > 100 {
+		cause = before + ",\n  " + after
+		if rest != "" {
+			cause += "\n" + rest
+		}
+	}
+	return errors.New(cause)
 }
 
 // useInstalledRuntime is the one place where the session's spec gets the installed

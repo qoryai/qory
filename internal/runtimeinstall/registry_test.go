@@ -287,21 +287,21 @@ func TestATokenRealmElsewhereIsRefused(t *testing.T) {
 		want     string
 	}{
 		{"the registry's host", "http://localhost:%PORT%", func(registry, _ string) string { return "http://" + registry + "/registry/token" },
-			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://%REGISTRY%/registry/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nThe registry's token realm is http://%REGISTRY%/registry/token, and the instance's token route is http://localhost:%PORT%/registry/token."},
 		{"another host", "http://localhost:%PORT%", func(_, port string) string { return "http://127.0.0.1:" + port + "/registry/token" },
-			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://127.0.0.1:%PORT%/registry/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nThe registry's token realm is http://127.0.0.1:%PORT%/registry/token, and the instance's token route is http://localhost:%PORT%/registry/token."},
 		{"another port", "http://localhost:%PORT%", func(_, _ string) string { return "http://localhost:1/registry/token" },
-			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:1/registry/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nThe registry's token realm is http://localhost:1/registry/token, and the instance's token route is http://localhost:%PORT%/registry/token."},
 		{"http when the instance is https", "https://localhost:%PORT%", func(_, port string) string { return "http://localhost:" + port + "/registry/token" },
-			"Ask Qory Apiary's instance admin to put the registry's token realm at https://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/registry/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at https://localhost:%PORT%/registry/token\nThe registry's token realm is http://localhost:%PORT%/registry/token, and the instance's token route is https://localhost:%PORT%/registry/token."},
 		{"another path", "http://localhost:%PORT%", func(_, port string) string { return "http://localhost:" + port + "/api/token" },
-			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/api/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nThe registry's token realm is http://localhost:%PORT%/api/token, and the instance's token route is http://localhost:%PORT%/registry/token."},
 		{"a longer path", "http://localhost:%PORT%", func(_, port string) string { return "http://localhost:" + port + "/registry/token/x" },
-			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/registry/token/x"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nThe registry's token realm is http://localhost:%PORT%/registry/token/x, and the instance's token route is http://localhost:%PORT%/registry/token."},
 		{"an instance under a path", "http://localhost:%PORT%/base", func(_, port string) string { return "http://localhost:" + port + "/base/registry/token" },
 			"Set gateway.server.url in forager.yaml to an address with no path\nThe address is \"http://localhost:%PORT%/base\"."},
 		{"no address of the instance", "", func(_, port string) string { return "http://localhost:" + port + "/registry/token" },
-			"Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe realm is http://localhost:%PORT%/registry/token, and the run has no address of Qory Apiary to check it against."},
+			"Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe pool's forager.yaml sets no gateway.server.url, so qory cannot check the registry's token realm http://localhost:%PORT%/registry/token."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			asked := false

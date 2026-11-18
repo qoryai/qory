@@ -96,7 +96,11 @@ release may change what an existing document does, and states it under Upgrading
 - A run from a run key or a run code whose runtime's install fails prints the cause of
   the failure alone, such as `qory run: npm has no signature of claude 2.1.320`, with no
   fix line: Qory Apiary shows that output, and the fix line, such as `Update qory.`,
-  advises a person who runs qory. A person's run prints the fix line, then the cause.
+  advises a person who runs qory. A person's run prints the fix line, then the cause. The
+  refusals of a registry's token realm state the cause in full: `The pool's forager.yaml
+  sets no gateway.server.url, so qory cannot check the registry's token realm <realm>.`
+  and `The registry's token realm is <realm>, and the instance's token route is
+  <url>/registry/token.`
 - Every install of a runtime checks npm's signature of the version before it reads the
   tarball, with npm's public keys built into qory: from npm, `dist.signatures`; from a
   registry's runtime cache, the layer's annotation `dev.qory.runtime.signatures`. A

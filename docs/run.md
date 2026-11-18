@@ -972,14 +972,23 @@ path stops the run with:
 
 ```text
 qory run: Ask Qory Apiary's instance admin to put the registry's token realm at https://apiary.example.com/registry/token
-It is https://registry.example.com/registry/token
+The registry's token realm is https://registry.example.com/registry/token, and the instance's token route is https://apiary.example.com/registry/token.
+```
+
+A run from a run key or a run code prints the second line alone, and when that line is
+longer than 100 characters with `qory run: `, it goes on after its first comma on an
+indented line:
+
+```text
+qory run: the registry's token realm is https://registry.example.com/registry/token,
+  and the instance's token route is https://apiary.example.com/registry/token
 ```
 
 A run with no address of the instance takes no realm. Its install stops with:
 
 ```text
 qory run: Set gateway.server.url in forager.yaml to the address of Qory Apiary
-The realm is https://apiary.example.com/registry/token, and the run has no address of Qory Apiary to check it against.
+The pool's forager.yaml sets no gateway.server.url, so qory cannot check the registry's token realm https://apiary.example.com/registry/token.
 ```
 
 A run that starts from a run key has no `gateway.server` section in the `forager.yaml`

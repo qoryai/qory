@@ -538,14 +538,14 @@ func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, e
 		return "", fmt.Errorf("Check the registry at %s\nThe realm of its Bearer challenge is not an https URL, or http on loopback", r.host)
 	}
 	if r.instance == "" {
-		return "", fmt.Errorf("Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe realm is %s, and the run has no address of Qory Apiary to check it against.", realm.Redacted())
+		return "", fmt.Errorf("Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe pool's forager.yaml sets no gateway.server.url, so qory cannot check the registry's token realm %s.", realm.Redacted())
 	}
 	want, err := tokenRoute(r.instance)
 	if err != nil {
 		return "", err
 	}
 	if !sameRoute(realm, want) {
-		return "", fmt.Errorf("Ask Qory Apiary's instance admin to put the registry's token realm at %s\nIt is %s", want.Redacted(), realm.Redacted())
+		return "", fmt.Errorf("Ask Qory Apiary's instance admin to put the registry's token realm at %s\nThe registry's token realm is %s, and the instance's token route is %s.", want.Redacted(), realm.Redacted(), want.Redacted())
 	}
 	// The request is to the instance's token route, with the service and the scope alone:
 	// nothing else of the realm, such as its query or fragment, goes with it.
