@@ -40,6 +40,9 @@ release may change what an existing document does, and states it under Upgrading
   last push.`, then `  qory pushed <commit> to qory/<work item id>.`, then `Qory Apiary
   returned <status>: <message or code>`, or `The gateway returned <status>: <code>` for a
   status that the gateway returned.
+  When the run is already closed and Forager sends nothing (`session.ErrRunClosed`), qory
+  sends the call once and prints the same two lines as for a 410 with the code `run_closed`,
+  with no `Contact support` line and no end code of qory's.
 - A stack's workflow may set `tier` to `light`, `fast` or `thinking`, which names the
   main session's model and effort for a dispatched run. Any other value refuses the
   stack. `qory run` does not read it.
