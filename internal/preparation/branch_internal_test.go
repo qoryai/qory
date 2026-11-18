@@ -66,7 +66,7 @@ func switchTo(dir string, b *WorkBranch) (string, error) {
 	return strings.TrimSuffix(report.String(), "\n"), err
 }
 
-// TestTheTargetStaysAtItsVersionUntilTheSwitch is a run with a branch version: the fetch
+// TestTheTargetStaysAtItsVersionUntilTheSwitch is a run with a submission version: the fetch
 // leaves the working folder at the target version, for the compose, and the switch puts
 // it on the branch at the version's commit.
 func TestTheTargetStaysAtItsVersionUntilTheSwitch(t *testing.T) {
@@ -106,7 +106,7 @@ func TestTheTargetStaysAtItsVersionUntilTheSwitch(t *testing.T) {
 	}
 }
 
-// TestABranchWithNoVersionStartsAtTheTargetVersion is a work item with no branch version:
+// TestABranchWithNoVersionStartsAtTheTargetVersion is a work item with no submission version:
 // the branch is new, at the target version.
 func TestABranchWithNoVersionStartsAtTheTargetVersion(t *testing.T) {
 	needGit(t)

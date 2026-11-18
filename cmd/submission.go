@@ -10,9 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/preparation"
+	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/submission"
 )
@@ -88,11 +90,16 @@ func readHandoff(root string) (*handoff, error) {
 	if !info.Mode().IsRegular() {
 		return nil, errors.New("the path is not a regular file")
 	}
-	f, err := checkout.Open(handoffRel)
+	// The path may be swapped for a pipe after the check: the open does not wait for a writer,
+	// and the opened file is checked again.
+	f, err := checkout.OpenFile(handoffRel, os.O_RDONLY|render.OpenFlags, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+		return nil, errors.New("the path is not a regular file")
+	}
 	// The file may be swapped for a larger one after the check: the read stops at the limit.
 	data, err := io.ReadAll(io.LimitReader(f, handoffMax+1))
 	if err != nil {
@@ -103,7 +110,7 @@ func readHandoff(root string) (*handoff, error) {
 	}
 	var h handoff
 	if err := json.Unmarshal(data, &h); err != nil {
-		return nil, err
+		return nil, errors.New(jsonCause(err))
 	}
 	h.limit()
 	return &h, nil
@@ -133,6 +140,24 @@ func controlAt(title string) int {
 		}
 	}
 	return 0
+}
+
+// jsonCause is the cause of an error of the JSON reader for the file of the agent, with no
+// content of the file: the reader's text can have the first character that it did not
+// expect, or a member's name.
+func jsonCause(err error) string {
+	var syntax *json.SyntaxError
+	var typed *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &syntax):
+		return fmt.Sprintf("the file is not JSON: syntax error at byte %d", syntax.Offset)
+	case errors.As(err, &typed) && typed.Field != "":
+		member, _, _ := strings.Cut(typed.Field, ".")
+		if member == "text" || member == "steps" {
+			return fmt.Sprintf("the member %s of the file has the wrong type", member)
+		}
+	}
+	return "the file is not JSON of the form of the hand-off"
 }
 
 // limit drops the parts of h that are over a limit of the submission format.

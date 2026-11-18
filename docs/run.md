@@ -2881,8 +2881,11 @@ that is not this JSON, qory ignores the file, stores the submission the same way
 `qory run: The hand-off file is not usable, so the submission has no text and no steps.`,
 then two lines indented by two spaces: `File: .qory/handoff/submission.json, from
 QORY_SUBMISSION_HANDOFF.` and `Cause: <cause>`. `<cause>` is `the path is not a regular
-file`, `the file has more than 262144 bytes, and qory reads at most 262144`, or the error of
-the file read or of the JSON reader.
+file`, `the file has more than 262144 bytes, and qory reads at most 262144`, `the file is not
+JSON: syntax error at byte <n>`, `the member <text or steps> of the file has the wrong type`,
+`the file is not JSON of the form of the hand-off`, or the error of the file read. The cause
+has no character or value of the file. qory never waits on a pipe at the path: it reads the
+kind of the file first and opens it without blocking.
 
 qory also checks the file against the limits of the submission format, and drops the part
 that is over a limit and keeps the rest: a `text` whose `title` has more than 256 characters or

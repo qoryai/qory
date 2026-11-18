@@ -134,7 +134,7 @@ type Snapshot struct {
 	// Verdict is the work item's newest verdict, nil for none.
 	Verdict *GivenVerdict `json:"verdict"`
 	// PushedCommits is every commit that an earlier run of the work item pushed, ordered by
-	// run number and then push order, the requesting run's own left out; nil for none.
+	// run number and then push order, without the commits of the requesting run; nil for none.
 	PushedCommits []PushedEntry `json:"pushed_commits"`
 	// Notes is the work item's notes, oldest first, byte for byte as the run API returned
 	// them: a JSON array, or null or empty for a response with no notes.

@@ -470,3 +470,11 @@ func TestAProxyAddressThatIsNoAddressIsAnError(t *testing.T) {
 		t.Errorf("the engine ran %v", f.e.verbs())
 	}
 }
+
+// TestTheProgramMayRunTwoMinutes is the default limit of the submit program: 120 seconds, the
+// limit that docs/run.md and the CHANGELOG state.
+func TestTheProgramMayRunTwoMinutes(t *testing.T) {
+	if pushcheck.ProgramLimit != 120*time.Second {
+		t.Errorf("ProgramLimit is %s, want 2m0s", pushcheck.ProgramLimit)
+	}
+}

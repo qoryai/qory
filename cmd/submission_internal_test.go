@@ -295,3 +295,28 @@ func TestAHandoffTitleWithAControlCharacterDropsTheText(t *testing.T) {
 		})
 	}
 }
+
+// TestAHandoffThatIsNotJSONNamesNoContent is a file whose text is not JSON, or has a member of
+// the wrong type: the cause says where or which member, and has no character, member name or
+// value of the file.
+func TestAHandoffThatIsNotJSONNamesNoContent(t *testing.T) {
+	for name, c := range map[string]struct{ file, want string }{
+		"text":           {`Secret-token-1234 {`, "the file is not JSON: syntax error at byte 1"},
+		"cut":            {`{"text":{"title":"x"`, "the file is not JSON: syntax error at byte 20"},
+		"a string text":  {`{"text":"secret-title"}`, "the member text of the file has the wrong type"},
+		"a number steps": {`{"steps":{"` + commitA + `":12345}}`, "the member steps of the file has the wrong type"},
+		"an array":       {`["secret"]`, "the file is not JSON of the form of the hand-off"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := readHandoff(handoffIn(t, c.file))
+			if err == nil || err.Error() != c.want {
+				t.Fatalf("the error is %v, want %q", err, c.want)
+			}
+			for _, content := range []string{"Secret", "secret", "invalid character", "12345", commitA} {
+				if strings.Contains(err.Error(), content) {
+					t.Errorf("the cause has %q: %v", content, err)
+				}
+			}
+		})
+	}
+}

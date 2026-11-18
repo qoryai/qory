@@ -35,7 +35,7 @@ const TargetRef = "refs/qory/target-version"
 type WorkBranch struct {
 	// Ref is the branch's name, the same in each repository: qory/<work item id>.
 	Ref string
-	// Version is the entries of the branch version the run read, nil with none, with the
+	// Version is the entries of the submission version the run read, nil with none, with the
 	// commit of each repository that a [Push] of the run pushed. It may have repositories
 	// that the run does not list, and those are not fetched.
 	Version []submission.Repository
@@ -110,7 +110,7 @@ func (b *WorkBranch) CommitOf(system, path string) string {
 }
 
 // fresh reports whether the run documents' checkout is the start of the repository path on
-// system: the branch version has no entry for it and no run that a person did not cancel
+// system: the submission version has no entry for it and no run that a person did not cancel
 // pushed a commit to it, so the branch may be missing at the forge.
 func (b *WorkBranch) fresh(system, path string) bool {
 	if b.CommitOf(system, path) != "" {

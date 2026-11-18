@@ -82,7 +82,7 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, timeout time.Du
 		return branch, nil
 	}
 
-	document, err := readBranchVersion(ctx, client, version)
+	document, err := readSubmissionVersion(ctx, client, version)
 	if err != nil {
 		return nil, fmt.Errorf("%w%s", err, codeUsed)
 	}
@@ -173,9 +173,9 @@ func chosenSubmission(snapshot *runapi.Snapshot, index *runapi.Index) (*runapi.V
 	return nil, nil
 }
 
-// readBranchVersion downloads the one file of version and returns it, checked against the
+// readSubmissionVersion downloads the one file of version and returns it, checked against the
 // submission format.
-func readBranchVersion(ctx context.Context, client *runapi.Client, version *runapi.Version) (*submission.Submission, error) {
+func readSubmissionVersion(ctx context.Context, client *runapi.Client, version *runapi.Version) (*submission.Submission, error) {
 	if len(version.Files) != 1 || version.Files[0].Size > maxSubmissionFile {
 		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary with one file of at most %d bytes: version %d has another size.",
 			submissionType, maxSubmissionFile, version.Number)

@@ -23,7 +23,7 @@ import (
 // workItem is the id of the work item in the documents of [codeDocuments].
 const workItem = "wi_8Kx2mQ4vT9"
 
-// branchAPI serves a run API whose work item has one branch version, with file as its
+// branchAPI serves a run API whose work item has one submission version, with file as its
 // file, or no version for an empty file, and counts the file's downloads.
 func branchAPI(t *testing.T, file string) string {
 	t.Helper()
