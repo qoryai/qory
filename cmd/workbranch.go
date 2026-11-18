@@ -9,20 +9,22 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/qoryai/qory/internal/branchformat"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/submission"
 )
 
-// branchType is the artifact type of a work item's branch, and maxBranchFile the largest
-// file of one of its versions in bytes, the type's size limit in the software factory.
+// submissionType is the artifact type of a work item's submission, and maxSubmissionFile
+// the largest file of one of its versions in bytes, the type's size limit in the software
+// factory.
 const (
-	branchType    = "branch"
-	maxBranchFile = 64 << 10
+	submissionType    = "submission"
+	maxSubmissionFile = 256 << 10
 )
 
 // readBranch reads the branch of the work item that r's run is for, on this machine and
-// before the fetch: nil with no branch step, for a run that is not from a run code, has
+// before the fetch: where the run starts, per repository, and which pushed commits are a
+// cancelled run's. It is nil with no branch step, for a run that is not from a run code, has
 // no work item, or has no target version on the system of its repositories, and for a
 // server with the feature workflow_model off. Each error ends with [codeUsed]. It sets
 // r.runNumber from the work item snapshot.
@@ -67,14 +69,16 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, timeout time.Du
 		return nil, fmt.Errorf("%w%s", err, codeUsed)
 	}
 
-	branch := &preparation.WorkBranch{Ref: branchformat.Name(r.workItem)}
+	branch := &preparation.WorkBranch{Ref: submission.Name(r.workItem)}
 
-	version, err := chosenBranch(snapshot, index)
+	version, err := chosenSubmission(snapshot, index)
 	if err != nil {
 		return nil, err
 	}
 
 	if version == nil {
+		pushedStarts(branch, snapshot.PushedCommits)
+
 		return branch, nil
 	}
 
@@ -85,12 +89,50 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, timeout time.Du
 
 	if document.Ref != branch.Ref {
 		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary with the ref %s: version %d has another ref.%s",
-			branchType, branch.Ref, version.Number, codeUsed)
+			submissionType, branch.Ref, version.Number, codeUsed)
 	}
 
-	branch.Version = document.Repositories
+	// A repository starts at the commit of the version; its commits, links and draft
+	// belong to the run that wrote it.
+	for _, r := range document.Repositories {
+		branch.Version = append(branch.Version, submission.Repository{System: r.System, Path: r.Path, Commit: r.Commit})
+	}
+
+	pushedStarts(branch, snapshot.PushedCommits)
 
 	return branch, nil
+}
+
+// pushedStarts sets what the work item's record of pushed commits gives branch: Pushed,
+// per repository the newest commit of a run that a person did not cancel, and Cancelled,
+// every commit of a cancelled run. The entries come ordered by run number and then by push
+// order, so the last one of a repository is its newest. Fresh is whether the run starts at
+// the run documents' checkout: no submission was chosen and no commit is Pushed.
+func pushedStarts(branch *preparation.WorkBranch, pushed []runapi.PushedEntry) {
+	newest := map[[2]string]preparation.Landed{}
+	order := [][2]string{}
+
+	for _, entry := range pushed {
+		landed := preparation.Landed{System: entry.System, Path: entry.Path, Commit: entry.Commit}
+		if entry.Cancelled {
+			branch.Cancelled = append(branch.Cancelled, landed)
+
+			continue
+		}
+
+		key := [2]string{entry.System, entry.Path}
+		if _, seen := newest[key]; !seen {
+			order = append(order, key)
+		}
+
+		newest[key] = landed
+	}
+
+	for _, key := range order {
+		branch.Pushed = append(branch.Pushed, newest[key])
+	}
+
+	branch.Fresh = len(branch.Version) == 0 && len(branch.Pushed) == 0
 }
 
 // featureOff reports whether err is a 404 with no error code, the error page of a server
@@ -101,63 +143,45 @@ func featureOff(err error) bool {
 	return errors.As(err, &apiError) && apiError.Status == http.StatusNotFound && apiError.Code == ""
 }
 
-// chosenBranch is the version of the artifact type branch that a run starts at: the
-// newest version of the artifact main when the work item's stage wrote it; else the
-// version of any artifact name that a gate approved of a stage's input; else the newest
-// version of the artifact main; nil with none of these. The newest version is the one
-// that [newestNotCancelled] returns, and an approved version of a name whose newest
-// version is withdrawn counts as none.
-func chosenBranch(snapshot *runapi.Snapshot, index *runapi.Index) (*runapi.Version, error) {
-	var newest *runapi.Version
-
+// chosenSubmission is the version of the artifact type submission that a run starts at: the
+// newest version of the artifact main that the work item's stage wrote and that is not
+// cancelled; else the version that a gate approved; nil with none of these, where the run
+// starts at what the run documents check out. A newest version that is a withdrawal counts
+// as none.
+func chosenSubmission(snapshot *runapi.Snapshot, index *runapi.Index) (*runapi.Version, error) {
 	for _, artifact := range index.Artifacts {
-		if artifact.Type == branchType && artifact.Name == defaultName {
-			newest = newestNotCancelled(artifact)
-		}
-	}
-
-	stage := snapshot.Stage.ID
-	if newest != nil && stage != nil && newest.StageID != nil && *stage == *newest.StageID {
-		return newest, nil
-	}
-
-	for _, input := range snapshot.Inputs {
-		if input.Type != branchType || input.Version == nil {
+		if artifact.Type != submissionType || artifact.Name != defaultName {
 			continue
 		}
 
-		for _, artifact := range index.Artifacts {
-			if artifact.Type != branchType {
-				continue
-			}
+		stage := snapshot.Stage.ID
+		if newest := newestNotCancelled(artifact); newest != nil && stage != nil && newest.StageID != nil && *stage == *newest.StageID {
+			return newest, nil
+		}
 
-			for i := range artifact.Versions {
-				if artifact.Versions[i].ID != input.Version.ID {
-					continue
-				}
+		if artifact.ApprovedVersion == nil || withdrawn(artifact) {
+			return nil, nil
+		}
 
-				// A name whose newest version is withdrawn is absent.
-				if withdrawn(artifact) {
-					return newest, nil
-				}
-
+		for i := range artifact.Versions {
+			if artifact.Versions[i].ID == *artifact.ApprovedVersion {
 				return &artifact.Versions[i], nil
 			}
 		}
 
-		return nil, fmt.Errorf("Report this run to the instance admin of Qory Apiary. The approved version %d of the artifact %s is "+
-			"not in the artifact's index.%s", input.Version.Number, branchType, codeUsed)
+		return nil, fmt.Errorf("Report this run to the instance admin of Qory Apiary. The approved version of the artifact %s is "+
+			"not in the artifact's index.%s", submissionType, codeUsed)
 	}
 
-	return newest, nil
+	return nil, nil
 }
 
 // readBranchVersion downloads the one file of version and returns it, checked against the
 // branch format.
-func readBranchVersion(ctx context.Context, client *runapi.Client, version *runapi.Version) (*branchformat.Branch, error) {
-	if len(version.Files) != 1 || version.Files[0].Size > maxBranchFile {
+func readBranchVersion(ctx context.Context, client *runapi.Client, version *runapi.Version) (*submission.Submission, error) {
+	if len(version.Files) != 1 || version.Files[0].Size > maxSubmissionFile {
 		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary with one file of at most %d bytes: version %d has another size.",
-			branchType, maxBranchFile, version.Number)
+			submissionType, maxSubmissionFile, version.Number)
 	}
 
 	var content bytes.Buffer
@@ -165,13 +189,13 @@ func readBranchVersion(ctx context.Context, client *runapi.Client, version *runa
 		return nil, err
 	}
 
-	if err := branchformat.Check(content.Bytes()); err != nil {
-		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary in place of version %d: %w", branchType, version.Number, err)
+	if err := submission.Check(content.Bytes()); err != nil {
+		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary in place of version %d: %w", submissionType, version.Number, err)
 	}
 
-	var document branchformat.Branch
+	var document submission.Submission
 	if err := json.Unmarshal(content.Bytes(), &document); err != nil {
-		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary in place of version %d: %w", branchType, version.Number, err)
+		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary in place of version %d: %w", submissionType, version.Number, err)
 	}
 
 	return &document, nil

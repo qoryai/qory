@@ -302,7 +302,7 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 	}
 	postCtx, cancelPost := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
 	defer cancelPost()
-	posted, err := r.post(postCtx, *point, kind, maxBranchTries)
+	posted, err := r.post(postCtx, *point, kind, maxSubmissionTries)
 	if err != nil {
 		r.said(fmt.Sprintf(textSuiteNoPost, shownError(err)))
 		return session.Outcome{State: event.StateFailed, ExitCode: 1}, &exitError{code: 1}
@@ -588,7 +588,7 @@ func postVerdict(ctx context.Context, client *runapi.Client, body []byte, tries 
 	var last error
 	for try := 1; try <= tries; try++ {
 		if try > 1 {
-			if err := branchWait(ctx, retryAfter(last)); err != nil {
+			if err := submissionWait(ctx, retryAfter(last)); err != nil {
 				return err
 			}
 		}

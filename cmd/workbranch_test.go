@@ -31,7 +31,7 @@ func branchAPI(t *testing.T, file string) string {
 	if file != "" {
 		sum := sha256.Sum256([]byte(file))
 		versions = fmt.Sprintf(`[{"id":"av_1","number":1,"writer":{"kind":"run","run_id":"r"},"stage_id":"st_a","at":"2026-11-02T09:00:00Z",`+
-			`"files":[{"filename":"branch.json","content_type":"application/json","size":%d,"sha256":%q}],"approvals":[]}]`,
+			`"files":[{"filename":"submission.json","content_type":"application/json","size":%d,"sha256":%q}],"approvals":[]}]`,
 			len(file), hex.EncodeToString(sum[:]))
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,8 +39,8 @@ func branchAPI(t *testing.T, file string) string {
 		case "/v1/runs/r/work-item":
 			fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"run":{"id":"r","number":57},"stage":{"id":"st_a"},"inputs":[],"outputs":[]}`, workItem)
 		case "/v1/runs/r/artifacts":
-			fmt.Fprintf(w, `{"version":1,"artifacts":[{"type":"branch","name":"main","newest_version":1,"versions":%s}]}`, versions)
-		case "/v1/runs/r/artifacts/av_1/files/branch.json":
+			fmt.Fprintf(w, `{"version":1,"artifacts":[{"type":"submission","name":"main","newest_version":1,"versions":%s}]}`, versions)
+		case "/v1/runs/r/artifacts/av_1/files/submission.json":
 			fmt.Fprint(w, file)
 		default:
 			http.NotFound(w, r)
@@ -78,8 +78,10 @@ func runOnBranch(t *testing.T, h *hostFetch, version, api string, flags ...strin
 func branchDocument(t *testing.T, commit string) string {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{
-		"ref":          "qory/" + workItem,
-		"repositories": []map[string]string{{"system": proxygittest.Host, "path": "acme/site", "commit": commit}},
+		"ref":     "qory/" + workItem,
+		"verdict": "none",
+		"repositories": []map[string]any{{"system": proxygittest.Host, "path": "acme/site", "commit": commit,
+			"draft": map[string]string{"none": "not-passed"}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -156,11 +158,11 @@ func TestARunStopsOnABrokenBranchVersion(t *testing.T) {
 	commit := strings.Repeat("a", 40)
 	for name, c := range map[string]struct{ file, want string }{
 		"another work item": {
-			`{"ref":"qory/wi_other","repositories":[{"system":"git.test","path":"acme/site","commit":"` + commit + `"}]}`,
-			"Add a new version of the artifact branch in Qory Apiary with the ref qory/" + workItem + ": version 1 has another ref.",
+			`{"ref":"qory/wi_other","verdict":"none","repositories":[{"system":"git.test","path":"acme/site","commit":"` + commit + `","draft":{"none":"not-passed"}}]}`,
+			"Add a new version of the artifact submission in Qory Apiary with the ref qory/" + workItem + ": version 1 has another ref.",
 		},
-		"not the format": {`{"ref":"main"}`, "Add a new version of the artifact branch in Qory Apiary in place of version 1: fix the branch document"},
-		"not JSON":       {"text", "Add a new version of the artifact branch in Qory Apiary in place of version 1: write the branch document"},
+		"not the format": {`{"ref":"main"}`, "Add a new version of the artifact submission in Qory Apiary in place of version 1: fix the submission"},
+		"not JSON":       {"text", "Add a new version of the artifact submission in Qory Apiary in place of version 1: write the submission as one JSON object"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h, first, _, _ := versionRepository(t)

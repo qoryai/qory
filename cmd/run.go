@@ -54,6 +54,7 @@ import (
 	"github.com/qoryai/qory/internal/runtimeinstall"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/source"
+	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/statusfd"
 	"github.com/qoryai/qory/internal/ui"
 )
@@ -751,6 +752,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// link is the transcript link of a run whose agent starts on a fresh home, see
 			// [transcriptLinkFor].
 			var link transcriptLink
+			var branch *preparation.WorkBranch
+			// handoffFile is the path of the hand-off file of a run on a work item's branch, and
+			// hasProgram whether the composed harness has a submit program.
+			var handoffFile string
+			var hasProgram bool
 			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
 				composing.writable = nil
 				for _, m := range spec.Mounts {
@@ -813,6 +819,17 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// harness gets a line.
 				submitLevel := accessOf(fromCode, workflows)
 				fromCode.limitSubmit(submitLevel)
+				// Only a run at level write submits: a run at write-no-push or read has no
+				// submit program and no hand-off file.
+				if submitLevel == stack.AccessWrite {
+					hasProgram = c.submitProgram != nil
+					if branch != nil {
+						// The hand-off file is in the checkout's .qory, which no commit has: a
+						// walled session writes it through the checkout's mount.
+						handoffFile = handoffPath(at.root)
+						spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{handoffEnv: handoffFile})
+					}
+				}
 				if line := fromCode.submitLine(rep, submitLevel); line != "" {
 					fmt.Fprintln(w, "qory run:", line)
 				}
@@ -910,7 +927,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
 			}
 			// branch is the branch of the run's work item, set by hostWork, nil for none.
-			var branch *preparation.WorkBranch
 			// codeLine ends a line that stops a run from a run code with [codeUsed].
 			codeLine := func(err error) error {
 				if code != nil {
@@ -1384,6 +1400,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					ctx: ctx, again: again, limit: limit, stopNow: stopNow,
 					run: run, stderr: streams.errOut, branch: branch, dir: cwd, runID: spec.RunID,
 					runNumber: fromCode.runNumber, agentStopped: walled, checks: checks,
+					handoff: handoffFile, program: hasProgram,
 				}
 				out, pushErr = pushAfterSession(push, &ending, out)
 			}

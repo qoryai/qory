@@ -9,20 +9,20 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/qoryai/qory/internal/branchformat"
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/integration"
+	"github.com/qoryai/qory/internal/submission"
 )
 
 // The words of the checkout of a work item's branch. Each is one format string.
 const (
 	textOnBranch        = "qory run: on branch %s at %s"
-	textBranchNoCommit  = "qory run: add a new version of the artifact branch in Qory Apiary with a commit of %[2]s, then take the work item in again: the version has %[1]s, which is not a commit on %[2]s on %[3]s. The fetch through the run's gateway failed: %[4]s; the code is used"
-	textBranchNotCommit = "qory run: add a new version of the artifact branch in Qory Apiary with a commit of %[2]s, then take the work item in again: the version has %[1]s, which is not a commit; the code is used"
-	textQoryInBranch    = "qory run: add a new version of the artifact branch in Qory Apiary whose commit has .qory as the target version %[3]s has it, then take the work item in again: commit %[2]s of %[1]s has another .qory, where qory keeps the files of the run; the code is used"
-	textNoCheckout      = "qory run: add a new version of the artifact branch in Qory Apiary with a commit that git can check out, then take the work item in again. The checkout of %[1]s at %[2]s in %[3]s failed: %[4]s; the code is used"
+	textBranchNoCommit  = "qory run: add a new version of the artifact submission in Qory Apiary with a commit of %[2]s, then take the work item in again: the version has %[1]s, which is not a commit on %[2]s on %[3]s. The fetch through the run's gateway failed: %[4]s; the code is used"
+	textBranchNotCommit = "qory run: add a new version of the artifact submission in Qory Apiary with a commit of %[2]s, then take the work item in again: the version has %[1]s, which is not a commit; the code is used"
+	textQoryInBranch    = "qory run: add a new version of the artifact submission in Qory Apiary whose commit has .qory as the target version %[3]s has it, then take the work item in again: commit %[2]s of %[1]s has another .qory, where qory keeps the files of the run; the code is used"
+	textNoCheckout      = "qory run: add a new version of the artifact submission in Qory Apiary with a commit that git can check out, then take the work item in again. The checkout of %[1]s at %[2]s in %[3]s failed: %[4]s; the code is used"
 )
 
 // TargetRef is the ref that [Switch] leaves at the target version: [fromSeed] reads which
@@ -38,7 +38,16 @@ type WorkBranch struct {
 	// Version is the entries of the branch version the run read, nil with none, with the
 	// commit of each repository that a [Push] of the run pushed. It may have repositories
 	// that the run does not list, and those are not fetched.
-	Version []branchformat.Repository
+	Version []submission.Repository
+	// Pushed is, per repository, the newest commit pushed by a run that a person did not
+	// cancel, from the work item's record of pushed commits; the run starts there instead of
+	// at Version when that commit descends from the commit of Version, or from the
+	// repository's target commit when Version has none. Cancelled is every commit that a
+	// cancelled run pushed. Fresh is whether the run documents' checkout is the run's
+	// start: the work item has no submission and no pushed commit of a run that is not
+	// cancelled, so the branch may be missing at the forge.
+	Pushed, Cancelled []Landed
+	Fresh             bool
 	// Repositories is every repository of the run, the target first, set by [RunAt] and
 	// [Switch].
 	Repositories []WorkRepository
@@ -85,6 +94,8 @@ type WorkRepository struct {
 	// Commit is HEAD after the checkout, and after a [Push] that pushed the repository the
 	// commit it pushed: a run's new commits are the ones past it.
 	Commit string
+	// Start is the commit the run started at in the repository: HEAD after [Switch].
+	Start string
 }
 
 // CommitOf is the commit of the repository path on system in the branch's version, ""
@@ -103,7 +114,10 @@ func (b *WorkBranch) CommitOf(system, path string) string {
 // FETCH_HEAD alone until [Switch]. It runs under the hold of the fetch, because the check
 // before a fetch stops on the remote's key that the fetch writes.
 func fetchBranchCommit(ctx context.Context, git gitRunner, dest, system, path string, b *WorkBranch) error {
-	commit := b.CommitOf(system, path)
+	commit, err := b.startOf(ctx, git, dest, system, path)
+	if err != nil {
+		return err
+	}
 	if commit == "" {
 		return nil
 	}
@@ -118,6 +132,58 @@ func fetchBranchCommit(ctx context.Context, git gitRunner, dest, system, path st
 		return fmt.Errorf(textBranchNotCommit, shortCommit(commit), integration.Printable(exports.Value(path, false)))
 	}
 	return nil
+}
+
+// startOf is the commit the run starts at in the repository path on system, whose clone
+// at dest is at the target version: the commit of [WorkBranch.Version], or, when
+// [WorkBranch.Pushed] has a newer commit of the repository whose history has that commit,
+// or the target version when the version has none, the pushed commit, which it also sets
+// in the version. It is "" for a repository with neither.
+func (b *WorkBranch) startOf(ctx context.Context, git gitRunner, dest, system, path string) (string, error) {
+	commit := b.CommitOf(system, path)
+	var pushed string
+	for _, l := range b.Pushed {
+		if l.System == system && sameRepository(system == ForgeGitHub, l.Path, path) {
+			pushed = l.Commit
+		}
+	}
+	if pushed == "" || pushed == commit {
+		return commit, nil
+	}
+	base := commit
+	if base == "" {
+		head, err := git(ctx, dest, "rev-parse", "HEAD")
+		if err != nil {
+			return "", notFetched(path, system, err)
+		}
+		base = strings.TrimSpace(head)
+	}
+	h, remove, err := openHistory(ctx, git, system, path, base, pushed)
+	defer remove()
+	if err != nil {
+		return "", notAtCommit(path, system, pushed, err)
+	}
+	above, err := h.descends(ctx, base, pushed)
+	if err != nil {
+		return "", notAtCommit(path, system, pushed, err)
+	}
+	if !above {
+		return commit, nil
+	}
+	b.Version = withStart(b.Version, system, path, pushed)
+	return pushed, nil
+}
+
+// withStart is version with the commit of the repository path on system set to commit,
+// as a new entry when it has none: the commit a run starts at.
+func withStart(version []submission.Repository, system, path, commit string) []submission.Repository {
+	for i := range version {
+		if version[i].System == system && sameRepository(system == ForgeGitHub, version[i].Path, path) {
+			version[i] = submission.Repository{System: system, Path: path, Commit: commit}
+			return version
+		}
+	}
+	return append(version, submission.Repository{System: system, Path: path, Commit: commit})
 }
 
 // branchNoCommit is [textBranchNoCommit] for commit of path on system, with git's line.
@@ -171,6 +237,7 @@ func checkOutBranch(ctx context.Context, dir string, base []string, b *WorkBranc
 			return noCheckout(b, *r, err)
 		}
 		r.Commit = strings.TrimSpace(head)
+		r.Start = r.Commit
 	}
 	fmt.Fprintf(report, textOnBranch+"\n", b.Ref, shortCommit(b.Repositories[0].Commit))
 	return nil

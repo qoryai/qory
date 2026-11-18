@@ -9,19 +9,27 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/qoryai/qory/internal/branchformat"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/proxygit"
+	"github.com/qoryai/qory/internal/submission"
 )
 
 // onBranch fetches acme/shop, and acme/lib when list has it, and checks out the branch,
 // from a first commit of each repository; it returns the working folder and the branch.
 func onBranch(t *testing.T, list string) (string, *WorkBranch) {
+	dir, b, _ := onBranchIn(t, list)
+	return dir, b
+}
+
+// onBranchIn is [onBranch] that also returns the folder of the remotes, whose repository
+// acme/shop is shop.git in the folder acme.
+func onBranchIn(t *testing.T, list string) (string, *WorkBranch, string) {
 	t.Helper()
 	needGit(t)
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
@@ -32,6 +40,8 @@ func onBranch(t *testing.T, list string) (string, *WorkBranch) {
 	dir := emptyFolder(t)
 	version := run(t, filepath.Join(base, "acme", "shop.git"), "rev-parse", "main")
 	b := fetchBranchAt(t, dir, list, version, nil)
+	// A first run: no submission and no pushed commit, so the branch is not at the forge yet.
+	b.Fresh = true
 	if _, err := switchTo(dir, b); err != nil {
 		t.Fatal(err)
 	}
@@ -39,20 +49,23 @@ func onBranch(t *testing.T, list string) (string, *WorkBranch) {
 		bare := filepath.Join(base, filepath.FromSlash(r.Path)+".git")
 		run(t, bare, "config", "http.receivepack", "true")
 	}
-	return dir, b
+	return dir, b, base
 }
 
 // pushOf is [Push] of b in dir, with the message "Changes left", which returns the lines
 // it printed too.
-func pushOf(dir string, b *WorkBranch) (*branchformat.Branch, string, error) {
+func pushOf(dir string, b *WorkBranch) (*submission.Submission, string, error) {
 	return pushWith(dir, b, true)
 }
 
 // pushWith is [pushOf] with agentStopped set.
-func pushWith(dir string, b *WorkBranch, agentStopped bool) (*branchformat.Branch, string, error) {
+func pushWith(dir string, b *WorkBranch, agentStopped bool) (*submission.Submission, string, error) {
 	var report strings.Builder
-	doc, err := Push(context.Background(), dir, os.Environ(), b, "Changes left", testProxy, agentStopped, &report)
-	return doc, report.String(), err
+	repositories, err := Push(context.Background(), dir, os.Environ(), b, "Changes left", testProxy, testProxy, agentStopped, &report)
+	if repositories == nil {
+		return nil, report.String(), err
+	}
+	return &submission.Submission{Repositories: repositories}, report.String(), err
 }
 
 // TestAfterTheRunTheCheckTakesWhatTheFetchWrote is a repository qory fetched: the check
@@ -160,18 +173,22 @@ func TestNoChangeAfterGitAddsCommitsNothing(t *testing.T) {
 }
 
 // TestWithCommit replaces the entry of a repository, in any letter case on github.com,
-// and adds one for a repository that has none.
+// with the run's base and commits, and adds one for a repository that has none.
 func TestWithCommit(t *testing.T) {
-	entry := func(system, path, commit string) branchformat.Repository {
-		return branchformat.Repository{System: system, Path: path, Commit: commit}
+	entry := func(system, path, commit string) submission.Repository {
+		return submission.Repository{System: system, Path: path, Commit: commit}
 	}
-	version := []branchformat.Repository{entry("github.com", "Acme/Shop", "a"), entry("github.com", "acme/lib", "b")}
-	got := withCommit(slices.Clone(version), "github.com", "acme/shop", "c")
-	if want := []branchformat.Repository{entry("github.com", "Acme/Shop", "c"), entry("github.com", "acme/lib", "b")}; !slices.Equal(got, want) {
+	commits := []submission.Commit{{Commit: "b1"}, {Commit: "c"}}
+	pushed := func(system, path string) submission.Repository {
+		return submission.Repository{System: system, Path: path, Commit: "c", Base: &submission.Base{Commit: "a"}, Commits: commits}
+	}
+	version := []submission.Repository{entry("github.com", "Acme/Shop", "a"), entry("github.com", "acme/lib", "b")}
+	got := withCommit(slices.Clone(version), "github.com", "acme/shop", "c", "a", commits)
+	if want := []submission.Repository{pushed("github.com", "Acme/Shop"), entry("github.com", "acme/lib", "b")}; !reflect.DeepEqual(got, want) {
 		t.Errorf("replaced: %+v, want %+v", got, want)
 	}
-	got = withCommit(slices.Clone(version), "git.example.com", "Acme/Shop", "c")
-	if len(got) != 3 || got[2] != entry("git.example.com", "Acme/Shop", "c") {
+	got = withCommit(slices.Clone(version), "git.example.com", "Acme/Shop", "c", "a", commits)
+	if len(got) != 3 || !reflect.DeepEqual(got[2], pushed("git.example.com", "Acme/Shop")) {
 		t.Errorf("added: %+v", got)
 	}
 }
@@ -195,7 +212,6 @@ func TestPushCause(t *testing.T) {
 func TestPushFailed(t *testing.T) {
 	b := &WorkBranch{Ref: testRef, system: "git.example.com"}
 	for output, want := range map[string]string{
-		" ! [rejected] a -> b (non-fast-forward)":           "qory run: add a new version of the artifact branch",
 		" ! [remote rejected] a -> b (protected)":           "qory run: change the rule on git.example.com",
 		"error: RPC failed; HTTP 403 curl 22":               "qory run: Contact support: the push was refused (403).",
 		"fatal: unable to access 'x': returned error: 403":  "qory run: Contact support: the push was refused (403).",

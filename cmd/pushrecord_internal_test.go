@@ -205,12 +205,12 @@ func TestAReportCutDuringTheCallStillGivesTheContactSupportLine(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			if c.wait {
-				before := branchWait
-				branchWait = func(ctx context.Context, _ time.Duration) error {
+				before := submissionWait
+				submissionWait = func(ctx context.Context, _ time.Duration) error {
 					cancel()
 					return ctx.Err()
 				}
-				defer func() { branchWait = before }()
+				defer func() { submissionWait = before }()
 			}
 			send := func(ctx context.Context, _ []byte) ([]byte, error) { return c.send(ctx, cancel) }
 			ended, err := recordLanded(ctx, send, "qory/w-1", landedRepositories(1))
@@ -303,9 +303,9 @@ func TestASendThatGetsNoResponseIsCutAtTheLimit(t *testing.T) {
 	before := recordAttemptLimit
 	recordAttemptLimit = 20 * time.Millisecond
 	defer func() { recordAttemptLimit = before }()
-	waits := branchWait
-	branchWait = func(context.Context, time.Duration) error { return nil }
-	defer func() { branchWait = waits }()
+	waits := submissionWait
+	submissionWait = func(context.Context, time.Duration) error { return nil }
+	defer func() { submissionWait = waits }()
 	var sends int
 	send := func(ctx context.Context, _ []byte) ([]byte, error) {
 		sends++

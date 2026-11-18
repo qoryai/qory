@@ -181,9 +181,10 @@ release may change what an existing document does, and states it under Upgrading
   503 `push_check_unavailable`, qory run writes the cause on its stderr, and the push
   exits 1. Outside a run, `qory artifact push` runs no check. See The module manifest in
   `contracts/harness/v1/README.md`.
-- Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
-  item's branch, `qory/<work item id>`, and the commit in each repository. A software
-  factory can use it as the `json_schema` of a custom artifact type `branch`.
+- Version 1 of the submission format, `contracts/harness/v1/submission.schema.json`: what
+  a run submits for a work item, its branch `qory/<work item id>`, the commits in each
+  repository with the step that made each, the verdict, and the draft pull request. A
+  software factory can use it as the `json_schema` of the artifact type `submission`.
 - Version 1 of the questions format, `contracts/harness/v1/questions.schema.json`: every
   question of a work item and its answer or a run's decision, the file of the artifact
   type `questions`. A run adds, decides, withdraws or reopens questions with `qory artifact
@@ -527,6 +528,17 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The push step stores a version of the artifact type `submission`, in place of `branch`.
+  The step checks the head of the branch on the forge before it pushes: a head that is not
+  the commit the run expected ends the run `failed` with the code `push_head_changed`, and
+  the push replaces commits of cancelled runs only, with a lease on the head it checked.
+  A run starts at the newest commit that an earlier run pushed and a person did not cancel.
+- A module manifest can declare `submit_program`, a command of the module that opens the
+  draft pull request. A composed harness has one; a second declaration stops the compose.
+- A run adds the module that Qory Apiary sends as `submit_module` by its manifest name, in
+  place of the module of that name in the harness, and prints a line for the replacement.
+- A session hands its title, description and the step of each commit to the submit step in
+  the file that `QORY_SUBMISSION_HANDOFF` names. A commit with no step is `unreviewed`.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
   qory stops a run whose documents have one. A run whose documents set no

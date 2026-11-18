@@ -272,11 +272,11 @@ func TestAPushCheckMountsTheVersionBeforeAWithdrawal(t *testing.T) {
 	}
 }
 
-// checksModule is a module that declares a push check for branch and one for spec,
+// checksModule is a module that declares a push check for submission and one for spec,
 // which reads questions; its program's #! line is for node.
 var checksModule = map[string]string{
 	"modules/checks/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: checks\npush_checks:\n" +
-		"  - type: branch\n    command: [bin/check, push, branch]\n" +
+		"  - type: submission\n    command: [bin/check, push, submission]\n" +
 		"  - type: spec\n    command: [bin/check, push, spec]\n    reads: [questions]\n",
 	"modules/checks/bin/check":         "#!/usr/bin/env node\n",
 	"modules/checks/skills/c/SKILL.md": "---\nname: c\ndescription: c\n---\n",
@@ -655,7 +655,7 @@ func TestACheckThatCannotBeSetStopsTheRun(t *testing.T) {
 // branch: a check that exits 1 stops the step before its POST, the step's lines have
 // the fix line and the findings, and the run fails as on another push failure.
 func TestThePushStepChecksItsVersion(t *testing.T) {
-	docker, log := checkDocker(t, 1, "branch.json: the ref is not the work item's\n")
+	docker, log := checkDocker(t, 1, "submission.json: the ref is not the work item's\n")
 	p, _ := newCheckedRepo(t, docker)
 	r := p.run(t, func(dir string) { writeFile(t, filepath.Join(dir, "left.txt"), "left\n") }, nil)
 	r.wantsClose(t, event.StateFailed, 1)
@@ -666,17 +666,17 @@ func TestThePushStepChecksItsVersion(t *testing.T) {
 		t.Errorf("the push step ended %s, want failed\n%s", state, r.out)
 	}
 	wants(t, r.log(),
-		"qory run: "+versionWays+", then take the work item in again: qory pushed qory/"+workItem+", and the version of the artifact branch was not stored: the version did not pass the check for branch; the code is used\n"+
-			"qory run: The check for branch failed:\nqory run: branch.json: the ref is not the work item's\n")
-	if strings.Contains(r.log(), "push again") || strings.Count(r.out, "The check for branch failed:") != 1 {
+		"qory run: "+versionWays+", then take the work item in again: qory pushed qory/"+workItem+", and the version of the artifact submission was not stored: the version did not pass the check for submission; the code is used\n"+
+			"qory run: The check for submission failed:\nqory run: submission.json: the ref is not the work item's\n")
+	if strings.Contains(r.log(), "push again") || strings.Count(r.out, "The check for submission failed:") != 1 {
 		t.Errorf("the step's lines have \"push again\", or the check's line not once:\n%s", r.out)
 	}
-	if !strings.Contains(checkLog(t, log), "/qory-push-check/files/branch.json") {
-		t.Errorf("the check did not get branch.json:\n%s", checkLog(t, log))
+	if !strings.Contains(checkLog(t, log), "/qory-push-check/files/submission.json") {
+		t.Errorf("the check did not get submission.json:\n%s", checkLog(t, log))
 	}
 }
 
-// TestThePushStepStoresAVersionThatPasses is a walled run whose check of branch exits 0:
+// TestThePushStepStoresAVersionThatPasses is a walled run whose check of submission exits 0:
 // the step stores the version.
 func TestThePushStepStoresAVersionThatPasses(t *testing.T) {
 	docker, log := checkDocker(t, 0, "")
@@ -686,7 +686,7 @@ func TestThePushStepStoresAVersionThatPasses(t *testing.T) {
 	if posts, _, stored := p.api.counts(); posts != 1 || stored != 1 {
 		t.Errorf("%d POST and %d versions, want 1 and 1\n%s", posts, stored, r.out)
 	}
-	if !strings.Contains(checkLog(t, log), "/qory-push-check/files/branch.json") {
+	if !strings.Contains(checkLog(t, log), "/qory-push-check/files/submission.json") {
 		t.Errorf("the check did not run:\n%s", checkLog(t, log))
 	}
 }

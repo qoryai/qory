@@ -2006,17 +2006,25 @@ not set, qory does not use `target_version`.
 
 A run of a work item at a `target_version` of a target on `QORY_RUN_SYSTEM` works on the
 branch `qory/<work item id>`. qory reads the work item and its artifacts through the run API
-before the fetch, and picks one version of the artifact type `branch`:
+before the fetch. For each repository, it picks the commit the run starts at, the start
+commit:
 
-1. The newest version of the artifact named `main`, if the work item's stage wrote it.
-2. Else, the version that a gate approved, of any artifact name, if the stage lists
-   `branch` as an input.
-3. Else, the newest version of the artifact named `main`.
-4. With no version, the run creates the branch at `target_version`.
+1. The commit of the newest version of the artifact `main` of the type `submission` that the
+   work item's stage wrote.
+2. Else, the commit of the version of that artifact that a gate approved, unless the
+   newest version is a withdrawal.
+3. Else, the checkout at `target_version`: the run creates the branch there.
 
-The newest version in steps 1 and 3 is the one with the highest number that the artifact
-index does not mark `cancelled`: a version that a cancelled run made counts for no stage.
-When every version of `main` is cancelled, steps 1 and 3 find none.
+The newest version in step 1 is the one with the highest number that the artifact index
+does not mark `cancelled`: a version that a cancelled run made counts for no stage.
+When every version of `main` is cancelled, step 1 finds none.
+
+Then the run moves to the newest commit of the repository that an earlier run pushed, when
+a person did not cancel that run and the commit descends from the start commit. qory reads
+these commits from `pushed_commits` in the response to `GET /work-item`, which lists each
+commit of the work item's earlier runs, ordered by run number and then by push order, and
+marks the commits of cancelled runs. A commit of a cancelled run, and a commit that does not descend from the start
+commit, moves the run nowhere.
 
 qory composes the harness at `target_version`, with the further repositories at their
 default branches, before it checks out the work item's branch. When the documents contain
@@ -2038,7 +2046,7 @@ copy.
 
 A run stops before the agent starts when:
 
-- the version does not match the [branch format](../contracts/harness/v1/README.md#the-branch-format),
+- the version does not match the [submission format](../contracts/harness/v1/README.md#the-submission-format),
   or its `ref` is another work item's;
 - a commit is not on its repository;
 - the target's commit has another `.qory` than `target_version`;
@@ -2574,10 +2582,9 @@ limits. Each error starts with its fix:
 ### The push step of a write run
 
 A write run of a work item ends with a push step: qory commits what the agent left, pushes
-it to the branch `qory/<work item id>`, and stores a new version of the artifact `branch`.
-The next run in the same stage starts at that commit. A run of another stage starts at the
-version a gate approved when its stage lists `branch` as an input, and at that commit
-otherwise. The step runs after the run's session, once the agent exited, and before the
+it to the branch `qory/<work item id>`, and stores a new version of the artifact `main` of
+the type `submission`. The next run of the work item starts at the newest commit that a run
+pushed and a person did not cancel, as [What the run takes from the response](#what-the-run-takes-from-the-response) says. The step runs after the run's session, once the agent exited, and before the
 run closes. A setup container is gone by then: qory removes it before the step, in the wall step `remove the setup
 container`, so no process in it writes the working folder after the check. Its kind is `push` and its name is `push qory/<work item
 id> to <system>/<path>`, followed by ` and 1 further repository` or ` and <n> further
@@ -2594,6 +2601,7 @@ for a session with no reason. A session that succeeded has neither.
 A run has no step in these cases, and what the agent left stays in the working folder only:
 
 - A read run.
+- A `write-no-push` run.
 - A run whose session did not start, or stopped with an error of the session itself.
 - A run that Qory Apiary ended during its session. What the agent left stays on the machine
   and is deleted with it, so nothing reaches the branch.
@@ -2630,18 +2638,22 @@ The step does this, in order:
    container, so what it changed counts as what the agent left. No hook in `.git` runs.
    The commits of all repositories come before the first push, so a failed commit pushes
    nothing.
-4. qory pushes each repository whose `HEAD` is past the commit the run started at to
-   `refs/heads/qory/<work item id>`, through the run's push proxy, with no force. It
-   prints `qory run: pushed qory/<work item id> to <path> at <commit>`, where `<commit>`
-   is the commit's first 12 characters. With no new commit in any repository, it prints
-   `qory run: no new commits to push`, and the step ends with no push and no version.
-5. qory stores a new version of the artifact `main` of the type `branch`, with one file,
-   `branch.json`, in the [branch format](../contracts/harness/v1/README.md#the-branch-format):
-   the version the run read, with the commit of each pushed repository replaced, or added
-   when the version has no entry for it. After a 429, qory waits for `Retry-After`, at
-   most 60 seconds, and sends the request again, at most 5 requests in all. After a request
-   with no answer, or with a status of 500 or above, qory reads the work item's artifacts
-   first, and sends the request again only when no version of this run has the file.
+4. qory checks the head of the branch on the forge, for each repository whose `HEAD` is past
+   the commit the run expected, as [The head check](#the-head-check) says. When one
+   repository fails the check, qory pushes nothing in any repository.
+5. qory pushes each of these repositories to `refs/heads/qory/<work item id>`, through the
+   run's push proxy: a fast-forward push, or a push with a lease where the head check asks
+   for one. It prints `qory run: pushed qory/<work item id> to <path> at <commit>`, where
+   `<commit>` is the commit's first 12 characters. With no new commit in any repository,
+   it prints `qory run: no new commits to push`, and the step ends with no push and no
+   version.
+6. qory stores a new version of the artifact `main` of the type `submission`, with one file,
+   `submission.json`, in the [submission format](../contracts/harness/v1/README.md#the-submission-format),
+   as [The submit step](#the-submit-step) says. After a 429, qory waits for `Retry-After`,
+   at most 60 seconds, and sends the request again, at most 5 requests in all. After a
+   request with no answer, or with a status of 500 or above, qory reads the work item's
+   artifacts first, and sends the request again only when no version of this run has the
+   file.
 
 The push proxy is the run's second proxy on the run's gateway. qory starts it for the push,
 after it removed the setup container, and closes it when the push returns. It sets only the
@@ -2682,9 +2694,11 @@ its 15 seconds when the agent's runtime stops within the 10 seconds of the defau
 `--stop-grace`. A longer `--stop-grace` takes time from the step, and SIGKILL ends it.
 
 One repository can be pushed before another fails, and a push can succeed before its version
-is stored. The branch is then past every version of the artifact, and the next run's push
-fails as a branch that moved. Each line for that state gives both ways out: add a version
-with the head of the branch, or delete the branch.
+is stored. The branch is then past every version of the artifact `submission`. When Qory
+Apiary has no record of the push (see The report of a push), the head of the branch is past
+the commit the next run starts at, and the next run ends `failed` with the end code
+`push_head_changed`. Each line for that state gives both ways out: add a version of the
+artifact `submission` with the head of the branch, or delete the branch.
 
 On a run that can push, each of these lines stops the run after the setup, before the
 agent starts, and closes it `failed` with `no_session`:
@@ -2712,9 +2726,20 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   <commit>: HEAD of <path> is at <commit>, which does not descend from it, so a push would
   not be a fast-forward; the code is used`, when the agent replaced the commit the run
   started at
-- `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
-  id> on <path>, or delete that branch on <system>, then take the work item in again: the
-  branch moved since the run fetched it, and the push failed: <error>; the code is used`
+- `Check branch qory/<work item id>: its head is not the commit this run expected, so qory
+  did not push.`, then a line indented by two spaces: `Repository <system>/<path>. Head:
+  <head>. Expected: <commit>, <the start commit or this run's last push>.` `<head>` is
+  `none` when the branch is not on the forge. A third line, `The head does not descend from
+  the expected commit.`, follows when the head is not past the expected commit. Both
+  commits are in full. The step pushes nothing in any repository, and ends the run as
+  [The head check](#the-head-check) says. A push that the forge rejects with the status
+  `[rejected]`, such as a lease that no longer matches, ends the step with the same text,
+  with the head read again
+- `Let the run's gateway read <system>, then take the work item in again.`, then a line
+  indented by two spaces: `The read of the head of <path> through the run's host proxy
+  failed: <error>; the code is used`
+- `take the work item in again in Qory Apiary: the run's host proxy, through which qory
+  reads the head of the branch before it pushes, did not open: <error>; the code is used`
 - `change the rule on <system> that stops a push to qory/<work item id> of <path>, then take
   the work item in again: the push failed: <error>; the code is used`, when a rule or a
   hook on the system stops the update
@@ -2735,23 +2760,109 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `take the work item in again in Qory Apiary: the run's push proxy, through which qory
   pushes the run's commits, did not open: <error>; the code is used`
 - `take the work item in again in Qory Apiary: the run API, which stores the version of the
-  artifact branch, is not reachable from this run: <error>; the code is used`
-- `Define the artifact type branch in the workspace's Artifact types, then add a new version
-  of the artifact branch in Qory Apiary with the head of qory/<work item id> on <path>, or
-  delete that branch on <system>, then run the round again`, when the workspace has no
-  artifact type `branch`
-- `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
-  id> on <path>, or delete that branch on <system>, then take the work item in again: qory
-  pushed <branch>, and the version of the artifact branch was not stored: <error>; the code
-  is used`
-- `check the artifact branch of the work item in Qory Apiary; with no version of this run,
-  add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
-  id> on <path>, or delete that branch on <system>; then take the work item in again: qory
-  pushed <branch>, and the request that stores its version ended with no response, so the
-  version may or may not be stored: <error>; the code is used`
-- `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
-  id> on <path>, or delete that branch on <system>: qory pushed <path> and stored no version,
+  artifact submission, is not reachable from this run: <error>; the code is used`
+- `Define the artifact type submission in the workspace's Artifact types, then add a new
+  version of the artifact submission in Qory Apiary with the head of qory/<work item id> on
+  <path>, or delete that branch on <system>, then run the round again`, when the workspace
+  has no artifact type `submission`
+- `add a new version of the artifact submission in Qory Apiary with the head of qory/<work
+  item id> on <path>, or delete that branch on <system>, then take the work item in again:
+  qory pushed <branch>, and the version of the artifact submission was not stored: <error>;
+  the code is used`
+- `check the artifact submission of the work item in Qory Apiary; with no version of this
+  run, add a new version of the artifact submission in Qory Apiary with the head of
+  qory/<work item id> on <path>, or delete that branch on <system>; then take the work item
+  in again: qory pushed <branch>, and the request that stores its version ended with no
+  response, so the version may or may not be stored: <error>; the code is used`
+- `add a new version of the artifact submission in Qory Apiary with the head of qory/<work
+  item id> on <path>, or delete that branch on <system>: qory pushed <path> and stored no version,
   because the push of the next repository failed: <line of that failure>`
+
+#### The head check
+
+Before any push, qory reads the head of `refs/heads/qory/<work item id>` on the forge, for
+each repository whose `HEAD` is past the commit the run expected. The expected commit is the
+start commit, or, after a push of this run, the commit of its last push. qory reads through
+the run's host proxy, with the read credential, because the push proxy has the push
+credential alone. The result of each repository is one of these:
+
+- The head is the expected commit: qory pushes with no lease.
+- The branch is not on the forge, and the run started at the checkout at `target_version`
+  (no version of the artifact `submission` and no commit that a person did not cancel was
+  pushed before) and has not pushed yet: qory pushes with no lease and creates the branch.
+- The head is past the start commit, the run has not pushed yet, and every commit past the
+  start commit is recorded as pushed by a run that a person cancelled: qory pushes with
+  `--force-with-lease=refs/heads/qory/<work item id>:<head>`, so the push replaces
+  those commits only while the branch is still at the head qory read.
+- Any other head, the branch missing where the run did not start at the checkout, or a head
+  that does not descend from the expected commit: qory pushes nothing in any repository,
+  and the step fails with the refusal in the list above, which starts with `Check branch
+  qory/<work item id>`.
+
+A push that the forge rejects with the status `[rejected]`, such as a lease that no longer
+matches, also fails the step with that refusal, with the head read again. When the read of a
+head fails, the step fails with the line `Let the run's gateway read <system>`, also in the
+list above.
+
+After a session that succeeded, a refusal closes the run `failed` with the end code
+`push_head_changed`. A session that did not succeed keeps its end, and a step that a stop or
+the time limit cut closes the run as the sections above say.
+
+#### The submit step
+
+After the push and the report of the pushed commits, the push step stores the submission,
+the document of the [submission format](../contracts/harness/v1/README.md#the-submission-format),
+as a version of the artifact `main` of the type `submission`. A `write-no-push` run and a
+read run have no submit step. The document has:
+
+- `ref`: `qory/<work item id>`.
+- `verdict`: the newest verdict of the work item, `passed`, `changes-requested` or
+  `escalate`, when this run wrote it. Otherwise `none`.
+- `text`: `title` and `description` from the hand-off file. Absent when the file gives no
+  text, or its `title` is empty. The format allows a title of at most 256 characters and a
+  description of at most 20000.
+- `repositories`: each repository that the version the run read lists, and each repository
+  the run pushed, each with `system`, `path`, `commit` and `draft`. A repository that the run
+  pushed also has `base`, the start commit, and `commits`, each commit from the start commit
+  to `commit`, oldest first, with its `step`. A repository that the run did not push has no
+  `base` and no `commits`.
+- `draft` of each repository: `{"none": <reason>}`. The reason is `escalated` when the
+  verdict is `escalate`; `not-passed` when the verdict is any other than `passed`;
+  `no-text` when the verdict is `passed` and `text` is absent; `no-program` when the verdict
+  is `passed` and `text` is there.
+
+The hand-off file is how a session gives qory its text and the ledger step of each
+commit. A run on a work item's branch at the access `write` has the variable
+`QORY_SUBMISSION_HANDOFF`, which holds the path of the file: `.qory/handoff/submission.json`
+in the checkout. The file is JSON:
+
+```json
+{"text": {"title": "Add an orders page", "description": "The page lists open orders."},
+ "steps": {"<full commit id>": "<ledger step>"}}
+```
+
+qory reads `text` and `steps` and nothing else. A commit with no entry in `steps` has the
+step `unreviewed`. That includes the commit that qory makes of what the agent left, which
+the hand-off cannot list, so a run that reached its time limit stores the edits it left as
+one commit with the step `unreviewed`.
+
+qory reads the file only when it is a regular file of at most 262144 bytes that holds JSON
+of this form. With no file, the submission has no `text`, and each commit is `unreviewed`.
+With a link, any other file that is not a regular file, a larger file, or a file that is not
+this JSON, qory ignores the file, stores the submission the same way, and prints
+`qory run: Check the file at the path in QORY_SUBMISSION_HANDOFF: qory ignored it and stored
+the submission with no text, and each commit as unreviewed. <cause>`. `<cause>` is `the path
+is not a regular file`, `the file has <size> bytes, and qory reads at most 262144`, or the
+error of the JSON reader.
+
+A module manifest can declare `submit_program`, a command of the module: a file in the
+module, then its arguments (see `contracts/harness/v1/README.md`). A composed harness has
+at most one, and a second declaration fails the compose. The run's documents can set
+`submit_module`: a module's `name` in its manifest, and its git `source`, whose `ref` is a
+full commit id. qory adds that module after the modules of the stack. When a module of the
+stack has the same name in its manifest and the same git source, qory reads that module at
+the commit in place of its ref, and prints `qory run: <module> from <url>@<commit>, in place
+of <ref> in <place>`. A module of that name from another git source fails the compose.
 
 #### The report of a push
 
@@ -2816,10 +2927,11 @@ run got a second signal`, `qory run got <signal>, and the step reached its limit
 
 - `take the work item in again in Qory Apiary: <cause> during the push step, and the run's
   commits may not have reached the branch; the code is used`
-- `check the artifact branch of the work item in Qory Apiary; with no version of this run,
-  add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
-  id> on <path>, or delete that branch on <system>; then take the work item in again: qory
-  pushed <branch>, and <cause>, so the version may or may not be stored; the code is used`
+- `check the artifact submission of the work item in Qory Apiary; with no version of this
+  run, add a new version of the artifact submission in Qory Apiary with the head of
+  qory/<work item id> on <path>, or delete that branch on <system>; then take the work item
+  in again: qory pushed <path>, and <cause>, so the version may or may not be stored; the
+  code is used`
 
 ### Runs of a node pool
 
@@ -3426,10 +3538,10 @@ Fix the files and push again. A check that did not finish stops the push with 50
 check before the push did not finish.` qory run writes the cause on its stderr, as `qory
 run: the check before a push did not finish, and the push was not stored (503
 push_check_unavailable): <cause>`. Neither push stores a version or keeps a copy in the
-store. The push step of a write run runs the check of the type `branch` before it stores
+store. The push step of a write run runs the check of the type `submission` before it stores
 its version. A check that does not pass fails the step as when the version is not stored:
-the step's line, which ends `the version did not pass the check for branch; the code is
-used`, comes first, then `The check for branch failed:` and the findings, each a line of
+the step's line, which ends `the version did not pass the check for submission; the code is
+used`, comes first, then `The check for submission failed:` and the findings, each a line of
 qory run.
 `qory run verdict` exits 4 for a request over its limit too. `qory work-item show` exits 3
 with no work item. These numbers mean a collision and a foreign path on `qory harness`.
@@ -4843,7 +4955,7 @@ workflow declared `write` with `access: write-no-push` in the documents gives a
 A workflow declared `write-no-push` with `access: read` gives a read run.
 
 A `write-no-push` run has a writable checkout, no push step, no submit, and no
-version of the artifact `branch`: qory pushes no commit and creates no branch on the
+version of the artifact `submission`: qory pushes no commit and creates no branch on the
 forge. qory runs no submit step on such a run, including a run whose documents have
 `access: write` and `submit` and whose workflow is declared `write-no-push`. With no
 wall, such a run stops with `write_needs_wall`, as a write run does.

@@ -312,12 +312,12 @@ func SetLoadPushChecks(f func(home string) ([]compose.PushCheck, error)) func() 
 // SetBranchWait makes the push step pass each wait to f in place of waiting, and returns
 // what restores the default.
 func SetBranchWait(f func(time.Duration)) func() {
-	before := branchWait
-	branchWait = func(_ context.Context, d time.Duration) error {
+	before := submissionWait
+	submissionWait = func(_ context.Context, d time.Duration) error {
 		f(d)
 		return nil
 	}
-	return func() { branchWait = before }
+	return func() { submissionWait = before }
 }
 
 // SetRecordAttemptLimit makes each send of the report of a push have d, and returns what

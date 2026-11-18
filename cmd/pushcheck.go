@@ -397,19 +397,19 @@ func checkNotes(raw json.RawMessage) ([]byte, error) {
 	return trimmed, nil
 }
 
-// checkBranchVersion runs the push check of the artifact type branch on content, the
+// checkSubmissionVersion runs the push check of the artifact type submission on content, the
 // file of the push step's version of branch at ref, before the step stores it. A check
 // that does not pass is the step's error: the step's fix line, then the check's line and
 // its findings, each a line of qory run. So is a check that could not run.
-func checkBranchVersion(ctx context.Context, checks *runPushChecks, branch *preparation.WorkBranch, ref string, content []byte) error {
-	failed, err := checks.check(ctx, branchType, []pushcheck.File{{Name: branchFile, Content: content}})
+func checkSubmissionVersion(ctx context.Context, checks *runPushChecks, branch *preparation.WorkBranch, ref string, content []byte) error {
+	failed, err := checks.check(ctx, submissionType, []pushcheck.File{{Name: submissionFile, Content: content}})
 	if err != nil {
 		return fmt.Errorf(textNotStored, branch.VersionWays(), ref, shownError(err))
 	}
 	if failed == nil {
 		return nil
 	}
-	lines := []string{fmt.Sprintf(textNotStored, branch.VersionWays(), ref, fmt.Sprintf(textNotChecked, branchType)), failed.Step}
+	lines := []string{fmt.Sprintf(textNotStored, branch.VersionWays(), ref, fmt.Sprintf(textNotChecked, submissionType)), failed.Step}
 	lines = append(lines, failed.Findings...)
 	return errors.New(strings.Join(lines, "\nqory run: "))
 }

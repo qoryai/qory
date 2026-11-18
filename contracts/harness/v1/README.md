@@ -11,7 +11,7 @@ What `qory harness compose` reads and what it writes.
 | `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use and the submit step of a run. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | a role contract | optional; a file of a module that declares an agents role, at the path that `roles.agents.<role>.contract` in the module's `qory-module.yaml` is set to | the parts an agent needs to fill the role: level-2 headings, front-matter keys, tools, a tier, and the form of its report (§The role contract). The compose checks every agent that fills the role against it; the harness's checks read the report's form |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for, the modules it appends and the workflow hooks it adds, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
-| a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
+| a submission document | the file of a version of the structured artifact type `submission` | what a run submits for a work item: its branch, the commits in each repository, the verdict and the draft pull request (§The submission format). No compose reads it |
 | a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
 | a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
 | a proposal sources document | the file `sources.json` of a version of the artifact type `proposal` | every source a run used to write the proposal, with the reason for each (§The proposal sources format). No compose reads it |
@@ -742,34 +742,49 @@ Remove the key "command" from submit.
   submit is in /src/acme-harness/harness/modules/support-desk/process.yaml.
 ```
 
-## The branch format
+## The submission format
 
-A branch document records a work item's branch and the commit in each repository. This
-is version 1 of the format ([branch.schema.json](branch.schema.json)):
+A submission document records what a run submits for a work item: the branch, the commits
+in each repository, the verdict, and the draft pull request. Only qory's submit step
+writes it, after the push. This is version 1 of the format
+([submission.schema.json](submission.schema.json)):
 
 ```json
 {"ref": "qory/wi_7k2m9pq4xt3a8b1c",
- "repositories": [{"system": "github.com", "path": "acme/web", "commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e"}]}
+ "verdict": "passed",
+ "text": {"title": "Add an orders page", "description": "The page lists open orders."},
+ "repositories": [{
+   "system": "github.com", "path": "acme/web",
+   "commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
+   "base": {"commit": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"},
+   "commits": [{"commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e", "step": "implement"}],
+   "draft": {"none": "no-program"}}]}
 ```
 
 | Member | Meaning |
 |---|---|
 | `ref` | the branch's name, the same in each repository: `qory/` followed by the work item's id |
+| `verdict` | the work item's newest verdict, when this run wrote it: `passed`, `changes-requested`, `escalate`, or `none` |
+| `text` | the title and the description of the draft pull request, from the session's hand-off file. Absent when the session wrote none |
 | `repositories` | each repository with the commit of the branch in it, at least one |
 | `system` | the host the repository is on, a lower-case host name of at most 253 characters |
 | `path` | the repository's path on the host: at most 200 characters of segments joined by slashes, with no `.`, `..` or `.git` segment |
-| `commit` | a full commit id, 40 or 64 lower-case hexadecimal digits |
+| `commit` | the head of the branch: a full commit id, 40 or 64 lower-case hexadecimal digits |
+| `base` | the commit the run started at |
+| `commits` | each commit from the base to the head, oldest first, with the ledger step that made it. A commit that the session's hand-off gives no step has the step `unreviewed` |
+| `draft` | the draft pull request (`number`, `url`, `title`, `state`, `action`), or `{"none": <reason>}` with the reason `not-passed`, `no-text`, `escalated`, `no-program`, `program-failed` (with `exit`, 1 or 2) or `program-timeout` |
+| `commit_url` | the forge's address of a commit, written by the submit program |
 
 A document has no other member. A software factory can use the format as the JSON Schema
 of a custom artifact type in its `process.yaml`:
 
 ```yaml
 artifact_types:
-  - name: branch
+  - name: submission
     base_view: structured
-    size_limit: 65536
+    size_limit: 262144
     max_files: 1
-    json_schema: {…}             # the content of branch.schema.json
+    json_schema: {…}             # the content of submission.schema.json
 ```
 
 ## The questions format

@@ -133,11 +133,25 @@ type Snapshot struct {
 	Outputs []Output `json:"outputs"`
 	// Verdict is the work item's newest verdict, nil for none.
 	Verdict *GivenVerdict `json:"verdict"`
+	// PushedCommits is every commit that an earlier run of the work item pushed, ordered by
+	// run number and then push order, the requesting run's own left out; nil for none.
+	PushedCommits []PushedEntry `json:"pushed_commits"`
 	// Notes is the work item's notes, oldest first, byte for byte as the run API returned
 	// them: a JSON array, or null or empty for a response with no notes.
 	Notes json.RawMessage `json:"notes"`
 
 	Raw json.RawMessage `json:"-"`
+}
+
+// PushedEntry is one commit that a run pushed: the repository, the commit, the run, whether a
+// member cancelled that run, and when the push was recorded.
+type PushedEntry struct {
+	System    string `json:"system"`
+	Path      string `json:"path"`
+	Commit    string `json:"commit"`
+	RunID     string `json:"run_id"`
+	Cancelled bool   `json:"cancelled"`
+	At        string `json:"at"`
 }
 
 // Input is one input of the work item's stage. Version is nil when the input has no

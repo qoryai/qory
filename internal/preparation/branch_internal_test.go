@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/qory/internal/branchformat"
+	"github.com/qoryai/qory/internal/submission"
 )
 
 const testRef = "qory/wi_1"
@@ -28,17 +28,17 @@ func branchCommit(t *testing.T, base, path, first string, change func(work strin
 
 // versionOf is a version with the commit of each path, given as path, commit, path,
 // commit, on git.example.com.
-func versionOf(pairs ...string) []branchformat.Repository {
-	var entries []branchformat.Repository
+func versionOf(pairs ...string) []submission.Repository {
+	var entries []submission.Repository
 	for i := 0; i < len(pairs); i += 2 {
-		entries = append(entries, branchformat.Repository{System: "git.example.com", Path: pairs[i], Commit: pairs[i+1]})
+		entries = append(entries, submission.Repository{System: "git.example.com", Path: pairs[i], Commit: pairs[i+1]})
 	}
 	return entries
 }
 
 // fetchBranchAt fetches list with the target acme/shop at version and the branch with
 // entries, and returns the branch.
-func fetchBranchAt(t *testing.T, dir, list, version string, entries []branchformat.Repository) *WorkBranch {
+func fetchBranchAt(t *testing.T, dir, list, version string, entries []submission.Repository) *WorkBranch {
 	t.Helper()
 	b := &WorkBranch{Ref: testRef, Version: entries}
 	if _, err := fetchListAt(dir, list, Target{System: "git.example.com", Path: "acme/shop", Version: version, Branch: b}); err != nil {
@@ -99,7 +99,7 @@ func TestTheTargetStaysAtItsVersionUntilTheSwitch(t *testing.T) {
 	if got := contentOf(t, filepath.Join(dir, "qory.yaml")); got != "branch\n" {
 		t.Errorf("qory.yaml = %q", got)
 	}
-	if want := (WorkRepository{Path: "acme/shop", Dir: ".", Commit: commit}); len(b.Repositories) != 1 || b.Repositories[0] != want {
+	if want := (WorkRepository{Path: "acme/shop", Dir: ".", Commit: commit, Start: commit}); len(b.Repositories) != 1 || b.Repositories[0] != want {
 		t.Errorf("repositories = %+v", b.Repositories)
 	}
 }
@@ -162,9 +162,9 @@ func TestFurtherRepositoriesGetTheBranch(t *testing.T) {
 		}
 	}
 	want := []WorkRepository{
-		{Path: "acme/shop", Dir: ".", Commit: first},
-		{Path: "acme/api", Dir: ".qory/repositories/acme/api", Commit: apiCommit},
-		{Path: "acme/docs", Dir: ".qory/repositories/acme/docs", Commit: docsHead},
+		{Path: "acme/shop", Dir: ".", Commit: first, Start: first},
+		{Path: "acme/api", Dir: ".qory/repositories/acme/api", Commit: apiCommit, Start: apiCommit},
+		{Path: "acme/docs", Dir: ".qory/repositories/acme/docs", Commit: docsHead, Start: docsHead},
 	}
 	if len(b.Repositories) != len(want) {
 		t.Fatalf("repositories = %+v", b.Repositories)
@@ -222,7 +222,7 @@ func TestAFileInTheWayStopsTheCheckout(t *testing.T) {
 			}
 
 			_, err := switchTo(dir, b)
-			want := "qory run: add a new version of the artifact branch in Qory Apiary with a commit that git can check out"
+			want := "qory run: add a new version of the artifact submission in Qory Apiary with a commit that git can check out"
 			if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), "; the code is used") {
 				t.Fatalf("err = %v", err)
 			}
@@ -242,7 +242,7 @@ func TestStopsOnABranchCommitTheRemoteLacks(t *testing.T) {
 
 	b := &WorkBranch{Ref: testRef, Version: versionOf("acme/shop", strings.Repeat("a", 40))}
 	_, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: first, Branch: b})
-	want := "qory run: add a new version of the artifact branch in Qory Apiary with a commit of acme/shop, then take the work item in again: the version has aaaaaaaaaaaa"
+	want := "qory run: add a new version of the artifact submission in Qory Apiary with a commit of acme/shop, then take the work item in again: the version has aaaaaaaaaaaa"
 	if err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Fatalf("err = %v", err)
 	}
@@ -257,7 +257,7 @@ func TestStopsOnABranchIDThatIsNoCommit(t *testing.T) {
 
 	b := &WorkBranch{Ref: testRef, Version: versionOf("acme/shop", tree)}
 	_, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: first, Branch: b})
-	want := "qory run: add a new version of the artifact branch in Qory Apiary with a commit of acme/shop, then take the work item in again: the version has " + tree[:12] + ", which is not a commit; the code is used"
+	want := "qory run: add a new version of the artifact submission in Qory Apiary with a commit of acme/shop, then take the work item in again: the version has " + tree[:12] + ", which is not a commit; the code is used"
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %s", err, want)
 	}
