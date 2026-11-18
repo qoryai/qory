@@ -276,7 +276,7 @@ func programChanges(document *submission.Submission, left []byte, fileErr string
 		if now.System != was.System || now.Path != was.Path || now.Commit != was.Commit {
 			return nil, fmt.Errorf("it changed the system, the path or the commit of repository %d", i+1)
 		}
-		if (now.Base == nil) != (was.Base == nil) || was.Base != nil && now.Base.Commit != was.Base.Commit {
+		if (now.Base == nil) != (was.Base == nil) || was.Base != nil && (now.Base.Commit != was.Base.Commit || now.Base.Branch != was.Base.Branch) {
 			return nil, fmt.Errorf("it changed the base of repository %d", i+1)
 		}
 		if len(now.Commits) != len(was.Commits) {

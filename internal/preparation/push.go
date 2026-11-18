@@ -193,7 +193,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 		if err != nil {
 			return nil, err
 		}
-		b.Version = withCommit(slices.Clone(b.Version), b.system, r.Path, heads[i], r.Start, commits)
+		b.Version = withCommit(slices.Clone(b.Version), b.system, r.Path, heads[i], r.Start, r.DefaultBranch, commits)
 	}
 	if len(b.pushed) == 0 {
 		fmt.Fprintln(report, textNoNewCommits)
@@ -682,8 +682,8 @@ func pushCause(output string) string {
 // base and commits, or with a new entry when it has none. The entries compare as
 // [WorkBranch.CommitOf] compares them. A set entry keeps no program output of an earlier
 // version: the commit URLs and the draft are written again at the submit step.
-func withCommit(version []submission.Repository, system, path, head, base string, commits []submission.Commit) []submission.Repository {
-	entry := submission.Repository{System: system, Path: path, Commit: head, Base: &submission.Base{Commit: base}, Commits: commits}
+func withCommit(version []submission.Repository, system, path, head, base, branch string, commits []submission.Commit) []submission.Repository {
+	entry := submission.Repository{System: system, Path: path, Commit: head, Base: &submission.Base{Commit: base, Branch: branch}, Commits: commits}
 	for i := range version {
 		if version[i].System == system && sameRepository(system == ForgeGitHub, version[i].Path, path) {
 			entry.Path = version[i].Path

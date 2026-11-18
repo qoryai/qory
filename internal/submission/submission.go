@@ -50,9 +50,11 @@ type Repository struct {
 	Draft json.RawMessage `json:"draft"`
 }
 
-// Base is the commit a run started at in a repository.
+// Base is the commit a run started at in a repository, with the name of the repository's
+// default branch when qory fetched it: the branch a pull request of the run is based on.
 type Base struct {
 	Commit    string `json:"commit"`
+	Branch    string `json:"branch,omitempty"`
 	CommitURL string `json:"commit_url,omitempty"`
 }
 

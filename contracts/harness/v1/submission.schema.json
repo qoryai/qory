@@ -43,7 +43,17 @@
             "type": "object",
             "required": ["commit"],
             "additionalProperties": false,
-            "properties": {"commit": {"$ref": "#/$defs/commit"}, "commit_url": {"type": "string", "minLength": 1}}
+            "properties": {
+              "commit": {"$ref": "#/$defs/commit"},
+              "branch": {
+                "description": "The name of the repository's default branch when the run started: the branch that a pull request of the run is based on. A branch name that git accepts after refs/heads/, at most 255 characters. Absent when qory did not read it.",
+                "type": "string",
+                "maxLength": 255,
+                "pattern": "^[^\u0000-\u0020\u007f~^:?*\\[\\\\/-][^\u0000-\u0020\u007f~^:?*\\[\\\\]*$",
+                "not": {"pattern": "\\.\\.|//|@\\{|(^|/)\\.|\\.lock(/|$)|[./]$"}
+              },
+              "commit_url": {"type": "string", "minLength": 1}
+            }
           },
           "commits": {
             "description": "Each commit from the base to the head, oldest first, with the ledger step that made it. The last one is the head.",

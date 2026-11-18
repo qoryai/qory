@@ -179,14 +179,14 @@ func TestWithCommit(t *testing.T) {
 	}
 	commits := []submission.Commit{{Commit: "b1"}, {Commit: "c"}}
 	pushed := func(system, path string) submission.Repository {
-		return submission.Repository{System: system, Path: path, Commit: "c", Base: &submission.Base{Commit: "a"}, Commits: commits}
+		return submission.Repository{System: system, Path: path, Commit: "c", Base: &submission.Base{Commit: "a", Branch: "main"}, Commits: commits}
 	}
 	version := []submission.Repository{entry("github.com", "Acme/Shop", "a"), entry("github.com", "acme/lib", "b")}
-	got := withCommit(slices.Clone(version), "github.com", "acme/shop", "c", "a", commits)
+	got := withCommit(slices.Clone(version), "github.com", "acme/shop", "c", "a", "main", commits)
 	if want := []submission.Repository{pushed("github.com", "Acme/Shop"), entry("github.com", "acme/lib", "b")}; !reflect.DeepEqual(got, want) {
 		t.Errorf("replaced: %+v, want %+v", got, want)
 	}
-	got = withCommit(slices.Clone(version), "git.example.com", "Acme/Shop", "c", "a", commits)
+	got = withCommit(slices.Clone(version), "git.example.com", "Acme/Shop", "c", "a", "main", commits)
 	if len(got) != 3 || !reflect.DeepEqual(got[2], pushed("git.example.com", "Acme/Shop")) {
 		t.Errorf("added: %+v", got)
 	}

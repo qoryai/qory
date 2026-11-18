@@ -756,7 +756,7 @@ writes it, after the push. This is version 1 of the format
  "repositories": [{
    "system": "github.com", "path": "acme/web",
    "commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
-   "base": {"commit": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"},
+   "base": {"commit": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b", "branch": "main"},
    "commits": [{"commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e", "step": "deliverable:d-1"}],
    "draft": {"none": "no-program"}}]}
 ```
@@ -770,7 +770,7 @@ writes it, after the push. This is version 1 of the format
 | `system` | the host the repository is on, a lower-case host name of at most 253 characters |
 | `path` | the repository's path on the host: at most 200 characters of segments joined by slashes, with no `.`, `..` or `.git` segment |
 | `commit` | the head of the branch: a full commit id, 40 or 64 lower-case hexadecimal digits. Each commit id of the format has this form |
-| `base` | the commit the run started at |
+| `base` | the commit the run started at (`commit`), and the name of the repository's default branch when the run started (`branch`, optional, at most 255 characters, a name that git accepts after `refs/heads/`): the branch that a pull request of the run is based on. The submit program may not change it |
 | `commits` | each commit from the base to the head, oldest first, with the ledger step that made it, at most 128 characters: the id of a ledger row, such as `deliverable:d-1`, `fix:f1`, `plan`, `checks`, `small-change` or `script:scenario-2#3`. A commit that a step made gets that step. Any commit with no step gets `unreviewed` |
 | `draft` | the draft pull request (`number`, `url`, `title`, `state`, `action`), or `{"none": <reason>}` with the reason `not-passed`, `no-text`, `escalated`, `no-program`, `program-failed` (with `exit`, 1 or 2) or `program-timeout` |
 | `commit_url` | the forge's address of a commit, written by the submit program |

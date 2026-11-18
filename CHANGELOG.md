@@ -533,6 +533,9 @@ release may change what an existing document does, and states it under Upgrading
   the commit the run expected ends the run `failed` with the code `push_head_changed`, and
   the push replaces commits of cancelled runs only, with a lease on the head it checked.
   A run starts at the newest commit that an earlier run pushed and a person did not cancel.
+- The submission has `base.branch` for each repository the run pushed: the name of the
+  repository's default branch, read when the run fetched it. The submit program may not
+  change it.
 - A module manifest can declare `submit_program`, a command of the module that opens the
   draft pull request. A composed harness has one; a second declaration stops the compose.
 - A run adds the module that Qory Apiary sends as `submit_module` by its manifest name, in

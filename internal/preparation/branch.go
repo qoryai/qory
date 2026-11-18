@@ -93,6 +93,9 @@ type WorkRepository struct {
 	Commit string
 	// Start is the commit the run started at in the repository: HEAD after [Switch].
 	Start string
+	// DefaultBranch is the name of the repository's default branch that [RunAt] read when it
+	// fetched the repository, "" when it did not read one: the submission has it as base.branch.
+	DefaultBranch string
 }
 
 // CommitOf is the commit of the repository path on system in the branch's version, ""

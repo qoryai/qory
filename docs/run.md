@@ -2833,7 +2833,8 @@ read run have no submit step. The document has:
   description of at most 20000.
 - `repositories`: each repository that the version the run read lists, and each repository
   the run pushed, each with `system`, `path`, `commit` and `draft`. A repository that the run
-  pushed also has `base`, the start commit, and `commits`, each commit from the start commit
+  pushed also has `base`, the start commit (`base.commit`) and the name of the repository's
+  default branch (`base.branch`), and `commits`, each commit from the start commit
   to `commit`, oldest first, with its `step`. A repository that the run did not push has no
   `base` and no `commits`.
 - `draft` of each repository: `{"none": <reason>}`, or a draft pull request that the
@@ -2977,6 +2978,12 @@ written with digits alone (`1.0` and `1e0` are refused), its `url` is
 no user, port, query or fragment, and its scheme is `https`: `javascript:`, `file:`, `http:`
 and another host are refused. qory writes the draft again from its five members, so a member
 that the file has twice is not stored.
+
+`base.branch` is the branch that qory read as the repository's default when it fetched the
+repository at the start of the run, such as `main`: one name for each repository, since each
+has its own default branch. The submit program bases a pull request on it. A repository
+that qory cloned and whose HEAD names no branch has no `base.branch`, and the program may
+not change it.
 
 The program may change only `commit_url`, `base.commit_url` and each `commits[].commit_url`
 of a repository, and its `draft`, from `no-program` to a draft pull request. A file that

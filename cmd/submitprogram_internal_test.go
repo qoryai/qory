@@ -229,3 +229,32 @@ func TestTheDraftIsWrittenAgainAndAMemberTwiceDoesNotSurvive(t *testing.T) {
 		})
 	}
 }
+
+// TestTheProgramMayNotChangeTheBaseBranch is a file whose base.branch is not the one qory
+// gave the program: another name, none where there was one, and one where there was none. The
+// file is discarded, with a cause that names the base.
+func TestTheProgramMayNotChangeTheBaseBranch(t *testing.T) {
+	placeholder := string(submission.None(submission.NoneNoProgram, 0))
+	doc := programDocument(t, placeholder)
+	doc.Repositories[0].Base.Branch = "main"
+	cases := map[string][]byte{
+		"another name": programFile(t, doc, `"branch":"main"`, `"branch":"other"`),
+		"none":         programFile(t, doc, `,"branch":"main"`, ``),
+	}
+	for name, file := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, why := afterProgram(doc, pushcheck.ProgramEnd{Submission: file})
+			if !strings.Contains(why, "the base") {
+				t.Errorf("the cause is %q, want one about the base", why)
+			}
+		})
+	}
+	plain := programDocument(t, placeholder)
+	file := programFile(t, plain, `"base":{"commit":"`+commitA+`"}`, `"base":{"commit":"`+commitA+`","branch":"main"}`)
+	if _, why := afterProgram(plain, pushcheck.ProgramEnd{Submission: file}); !strings.Contains(why, "the base") {
+		t.Errorf("a branch where there was none: the cause is %q, want one about the base", why)
+	}
+	if _, why := afterProgram(doc, pushcheck.ProgramEnd{Submission: programFile(t, doc)}); why != "" {
+		t.Errorf("a file with the same branch is refused: %q", why)
+	}
+}

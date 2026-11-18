@@ -1067,6 +1067,9 @@ func TestTheHandoffGivesTheTextAndTheSteps(t *testing.T) {
 	if !slices.Equal(steps, []string{"implement", "unreviewed"}) {
 		t.Errorf("the steps are %q, want implement then unreviewed", steps)
 	}
+	if base := doc.Repositories[0].Base; base == nil || base.Branch != "main" {
+		t.Errorf("the base is %+v, want the default branch main", base)
+	}
 	if doc.Verdict != submission.VerdictNone {
 		t.Errorf("the verdict is %q, want none", doc.Verdict)
 	}
