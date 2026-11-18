@@ -33,7 +33,7 @@ func handoffCommitted(ctx context.Context, git gitRunner, dir, system string, r 
 		return fmt.Errorf(textNoHistory, shownPath(dir), shortCommit(start), shownText(err.Error()))
 	}
 	for commit := range strings.FieldsSeq(out) {
-		paths, err := git(ctx, dir, "diff-tree", "-r", "-m", "--root", "--no-commit-id", "--name-only", "-z", "--no-renames", commit, "--", ":(top,literal)"+HandoffDir)
+		paths, err := git(ctx, dir, "diff-tree", "-r", "-m", "--root", "--no-commit-id", "--name-only", "-z", "--no-renames", commit, "--", ":(top,literal,icase)"+HandoffDir)
 		if err != nil {
 			return fmt.Errorf(textNoHistory, shownPath(dir), shortCommit(start), shownText(err.Error()))
 		}

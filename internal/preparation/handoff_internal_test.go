@@ -53,3 +53,22 @@ func TestACommitThatHadTheHandoffFolderIsFoundAfterALaterCommitRemovedIt(t *test
 		t.Errorf("a merge range with the file is not refused: %v", err)
 	}
 }
+
+// TestACommitWithTheHandoffFolderInAnotherCaseIsRefused is a commit that adds .QORY/Handoff/x: a
+// forge on a disk that ignores case keeps the folder under both names, so the check ignores case.
+func TestACommitWithTheHandoffFolderInAnotherCaseIsRefused(t *testing.T) {
+	needGit(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "--quiet", "-b", "main")
+	run(t, dir, "config", "user.name", "qory")
+	run(t, dir, "config", "user.email", "qory@localhost")
+	write(t, filepath.Join(dir, "a.txt"), "a\n")
+	start := commitHere(t, dir)
+	write(t, filepath.Join(dir, ".QORY", "Handoff", "x"), "x\n")
+	run(t, dir, "add", "-f", ".QORY/Handoff/x")
+	added := commitHere(t, dir)
+	err := handoffCommitted(context.Background(), stepGit(noRemote, ""), dir, "git.test", WorkRepository{Path: "acme/site"}, start, added)
+	if err == nil || !strings.Contains(err.Error(), "Commit "+added+".") || !strings.Contains(err.Error(), "Path .QORY/Handoff/x.") {
+		t.Errorf("the refusal is %v, want the commit %s and the path .QORY/Handoff/x", err, added)
+	}
+}
