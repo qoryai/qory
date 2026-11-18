@@ -1,0 +1,5 @@
+apiVersion: qory.dev/v1alpha1
+name: app
+scope_checks:
+  change-plan:
+    - [checks/check.js, scope, --plan]

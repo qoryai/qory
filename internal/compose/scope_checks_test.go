@@ -46,7 +46,8 @@ func TestAPlanWithAScopeCheckComposes(t *testing.T) {
 // declares a scope check for, with no module that declares one and with a module that
 // declares one for another type: the compose fails with the one fix line.
 func TestAPlanNoModuleCheckedIsRefused(t *testing.T) {
-	const want = "Add a scope check for change-plan to a module's scope_checks, or remove `plan: change-plan` from fix in the stack."
+	const want = "Add a scope check for change-plan to a module's scope_checks.\n" +
+		"  You can also remove `plan: change-plan` from fix in the stack."
 	for name, manifest := range map[string]string{
 		"no scope_checks": "apiVersion: qory.dev/v1alpha1\nname: core\n",
 		"another type":    strings.Replace(scopeManifest, "change-plan", "build-plan", 1),
@@ -191,7 +192,8 @@ func TestACheckoutModulesScopeCheckDoesNotCount(t *testing.T) {
 	const baseDeclares = "apiVersion: qory.dev/v1alpha1\nname: a\nscope_checks:\n  change-plan:\n    - [checks/check.js, scope, --plan]\n"
 	const baseSilent = "apiVersion: qory.dev/v1alpha1\nname: a\n"
 	_, err := composeCheckout(t, checkoutScopeTree(baseSilent, checkoutDeclares))
-	const want = "Add a scope check for change-plan to a module's scope_checks, or remove `plan: change-plan` from fix in the stack."
+	const want = "Add a scope check for change-plan to a module's scope_checks.\n" +
+		"  You can also remove `plan: change-plan` from fix in the stack."
 	if err == nil || err.Error() != want {
 		t.Errorf("checkout only: %v, want %q", err, want)
 	}
@@ -211,4 +213,30 @@ func TestACheckoutModulesScopeCheckDoesNotCount(t *testing.T) {
 		t.Fatalf("a program the checkout lacks: %v", err)
 	}
 	res2.Close()
+}
+
+// TestThePlanRefusalIsOneLineWhenItFits is a plan type and a workflow name short enough
+// for the fix and the alternative in 100 characters: the refusal is one line. With the
+// longest names, the first line is the fix, at most 100 characters.
+func TestThePlanRefusalIsOneLineWhenItFits(t *testing.T) {
+	refuse := func(plan, workflow string) string {
+		t.Helper()
+		_, err := composeTree(t, map[string]string{
+			stack.FileName: "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source: {path: modules/core}\nworkflows:\n  " + workflow + ":\n    access: write\n    plan: " + plan + "\n",
+			"modules/core/skills/" + workflow + "/SKILL.md": "text\n",
+		})
+		if err == nil {
+			t.Fatal("composed")
+		}
+		return err.Error()
+	}
+	const want = "Add a scope check for a1 to a module's scope_checks, or remove `plan: a1` from x in the stack."
+	if got := refuse("a1", "x"); got != want {
+		t.Errorf("short names: %q, want %q", got, want)
+	}
+	long := refuse(strings.Repeat("p", 64), "w"+strings.Repeat("o", 54))
+	first, _, _ := strings.Cut(long, "\n")
+	if n := len([]rune(first)); n > 100 || !strings.HasPrefix(first, "Add a scope check for ") {
+		t.Errorf("longest names: first line %q has %d characters", first, n)
+	}
 }

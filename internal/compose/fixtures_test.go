@@ -24,7 +24,7 @@ const fixtures = "../../contracts/harness/v1/fixtures"
 
 // TestFixtures runs every fixture: the document in its qory.yaml, on the stack it
 // extends when it extends one, composes to the expected entries, settings, instructions,
-// push checks, workflow hooks and workflow access levels, or fails with the expected
+// push checks, scope checks, workflow plan types, workflow hooks and workflow access levels, or fails with the expected
 // error text.
 func TestFixtures(t *testing.T) {
 	dirs, err := filepath.Glob(filepath.Join(fixtures, "*"))
@@ -177,6 +177,27 @@ func TestFixtures(t *testing.T) {
 			}
 			if _, err := os.Stat("expected/push-checks.txt"); err == nil || b.Len() > 0 {
 				expectText(t, "expected/push-checks.txt", b.String())
+			}
+			// expected/scope-checks.txt is each command of each scope check, sorted by type,
+			// with its module and its words, when any module of the base stack declares
+			// one. expected/plans.txt is each workflow that names a plan type, with it.
+			b.Reset()
+			for _, typ := range slices.Sorted(maps.Keys(res.ScopeChecks)) {
+				for _, c := range res.ScopeChecks[typ].Commands {
+					fmt.Fprintf(&b, "%s %s %s\n", typ, res.ScopeChecks[typ].Module, strings.Join(c, " "))
+				}
+			}
+			if _, err := os.Stat("expected/scope-checks.txt"); err == nil || b.Len() > 0 {
+				expectText(t, "expected/scope-checks.txt", b.String())
+			}
+			b.Reset()
+			for _, name := range slices.Sorted(maps.Keys(res.Stack.Workflows)) {
+				if plan := res.Stack.Workflows[name].Plan; plan != "" {
+					fmt.Fprintf(&b, "%s %s\n", name, plan)
+				}
+			}
+			if _, err := os.Stat("expected/plans.txt"); err == nil || b.Len() > 0 {
+				expectText(t, "expected/plans.txt", b.String())
 			}
 			// expected/hooks.txt is each workflow hook, in the order of harness.hooks, with
 			// its workflow, point, place in the session, kind, name, what it runs, whether

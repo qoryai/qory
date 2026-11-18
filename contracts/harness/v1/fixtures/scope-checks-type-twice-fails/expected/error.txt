@@ -1,0 +1,2 @@
+Remove the scope check for plan-a from module core or module web.
+  A type has one scope check, and both modules declare one.

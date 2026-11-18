@@ -123,6 +123,7 @@ workflows:                       # optional; the settings of the workflows a dis
     time_limit: 45m              # optional; a duration, such as 45m or 7h
     access: write                # optional; read, write-no-push, or write, read when left out
     tier: thinking               # optional; light, fast, or thinking, none when left out
+    plan: change-plan            # optional; an artifact type, only with access write, none when left out
     hook_points:                 # optional; where a checkout extending the stack may add workflow hooks
       after-review-round: {at: end, kinds: [check, review]}
 ```
@@ -209,6 +210,7 @@ schema is [config.schema.json](config.schema.json).
 | `workflows.<name>.hook_points` | no | the points of the workflow where a checkout extending the stack may add workflow hooks, by the point's name: `{at: end, kinds: [check, review]}`. `at` is where the point sits in the workflow's session, `end`, `start` or `inside`; `kinds` is one or more of `check`, `review` and `enrich`, each once. A point's name has the form of a workflow's name, and is unique in the stack, since a hook selects a point by its name alone. Only a `qory-stack.yaml` declares points: a `qory.yaml` that defines a stack, which nothing extends, is refused with `Remove hook_points from the workflows in qory.yaml.` (§Workflow hooks) |
 | `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on: `read`, `write-no-push`, or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access to a valid level.` with `The levels are read, write-no-push, and write.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. A run takes the lower of this access and `access` in the run's documents, in the order `read`, `write-no-push`, `write`; documents with no target have no `access`, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A `write-no-push` run has a writable checkout, no push step, no submit, and no version of the artifact `branch`. At `write` the checkout is writable and qory pushes what the agent left |
 | `workflows.<name>.tier` | no | the tier that names the main session's model and effort for a dispatched run of the workflow: `light`, `fast`, or `thinking`; none when left out. qory stops with an error on any other value: `Set workflows.<name>.tier to a valid tier.` with `The tiers are light, fast, and thinking.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. qory passes nothing new to the run: Qory Apiary resolves the session's model and effort from the tier, and sends them as it sends the session's model. `qory run` does not read it |
+| `workflows.<name>.plan` | no | the artifact type whose launch version sets what a dispatched run of the workflow may push, such as `build-plan`: lowercase letters and digits in groups joined by single hyphens, 64 bytes at most; none when left out. Only a workflow with `access: write` names one. qory stops with an error on a value that is no artifact type: `Set workflows.<name>.plan to an artifact type.` with `An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines; and on a `plan` in a workflow whose access is `read`, `write-no-push` or left out: `Remove `plan` from <name>, or set its access to write.` The compose stops when no module of the stack declares the scope check for the type in `scope_checks` (§Modules): `Add a scope check for <type> to a module's scope_checks.` with `You can also remove `plan: <type>` from <name> in the stack.` on the next line, or both on one line when they fit in 100 characters. `qory run` does not read `plan` |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 | `extending.hooks` | no | lets a checkout extending the stack add workflow hooks at the points of its workflows: `per_point`, the most hooks one point takes, 3 when left out; `per_workflow`, the most the points of one workflow take together, 10 when left out; `timeout`, a duration in whole seconds, 1s or more, the longest a hook may run and the timeout of a hook that sets none, 10 minutes when left out. A count below 1 is refused. Without the block a checkout adds no workflow hook (§Workflow hooks) |
 | `extending.target` | no | the runtimes and the models the stack is written for, `runtime` and `model`, each one name or a list, one of the two at least. A checkout's resolved target outside either list fails the compose; listed models make the model required, since a target without one runs whatever the runtime defaults to, which is a model the stack did not list. Left out, every target is accepted, a model left out included (§Extending a stack) |
@@ -953,6 +955,10 @@ push_checks:                     # optional: a check for the files of one artifa
   - type: spec
     command: [scripts/checks.js, push, spec]  # a program in the module, then its arguments
     reads: [questions]           # optional: the other artifact types the check reads
+scope_checks:                    # optional: the checks of the plan of one artifact type
+  build-plan:                    # the type a workflow names in `plan`
+    - [scripts/checks.js, scope, --plan]    # a program in the module, then its arguments
+    - [scripts/checks.js, freeze, --plan]   # the commands run in this order
 ```
 
 `description`, optional, describes what the module is for; the report contains it and `qory harness
@@ -1047,6 +1053,29 @@ out of it.` with `The program of the push check for spec is in skills/running, a
 exclude or only of module core leaves skills/running out.` The home contains
 `push-checks.json` with each check, sorted by type, with its `reads` and its program's
 absolute path in the home; a harness whose modules declare no check has no such file.
+
+`scope_checks`, optional, declares the checks of the plan of an artifact type, the type that a
+workflow of the stack names in `plan`. It is a map from the type to a list of commands, and
+a command is a list: the program, a file in the module as for `push_checks`, then its
+arguments. The commands of a type are in order, each is written to take `--base <start
+commit>` and `--artifacts <folder>` as its last arguments, and each exits 0 when the plan
+holds. The compose declares and checks them, and `qory run` does not run them. Only a module of the run's base stack
+counts: a module that the checkout's `qory.yaml` adds to the base declares none that counts, so the
+repository under work cannot supply the check of its plan. A `scope_checks` in such a module has no
+effect: the compose reads its form, as for any manifest, and uses nothing from it. When the `harness`
+section of a `qory.yaml` defines the stack and extends none, every module of the section is a module of
+the stack. A key that does not
+match `^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 64 bytes, one type twice in one module, a
+value that is not a list or is empty, a command that is not a list or is empty, a word of a
+command that is not a string, and a program that is empty, absolute or has a `..` part fail
+the compose, each with the manifest's path. The compose also fails when two modules declare
+one type, `Remove the scope check for build-plan from module core or module web.` with `A
+type has one scope check, and both modules declare one.` on the next line; when a program
+is not a file in the module, `Add checks/check.js to module core, or change its scope check
+for build-plan.` with `Module core has no file at checks/check.js.`; and when a program is
+in an entry an `exclude` or an `only` of its module leaves out, as for a push check. The
+compose result lists each type with its module and its commands, each program as
+`$QORY_HARNESS_HOME/modules/<module>/<path>`.
 
 **Push checks.** A push check runs in a run behind a wall, before a push of its type
 reaches Qory Apiary: for every push to the run API from inside the wall, through `qory

@@ -18,6 +18,14 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
+  the type whose launch version sets what the workflow's session may push. A module
+  declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: a
+  list of commands for each type. The compose refuses a workflow whose `plan` is not an
+  artifact type, a `plan` on a workflow whose access is not `write`, and a `plan` whose
+  type no module of the base stack declares a scope check for. A module that a checkout
+  adds to the base declares none that counts. `qory run` does not read `plan` or
+  `scope_checks`.
 - `qory run verdict` proposes a track for the work item: `--track <id>` is the id of a
   track that the gate of the run's stage offers, and `--track-reason <text>` is the
   reason, one sentence on one line of 1 to 300 characters. Pass both or neither. A track's

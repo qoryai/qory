@@ -631,9 +631,8 @@ func excludedProgram(res *Result, dir, name, program string) (Exclude, bool) {
 }
 
 // ScopeCheck is the scope check the composed harness declares for the plan of one
-// artifact type: the commands that qory runs, in this order, on a fresh clone of what a
-// session pushes. Each gets --base <start commit> and --artifacts <folder> after its
-// arguments, and all must exit 0.
+// artifact type: commands in order, each written to take --base <start commit> and
+// --artifacts <folder> as its last arguments and to exit 0 when the plan holds.
 type ScopeCheck struct {
 	// Module is the module of the base stack that declares the check.
 	Module string `json:"module"`
@@ -689,8 +688,9 @@ func addScopeChecks(res *Result, dir string, root *os.Root, name string, checks 
 }
 
 // checkPlans refuses a workflow of the stack whose plan type no module of the base stack
-// declares a scope check for, one line for the first such workflow in sorted order, so
-// no plan goes unchecked. The check is the compose's, since the stack alone does not
+// declares a scope check for, for the first such workflow in sorted order, so no plan
+// goes unchecked. The refusal is one line when it fits in 100 characters, and the
+// alternative moves to a second line otherwise, as [altFix] does. The check is the compose's, since the stack alone does not
 // know its modules.
 func checkPlans(res *Result, p *stack.Stack) error {
 	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
@@ -699,7 +699,7 @@ func checkPlans(res *Result, p *stack.Stack) error {
 			continue
 		}
 		if _, ok := res.ScopeChecks[plan]; !ok {
-			return exports.Errorf("Add a scope check for %s to a module's scope_checks, or remove `plan: %s` from %s in the stack.", plan, plan, name)
+			return exports.Errorf("%s", altFix(fmt.Sprintf("Add a scope check for %s to a module's scope_checks", plan), fmt.Sprintf("remove `plan: %s` from %s in the stack", plan, name)))
 		}
 	}
 	return nil

@@ -1,0 +1,2 @@
+Add checks/check.js to module core, or change its scope check for build-plan.
+  Module core has no file at checks/check.js.
