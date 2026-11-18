@@ -2952,18 +2952,22 @@ qory gives the program no credential, no token and no proxy address. The program
 run for 120 seconds. qory prints at most 20 lines of its standard error, masked and of at most
 300 characters each, with the prefix `qory run: submit program: `, and none of its standard
 output. The program prints its result on standard output, one line for each fact, each ending in
-a line feed: `draft_number`, `draft_url`, `draft_title`, `draft_state` (`draft` or `open`) and
-`draft_action` (`opened`, `updated` or `kept`), each with its value after one space, and
-`commit_url <commit> <address>` for the base and each commit. qory stores the five draft
-lines as the draft, only when each is there once and valid, and each address in the
+a line feed or a carriage return and a line feed: `draft_number`, `draft_url`, `draft_title`,
+`draft_state` (`draft`, `open`, `closed` or `merged`) and `draft_action` (`opened`, `updated`
+or `kept`, and `kept` for a draft that is `closed` or `merged`), each with its value after one
+space, and `commit_url <commit> <address>` for the base and each commit. qory stores the five
+draft lines as the draft, only when each is there once and valid, and each address in the
 `commit_url` of the repository, its `base` or its commit. A number has 1 to 9 digits and no
-leading zero, a title at most 256 characters, and an address is `https` on the repository's
-`system`, with a path, at most 2048 characters, and no user, port, query or fragment. qory
-leaves out, and prints `qory run: The submit program printed a line that qory cannot use, so
-qory left it out.` with `Line <n>: <reason>.` on a second line, for at most 5 lines: a line with
-a key that is not listed, no value, a control character or no final line feed, a repeated draft
-key or address, and an address of a commit that qory did not give the program. When the program
-ends, qory prints one of these, each with line 1 as the cause, then lines indented by two spaces:
+leading zero, a title is UTF-8 of at most 256 characters with a character that is not a space
+and no control, bidirectional or invisible character, and an address is `https` on the
+repository's `system`, with a path, at most 2048 characters, of the ASCII characters that RFC
+3986 allows, and with no user, port, query or fragment. qory leaves out a line, and prints
+`qory run: The submit program printed a line that qory cannot use, so qory left it out.` with
+`Line <n>: <reason>.` on a second line, for at most 5 lines: a line with a key that is not
+listed, no value, a control character or no final line feed, a repeated draft key or address, an
+address of a commit that qory did not give the program, any draft line when `QORY_SUBMIT_DRAFT`
+is `none`, and each draft line of a draft that lacks one of the five. When the program ends, qory
+prints one of these, each with line 1 as the cause, then lines indented by two spaces:
 
 - `qory run: The submit program failed, so a repository it did not finish has no draft.`,
   `Exit code: <code>.`, `Draft of the repository: program-failed.`
@@ -2974,17 +2978,19 @@ ends, qory prints one of these, each with line 1 as the cause, then lines indent
 - `qory run: The submit program did not run, so a repository has no draft.`, `Cause:
   <cause>`, `Draft of the repository: program-failed.` The cause is a repository with more than
   100 commits, or a folder or file that qory could not make.
-- ``qory run: Run `gh auth login`, then `qory run` again.``, `The draft was not opened. The
-  branch <ref> is pushed.`, `Draft of the repository: program-failed.`
+- `qory run: The submit program printed no whole draft, so a repository has no draft.`,
+  `Exit code: <code>.`, `Draft of the repository: program-failed.`
+- `qory run: The draft is closed or merged, so the submission has no draft for it.`, `Draft
+  state: <state>.`, `Draft of the repository: program-failed.` The submission format has the
+  states `draft` and `open` alone.
 
 The program's exit status says how it ended:
 
 | Exit | The step stores |
 |---|---|
-| 0 | The addresses and the draft of the lines. With no draft lines, a repository whose draft is `no-program` keeps it: the program did not handle that repository. |
-| 1 | The addresses and the draft of the lines, a call to the forge having failed. With no whole draft, `{"none": "program-failed", "exit": 1}` in place of `no-program`. |
+| 0 | The addresses and the draft of the lines. With no whole draft, `{"none": "program-failed", "exit": 1}` in place of `no-program`: the contract records the exit 0, and the submission format has the exits 1 and 2. |
+| 1 | The addresses and the draft of the lines, a call to the forge having failed. With no whole draft, `{"none": "program-failed", "exit": 1}` in place of `no-program`. A person who is not logged in to the forge's command line gets this status: the program prints the command to log in on its standard error, such as `gh auth login`, and qory prints that line. The branch stays pushed. |
 | 2 | The same as 1 with `"exit": 2`: the program found its input wrong. |
-| 3 | `{"none": "program-failed", "exit": 1}` and the login line: the program found no login of the forge's command line. The branch stays pushed. This status is not in the contract yet. |
 | another status, or the program did not start | No line is read, and `{"none": "program-failed", "exit": 1}`. |
 | it ran past 120 seconds | No line is read, and `{"none": "program-timeout"}`. |
 

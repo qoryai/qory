@@ -19,7 +19,8 @@ func TestTheTextsOfTheSubmitStepStateTheCauseInLineOne(t *testing.T) {
 		"textProgramTimeout":  textProgramTimeout,
 		"textProgramNoStart":  textProgramNoStart,
 		"textProgramTooMany":  textProgramTooMany,
-		"textProgramNoLogin":  textProgramNoLogin,
+		"textProgramNoDraft":  textProgramNoDraft,
+		"textProgramClosed":   textProgramClosed,
 		"textProgramLeftOut":  textProgramLeftOut,
 		"textProgramNoFolder": textProgramNoFolder,
 		"textPushNoReadProxy": "qory run: " + textPushNoReadProxy,
@@ -28,10 +29,6 @@ func TestTheTextsOfTheSubmitStepStateTheCauseInLineOne(t *testing.T) {
 		line, _, _ := strings.Cut(text, "\n")
 		if n := utf8.RuneCountInString(line); n > 100 {
 			t.Errorf("%s: line 1 has %d characters, want at most 100: %q", name, n, line)
-		}
-		// The login line is the one text that starts with its fix, as the person's request says.
-		if name == "textProgramNoLogin" {
-			continue
 		}
 		for _, advice := range []string{"Check ", "Read ", "Run ", "Shorten ", "Set ", "Let ", "Take "} {
 			if strings.HasPrefix(strings.TrimPrefix(line, "qory run: "), advice) {

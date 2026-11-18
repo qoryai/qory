@@ -27,7 +27,8 @@ const (
 	textProgramTimeout  = "qory run: The submit program ran past its limit, so a repository it did not finish has no draft.\n  Limit: %s.\n  Draft of the repository: program-timeout."
 	textProgramNoStart  = "qory run: The submit program did not start, so a repository has no draft.\n  Cause: %s\n  Draft of the repository: program-failed."
 	textProgramTooMany  = "qory run: The submit program did not run, so a repository has no draft.\n  Cause: the repository has %d commits, and the program takes at most %d.\n  Draft of the repository: program-failed."
-	textProgramNoLogin  = "qory run: Run `gh auth login`, then `qory run` again.\n  The draft was not opened. The branch %s is pushed.\n  Draft of the repository: program-failed."
+	textProgramNoDraft  = "qory run: The submit program printed no whole draft, so a repository has no draft.\n  Exit code: %d.\n  Draft of the repository: program-failed."
+	textProgramClosed   = "qory run: The draft is closed or merged, so the submission has no draft for it.\n  Draft state: %s.\n  Draft of the repository: program-failed."
 	textProgramLeftOut  = "qory run: The submit program printed a line that qory cannot use, so qory left it out.\n  Line %d: %s."
 	textProgramNoFolder = "qory run: The submit program did not run, so a repository has no draft.\n  Cause: %s\n  Draft of the repository: program-failed."
 )
@@ -132,7 +133,7 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 	// bad input; for any other end they record nothing.
 	var lines submitLines
 	if end.startErr == "" && !end.timedOut && (end.exit == submitExitDone || end.exit == submitExitForge || end.exit == submitExitInput) {
-		lines = parseSubmitLines(end.stdout, r.System, append([]string{r.Base.Commit}, commits...))
+		lines = parseSubmitLines(end.stdout, r.System, input.Draft, append([]string{r.Base.Commit}, commits...))
 		for i, bad := range lines.Invalid {
 			if i == maxLeftOut {
 				break
@@ -149,6 +150,10 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 	if !bytes.Equal(r.Draft, placeholder) {
 		return r, nil
 	}
+	exit := end.exit
+	if exit != submitExitForge && exit != submitExitInput {
+		exit = submitExitForge
+	}
 	switch {
 	case end.timedOut:
 		fmt.Fprintf(w, textProgramTimeout+"\n", p.limitOrDefault())
@@ -156,8 +161,12 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 	case end.startErr != "":
 		fmt.Fprintf(w, textProgramNoStart+"\n", shownText(end.startErr))
 		r.Draft = submission.None(submission.NoneProgramFailed, submitExitForge)
-	case end.exit == submitExitNoLogin:
-		fmt.Fprintf(w, textProgramNoLogin+"\n", shownText(document.Ref))
+	case end.exit != submitExitDone && end.exit != submitExitForge && end.exit != submitExitInput:
+		fmt.Fprintf(w, textProgramFailed+"\n", end.exit)
+		r.Draft = submission.None(submission.NoneProgramFailed, submitExitForge)
+	case lines.Draft != nil && (lines.Draft.State == "closed" || lines.Draft.State == "merged"):
+		// The format's draft has the states draft and open alone.
+		fmt.Fprintf(w, textProgramClosed+"\n", lines.Draft.State)
 		r.Draft = submission.None(submission.NoneProgramFailed, submitExitForge)
 	case lines.Draft != nil:
 		draft, err := json.Marshal(lines.Draft)
@@ -166,12 +175,10 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 		}
 		r.Draft = draft
 	case end.exit == submitExitDone:
-		// A program that finished and printed no draft leaves the draft as it was.
+		// The contract records program-failed with exit 0; the format has the exits 1 and 2.
+		fmt.Fprintf(w, textProgramNoDraft+"\n", end.exit)
+		r.Draft = submission.None(submission.NoneProgramFailed, submitExitForge)
 	default:
-		exit := end.exit
-		if exit != submitExitForge && exit != submitExitInput {
-			exit = submitExitForge
-		}
 		fmt.Fprintf(w, textProgramFailed+"\n", end.exit)
 		r.Draft = submission.None(submission.NoneProgramFailed, exit)
 	}

@@ -1,7 +1,6 @@
 package cmd_test
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,24 +9,23 @@ import (
 	"github.com/qoryai/forager/session"
 )
 
-// markedModule is a module that declares a submit program, and no more. The program writes a
-// file at marker when it starts, so a test sees whether it ran.
-func markedModule(marker string) map[string]string {
+// programModule is a module that declares a submit program, and no more. The program is a file
+// of the module that no test makes executable, so a run that starts it ends with the draft
+// program-failed and the lines of the program's step in its log.
+func programModule() map[string]string {
 	return map[string]string{
 		"modules/forge/qory-module.yaml":   "apiVersion: qory.dev/v1alpha1\nname: forge\nsubmit_program:\n  command: [bin/open-draft]\n",
-		"modules/forge/bin/open-draft":     "#!/bin/sh\necho started > " + marker + "\nexit 0\n",
+		"modules/forge/bin/open-draft":     "#!/bin/sh\nexit 0\n",
 		"modules/forge/skills/f/SKILL.md":  "---\nname: f\ndescription: f\n---\n",
 		"modules/forge/skills/f/helper.md": "A skill.\n",
 	}
 }
 
 // newProgramRepo is a [pushRepo] whose harness has a module with a submit program beside
-// hello, at access, with a wall whose docker is the fake one. It returns the docker's log and
-// the file that the program writes when it starts.
-func newProgramRepo(t *testing.T, access string) (p *pushRepo, log, marker string) {
+// hello, at access, with a wall whose docker is the fake one. It returns the docker's log.
+func newProgramRepo(t *testing.T, access string) (p *pushRepo, log string) {
 	t.Helper()
-	marker = filepath.Join(tempDir(t), "program-started")
-	files := markedModule(marker)
+	files := programModule()
 	stack := "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n" +
 		"  - name: forge\n    source: {path: modules/forge}\nworkflows:\n  hello:\n    access: " + access + "\n"
 	files["qory.yaml"] = ownStack(stack)
@@ -36,7 +34,7 @@ func newProgramRepo(t *testing.T, access string) (p *pushRepo, log, marker strin
 	docker, log = fakeDocker(t)
 	walledBy(t, docker)
 	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
-	return p, log, marker
+	return p, log
 }
 
 // passedWithText is an agent that commits a file and writes a hand-off with a text, and the
@@ -51,12 +49,13 @@ func passedWithText(t *testing.T, p *pushRepo) func(string) {
 	}
 }
 
-// wantsNoProgram checks that nothing of a submit program started: the program's file is not
-// there, and the engine got no command to create or start a container for it.
-func wantsNoProgram(t *testing.T, p *pushRepo, log, marker string) {
+// wantsNoProgram checks that nothing of a submit program started in the run r: the log has no
+// line of the program's step, and the engine got no command to create or start a container for
+// it.
+func wantsNoProgram(t *testing.T, r pushed, log string) {
 	t.Helper()
-	if _, err := os.Stat(marker); err == nil {
-		t.Error("the submit program started")
+	if got := r.log(); strings.Contains(got, "submit program") || strings.Contains(got, "program-failed") {
+		t.Errorf("the log has a line of the submit program:\n%s", got)
 	}
 	if got := checkLog(t, log); strings.Contains(got, "create ") || strings.Contains(got, "start ") || strings.Contains(got, "qory-push-check") {
 		t.Errorf("a container ran:\n%s", got)
@@ -68,7 +67,7 @@ func wantsNoProgram(t *testing.T, p *pushRepo, log, marker string) {
 // no relay and no container. The draft is no-program, for the forge's adapter to fill from the
 // stored submission, and no commit has an address.
 func TestARunWithARunCodeRunsNoSubmitProgram(t *testing.T) {
-	p, log, marker := newProgramRepo(t, "write")
+	p, log := newProgramRepo(t, "write")
 	r := p.run(t, passedWithText(t, p), nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
 	repo := p.api.document(t, 1).Repositories[0]
@@ -81,7 +80,7 @@ func TestARunWithARunCodeRunsNoSubmitProgram(t *testing.T) {
 	if posts, _, stored := p.api.counts(); posts != 1 || stored != 1 {
 		t.Errorf("%d POST and %d versions, want 1 and 1", posts, stored)
 	}
-	wantsNoProgram(t, p, log, marker)
+	wantsNoProgram(t, r, log)
 }
 
 // TestARunWithNoPushRunsNoProgram is a run that pushed nothing, a write-no-push run and a
@@ -89,14 +88,14 @@ func TestARunWithARunCodeRunsNoSubmitProgram(t *testing.T) {
 func TestARunWithNoPushRunsNoProgram(t *testing.T) {
 	for _, access := range []string{"write", "write-no-push", "read"} {
 		t.Run(access, func(t *testing.T) {
-			p, log, marker := newProgramRepo(t, access)
+			p, log := newProgramRepo(t, access)
 			agent := func(dir string) {}
 			if access != "write" {
 				agent = writesAndCommits(t)
 			}
 			r := p.run(t, agent, nil)
 			r.wantsClose(t, event.StateSucceeded, 0)
-			wantsNoProgram(t, p, log, marker)
+			wantsNoProgram(t, r, log)
 			if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
 				t.Errorf("%d POST and %d versions, want none", posts, stored)
 			}
@@ -108,7 +107,7 @@ func TestARunWithNoPushRunsNoProgram(t *testing.T) {
 // closed during the session, so the session's result has no After: the run does not panic, it
 // has no push step and no program, and no version is stored.
 func TestAClosedRunRunsNoSubmitStep(t *testing.T) {
-	p, log, marker := newProgramRepo(t, "write")
+	p, log := newProgramRepo(t, "write")
 	r := p.run(t, writesAndCommits(t), func() (*session.Result, error) {
 		return &session.Result{State: event.StateCancelled, Reason: "stopped", RunClosed: true}, nil
 	})
@@ -120,7 +119,7 @@ func TestAClosedRunRunsNoSubmitStep(t *testing.T) {
 			t.Errorf("a submit step: %+v", e)
 		}
 	}
-	wantsNoProgram(t, p, log, marker)
+	wantsNoProgram(t, r, log)
 	if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
 		t.Errorf("%d POST and %d versions, want none", posts, stored)
 	}

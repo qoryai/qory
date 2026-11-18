@@ -21,7 +21,7 @@ func TestARunLoweredBelowWriteRunsNoSubmitStep(t *testing.T) {
 		write  bool
 	}{{"write", true}, {"write-no-push", false}, {"read", false}} {
 		t.Run(c.access, func(t *testing.T) {
-			p, log, marker := newProgramRepo(t, c.access)
+			p, log := newProgramRepo(t, c.access)
 			p.change = func(d map[string]any) {
 				d["access"] = "write"
 				d["submit"] = map[string]any{"type": "code-change", "send": "after_gate"}
@@ -38,7 +38,7 @@ func TestARunLoweredBelowWriteRunsNoSubmitStep(t *testing.T) {
 			if handoff != c.write {
 				t.Errorf("hand-off variable %v, want %v", handoff, c.write)
 			}
-			wantsNoProgram(t, p, log, marker)
+			wantsNoProgram(t, r, log)
 			if c.write {
 				return
 			}

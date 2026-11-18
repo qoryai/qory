@@ -558,9 +558,10 @@ release may change what an existing document does, and states it under Upgrading
   stores the version, once for each repository. The program gets the inputs `QORY_SUBMIT_*` and
   prints plain lines: the five `draft_` lines and a `commit_url` line for each commit. qory
   stores them as the draft and the commit addresses, checks each value, and leaves out a line
-  that it cannot use. Exit 3 means that the forge's command line has no login: qory prints
-  ``Run `gh auth login`, then `qory run` again.`` and the branch stays pushed. This build has
-  no push step for a run with no run code yet. See The submit program in `docs/run.md`.
+  that it cannot use. A person who is not logged in to the forge's command line gets the
+  line that the program prints on standard error, such as the command `gh auth login`, and
+  the branch stays pushed. This build has no push step for a run with no run code yet. See The submit
+  program in `docs/run.md`.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
   qory stops a run whose documents have one. A run whose documents set no

@@ -136,8 +136,8 @@ func TestTheProgramUpdatesTheDraftOfThePreviousVersion(t *testing.T) {
 	if string(data) != "update 7 Add a first page\n" {
 		t.Errorf("the program saw %q", data)
 	}
-	if string(got.Repositories[0].Draft) != string(placeholder) {
-		t.Errorf("a program that printed no draft changed the draft to %s", got.Repositories[0].Draft)
+	if string(got.Repositories[0].Draft) != `{"none":"program-failed","exit":1}` {
+		t.Errorf("a program that printed no draft left the draft %s", got.Repositories[0].Draft)
 	}
 }
 
@@ -170,7 +170,15 @@ func TestAProgramByHowItEnded(t *testing.T) {
 		urls              bool
 		printed           []string
 	}{
-		{"finished with no draft", `echo done >&2`, `{"none":"no-program"}`, false, []string{"qory run: submit program: done"}},
+		{"finished with no draft", `echo done >&2`, `{"none":"program-failed","exit":1}`, false,
+			[]string{"qory run: submit program: done", "qory run: The submit program printed no whole draft, so a repository has no draft.", "  Exit code: 0.", "  Draft of the repository: program-failed."}},
+		{"closed draft", `echo "draft_number 7"
+echo "draft_url https://git.example.com/acme/shop/pull/7"
+echo "draft_title T"
+echo "draft_state merged"
+echo "draft_action kept"
+`, `{"none":"program-failed","exit":1}`, false,
+			[]string{"qory run: The draft is closed or merged, so the submission has no draft for it.", "  Draft state: merged.", "  Draft of the repository: program-failed."}},
 		{"failed call after its lines", fillScript + "echo 'no permission' >&2\nexit 1", `{"number":7,"url":"https://git.example.com/acme/shop/pull/7","title":"Add a page","state":"draft","action":"opened"}`, true,
 			[]string{"qory run: submit program: no permission"}},
 		{"failed call, no draft", "echo 'no permission' >&2\nexit 1", `{"none":"program-failed","exit":1}`, false,
@@ -179,8 +187,8 @@ func TestAProgramByHowItEnded(t *testing.T) {
 			[]string{"qory run: The submit program failed, so a repository it did not finish has no draft.", "  Exit code: 2.", "  Draft of the repository: program-failed."}},
 		{"another status", fillScript + "exit 137", `{"none":"program-failed","exit":1}`, false,
 			[]string{"qory run: The submit program failed, so a repository it did not finish has no draft.", "  Exit code: 137.", "  Draft of the repository: program-failed."}},
-		{"no login", "echo 'not logged in' >&2\nexit 3", `{"none":"program-failed","exit":1}`, false,
-			[]string{"qory run: submit program: not logged in", "qory run: Run `gh auth login`, then `qory run` again.", "  The draft was not opened. The branch qory/wi_1 is pushed.", "  Draft of the repository: program-failed."}},
+		{"no login", "echo 'Run `gh auth login`, then `qory run` again.' >&2\nexit 1", `{"none":"program-failed","exit":1}`, false,
+			[]string{"qory run: submit program: Run `gh auth login`, then `qory run` again.", "qory run: The submit program failed, so a repository it did not finish has no draft.", "  Exit code: 1.", "  Draft of the repository: program-failed."}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got, printed := runProgram(t, &submitProgram{command: []string{programScript(t, c.body)}}, passedDocument())
@@ -238,11 +246,12 @@ echo "commit_url $QORY_SUBMIT_BASE_COMMIT https://git.example.com/acme/shop/comm
 `
 	got, printed := runProgram(t, &submitProgram{command: []string{programScript(t, body)}}, passedDocument())
 	r := got.Repositories[0]
-	if string(r.Draft) != `{"none":"no-program"}` || r.Base.CommitURL != commitLink(baseID) {
+	if string(r.Draft) != `{"none":"program-failed","exit":1}` || r.Base.CommitURL != commitLink(baseID) {
 		t.Errorf("the repository is %+v", r)
 	}
 	for _, want := range []string{
 		"qory run: The submit program printed a line that qory cannot use, so qory left it out.\n  Line 1: the number is not a whole number of 1 to 9 digits, 1 or more.",
+		"  Line 2: the draft needs five lines, and draft_number, draft_title, draft_state, draft_action is missing; the line is left out.",
 		"  Line 3: the address is not on the repository's system.",
 	} {
 		if !strings.Contains(printed, want) {
@@ -290,6 +299,23 @@ func TestTheProgramsErrorLinesHideASecret(t *testing.T) {
 	}
 }
 
+// missing is the reason of each of the n draft lines that are there when one of the five is
+// not.
+func missing(key string, n int) []string {
+	var out []string
+	for range n {
+		out = append(out, "the draft needs five lines, and "+key+" is missing; the line is left out")
+	}
+	return out
+}
+
+// around is the reasons for a draft whose line at position (1 to 5) is wrong for reason: the
+// reason in its place, and the other four lines left out.
+func around(key string, position int, reason string) []string {
+	out := missing(key, 4)
+	return append(out[:position-1], append([]string{reason}, out[position-1:]...)...)
+}
+
 // TestParseSubmitLines is the contract's rules for the lines of the program: a whole draft, an
 // address for a commit that qory gave, and the lines that qory leaves out with the reason.
 func TestParseSubmitLines(t *testing.T) {
@@ -304,7 +330,7 @@ func TestParseSubmitLines(t *testing.T) {
 		{"whole", good + "commit_url " + headID + " https://git.example.com/acme/shop/commit/" + headID + "\n", true, 1, nil},
 		{"blank line", "\n" + good, true, 0, nil},
 		{"a draft key twice", good + "draft_state draft\n", true, 0, []string{"the key is there already"}},
-		{"four draft keys", strings.Replace(good, "draft_action kept\n", "", 1), false, 0, nil},
+		{"four draft keys", strings.Replace(good, "draft_action kept\n", "", 1), false, 0, missing("draft_action", 4)},
 		{"no line feed at the end", good + "commit_url " + headID, true, 0, []string{"the line has no line feed at its end"}},
 		{"control character", "draft_title a\tb\n", false, 0, []string{"the line has a control character"}},
 		{"no value", "draft_url\n", false, 0, []string{"the line is not a key and a value"}},
@@ -312,18 +338,28 @@ func TestParseSubmitLines(t *testing.T) {
 		{"unknown commit", "commit_url " + middleID + " https://git.example.com/a/b\n", false, 0, []string{"the commit is not one that qory gave the program"}},
 		{"commit twice", "commit_url " + headID + " https://git.example.com/a/b\ncommit_url " + headID + " https://git.example.com/a/c\n", false, 1, []string{"the commit has an address already"}},
 		{"no address", "commit_url " + headID + "\n", false, 0, []string{"the line has no address"}},
-		{"http", "draft_url http://git.example.com/a/b\n", false, 0, []string{"the address is not https"}},
+		{"http", "draft_url http://git.example.com/a/b\n", false, 0, []string{"the address is not an https URL as definitions.schema.json describes it"}},
 		{"port", "draft_url https://git.example.com:8443/a/b\n", false, 0, []string{"the address has a port"}},
-		{"user", "draft_url https://u@git.example.com/a/b\n", false, 0, []string{"the address has user information"}},
+		{"user", "draft_url https://u@git.example.com/a/b\n", false, 0, []string{"the address is not an https URL as definitions.schema.json describes it"}},
 		{"query", "draft_url https://git.example.com/a/b?x=1\n", false, 0, []string{"the address has a query or a fragment"}},
 		{"no path", "draft_url https://git.example.com/\n", false, 0, []string{"the address has no path"}},
-		{"state", "draft_state merged\n", false, 0, []string{"the state is neither draft nor open"}},
+		{"state", "draft_state archived\n", false, 0, []string{"the state is none of draft, open, closed and merged"}},
+		{"a draft line alone", "draft_state draft\n", false, 0, []string{"the draft needs five lines, and draft_number, draft_url, draft_title, draft_action is missing; the line is left out"}},
+		{"closed with the action updated", strings.Replace(strings.Replace(good, "draft_state open", "draft_state closed", 1), "draft_action kept", "draft_action updated", 1), false, 0, []string{"a draft that is closed or merged has the action kept"}},
+		{"merged and kept", strings.Replace(good, "draft_state open", "draft_state merged", 1), true, 0, nil},
+		{"carriage returns", strings.ReplaceAll(good, "\n", "\r\n"), true, 0, nil},
+		{"a title of spaces", strings.Replace(good, "A title", "\u00a0 \u3000", 1), false, 0, around("draft_title", 3, "the title has a control, bidirectional or invisible character, or only spaces")},
+		{"a title with a bidirectional control", strings.Replace(good, "A title", "A\u202etitle", 1), false, 0, around("draft_title", 3, "the title has a control, bidirectional or invisible character, or only spaces")},
+		{"a title that is not UTF-8", strings.Replace(good, "A title", "A\xfftitle", 1), false, 0, around("draft_title", 3, "the title is not UTF-8")},
+		{"an upper-case scheme", strings.Replace(good, "https://git", "HTTPS://git", 1), false, 0, around("draft_url", 2, "the address is not an https URL as definitions.schema.json describes it")},
+		{"a quote in an address", "commit_url " + headID + " https://git.example.com/acme/shop/commit/\"x\n", false, 0, []string{"the address is not an https URL as definitions.schema.json describes it"}},
+		{"a non-ASCII address", "commit_url " + headID + " https://git.example.com/acme/shop/commit/\u00e9\n", false, 0, []string{"the address is not an https URL as definitions.schema.json describes it"}},
 		{"action", "draft_action closed\n", false, 0, []string{"the action is none of opened, updated and kept"}},
 		{"number with a zero", "draft_number 07\n", false, 0, []string{"the number is not a whole number of 1 to 9 digits, 1 or more"}},
 		{"number of 10 digits", "draft_number 1234567890\n", false, 0, []string{"the number is not a whole number of 1 to 9 digits, 1 or more"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			got := parseSubmitLines(c.out, "git.example.com", commits)
+			got := parseSubmitLines(c.out, "git.example.com", submitDraftOpen, commits)
 			if (got.Draft != nil) != c.draft || len(got.CommitURLs) != c.urls {
 				t.Errorf("draft %v and %d addresses, want %v and %d", got.Draft, len(got.CommitURLs), c.draft, c.urls)
 			}
