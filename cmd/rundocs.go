@@ -170,6 +170,11 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	}
 	hidden := doc.HarnessHidden != nil && *doc.HarnessHidden
 	runtime, settings := provisioner.Settings(doc.RunSettings)
+	// A workflow runs on the runtime of the workspace or of its workflow settings, which
+	// Qory Apiary sends in run_settings: qory picks none.
+	if runtime == "" {
+		return nil, fmt.Errorf(textNoRuntime, headlessList())
+	}
 	// A runtime this qory does not render has no headless start either.
 	if rt, err := render.Lookup(runtime); err != nil {
 		return nil, noHeadless(runtime)
@@ -690,6 +695,30 @@ func (r *codeRun) harnessAt(system string) string {
 
 // noHeadless is the error of a run from a run code on the runtime name, which has no
 // headless start, see [render.Headless]. It is exit 1 and ends with [codeUsed].
+// textNoRuntime is the refusal of documents whose run settings name no runtime, with the
+// runtimes that qory starts headless, see [headlessList].
+const textNoRuntime = "Set `runtime` in the run settings to one of %s.\n  The document names no runtime."
+
+// headlessList is the runtimes that qory renders with a headless start, in alphabetical
+// order, as a list for a message: "claude, codex, and gemini".
+func headlessList() string {
+	var names []string
+	for _, n := range render.Names() {
+		if rt, err := render.Lookup(n); err == nil {
+			if _, ok := rt.(render.Headless); ok {
+				names = append(names, n)
+			}
+		}
+	}
+	switch len(names) {
+	case 0, 1:
+		return strings.Join(names, "")
+	case 2:
+		return names[0] + " and " + names[1]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + ", and " + names[len(names)-1]
+}
+
 func noHeadless(name string) error {
 	return fmt.Errorf("set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for %s%s", accesskey.ShownName(name, false), codeUsed)
 }

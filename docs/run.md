@@ -1911,8 +1911,8 @@ the work item. Then a run of the step explore:
 - when `harness_hidden` is `true`, composes a home that contains no link, and has
   Forager mask text that matches the home's files in the session's log and events
   (see [A hidden harness](#a-hidden-harness));
-- runs the runtime of `run_settings.runtime`, `claude` when the documents contain no
-  `run_settings`, composed with the model, the effort and the tiers the run settings set, as
+- runs the runtime of `run_settings.runtime`, composed with the model, the effort and the
+  tiers the run settings set, as
   `--model`, `--effort`, `--tier` and `--tier-effort` set them;
 - writes the inputs to `inputs.json`, mode 0600, in a folder `in/`, mode 0700, of a new
   temporary folder, which qory removes when the run ends. Behind a wall, `in/` is mounted
@@ -2300,6 +2300,11 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   the code was redeemed
 - `set a workflow for the workspace in Qory Apiary, then take the work item in again: the
   response to the run code has no workflow; the code is used`
+- ``Set `runtime` in the run settings to one of claude, codex, cursor, gemini, and
+  opencode.`` and the next line ``The document names no runtime.``, when the documents
+  contain no `run_settings`, before anything is installed or fetched. Qory Apiary sends
+  the runtime of the workspace, or of the workflow's settings when they set one; qory
+  picks none
 - `set another runtime for the workspace in Qory Apiary, then take the work item in
   again: qory starts a run code's workflow with a runtime's headless start, and has none
   for <runtime>; the code is used`, before anything is fetched
@@ -2352,8 +2357,7 @@ The documents contain the harness, a harness document like a checkout's `harness
 when the workspace in Qory Apiary sets one. The harness extends a stack, under
 `extends`, or defines one: with no `extends`, it lists at least one module and may list
 `workflows`, as a `qory-stack.yaml` does. It has no `target`: qory composes a stack it
-defines for the run's runtime, `run_settings.runtime`, or `claude` when the documents
-have no run settings. Its `extends` and the source of each of its modules are git
+defines for the run's runtime, `run_settings.runtime`. Its `extends` and the source of each of its modules are git
 sources, which `documents.schema.json` requires. A source with no `git` address, a
 harness with no `extends` and no module, or `workflows` beside `extends` fails that
 schema, and the run stops after the redemption with exit 1 and the line `update qory, or

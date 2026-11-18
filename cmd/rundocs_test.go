@@ -42,6 +42,11 @@ func codeDocuments(t *testing.T, change func(map[string]any)) json.RawMessage {
 		t.Fatal(err)
 	}
 	doc["access"] = "write"
+	// Qory Apiary sends the runtime of the workspace or of the workflow's settings; the
+	// fixture has none, and a document with none is refused.
+	if _, ok := doc["run_settings"]; !ok {
+		doc["run_settings"] = map[string]any{"runtime": "claude"}
+	}
 	if change != nil {
 		change(doc)
 	}
@@ -96,8 +101,8 @@ func TestARunCodeTakesNoStackRuntimeOrArguments(t *testing.T) {
 // TestARunCodeWhoseAnswerQoryDoesNotRunStops is a redemption whose documents qory does
 // not run: none, documents that break the schema, a stack or a stack_reference, which
 // the schema does not allow, a step other than explore and prebuild, a prebuild on a
-// machine whose forager.yaml has no wall, no workflow, a runtime with no headless start,
-// and a runtime qory does not render.
+// machine whose forager.yaml has no wall, no workflow, no run settings, and so no runtime,
+// a runtime with no headless start, and a runtime qory does not render.
 // Each stops the run after the one redemption, before it opens, with a line that starts
 // with its fix and ends "; the code is used": exit 2 for an answer with no documents,
 // which Forager refuses, and exit 1 for the rest.
@@ -131,6 +136,8 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 		{"a stack reference", codeDocuments(t, func(d map[string]any) {
 			d["stack"], d["stack_reference"] = "core", "https://code.example.com/team/stacks#release-7:core"
 		}), broken},
+		{"no run settings", codeDocuments(t, func(d map[string]any) { delete(d, "run_settings") }),
+			"Set `runtime` in the run settings to one of " + headlessRuntimes + ".\n  The document names no runtime."},
 		{"a runtime with no headless start", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "goose"} }),
 			"set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for goose; the code is used"},
 		{"a runtime qory does not render", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "example"} }),
@@ -160,6 +167,10 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 		})
 	}
 }
+
+// headlessRuntimes is the list of runtimes that qory starts headless, as the refusal of
+// documents with no runtime has it.
+const headlessRuntimes = "claude, codex, cursor, gemini, and opencode"
 
 // codeRun is what a run from a run code came to, opened nowhere: its output and error,
 // the run's spec at the open, the session's spec at the join, the inputs.json and the

@@ -377,9 +377,8 @@ release may change what an existing document does, and states it under Upgrading
   lists `workflows` stops with exit 2, `remove workflows or extends: a harness section
   that extends a stack takes the workflows of its base`.
 - A run from a run code composes a harness document with no `extends`, which defines a
-  stack, for the run's runtime: `run_settings.runtime`, or `claude` when the documents
-  have no run settings. The `workflows.<name>.time_limit` of that stack applies to the
-  run, as a base's does.
+  stack, for the run's runtime, `run_settings.runtime`. The `workflows.<name>.time_limit`
+  of that stack applies to the run, as a base's does.
 - `QORY_STATUS_FD=<n>` makes `qory run` also write qory's lines, masked, to the open
   descriptor `<n>`: the `✓`, `✗` and `⚠` lines, every `qory run:` line, Forager's lines
   among them, and the last error line, an error of the flags included, each only when
@@ -562,6 +561,12 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A run from a run code whose documents contain no `run_settings` stops before
+  anything is installed or fetched, with ``Set `runtime` in the run settings to one of
+  claude, codex, cursor, gemini, and opencode.`` Until now, such a run started on
+  `claude`. A workflow runs on the runtime of the workspace, or of the workflow's settings
+  when they set one, which Qory Apiary sends. A prebuild needs no runtime and runs as
+  before.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
   qory stops a run whose documents have one. A run whose documents set no

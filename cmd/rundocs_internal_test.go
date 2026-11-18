@@ -545,8 +545,7 @@ func TestAHarnessDocumentWithASourceQoryDoesNotFetchStops(t *testing.T) {
 // TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime is a harness document
 // with no extends, whose section defines a stack with workflows: harnessChecked checks
 // its modules and no base, and qory writes it with target.runtime set to the run's
-// runtime, run_settings.runtime or the default runtime when the documents have no run
-// settings, the workflows as the documents have them.
+// runtime, run_settings.runtime, the workflows as the documents have them.
 func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing.T) {
 	defined := func(git string) *contracts.HarnessDocument {
 		return &contracts.HarnessDocument{Harness: contracts.HarnessSection{
@@ -560,7 +559,7 @@ func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing
 	if err := harnessChecked(defined(""), true); err == nil || !strings.HasPrefix(err.Error(), "set the module tools of the harness in the workspace's settings in Qory Apiary to an https source") {
 		t.Errorf("a module in a folder: %v", err)
 	}
-	for _, settings := range []*contracts.RunSettings{{Runtime: "claude"}, nil} {
+	for _, settings := range []*contracts.RunSettings{{Runtime: "claude"}, {Runtime: "codex"}} {
 		r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: defined("https://code.example.com/team/tools.git"), Workflow: "example", RunSettings: settings})
 		if err != nil {
 			t.Fatal(err)
@@ -577,11 +576,11 @@ func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing
 			t.Fatal(err)
 		}
 		h := doc.Harness
-		if !r.defines || h.Extends != nil || h.Target.Runtime != "claude" || len(h.Modules) != 1 || h.Workflows["example"] != (contracts.HarnessWorkflow{Access: "write", TimeLimit: "45m"}) {
+		if !r.defines || h.Extends != nil || h.Target.Runtime != settings.Runtime || len(h.Modules) != 1 || h.Workflows["example"] != (contracts.HarnessWorkflow{Access: "write", TimeLimit: "45m"}) {
 			t.Errorf("run settings %+v: defines %v, harness.yaml has:\n%s", settings, r.defines, r.harness)
 		}
 	}
-	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}, Workflow: "example"})
+	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
 	if err != nil || r.defines || strings.Contains(string(r.harness), "target") {
 		t.Errorf("a document with extends: %v, defines %v, harness.yaml has:\n%s", err, r != nil && r.defines, r.harness)
 	}
@@ -606,7 +605,7 @@ func TestAHarnessDocumentsBindIsWrittenInItsForm(t *testing.T) {
 		if err := json.Unmarshal(fmt.Appendf(nil, documents, source), &h); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: &h, Workflow: "example"})
+		r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: &h, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -712,6 +711,9 @@ func TestARunWritesOnlyWithAccessWriteInItsDocuments(t *testing.T) {
 			doc, err := codeDocumentsOf(raw)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if doc.RunSettings == nil {
+				doc.RunSettings = &contracts.RunSettings{Runtime: "claude"}
 			}
 			r, err := codeRunOf(doc)
 			if err != nil {

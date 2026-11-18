@@ -24,9 +24,6 @@ func TimeLimit(minutes int, workflow time.Duration) time.Duration {
 	return FallbackTimeLimit
 }
 
-// DefaultRuntime is the runtime of a dispatched run whose answer sets no run settings.
-const DefaultRuntime = "claude"
-
 // Setting is one compose flag of qory run that run settings set: the flag's name,
 // without its dashes, and its value.
 type Setting struct {
@@ -36,7 +33,7 @@ type Setting struct {
 // Settings are the runtime and the compose flags of qory run that rs sets, nil for no
 // run settings, each value as rs has it:
 //
-//	runtime            the runtime; [DefaultRuntime] when rs is nil
+//	runtime            the runtime; "" when rs is nil or sets none
 //	model              model
 //	effort             effort
 //	tiers.<tier>       tier <tier>=<model> and, with its effort, tier-effort <tier>=<effort>
@@ -45,7 +42,7 @@ type Setting struct {
 // checked them against the model, the effort and the tiers before it answered.
 func Settings(rs *contracts.RunSettings) (runtime string, flags []Setting) {
 	if rs == nil {
-		return DefaultRuntime, nil
+		return "", nil
 	}
 	if rs.Model != "" {
 		flags = append(flags, Setting{"model", rs.Model})
