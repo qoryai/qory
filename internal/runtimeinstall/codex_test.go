@@ -279,32 +279,37 @@ func TestCodexHelpersAreInstalledRunnable(t *testing.T) {
 	}
 }
 
-// TestAPartialCodexFolderIsNotTakenAsComplete installs Codex, then removes one helper of
-// [codexHelpers], or makes it one nobody can run, as a partial earlier install left it:
-// the next install refuses the version's folder, with the fix to remove it, and leaves
-// it as it is.
+// TestAPartialCodexFolderIsNotTakenAsComplete installs Codex, then removes the program
+// bin/codex or one helper of [codexHelpers], makes it one nobody can run, or empties it,
+// as a partial earlier install left it: the next install refuses the version's folder,
+// with the fix to remove it, and leaves it as it is.
 func TestAPartialCodexFolderIsNotTakenAsComplete(t *testing.T) {
-	for _, helper := range codexHelpers {
+	for _, file := range append([]string{"bin/codex"}, codexHelpers...) {
 		for kind, spoil := range map[string]func(string) error{
 			"removed":      os.Remove,
 			"not runnable": func(p string) error { return os.Chmod(p, 0o644) },
+			"empty":        func(p string) error { return os.Truncate(p, 0) },
 		} {
-			t.Run(kind+" "+helper, func(t *testing.T) {
+			t.Run(kind+" "+file, func(t *testing.T) {
 				folder := t.TempDir()
 				keep := func(*rt.Entry) bool { return true }
 				got, err := installCodexFolder(t, folder, keep)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := spoil(filepath.Join(got.Dir, filepath.FromSlash(helper))); err != nil {
+				if err := spoil(filepath.Join(got.Dir, filepath.FromSlash(file))); err != nil {
 					t.Fatal(err)
 				}
 				_, err = installCodexFolder(t, folder, keep)
-				want := "Remove the version's folder once no run uses it, then run again\n" + got.Dir + " has no " + helper + " that everyone can read and run."
+				missing := file
+				if file == "bin/codex" {
+					missing = "program bin/codex"
+				}
+				want := "Remove the version's folder once no run uses it, then run again\n" + got.Dir + " has no " + missing + " that everyone can read and run."
 				if err == nil || err.Error() != want {
 					t.Fatalf("the error is %v, want %q", err, want)
 				}
-				if _, err := os.Lstat(filepath.Join(got.Dir, "bin", "codex")); err != nil {
+				if _, err := os.Lstat(filepath.Join(got.Dir, "codex-resources")); err != nil {
 					t.Fatalf("the version's folder was changed: %v", err)
 				}
 			})
