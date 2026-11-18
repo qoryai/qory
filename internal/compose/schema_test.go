@@ -573,6 +573,14 @@ func TestQuestionsSchema(t *testing.T) {
 		return replace(option, strings.TrimSuffix(strings.Repeat(option+", ", n), ", "))
 	}
 	question := "Which database does the service use?"
+	// withProposal gives the document's first option the member proposal, and withCriterion
+	// gives the first question the member criterion.
+	withProposal := func(value string) string {
+		return replace(option, strings.Replace(option, `}`, `, "proposal": `+value+`}`, 1))
+	}
+	withCriterion := func(doc string) string {
+		return strings.Replace(doc, `"question": "`+question+`",`, `"question": "`+question+`", "criterion": "ac-3",`, 1)
+	}
 	// answerStart and historyStart start the answer and the history entry of the document.
 	const (
 		answerStart  = `"answer": {"option": "PostgreSQL"`
@@ -737,6 +745,18 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-10000"`), false},
 		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-03"`), false},
 		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": 3`), false},
+		// an option's proposal, only on a question with criterion
+		{withCriterion(withProposal(`"Use PostgreSQL 16."`)), true},
+		{withCriterion(withProposal(`"` + strings.Repeat("a", 2000) + `"`)), true},
+		{withCriterion(withProposal(`"Use PostgreSQL\n16."`)), true},
+		{withProposal(`"Use PostgreSQL 16."`), false},
+		{withCriterion(withProposal(`""`)), false},
+		{withCriterion(withProposal(`"` + strings.Repeat("a", 2001) + `"`)), false},
+		{withCriterion(withProposal(`null`)), false},
+		{withCriterion(withProposal(`7`)), false},
+		{withCriterion(withProposal(`"Use\u200bPostgreSQL."`)), false},
+		{withCriterion(questionsDocument), true},
+		{withCriterion(replace(option, recommended(`true`))), true},
 		// history
 		{replace(`, "reopened": {"run": 2, "at": "2026-11-04T10:45:00Z"}`, ``), false},
 		{replace(`"reopened": {"run": 2, `, `"reopened": {"run": 0, `), false},

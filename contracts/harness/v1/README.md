@@ -790,6 +790,11 @@ A question about no acceptance criterion has no `criterion`. The criterion ids o
 mockup schema of Qory Apiary, `mockup.schema.json`, have the same form. `qory` does not
 ship that file.
 
+An option has the optional member `proposal`, the wording the run proposes for the answer
+if a member picks that option: plain text, 1 to 2000 characters. Only an option of a
+question with `criterion` has `proposal`. The schema refuses `proposal` on an option of a
+question with no `criterion`.
+
 A run that chooses an option without asking a member records a decided question: its
 `state` is `decided`, so it is not open, and it has `decision`. A decided question has at
 least one option, and none has `recommended`. `decision` has four members, all required:
