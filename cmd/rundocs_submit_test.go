@@ -9,15 +9,10 @@ import (
 	"github.com/qoryai/qory/cmd"
 )
 
-// submitCommit is the commit of the source of the documents' submit_module.
-const submitCommit = "0123456789abcdef0123456789abcdef01234567"
-
-// withSubmit sets the documents' submit to typ and send, and their submit_module to the
-// module forge-submit at [submitCommit].
+// withSubmit sets the documents' submit to typ and send.
 func withSubmit(typ, send string) func(map[string]any) {
 	return func(d map[string]any) {
 		d["submit"] = map[string]any{"type": typ, "send": send}
-		d["submit_module"] = map[string]any{"name": "forge-submit", "source": map[string]any{"git": "https://git.test/example-org/forge.git", "ref": submitCommit, "path": "modules/forge-submit"}}
 	}
 }
 
@@ -50,24 +45,21 @@ func submitLines(out string) []string {
 }
 
 // TestARunKeepsTheDocumentsSubmitWhenTheHarnessHasNone is a run from a run code whose
-// documents have submit reply-draft at end_of_run and a submit_module, and whose
-// composed harness has no process.yaml: the run's submit and submit_module are the
-// documents', as they are, and the run prints no submit line.
+// documents have submit reply-draft at end_of_run, and whose composed harness has no
+// process.yaml: the run's submit is the documents', as it is, and the run prints no
+// submit line.
 func TestARunKeepsTheDocumentsSubmitWhenTheHarnessHasNone(t *testing.T) {
 	change := withSubmit("reply-draft", "end_of_run")
 	r := submitRun(t, change, nil)
 	if lines := submitLines(r.out); len(lines) != 0 {
 		t.Errorf("the run prints %q, want no submit line\n%s", lines, r.out)
 	}
-	submit, module, err := cmd.SubmitOf(codeDocuments(t, change))
+	submit, err := cmd.SubmitOf(codeDocuments(t, change))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if submit == nil || submit.Type != "reply-draft" || submit.Send != "end_of_run" {
 		t.Errorf("the run's submit is %+v, want reply-draft at end_of_run", submit)
-	}
-	if module == nil || module.Name != "forge-submit" || module.Source.Ref != submitCommit {
-		t.Errorf("the run's submit_module is %+v, want forge-submit at %s", module, submitCommit)
 	}
 }
 
@@ -87,7 +79,7 @@ func TestARunWhoseHarnessHasAnotherSubmitKeepsTheDocumentsSubmitAndPrintsBoth(t 
 		if !strings.Contains(r.logged(), want) {
 			t.Errorf("the compose step's lines have no submit line:\n%s", r.logged())
 		}
-		submit, _, err := cmd.SubmitOf(codeDocuments(t, change))
+		submit, err := cmd.SubmitOf(codeDocuments(t, change))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -105,20 +97,20 @@ func TestARunWhoseHarnessHasAnotherSubmitKeepsTheDocumentsSubmitAndPrintsBoth(t 
 
 // TestARunWhoseDocumentsHaveNoSubmitHasNoSubmitSettings is a run from a run code whose
 // documents have no submit, and whose composed harness has a process.yaml in the module
-// hello with submit reply-draft at after_gate: the run's submit and submit_module are
-// nil, and the run prints one line that shows the harness's submit as unused.
+// hello with submit reply-draft at after_gate: the run's submit is nil, and the run
+// prints one line that shows the harness's submit as unused.
 func TestARunWhoseDocumentsHaveNoSubmitHasNoSubmitSettings(t *testing.T) {
 	r := submitRun(t, nil, harnessSubmit("reply-draft", "after_gate"))
 	want := "qory run: submit: documents have no submit, so harness's reply-draft at after_gate is unused\n"
 	if lines := submitLines(r.out); len(lines) != 1 || lines[0] != want {
 		t.Errorf("the run prints %q, want the one line %q\n%s", lines, want, r.out)
 	}
-	submit, module, err := cmd.SubmitOf(codeDocuments(t, nil))
+	submit, err := cmd.SubmitOf(codeDocuments(t, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if submit != nil || module != nil {
-		t.Errorf("the run's submit is %+v and its submit_module %+v, want none", submit, module)
+	if submit != nil {
+		t.Errorf("the run's submit is %+v, want none", submit)
 	}
 }
 
@@ -330,8 +322,8 @@ func TestASubmitLineOf100CharactersStaysWholeAndOneOf101IsShortened(t *testing.T
 // harness has a different submit, and whose stack declares the workflow hello
 // write-no-push, read or write. With write, the run keeps the documents' submit and
 // prints the one line, whether the documents have a submit or none. With write-no-push
-// or read, the run's level is below write: it keeps no submit and no submit_module, and
-// prints no submit line.
+// or read, the run's level is below write: it keeps no submit, and prints no submit
+// line.
 func TestARunWhoseWorkflowLowersItBelowWriteKeepsNoSubmitAndPrintsNoLine(t *testing.T) {
 	for _, c := range []struct {
 		name, access string
@@ -361,12 +353,12 @@ func TestARunWhoseWorkflowLowersItBelowWriteKeepsNoSubmitAndPrintsNoLine(t *test
 			if lines := submitLines(r.out); len(lines) != want {
 				t.Errorf("the run prints %q, want %d submit lines\n%s", lines, want, r.out)
 			}
-			submit, module, err := cmd.SubmitAt(codeDocuments(t, change), c.access)
+			submit, err := cmd.SubmitAt(codeDocuments(t, change), c.access)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if kept := submit != nil && module != nil; kept != (c.write && c.docsSubmit) {
-				t.Errorf("at level %s the run keeps submit %+v and submit_module %+v", c.access, submit, module)
+			if kept := submit != nil; kept != (c.write && c.docsSubmit) {
+				t.Errorf("at level %s the run keeps submit %+v", c.access, submit)
 			}
 		})
 	}

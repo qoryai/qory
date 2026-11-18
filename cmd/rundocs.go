@@ -120,10 +120,8 @@ type codeRun struct {
 	workItem string
 	// submit is the documents' submit, the run's submit settings, type and send: the one
 	// place qory takes them from, never the composed harness's process.yaml, see
-	// [codeRun.submitLine]. nil when the documents have no submit. submitModule is the
-	// documents' submit_module, nil for none.
-	submit       *contracts.Submit
-	submitModule *contracts.SubmitModule
+	// [codeRun.submitLine]. nil when the documents have no submit.
+	submit *contracts.Submit
 
 	// runNumber is the run's number on the server, set by [codeRun.readBranch].
 	runNumber int
@@ -217,7 +215,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if hidden {
 		r.named = source.NewNamed(r.phrase())
 	}
-	r.submit, r.submitModule = doc.Submit, doc.SubmitModule
+	r.submit = doc.Submit
 	return r, nil
 }
 
@@ -771,12 +769,12 @@ func entryKeys(rep report.Report) []string {
 	return keys
 }
 
-// limitSubmit keeps r's submit and submit_module only for a run whose level is
+// limitSubmit keeps r's submit only for a run whose level is
 // [stack.AccessWrite], the run's [accessOf] level: a run that the stack's workflow or the
 // documents lower to write-no-push or read has no submit settings.
 func (r *codeRun) limitSubmit(level string) {
 	if r != nil && level != stack.AccessWrite {
-		r.submit, r.submitModule = nil, nil
+		r.submit = nil
 	}
 }
 
