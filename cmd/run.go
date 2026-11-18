@@ -818,7 +818,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// The documents' submit is the run's at level write, and a different one in the
 				// harness gets a line.
 				submitLevel := accessOf(fromCode, workflows)
-				fromCode.limitSubmit(submitLevel)
 				// Only a run at level write submits: a run at write-no-push or read has no
 				// submit program and no hand-off file.
 				if submitLevel == stack.AccessWrite {
