@@ -10,9 +10,9 @@
 // tarball with the same checksum made it, and opens no tarball then. Otherwise it takes
 // the version's install lock, so that a second run that needs the same version waits and
 // then uses the folder, reads the tarball into a temporary file, checks its checksum, and
-// extracts only the program's entry, [Release.Program], to bin/<runtime> in a temporary
-// folder, which it then renames to the version's folder: a folder at that path is always
-// a complete install.
+// extracts into a temporary folder either the program's entry, [Release.Program], to
+// bin/<runtime>, or the release's folder, [Release.Folder], whole. It then renames that
+// folder to the version's folder: a folder at that path is always a complete install.
 package runtimeinstall
 
 import (
@@ -73,23 +73,28 @@ type Release struct {
 	// platform, whose program is the entry Program. Install calls it at most once, and
 	// only when the version's folder is not complete.
 	Open func(ctx context.Context) (io.ReadCloser, error)
-	// Program is the entry of the program in the tarball, see [programEntry]; ""
-	// stands for package/<runtime>.
+	// Program is the entry of the program in the tarball, see [layout]; "" stands for
+	// package/<runtime>. Install extracts only this entry, to bin/<runtime>.
 	Program string
+	// Folder, when it is set, is a folder of the tarball, ending in /, see [layout].
+	// Install extracts it whole, in its layout, as the version's folder, in place of
+	// Program: the folder's bin/<runtime> is the program.
+	Folder string
 }
 
-// programEntry is the entry of runtime's program in the npm tarball of its build for
-// linux/arch: package/vendor/<x86_64 or aarch64>-unknown-linux-musl/bin/codex for Codex,
-// and package/<runtime> for any other runtime, such as package/claude for Claude Code.
-// Install extracts only this entry. Codex then runs without the other files of its
-// tarball: a walled run starts it with --sandbox danger-full-access, so it needs no bwrap
-// from the tarball, and takes rg from the image.
-func programEntry(runtime, arch string) string {
+// layout is where runtime's program is in the npm tarball of its build for linux/arch,
+// as a [Release] has it. Codex's build is the folder package/vendor/<x86_64 or
+// aarch64>-unknown-linux-musl/: its codex-package.json sets bin/codex as the entry point
+// and codex-resources and codex-path as the folders of its helpers, such as
+// codex-resources/bwrap and codex-path/rg, and bin/codex-code-mode-host is beside
+// bin/codex. Install extracts that folder whole. Any other runtime's program is the one
+// entry package/<runtime>, such as package/claude for Claude Code.
+func layout(runtime, arch string) (program, folder string) {
 	if runtime == "codex" {
 		triple := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[arch]
-		return "package/vendor/" + triple + "-unknown-linux-musl/bin/codex"
+		return "", "package/vendor/" + triple + "-unknown-linux-musl/"
 	}
-	return "package/" + runtime
+	return "package/" + runtime, ""
 }
 
 // Fetch returns the newest release of the runtime. Every error's text starts with what

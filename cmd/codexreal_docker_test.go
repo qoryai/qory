@@ -74,14 +74,15 @@ case $found in 0) echo "scan: a file has the key";; 1) echo "scan: no file has t
 exit $status
 `
 
-// realCodexVersion is the Codex the test builds into its image: 0.167.2, the version the
-// walled run's settings, refused keys and hook hashes were checked on. realCodexSums are
-// npm's dist.integrity of its native build for each engine architecture, sha512 in hex.
-const realCodexVersion = "0.167.2"
+// realCodexVersion is the Codex the test builds into its image: 0.170.0, the dist-tag
+// latest of @openai/codex on npm on 2026-11-18. The walled run's settings, refused keys
+// and hook hashes were first checked on 0.167.2. realCodexSums are npm's dist.integrity
+// of its native build for each engine architecture, sha512 in hex.
+const realCodexVersion = "0.170.0"
 
 var realCodexSums = map[string]string{
-	"amd64": "d91c375645a89ccc7009280ec3e36488a2ceb8ecf2a103569b153bc7c1a789eb1d31f84a7386ac36a3b34e043024b282ad294f738ffa7d84da1fb7d872e19619",
-	"arm64": "c7f3e13d1ab45fe841643a97284d18226e0d6684b2085f7d29c2495919f407658d766624dde043b6334ee7ec25ef358c081c234ce7afe53cf6659ebe635e1840",
+	"amd64": "e9c09925a64bd7bb624c0be17753e2aedf2fb15d5d3fc09f1bde3e207ca050ee26db8a182d0ac82272492f22b370cbffb94a276eed5d176266717840fece5bb2",
+	"arm64": "9892e6e5e89afc672e902ad17d51276150f974e5c613b726a5df5d27f8b191288a89fcc300f686abcdd9126c15864dcfc5b7533d448b4699d765029b352e47a0",
 }
 
 // realCodexImage builds an image on alpine with git, Codex, and [codexScan] with mark at

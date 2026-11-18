@@ -11,9 +11,13 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
+
+// maxEntries is the most entries of a release's folder that [extractFolder] writes.
+const maxEntries = 10000
 
 // folder is the folder of a runtime's versions, <Folder>/<runtime>.
 type folder struct {
@@ -73,8 +77,8 @@ func readSmall(path string) (string, error) {
 const textState = "Check that qory can write its state folder: "
 
 // install reads the tarball of rel into a temporary file in the folder and checks it
-// against sum, the sha512 digest of rel's checksum. It extracts the program into a
-// temporary folder, and renames that folder to the version's folder. When another run
+// against sum, the sha512 digest of rel's checksum. It extracts the program, or rel's
+// folder whole, into a temporary folder, and renames that folder to the version's folder. When another run
 // renamed its folder there first, that folder is used, if [folder.complete] takes it.
 // The temporary file and folder are removed on every path.
 func (f folder) install(ctx context.Context, rel Release, sum []byte) error {
@@ -96,11 +100,16 @@ func (f folder) install(ctx context.Context, rel Release, sum []byte) error {
 	if _, err := tarball.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf(textState+"%w", err)
 	}
-	entry := rel.Program
-	if entry == "" {
-		entry = "package/" + f.runtime
+	if rel.Folder != "" {
+		err = extractFolder(tarball, tmp, f.runtime, rel.Folder, what)
+	} else {
+		entry := rel.Program
+		if entry == "" {
+			entry = "package/" + f.runtime
+		}
+		err = extract(tarball, tmp, f.runtime, entry, what)
 	}
-	if err := extract(tarball, tmp, f.runtime, entry, what); err != nil {
+	if err != nil {
 		return err
 	}
 	if err := writeFile(filepath.Join(tmp, checksumFile), []byte(rel.Integrity+"\n"), 0o644); err != nil {
@@ -227,16 +236,23 @@ func writeProgram(r io.Reader, size int64, bin, name string) error {
 	if err := os.Chmod(bin, 0o755); err != nil {
 		return err
 	}
-	path := filepath.Join(bin, name)
-	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o700)
+	if err := writeEntry(r, size, filepath.Join(bin, name), 0o755); err != nil {
+		return err
+	}
+	return syncDir(bin)
+}
+
+// writeEntry writes size bytes of r to path, a new file of mode perm, and syncs it.
+func writeEntry(r io.Reader, size int64, path string, perm fs.FileMode) error {
+	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
 	if _, err := io.CopyN(out, r, size); err != nil {
 		out.Close()
-		return fmt.Errorf(textRelease+"The tarball's program ends before its %d bytes: %w", size, err)
+		return fmt.Errorf(textRelease+"The tarball's entry for %s ends before its %d bytes: %w", filepath.Base(path), size, err)
 	}
-	if err := out.Chmod(0o755); err != nil {
+	if err := out.Chmod(perm); err != nil {
 		out.Close()
 		return err
 	}
@@ -244,10 +260,122 @@ func writeProgram(r io.Reader, size int64, bin, name string) error {
 		out.Close()
 		return err
 	}
-	if err := out.Close(); err != nil {
+	return out.Close()
+}
+
+// extractFolder writes each entry of the gzip tar archive in r whose name starts with
+// prefix, a folder such as package/vendor/x86_64-unknown-linux-musl/, to dir, at its
+// path below prefix, so the folder keeps its layout. No other entry is written. Each
+// entry is a folder, mode 0755, or a regular file of at most [maxProgram] bytes, mode
+// 0755 when its mode in the archive lets anyone run it and 0644 otherwise; its path is a
+// plain relative path, with no . or .. segment. The folder must have at most
+// [maxEntries] entries, no file named [checksumFile] at its top, and bin/<runtime>, a
+// file of at least 1 byte, which is made 0755. The archive must unpack to at most
+// [maxUnpacked] bytes. what is the release as an error shows it.
+func extractFolder(r io.Reader, dir, runtime, prefix, what string) error {
+	zr, err := gzip.NewReader(r)
+	if err != nil {
+		return fmt.Errorf(textRelease+"The tarball of %s is not gzip", what)
+	}
+	defer zr.Close()
+	unpacked := &countingReader{r: io.LimitReader(zr, maxUnpacked+1)}
+	tr := tar.NewReader(unpacked)
+	tooBig := fmt.Errorf(textRelease+"The tarball of %s unpacks to more than %d bytes", what, maxUnpacked)
+	program := "bin/" + runtime
+	made := map[string]bool{".": true}
+	entries := 0
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if unpacked.n > maxUnpacked {
+			return tooBig
+		}
+		if err != nil {
+			return fmt.Errorf(textRelease+"The tarball of %s is not a tar archive: %w", what, err)
+		}
+		rest, ok := strings.CutPrefix(h.Name, prefix)
+		if !ok {
+			continue
+		}
+		name := rest
+		if h.Typeflag == tar.TypeDir {
+			name = strings.TrimSuffix(rest, "/")
+			if name == "" {
+				continue
+			}
+		}
+		if entries++; entries > maxEntries {
+			return fmt.Errorf(textRelease+"The folder %s of the tarball of %s has more than %d entries", prefix, what, maxEntries)
+		}
+		if !filepath.IsLocal(name) || path.Clean(name) != name || strings.Contains(name, `\`) {
+			return fmt.Errorf(textRelease+"The tarball of %s has the entry %q, whose path below %s is not a plain relative path", what, h.Name, prefix)
+		}
+		if name == checksumFile {
+			return fmt.Errorf(textRelease+"The tarball of %s has %s, and qory writes its checksum file there", what, h.Name)
+		}
+		switch h.Typeflag {
+		case tar.TypeDir:
+			err = makeDirs(dir, name, made)
+		case tar.TypeReg:
+			if h.Size > maxProgram {
+				return fmt.Errorf(textRelease+"The tarball of %s has %s of %d bytes, and a file has at most %d", what, h.Name, h.Size, maxProgram)
+			}
+			perm := fs.FileMode(0o644)
+			if h.Mode&0o111 == 0o111 || name == program {
+				perm = 0o755
+			}
+			if err = makeDirs(dir, path.Dir(name), made); err == nil {
+				err = writeEntry(tr, h.Size, filepath.Join(dir, filepath.FromSlash(name)), perm)
+			}
+		default:
+			return fmt.Errorf(textRelease+"The tarball of %s has %s as another kind of entry than a regular file or a folder", what, h.Name)
+		}
+		switch {
+		case err == nil:
+		case unpacked.n > maxUnpacked:
+			return tooBig
+		case errors.Is(err, fs.ErrExist):
+			return fmt.Errorf(textRelease+"The tarball of %s has %s twice, or as a file and a folder", what, h.Name)
+		case strings.HasPrefix(err.Error(), textRelease):
+			return err
+		default:
+			return fmt.Errorf(textState+"%w", err)
+		}
+	}
+	if unpacked.n > maxUnpacked {
+		return tooBig
+	}
+	if p, err := os.Lstat(filepath.Join(dir, "bin", runtime)); err != nil || !p.Mode().IsRegular() || p.Size() < 1 {
+		return fmt.Errorf(textRelease+"The tarball of %s has no %s", what, prefix+program)
+	}
+	for name := range made {
+		if err := syncDir(filepath.Join(dir, filepath.FromSlash(name))); err != nil {
+			return fmt.Errorf(textState+"%w", err)
+		}
+	}
+	return nil
+}
+
+// makeDirs makes the folder name below dir, and each folder above it, mode 0755, unless
+// made records it, and records each folder it makes in made.
+func makeDirs(dir, name string, made map[string]bool) error {
+	if made[name] {
+		return nil
+	}
+	if err := makeDirs(dir, path.Dir(name), made); err != nil {
 		return err
 	}
-	return syncDir(bin)
+	p := filepath.Join(dir, filepath.FromSlash(name))
+	if err := os.Mkdir(p, 0o755); err != nil {
+		return err
+	}
+	if err := os.Chmod(p, 0o755); err != nil {
+		return err
+	}
+	made[name] = true
+	return nil
 }
 
 // writeFile writes b to path, a new file of mode perm, and syncs it.

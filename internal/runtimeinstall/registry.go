@@ -86,7 +86,7 @@ func RegistryFetch(client *http.Client, host, arch, instance string) Fetch {
 		if err != nil {
 			return Release{}, err
 		}
-		rel.Program = programEntry(runtime, arch)
+		rel.Program, rel.Folder = layout(runtime, arch)
 		return rel, nil
 	}
 }

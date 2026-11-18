@@ -870,9 +870,11 @@ it, and the session's `dev.qory.session.started` has the installed version as
 `runtime_version`. Forager sets `DISABLE_AUTOUPDATER=1` for Claude Code, so it does not
 update itself, and its launch of Codex turns off Codex's update check.
 
-Codex runs as `bin/codex` alone, without the other files of its npm build. Behind a
-wall, `codex exec` runs with `--sandbox danger-full-access`, so it needs no `bwrap` of its
-build, and it runs `rg` from the image.
+The version's folder of Codex is the whole folder
+`package/vendor/<x86_64 or aarch64>-unknown-linux-musl/` of its npm build, in that
+folder's layout: `bin/codex`, with `bin/codex-code-mode-host`, `codex-resources/bwrap`,
+`codex-path/rg` and `codex-package.json` beside it, as npm's build places them. Behind a
+wall, `codex exec` runs with `--sandbox danger-full-access`.
 
 The program comes from the runtime cache of the instance's registry when the machine has
 one, and from npm otherwise:
@@ -1015,18 +1017,23 @@ pool` starts, `<runtimes>` is `runtimes` in the pool's folder, which every run o
 shares. For any other run, `<runtimes>` is `<state>/runtimes`, where `<state>` is
 `$XDG_STATE_HOME/qory`, or `~/.local/state/qory` without `XDG_STATE_HOME`. The folder
 contains `bin/<runtime>`, mode `0755`, and `integrity`, the checksum of the tarball it
-came from.
+came from. For Codex, it also contains the other files of Codex's folder in the tarball.
 
 1. When the version's folder exists, the run uses it and reads no tarball: a later run on
    the same machine with the same newest version downloads nothing.
 2. Otherwise qory reads the tarball into a temporary file in `<runtimes>/<runtime>/`, at
-   most 1 GiB, and checks it against the checksum before it extracts anything. It
-   extracts only the program's entry, a regular file of at most 1 GiB, to
-   `bin/<runtime>` in a temporary folder: `package/claude` for Claude Code, and
-   `package/vendor/<x86_64 or aarch64>-unknown-linux-musl/bin/codex` for Codex. The
-   tarball may unpack to at most 4 GiB. No other entry is written, and a link at the
-   program's entry stops the run. qory then renames the temporary folder to the
-   version's folder, so a folder at that path is always a complete install.
+   most 1 GiB, and checks it against the checksum before it extracts anything. For
+   Claude Code, it extracts only the program's entry `package/claude`, a regular file of
+   at most 1 GiB, to `bin/claude` in a temporary folder; no other entry is written, and a
+   link at the program's entry stops the run. For Codex, it extracts each entry of the
+   folder `package/vendor/<x86_64 or aarch64>-unknown-linux-musl/` to the same path below
+   a temporary folder, and no entry outside that folder. Each entry is a folder, mode
+   `0755`, or a regular file of at most 1 GiB, mode `0755` when its mode in the tarball
+   lets anyone run it and `0644` otherwise. A link, a hard link, a path with a `.` or
+   `..` segment, an entry twice, a file `integrity` at the folder's top, more than 10,000
+   entries, or no `bin/codex` stops the run. The tarball may unpack to at most 4 GiB. qory
+   then renames the temporary folder to the version's folder, so a folder at that path is
+   always a complete install.
 
 Every session of the run uses that one version, and the run holds the version's folder
 until it ends. Each install removes, in `<runtimes>/<runtime>/`, the folders of versions

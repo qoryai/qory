@@ -90,10 +90,9 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 		if err != nil || tarball.Scheme != root.Scheme || tarball.Host != root.Host || tarball.User != nil {
 			return Release{}, fmt.Errorf(textRelease+"The tarball of %s is not on %s", what, root.Host)
 		}
-		return Release{
+		rel := Release{
 			Version:   version,
 			Integrity: doc.Dist.Integrity,
-			Program:   programEntry(runtime, arch),
 			Open: func(ctx context.Context) (io.ReadCloser, error) {
 				resp, err := n.get(ctx, tarball.String(), "", "the tarball of "+what)
 				if err != nil {
@@ -101,7 +100,9 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 				}
 				return resp.Body, nil
 			},
-		}, nil
+		}
+		rel.Program, rel.Folder = layout(runtime, arch)
+		return rel, nil
 	}
 }
 

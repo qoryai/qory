@@ -83,9 +83,11 @@ release may change what an existing document does, and states it under Upgrading
   Claude Code: from `shared/runtimes/codex` in the runtime cache of the pool's registry,
   or of `pool.registry`, or else from npm, where it reads the dist-tag `latest` of
   `@openai/codex` and the version `<version>-linux-x64` or `-linux-arm64` of the same
-  package. qory extracts only `package/vendor/<x86_64 or aarch64>-unknown-linux-musl/bin/codex`
-  into `<runtimes>/codex/<version>/bin/codex` and prints `qory run: installed codex
-  <version>`. The session starts that program, and behind a wall Forager mounts the
+  package. The registry's layer is npm's tarball, unchanged. qory extracts the whole
+  folder `package/vendor/<x86_64 or aarch64>-unknown-linux-musl/`, in its layout, as
+  `<runtimes>/codex/<version>/`, so `bin/codex-code-mode-host`, `codex-resources/bwrap`
+  and `codex-path/rg` are beside `bin/codex`, and prints `qory run: installed codex
+  <version>`. The session starts `bin/codex`, and behind a wall Forager mounts the
   version's folder read-only at `/qory/runtime/codex`. Before, a session of Codex started
   the program from the image, which no agent image has.
 - Every run of Claude Code installs the runtime's program before its session: from the

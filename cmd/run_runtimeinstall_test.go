@@ -183,21 +183,22 @@ func startedProgram(s session.SessionSpec) string {
 }
 
 // TestADispatchedCodexRunInstallsCodexAndRunsItBehindTheWall runs codex exec with a run
-// key behind the fake wall, with no pool.registry: qory installs codex 0.169.1 from npm
+// key behind the fake wall, with no pool.registry: qory installs codex 0.170.0 from npm
 // through the run's host proxy before the image's fetch, prints "qory run: installed
-// codex 0.169.1" once, and the session joins with the version's folder as
+// codex 0.170.0" once, and the session joins with the version's folder as
 // RuntimeInstall and the installed program as the program it starts, behind the wall:
 // Forager binds the folder read-only at /qory/runtime/codex. Codex runs as a walled run
 // starts it: on the home at /var/lib/qory-codex-home, with --sandbox danger-full-access
-// after exec.
+// after exec. The version's folder is Codex's whole vendor folder of the tarball, with
+// bin/codex-code-mode-host, codex-resources/bwrap and codex-path/rg beside bin/codex.
 func TestADispatchedCodexRunInstallsCodexAndRunsItBehindTheWall(t *testing.T) {
 	npm, proxy := rt.StartCodexNpm(t), rt.StartProxy(t)
-	npm.Publish("0.169.1")
-	r := runInstalling(t, installSetup{npm: npm, proxy: proxy, walled: true, runtime: "codex", version: "0.169.1", args: []string{"--", "exec", "hi"}})
+	npm.Publish("0.170.0")
+	r := runInstalling(t, installSetup{npm: npm, proxy: proxy, walled: true, runtime: "codex", version: "0.170.0", args: []string{"--", "exec", "hi"}})
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || len(r.joins) != 1 {
 		t.Fatalf("%d joins, %v\n%s", len(r.joins), r.err, r.out)
 	}
-	if n := strings.Count(r.out, "qory run: installed codex 0.169.1\n"); n != 1 {
+	if n := strings.Count(r.out, "qory run: installed codex 0.170.0\n"); n != 1 {
 		t.Fatalf("the run prints the install line %d times:\n%s", n, r.out)
 	}
 	if !r.installFirst {
@@ -206,13 +207,14 @@ func TestADispatchedCodexRunInstallsCodexAndRunsItBehindTheWall(t *testing.T) {
 	if npm.TarballGets() != 1 || proxy.Passed() != 3 || proxy.Refusals() != 0 {
 		t.Fatalf("npm requests %q; the proxy passed %d and refused %d", npm.Paths(), proxy.Passed(), proxy.Refusals())
 	}
-	program := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "codex", "0.169.1", "bin", "codex")
-	if b, err := os.ReadFile(program); err != nil || string(b) != rt.CodexProgram("0.169.1 "+goruntime.GOARCH) {
+	program := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "codex", "0.170.0", "bin", "codex")
+	if b, err := os.ReadFile(program); err != nil || string(b) != rt.CodexProgram("0.170.0 "+goruntime.GOARCH) {
 		t.Fatalf("the installed program is %q (%v)", b, err)
 	}
+	codexFolderIs(t, filepath.Dir(filepath.Dir(program)), "0.170.0 "+goruntime.GOARCH)
 	join := r.joins[0]
-	if in := join.RuntimeInstall; in == nil || in.Version != "0.169.1" || in.Dir != filepath.Dir(filepath.Dir(program)) {
-		t.Fatalf("the session's RuntimeInstall is %+v, want the folder of codex 0.169.1", in)
+	if in := join.RuntimeInstall; in == nil || in.Version != "0.170.0" || in.Dir != filepath.Dir(filepath.Dir(program)) {
+		t.Fatalf("the session's RuntimeInstall is %+v, want the folder of codex 0.170.0", in)
 	}
 	if got := startedProgram(join); got != program {
 		t.Fatalf("the session starts %q, want the installed program", got)
@@ -224,18 +226,38 @@ func TestADispatchedCodexRunInstallsCodexAndRunsItBehindTheWall(t *testing.T) {
 
 // TestADispatchedCodexRunInstallsCodexFromTheRegistry runs codex with a run key behind
 // the fake wall on a machine whose forager.yaml sets pool.registry: qory reads codex
-// 0.169.1 from shared/runtimes/codex of the registry through the run's host proxy, and
-// npm gets no request.
+// 0.170.0 from shared/runtimes/codex of the registry through the run's host proxy, and
+// npm gets no request. The layer is npm's tarball: the version's folder is Codex's whole
+// vendor folder, and the session starts its bin/codex.
 func TestADispatchedCodexRunInstallsCodexFromTheRegistry(t *testing.T) {
 	reg, npm, proxy := rt.StartCodexRegistry(t), rt.StartCodexNpm(t), rt.StartProxy(t)
-	reg.PublishPlain("0.169.1")
-	r := runInstalling(t, installSetup{reg: reg, npm: npm, proxy: proxy, walled: true, runtime: "codex", version: "0.169.1"})
+	reg.PublishPlain("0.170.0")
+	r := runInstalling(t, installSetup{reg: reg, npm: npm, proxy: proxy, walled: true, runtime: "codex", version: "0.170.0"})
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || len(r.joins) != 1 {
 		t.Fatalf("%d joins, %v\n%s", len(r.joins), r.err, r.out)
 	}
-	wants(t, r.out, "qory run: installed codex 0.169.1\n")
+	wants(t, r.out, "qory run: installed codex 0.170.0\n")
 	if reg.BlobGets() != 1 || len(npm.Paths()) != 0 || !r.installFirst {
 		t.Fatalf("%d blobs, %d npm requests, installed first %v", reg.BlobGets(), len(npm.Paths()), r.installFirst)
+	}
+	dir := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "codex", "0.170.0")
+	codexFolderIs(t, dir, "0.170.0 "+goruntime.GOARCH)
+	if in := r.joins[0].RuntimeInstall; in == nil || in.Dir != dir {
+		t.Fatalf("the session's RuntimeInstall is %+v, want %s", in, dir)
+	}
+	if got := startedProgram(r.joins[0]); got != filepath.Join(dir, "bin", "codex") {
+		t.Fatalf("the session starts %q, want bin/codex of %s", got, dir)
+	}
+}
+
+// codexFolderIs fails the test unless dir has each file of Codex's folder of version, as
+// [rt.CodexFolder] has it, with its body.
+func codexFolderIs(t *testing.T, dir, version string) {
+	t.Helper()
+	for _, f := range rt.CodexFolder(version) {
+		if b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(f.Name))); err != nil || string(b) != f.Body {
+			t.Errorf("%s of the installed folder is %q (%v), want %q", f.Name, b, err, f.Body)
+		}
 	}
 }
 
