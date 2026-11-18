@@ -556,7 +556,8 @@ release may change what an existing document does, and states it under Upgrading
   person's git login, after the checks of every repository and before any program, then runs the program on the person's machine,
   outside the wall, with the person's login of the forge's command line, once for each
   repository. The program never pushes. A run whose session did not pass, or that wrote no
-  hand-off text, gets the draft `none`. The program gets the inputs `QORY_SUBMIT_*` and
+  hand-off text, gets the draft `none`. For each repository whose program returned a draft,
+  `qory run` prints `Draft: <address>` as its last lines. The program gets the inputs `QORY_SUBMIT_*` and
   prints plain lines: the five `draft_` lines and a `commit_url` line for each commit. qory
   stores them as the draft and the commit addresses, checks each value, and leaves out a line
   that it cannot use. A program that ends with status 3 means that the person has no login of

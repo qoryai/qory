@@ -153,6 +153,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			maskServerSecrets()
 			streams := newRunStreams(cmd.OutOrStdout(), cmd.ErrOrStderr())
 			defer streams.flush()
+			// The drafts of a local run print as the last lines of the run, after every line of
+			// the other defers: this one is registered first among them, so it runs last.
+			var drafts []string
+			defer func() {
+				for _, address := range drafts {
+					fmt.Fprintln(streams.out, textDraftLine+address)
+				}
+			}()
 			// The access key's descriptor is read and closed first, whatever comes next, so
 			// nothing qory starts inherits it.
 			var fdKey *accesskey.Key
@@ -1509,7 +1517,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// session ended: it pushes its branches and runs the harness's submit program. The
 			// program opens a draft only after a session that passed.
 			if back && copied.submits && program != nil {
-				copied.submitLocal(backCtx, streams.errOut, program, ExitCode(ended) == 0)
+				drafts = copied.submitLocal(backCtx, streams.errOut, program, ExitCode(ended) == 0)
 			}
 			// A run the gateway closed as completed ends with an exit status of 0 that is not nil.
 			if (!back || !artifactsBack || returnFailed) && ExitCode(ended) == 0 {

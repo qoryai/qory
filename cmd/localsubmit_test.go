@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -37,7 +38,8 @@ for b in $(cat `+started+`.bares); do
   git --git-dir="$b" rev-parse --verify -q "refs/heads/$QORY_SUBMIT_BRANCH" >/dev/null && n=$((n+1))
 done
 echo "$QORY_SUBMIT_PATH $QORY_SUBMIT_BRANCH $QORY_SUBMIT_DRAFT $n" >> `+started+`
-exit 0
+if [ -f `+started+`.out ]; then sed "s|@PATH@|$QORY_SUBMIT_PATH|g" `+started+`.out; fi
+exit $(cat `+started+`.exit 2>/dev/null || echo 0)
 `)
 	composedForFake(t, root, fakeRuntime(t))
 	runGit(t, root, "add", "README.md", "qory.yaml", "modules")
@@ -429,5 +431,126 @@ func TestALocalRunWithTwoPushAddressesPushesNothing(t *testing.T) {
 	wants(t, out, "qory run: The remote origin has 2 push addresses, so qory pushed nothing and opened no draft.", "git remote set-url --push origin <address>")
 	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 {
 		t.Errorf("pushed %q and started %d programs, want none", got, timesStarted(t, started))
+	}
+}
+
+// draftLines are the result lines of a program that opened a draft on the repository @PATH@ of
+// the forge git.example.com.
+const draftLines = "draft_number 7\ndraft_url https://git.example.com/@PATH@/pull/7\ndraft_title Add a file\ndraft_state draft\ndraft_action opened\n"
+
+// runLocal runs a local run with the agent and returns the output, failing the test on an error.
+func runLocal(t *testing.T, agent func(session.SessionSpec)) string {
+	t.Helper()
+	agentInCopy(t, agent)
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	return out
+}
+
+// lastLines is the last n lines of out, without trailing blank lines.
+func lastLines(out string, n int) []string {
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	return lines[max(0, len(lines)-n):]
+}
+
+// TestALocalRunPrintsTheAddressOfItsDraftAsItsLastLine is a program that returns the five draft
+// lines: the output ends with `Draft: <address>`, once, after the line with the record.
+func TestALocalRunPrintsTheAddressOfItsDraftAsItsLastLine(t *testing.T) {
+	_, _, started := localProgramCheckout(t)
+	writeFile(t, started+".out", draftLines)
+	passingCheck(t)
+	out := runLocal(t, handsOffText(t))
+	const want = "Draft: https://git.example.com/acme/app/pull/7"
+	if got := lastLines(out, 1); got[0] != want || strings.Count(out, "Draft: ") != 1 {
+		t.Errorf("the last line is %q with %d draft lines, want %q once:\n%s", got, strings.Count(out, "Draft: "), want, out)
+	}
+	if strings.Index(out, "the record is in") > strings.Index(out, want) {
+		t.Errorf("the draft line is before the record line:\n%s", out)
+	}
+}
+
+// TestALocalRunPrintsNoDraftLineForNoDraft is a program that returns draft lines for a run that
+// has no hand-off text, so the draft is none and qory leaves the lines out, and a program that
+// fails, and one whose address has a control character, which the contract's rule refuses:
+// none of them prints a draft line.
+func TestALocalRunPrintsNoDraftLineForNoDraft(t *testing.T) {
+	noText := func(spec session.SessionSpec) {
+		makeProgramRunnable(t)
+		writeFile(t, filepath.Join(spec.Dir, "committed.txt"), "committed\n")
+		gitOutput(t, spec.Dir, "add", "committed.txt")
+		gitOutput(t, spec.Dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "Add a file")
+	}
+	for _, c := range []struct {
+		name  string
+		lines string
+		exit  string
+		agent func(session.SessionSpec)
+	}{
+		{"draft none", draftLines, "0", noText},
+		{"a program that fails", "", "1", handsOffText(t)},
+		{"an address with a control character", strings.Replace(draftLines, "/pull/7", "/pull/7\x01", 1), "0", handsOffText(t)},
+		{"an address on another host", strings.Replace(draftLines, "git.example.com", "evil.example.net", 1), "0", handsOffText(t)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, _, started := localProgramCheckout(t)
+			writeFile(t, started+".out", c.lines)
+			writeFile(t, started+".exit", c.exit+"\n")
+			passingCheck(t)
+			out := runLocal(t, c.agent)
+			if strings.Contains(out, "Draft: ") {
+				t.Errorf("the output has a draft line:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestALocalRunPrintsTheAddressOfADraftThatTheProgramReportedBeforeItFailed is a program that
+// prints the five draft lines and exits with 1: the contract records the draft with that exit, a
+// draft exists on the forge, so its address is printed.
+func TestALocalRunPrintsTheAddressOfADraftThatTheProgramReportedBeforeItFailed(t *testing.T) {
+	_, _, started := localProgramCheckout(t)
+	writeFile(t, started+".out", draftLines)
+	writeFile(t, started+".exit", "1\n")
+	passingCheck(t)
+	out := runLocal(t, handsOffText(t))
+	if got := lastLines(out, 1); got[0] != "Draft: https://git.example.com/acme/app/pull/7" {
+		t.Errorf("the last line is %q, want the draft's address:\n%s", got, out)
+	}
+}
+
+// TestALocalRunPrintsADraftLineForEachRepositoryInOrder is a local run of two repositories whose
+// program returns a draft for each: the output ends with their two lines, the first repository's
+// first.
+func TestALocalRunPrintsADraftLineForEachRepositoryInOrder(t *testing.T) {
+	root, bare, started := localProgramCheckout(t)
+	further := filepath.Join(root, ".qory", "repositories", "other")
+	if err := os.MkdirAll(further, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, further, "init", "--quiet", "--initial-branch=main")
+	runGit(t, further, "config", "user.name", "Tester")
+	runGit(t, further, "config", "user.email", "tester@example.com")
+	writeFile(t, filepath.Join(further, "README.md"), "first\n")
+	runGit(t, further, "add", "README.md")
+	runGit(t, further, "commit", "--quiet", "-m", "first")
+	otherBare := filepath.Join(tempDir(t), "other.git")
+	runGit(t, further, "init", "--quiet", "--bare", "--initial-branch=main", otherBare)
+	runGit(t, further, "remote", "add", "origin", "https://git.example.com/acme/other.git")
+	routePush(t, "https://git.example.com/acme/other.git", otherBare)
+	writeFile(t, started+".bares", bare+"\n"+otherBare+"\n")
+	writeFile(t, started+".out", draftLines)
+	passingCheck(t)
+	out := runLocal(t, func(spec session.SessionSpec) {
+		handsOffText(t)(spec)
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "repositories", "other", "there.txt"), "there\n")
+		in := filepath.Join(spec.Dir, ".qory", "repositories", "other")
+		gitOutput(t, in, "add", "there.txt")
+		gitOutput(t, in, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "Add there")
+	})
+	want := []string{"Draft: https://git.example.com/acme/app/pull/7", "Draft: https://git.example.com/acme/other/pull/7"}
+	if got := lastLines(out, 2); !slices.Equal(got, want) {
+		t.Errorf("the last lines are %q, want %q:\n%s", got, want, out)
 	}
 }

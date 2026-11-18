@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ const (
 	textPushRefused       = "qory run: A push check refused the push, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalPushFailed   = "qory run: The push of the branch failed, so qory opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalNoHistory    = "qory run: qory could not read the branch or its origin, so it pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
+	textDraftLine         = "Draft: "
 	textLocalPushURLs     = "qory run: The remote origin has %d push addresses, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  Fix: keep one with git remote set-url --push origin <address>."
 )
 
@@ -88,15 +90,16 @@ var localPushAddress = func(address string) string { return address }
 // each pushed repository. passed is whether the session ended with exit 0. The program opens a
 // draft only for a passed session with a hand-off text, and gets the draft none otherwise. A check
 // that refuses ends the step before any push, and a push that fails leaves its repository out of
-// the program. Each line goes to w.
-func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitProgram, passed bool) {
+// the program. Each line goes to w. It returns the address of each draft that a program returned,
+// in the order of the repositories.
+func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitProgram, passed bool) (drafts []string) {
 	if len(c.landed) == 0 {
-		return
+		return nil
 	}
 	checks, ok := pushChecks()
 	if !ok {
 		fmt.Fprintln(w, textPushChecksMissing)
-		return
+		return nil
 	}
 	given := readHandoffPrinting(w, c.dir.Work())
 	// Every check of every repository runs before the first push, and every push before the
@@ -112,19 +115,19 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 		switch {
 		case errors.As(err, &many):
 			fmt.Fprintf(w, textLocalPushURLs+"\n", many.n, shownText(branch))
-			return
+			return nil
 		case err != nil:
 			fmt.Fprintf(w, textLocalNoHistory+"\n", shownText(branch), shownError(err))
-			return
+			return nil
 		}
 		if err := preparation.HandoffCommitted(ctx, repo.Dir, repo.System, repo.Path, repo.Start, repo.Head); err != nil {
 			fmt.Fprintln(w, shownError(err))
-			return
+			return nil
 		}
 		for _, check := range checks {
 			if err := check(ctx, repo); err != nil {
 				fmt.Fprintf(w, textPushRefused+"\n", shownText(repo.Branch), shownError(err))
-				return
+				return nil
 			}
 		}
 		repos = append(repos, repo)
@@ -147,10 +150,30 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 			fmt.Fprintf(w, textLocalNoHistory+"\n", shownText(repo.Branch), shownError(err))
 			continue
 		}
-		if _, err := program.apply(ctx, w, document); err != nil {
-			return
+		result, err := program.apply(ctx, w, document)
+		if err != nil {
+			return drafts
+		}
+		if address := draftAddress(result); address != "" {
+			drafts = append(drafts, address)
 		}
 	}
+	return drafts
+}
+
+// draftAddress is the address of the draft that the program returned for the one repository of
+// document, "" for none: a draft of none, a program that failed, or one whose lines were not all
+// valid. The address is the value that [parseSubmitLines] accepted: https, on the repository's
+// system, of the characters that RFC 3986 allows, so it has no control character.
+func draftAddress(document *submission.Submission) string {
+	if len(document.Repositories) != 1 {
+		return ""
+	}
+	var draft pullRequest
+	if json.Unmarshal(document.Repositories[0].Draft, &draft) != nil || draft.Number == 0 {
+		return ""
+	}
+	return draft.URL
 }
 
 // manyPushURLs is the error of a remote origin with more than one push address.

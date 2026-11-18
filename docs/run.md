@@ -2947,6 +2947,14 @@ registered, so a run with no run code pushes nothing, runs no program and prints
 `qory run: The push checks are not available yet, so qory pushed nothing and opened no draft.`
 Until the checks exist, a run with no run code opens no draft.
 
+When the program returns a draft for a repository, qory prints `Draft: <address>` on standard
+output, one line for each such repository in the order of the repositories, as the last lines of
+`qory run`, after the line `qory run: the record is in <folder>`. The address is the `draft_url`
+that qory accepted: `https` on the repository's system, of the characters that RFC 3986 allows,
+so it has no control character. A repository whose draft is `none`, whose program failed or
+timed out with no whole draft, or whose lines qory could not use, prints no line. A program that
+printed all five lines and then exited with 1 or 2 has a draft, so its line is printed.
+
 qory runs the command once for each repository that it pushed, in a new empty folder, with no
 argument and with standard input closed. The program
 gets the environment of the person who runs `qory`, so the login of the forge's command line
