@@ -21,8 +21,9 @@ release may change what an existing document does, and states it under Upgrading
 - A skill with the frontmatter keys `notes_for` (a role or a list of roles) and `paths` (one
   glob or more from the checkout root) is a note. The compose refuses a note for a role that
   no agent fills, a note with no `paths`, and an empty glob, with the fix as line 1 and
-  exit 2. Note `paths` use the glob form of agent `paths`. The home has `role-notes.json`, always written, with one row per note:
-  `name`, `roles`, `paths`, `module` and `layer` (0 for a module of the checkout's
+  exit 2. Note `paths` use the glob form of agent `paths`. The home has
+  `role-notes.json`, always written, with one row per note: `name`, `roles`, `paths`,
+  `module` and `layer` (0 for a module of the checkout's
   `qory.yaml`, 1 for a module of its base stack). With no note it is `{"notes": []}`. It is
   not the `notes.json` of a push check. See "Notes" in `docs/harness.md`.
 - `qory run verdict` proposes a track for the work item: `--track <id>` is the id of a
