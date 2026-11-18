@@ -2923,17 +2923,26 @@ stored submission.
 
 A run with no run code has no work item and no run API, so qory stores no submission for it.
 After the run's commits are back in your repositories on a branch `qory/run-<run id>`, qory
-pushes that branch for each repository with your git login and configuration, without force,
-and then runs the program of the composed harness, `submit_program`, on your machine, outside
-the wall. The program never pushes: it opens or updates the draft and prints the address of
-each commit. This holds whether the session passed or not, as for a run from a run code. A
-session that did not pass, or that wrote no hand-off text, gets the draft `none`.
+pushes the head commit of that branch for each repository, as it was when the checks ran, to
+the push address of the remote `origin` (`git remote get-url --push origin`, after git's
+`insteadOf` and `pushInsteadOf` rewrites), with your git login and configuration. The push has
+no force, no pre-push hook, no submodule push and no tag that follows the commit. The remote
+must have one push address: with two or more, qory pushes nothing and prints `qory run: The
+remote origin has <n> push addresses, so qory pushed nothing and opened no draft.` with the
+branch and the command `git remote set-url --push origin <address>`. `QORY_SUBMIT_SYSTEM` and
+`QORY_SUBMIT_PATH` come from that address.
 
-Before each push, qory runs the push checks on every repository. If one refuses, qory pushes
-nothing and runs no program, and prints `qory run: A push check refused the push, so qory
-pushed nothing and opened no draft.` with `Branch: <branch>.` and `Cause: <cause>` indented
-by two spaces. A push that fails prints `qory run: The push of the branch failed, so qory opened
-no draft.` and leaves that repository out of the program. In this build no push check is
+The order is fixed: the checks of every repository, then the pushes of every repository, then
+the program of each pushed repository. The program never pushes: it opens the draft and prints
+the address of each commit. This holds whether the session passed or not, as for a run from a run
+code. A session that did not pass, or that wrote no hand-off text, gets the draft `none`.
+
+Two push checks must be registered by name before qory pushes: `key` (a key or a secret value in
+the run's commits) and `scope` (a change to a file that the session may not change). If one
+refuses, qory pushes nothing and runs no program, and prints `qory run: A push check refused the
+push, so qory pushed nothing and opened no draft.` with `Branch: <branch>.` and `Cause: <cause>`
+indented by two spaces. A push that fails prints `qory run: The push of the branch failed, so qory
+opened no draft.` and leaves that repository out of the program. In this build neither check is
 registered, so a run with no run code pushes nothing, runs no program and prints one line:
 `qory run: The push checks are not available yet, so qory pushed nothing and opened no draft.`
 Until the checks exist, a run with no run code opens no draft.

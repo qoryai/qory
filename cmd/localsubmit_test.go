@@ -29,17 +29,58 @@ func localProgramCheckout(t *testing.T) (root, bare, started string) {
 	for name, content := range programModule() {
 		writeFile(t, filepath.Join(root, name), content)
 	}
-	writeFile(t, filepath.Join(root, "modules/forge/bin/open-draft"), "#!/bin/sh\necho \"$QORY_SUBMIT_PATH $QORY_SUBMIT_BRANCH $QORY_SUBMIT_DRAFT\" >> "+started+"\nexit 0\n")
+	// The program writes its path, branch and draft, and how many of the repositories listed in the
+	// file started.bares already have the branch: every push comes before the first program.
+	writeFile(t, filepath.Join(root, "modules/forge/bin/open-draft"), `#!/bin/sh
+n=0
+for b in $(cat `+started+`.bares); do
+  git --git-dir="$b" rev-parse --verify -q "refs/heads/$QORY_SUBMIT_BRANCH" >/dev/null && n=$((n+1))
+done
+echo "$QORY_SUBMIT_PATH $QORY_SUBMIT_BRANCH $QORY_SUBMIT_DRAFT $n" >> `+started+`
+exit 0
+`)
 	composedForFake(t, root, fakeRuntime(t))
 	runGit(t, root, "add", "README.md", "qory.yaml", "modules")
 	runGit(t, root, "commit", "--quiet", "-m", "first")
 	bare = filepath.Join(tempDir(t), "origin.git")
 	runGit(t, root, "init", "--quiet", "--bare", "--initial-branch=main", bare)
-	runGit(t, root, "config", "url."+bare+".insteadOf", "https://git.example.com/acme/app.git")
+	writeFile(t, started+".bares", bare+"\n")
+	routePush(t, "https://git.example.com/acme/app.git", bare)
 	docker, _ := fakeDocker(t)
 	walledBy(t, docker)
 	t.Setenv("QORY_RUN_KEY", "")
 	return root, bare, started
+}
+
+// pushRoutes is where the test run's pushes go: the address that qory pushes to, and the bare
+// repository on disk that stands in for it.
+var pushRoutes = map[string]string{}
+
+// routePush makes a push to address go to the bare repository bare, for the rest of the test.
+func routePush(t *testing.T, address, bare string) {
+	t.Helper()
+	if len(pushRoutes) == 0 {
+		t.Cleanup(cmd.SetLocalPushAddress(func(a string) string {
+			if b, ok := pushRoutes[a]; ok {
+				return b
+			}
+			return a
+		}))
+		t.Cleanup(func() { clear(pushRoutes) })
+	}
+	pushRoutes[address] = bare
+}
+
+// bothChecks registers the push checks that a local run needs, each calling check. It returns
+// the number of calls.
+func bothChecks(t *testing.T, check func(ctx context.Context, dir, branch string) error) *int {
+	t.Helper()
+	calls := new(int)
+	count := func(ctx context.Context, dir, branch string) error { *calls++; return check(ctx, dir, branch) }
+	names := cmd.PushChecksRequired()
+	t.Cleanup(cmd.RegisterPushCheck(names[0], count))
+	t.Cleanup(cmd.RegisterPushCheck(names[1], func(context.Context, string, string) error { return nil }))
+	return calls
 }
 
 // makeProgramRunnable makes the submit program in the run's composed home executable: a home
@@ -99,13 +140,13 @@ func timesStarted(t *testing.T, started string) int {
 func TestALocalWriteRunWithAHandoffPushesThroughTheChecksThenRunsTheProgram(t *testing.T) {
 	root, bare, started := localProgramCheckout(t)
 	var checked []string
-	t.Cleanup(cmd.RegisterPushCheck(func(_ context.Context, dir, branch string) error {
+	bothChecks(t, func(_ context.Context, dir, branch string) error {
 		if got := pushedBranches(t, bare); got != "" {
 			t.Errorf("the bare repository has %q before the check ends", got)
 		}
 		checked = append(checked, dir+" "+branch)
 		return nil
-	}))
+	})
 	agentInCopy(t, handsOffText(t))
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
 	if err != nil {
@@ -127,8 +168,8 @@ func TestALocalWriteRunWithAHandoffPushesThroughTheChecksThenRunsTheProgram(t *t
 	if n := timesStarted(t, started); n != 1 {
 		t.Errorf("the program started %d times, want 1\n%s", n, out)
 	}
-	if got := strings.TrimSpace(readText(t, started)); got != "acme/app "+branch+" open" {
-		t.Errorf("the program got %q, want the path, %s and the draft open", got, branch)
+	if got := strings.TrimSpace(readText(t, started)); got != "acme/app "+branch+" open 1" {
+		t.Errorf("the program got %q, want the path, %s, the draft open and 1 pushed repository", got, branch)
 	}
 }
 
@@ -136,7 +177,7 @@ func TestALocalWriteRunWithAHandoffPushesThroughTheChecksThenRunsTheProgram(t *t
 // check that refuses: nothing is pushed, no program starts, and the output says why.
 func TestALocalRunWithARefusingCheckPushesNothing(t *testing.T) {
 	_, bare, started := localProgramCheckout(t)
-	t.Cleanup(cmd.RegisterPushCheck(func(context.Context, string, string) error { return errors.New("a key is in a commit") }))
+	bothChecks(t, func(context.Context, string, string) error { return errors.New("a key is in a commit") })
 	agentInCopy(t, handsOffText(t))
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
 	if err != nil {
@@ -182,12 +223,10 @@ func TestALocalRunWithNoCheckPushesNothing(t *testing.T) {
 	}
 }
 
-// passingCheck registers a push check that passes and counts its calls.
+// passingCheck registers the push checks, which pass, and counts the calls of the first.
 func passingCheck(t *testing.T) *int {
 	t.Helper()
-	calls := new(int)
-	t.Cleanup(cmd.RegisterPushCheck(func(context.Context, string, string) error { *calls++; return nil }))
-	return calls
+	return bothChecks(t, func(context.Context, string, string) error { return nil })
 }
 
 // TestALocalRunWithNoHandoffPushesAndRunsTheProgramWithNoDraft is a local run whose agent wrote
@@ -210,8 +249,8 @@ func TestALocalRunWithNoHandoffPushesAndRunsTheProgramWithNoDraft(t *testing.T) 
 	if got := pushedBranches(t, bare); got != branch || *calls != 1 {
 		t.Errorf("pushed %q after %d checks, want %s after 1", got, *calls, branch)
 	}
-	if got := strings.TrimSpace(readText(t, started)); got != "acme/app "+branch+" none" {
-		t.Errorf("the program got %q, want the path, %s and the draft none", got, branch)
+	if got := strings.TrimSpace(readText(t, started)); got != "acme/app "+branch+" none 1" {
+		t.Errorf("the program got %q, want the path, %s, the draft none and 1 pushed repository", got, branch)
 	}
 }
 
@@ -236,8 +275,8 @@ func TestALocalRunThatDidNotPassPushesAndRunsTheProgramWithNoDraft(t *testing.T)
 	if got := pushedBranches(t, bare); got != branch || *calls != 1 {
 		t.Errorf("pushed %q after %d checks, want %s after 1", got, *calls, branch)
 	}
-	if got := strings.TrimSpace(readText(t, started)); got != "acme/app "+branch+" none" {
-		t.Errorf("the program got %q, want the path, %s and the draft none", got, branch)
+	if got := strings.TrimSpace(readText(t, started)); got != "acme/app "+branch+" none 1" {
+		t.Errorf("the program got %q, want the path, %s, the draft none and 1 pushed repository", got, branch)
 	}
 }
 
@@ -259,7 +298,8 @@ func TestALocalRunPushesAndSubmitsEachRepository(t *testing.T) {
 	otherBare := filepath.Join(tempDir(t), "other.git")
 	runGit(t, further, "init", "--quiet", "--bare", "--initial-branch=main", otherBare)
 	runGit(t, further, "remote", "add", "origin", "https://git.example.com/acme/other.git")
-	runGit(t, further, "config", "url."+otherBare+".insteadOf", "https://git.example.com/acme/other.git")
+	routePush(t, "https://git.example.com/acme/other.git", otherBare)
+	writeFile(t, started+".bares", bare+"\n"+otherBare+"\n")
 	calls := passingCheck(t)
 	agentInCopy(t, func(spec session.SessionSpec) {
 		handsOffText(t)(spec)
@@ -277,7 +317,117 @@ func TestALocalRunPushesAndSubmitsEachRepository(t *testing.T) {
 		t.Errorf("pushed %q and %q after %d checks, want %s twice after 2", a, b, *calls, branch)
 	}
 	got := strings.Split(strings.TrimSpace(readText(t, started)), "\n")
-	if len(got) != 2 || got[0] != "acme/app "+branch+" open" || got[1] != "acme/other "+branch+" open" {
-		t.Errorf("the program started as %q, want once for each repository", got)
+	if len(got) != 2 || got[0] != "acme/app "+branch+" open 2" || got[1] != "acme/other "+branch+" open 2" {
+		t.Errorf("the program started as %q, want once for each repository, after both pushes", got)
+	}
+}
+
+// TestALocalRunNeedsEveryPushCheck is a local run with a hand-off text, with no push check, with
+// the check key only, and with the check scope only: each ends with the one line that says the
+// checks are not available, and nothing is pushed or started. With both, qory pushes.
+func TestALocalRunNeedsEveryPushCheck(t *testing.T) {
+	names := cmd.PushChecksRequired()
+	if len(names) != 2 || names[0] != "key" || names[1] != "scope" {
+		t.Fatalf("the required checks are %v, want key and scope", names)
+	}
+	pass := func(context.Context, string, string) error { return nil }
+	const line = "qory run: The push checks are not available yet, so qory pushed nothing and opened no draft."
+	for _, c := range []struct {
+		name  string
+		given []string
+		ok    bool
+	}{{"none", nil, false}, {"key only", names[:1], false}, {"scope only", names[1:], false}, {"both", names, true}} {
+		t.Run(c.name, func(t *testing.T) {
+			_, bare, started := localProgramCheckout(t)
+			for _, name := range c.given {
+				t.Cleanup(cmd.RegisterPushCheck(name, pass))
+			}
+			agentInCopy(t, handsOffText(t))
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			pushed, started1 := pushedBranches(t, bare) != "", timesStarted(t, started)
+			if c.ok {
+				if strings.Contains(out, line) || !pushed || started1 != 1 {
+					t.Errorf("pushed %v, started %d, want a push and 1 program:\n%s", pushed, started1, out)
+				}
+				return
+			}
+			if n := strings.Count(out, line); n != 1 || pushed || started1 != 0 {
+				t.Errorf("the line is there %d times, pushed %v, started %d, want 1, false, 0:\n%s", n, pushed, started1, out)
+			}
+		})
+	}
+}
+
+// TestACheckThatMovesTheBranchCannotChangeThePushedCommit is a push check that moves the branch to a
+// new commit after it read the head: the push sends the commit that the checks saw, not the
+// commit the branch name has by then.
+func TestACheckThatMovesTheBranchCannotChangeThePushedCommit(t *testing.T) {
+	_, bare, _ := localProgramCheckout(t)
+	var checked string
+	bothChecks(t, func(_ context.Context, dir, branch string) error {
+		checked = gitOutput(t, dir, "rev-parse", "refs/heads/"+branch)
+		moved := gitOutput(t, dir, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit-tree", "-p", checked, "-m", "later", checked+"^{tree}")
+		gitOutput(t, dir, "update-ref", "refs/heads/"+branch, moved)
+		return nil
+	})
+	agentInCopy(t, handsOffText(t))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	branch := runBranchOf(t, out)
+	if checked == "" {
+		t.Fatalf("no check ran:\n%s", out)
+	}
+	if got := gitOutput(t, bare, "rev-parse", branch); got != checked {
+		t.Errorf("the pushed commit is %s, want the checked %s", got, checked)
+	}
+}
+
+// TestALocalRunPushesToThePushAddress is a remote origin whose push address differs from its fetch
+// address: the program gets the system and path of the push address, and the push goes to it.
+func TestALocalRunPushesToThePushAddress(t *testing.T) {
+	root, bare, started := localProgramCheckout(t)
+	pushBare := filepath.Join(tempDir(t), "pushed.git")
+	runGit(t, root, "init", "--quiet", "--bare", "--initial-branch=main", pushBare)
+	runGit(t, root, "config", "remote.origin.pushurl", "https://git.example.com/acme/pushed.git")
+	routePush(t, "https://git.example.com/acme/pushed.git", pushBare)
+	writeFile(t, started+".bares", pushBare+"\n")
+	passingCheck(t)
+	agentInCopy(t, handsOffText(t))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	branch := runBranchOf(t, out)
+	if got := pushedBranches(t, pushBare); got != branch {
+		t.Errorf("the push address has %q, want %s", got, branch)
+	}
+	if got := pushedBranches(t, bare); got != "" {
+		t.Errorf("the fetch address has %q, want none", got)
+	}
+	if got := strings.TrimSpace(readText(t, started)); got != "acme/pushed "+branch+" open 1" {
+		t.Errorf("the program got %q, want the path of the push address", got)
+	}
+}
+
+// TestALocalRunWithTwoPushAddressesPushesNothing is a remote origin with two push addresses: qory
+// pushes nothing, runs no program, and says which address count it found.
+func TestALocalRunWithTwoPushAddressesPushesNothing(t *testing.T) {
+	root, bare, started := localProgramCheckout(t)
+	runGit(t, root, "config", "--add", "remote.origin.pushurl", "https://git.example.com/acme/app.git")
+	runGit(t, root, "config", "--add", "remote.origin.pushurl", "https://git.example.com/acme/second.git")
+	passingCheck(t)
+	agentInCopy(t, handsOffText(t))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, "qory run: The remote origin has 2 push addresses, so qory pushed nothing and opened no draft.", "git remote set-url --push origin <address>")
+	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 {
+		t.Errorf("pushed %q and started %d programs, want none", got, timesStarted(t, started))
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -309,12 +310,23 @@ func SetLoadPushChecks(f func(home string) ([]compose.PushCheck, error)) func() 
 	return func() { loadPushChecks = before }
 }
 
-// RegisterPushCheck adds check to the push checks of a local run, called with the repository's
-// folder and the branch about to be pushed, and returns what removes it again.
-func RegisterPushCheck(check func(ctx context.Context, dir, branch string) error) func() {
-	before := localPushChecks
-	registerPushCheck(func(ctx context.Context, repo localRepository) error { return check(ctx, repo.Dir, repo.Branch) })
+// RegisterPushCheck sets the push check with name for a local run, called with the repository's
+// folder and the branch about to be pushed, and returns what restores the checks.
+func RegisterPushCheck(name string, check func(ctx context.Context, dir, branch string) error) func() {
+	before := maps.Clone(localPushChecks)
+	registerPushCheck(name, func(ctx context.Context, repo localRepository) error { return check(ctx, repo.Dir, repo.Branch) })
 	return func() { localPushChecks = before }
+}
+
+// PushChecksRequired is the names of the push checks that a local run needs.
+func PushChecksRequired() []string { return slices.Clone(requiredPushChecks) }
+
+// SetLocalPushAddress makes a local run's push go to route(address) in place of address, and
+// returns what restores it.
+func SetLocalPushAddress(route func(address string) string) func() {
+	before := localPushAddress
+	localPushAddress = route
+	return func() { localPushAddress = before }
 }
 
 // SetBranchWait makes the push step pass each wait to f in place of waiting, and returns

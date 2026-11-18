@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -23,6 +24,7 @@ const (
 	textPushRefused       = "qory run: A push check refused the push, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalPushFailed   = "qory run: The push of the branch failed, so qory opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalNoHistory    = "qory run: qory could not read the branch or its origin, so it pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
+	textLocalPushURLs     = "qory run: The remote origin has %d push addresses, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  Fix: keep one with git remote set-url --push origin <address>."
 )
 
 // localPushCheck is a check of a push that a local run makes: it gets the repository and the
@@ -37,15 +39,47 @@ type localRepository struct {
 	Dir, System, Path string
 	Start, Head       string
 	Branch            string
+	// PushURL is the one address that qory pushes to: the push address of the remote origin, after
+	// git's url.<base>.insteadOf and pushInsteadOf rewrites. System and Path come from it.
+	PushURL string
 }
 
-// localPushChecks are the checks that run before a local run pushes, in the order of their
-// registration. With none registered, the step pushes nothing: it fails closed.
-var localPushChecks []localPushCheck
+// The names of the push checks that a local run needs before it pushes. A push proceeds only when
+// every one of them is registered.
+const (
+	// pushCheckKey is the check for a key or a secret value in the run's commits.
+	pushCheckKey = "key"
+	// pushCheckScope is the check for a change to a file that a session may not change.
+	pushCheckScope = "scope"
+)
 
-// registerPushCheck adds check to the checks that every push of a local run passes. It is the one
-// place where a check joins the step.
-func registerPushCheck(check localPushCheck) { localPushChecks = append(localPushChecks, check) }
+// requiredPushChecks are the names of the checks that a push needs, in the order they run.
+var requiredPushChecks = []string{pushCheckKey, pushCheckScope}
+
+// localPushChecks are the registered checks, by name.
+var localPushChecks = map[string]localPushCheck{}
+
+// registerPushCheck sets the check with the name, one of [requiredPushChecks]. It is the one place
+// where a check joins the step.
+func registerPushCheck(name string, check localPushCheck) { localPushChecks[name] = check }
+
+// pushChecks is the checks in the order of [requiredPushChecks], and false when one of them is
+// not registered: the step then fails closed.
+func pushChecks() ([]localPushCheck, bool) {
+	var checks []localPushCheck
+	for _, name := range requiredPushChecks {
+		check, ok := localPushChecks[name]
+		if !ok {
+			return nil, false
+		}
+		checks = append(checks, check)
+	}
+	return checks, true
+}
+
+// localPushAddress is the address that git gets for a push. Tests set it to reach a repository on
+// disk for an address of a forge; it is the identity otherwise.
+var localPushAddress = func(address string) string { return address }
 
 // submitLocal is the submit step of a local run, a run with no run code that works in a copy:
 // after the run's commits are in the person's repositories, on the branches in c.landed, it reads
@@ -59,11 +93,14 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 	if len(c.landed) == 0 {
 		return
 	}
-	if len(localPushChecks) == 0 {
+	checks, ok := pushChecks()
+	if !ok {
 		fmt.Fprintln(w, textPushChecksMissing)
 		return
 	}
 	given := readHandoffPrinting(w, c.dir.Work())
+	// Every check of every repository runs before the first push, and every push before the
+	// first program.
 	var repos []localRepository
 	for _, r := range c.repos {
 		branch := c.landed[r.Path]
@@ -71,7 +108,12 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 			continue
 		}
 		repo, err := c.localRepository(ctx, r, branch)
-		if err != nil {
+		var many *manyPushURLs
+		switch {
+		case errors.As(err, &many):
+			fmt.Fprintf(w, textLocalPushURLs+"\n", many.n, shownText(branch))
+			return
+		case err != nil:
 			fmt.Fprintf(w, textLocalNoHistory+"\n", shownText(branch), shownError(err))
 			return
 		}
@@ -79,7 +121,7 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 			fmt.Fprintln(w, shownError(err))
 			return
 		}
-		for _, check := range localPushChecks {
+		for _, check := range checks {
 			if err := check(ctx, repo); err != nil {
 				fmt.Fprintf(w, textPushRefused+"\n", shownText(repo.Branch), shownError(err))
 				return
@@ -87,15 +129,19 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 		}
 		repos = append(repos, repo)
 	}
-	verdict := submission.VerdictNone
-	if passed {
-		verdict = submission.VerdictPassed
-	}
+	var pushed []localRepository
 	for _, repo := range repos {
 		if out, err := pushBranch(ctx, repo); err != nil {
 			fmt.Fprintf(w, textLocalPushFailed+"\n", shownText(repo.Branch), shownText(lastOutputLine(out, err)))
 			continue
 		}
+		pushed = append(pushed, repo)
+	}
+	verdict := submission.VerdictNone
+	if passed {
+		verdict = submission.VerdictPassed
+	}
+	for _, repo := range pushed {
 		document, err := localSubmission(ctx, repo, given, verdict)
 		if err != nil {
 			fmt.Fprintf(w, textLocalNoHistory+"\n", shownText(repo.Branch), shownError(err))
@@ -107,8 +153,16 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 	}
 }
 
+// manyPushURLs is the error of a remote origin with more than one push address.
+type manyPushURLs struct{ n int }
+
+func (e *manyPushURLs) Error() string {
+	return fmt.Sprintf("the remote origin has %d push addresses", e.n)
+}
+
 // localRepository is the repository r of the run: the commit the run started at, the head of the
-// branch that the run's commits landed on, and the system and path of the remote origin.
+// branch that the run's commits landed on, and the push address of the remote origin with its system
+// and path.
 func (c *runCopy) localRepository(ctx context.Context, r runcopy.Repository, branch string) (localRepository, error) {
 	dir := filepath.Join(c.root, filepath.FromSlash(r.Path))
 	repo := localRepository{Dir: dir, Start: r.Base, Branch: branch}
@@ -117,15 +171,21 @@ func (c *runCopy) localRepository(ctx context.Context, r runcopy.Repository, bra
 		return repo, err
 	}
 	repo.Head = strings.TrimSpace(head)
-	remote, err := localGit(ctx, dir, "config", "--get", "remote.origin.url")
+	// The push address, with git's rewrites applied: the address that a push goes to, which is
+	// not always the fetch address.
+	out, err := localGit(ctx, dir, "remote", "get-url", "--push", "--all", "origin")
 	if err != nil {
 		return repo, err
 	}
-	system, path, ok := remoteSystemPath(strings.TrimSpace(remote))
-	if !ok {
-		return repo, fmt.Errorf("the address %s has no host and path", shownText(strings.TrimSpace(remote)))
+	addresses := strings.Fields(out)
+	if len(addresses) != 1 {
+		return repo, &manyPushURLs{len(addresses)}
 	}
-	repo.System, repo.Path = system, path
+	system, path, ok := remoteSystemPath(addresses[0])
+	if !ok {
+		return repo, fmt.Errorf("the address %s has no host and path", shownText(addresses[0]))
+	}
+	repo.System, repo.Path, repo.PushURL = system, path, addresses[0]
 	return repo, nil
 }
 
@@ -150,10 +210,18 @@ func localSubmission(ctx context.Context, repo localRepository, given *handoff, 
 	return &submission.Submission{Ref: repo.Branch, Verdict: verdict, Text: text, Repositories: []submission.Repository{entry}}, nil
 }
 
-// pushBranch pushes the branch of repo to the remote origin with the person's git configuration
-// and login, without force and with no input: a command that asks for one fails.
+// pushArgs is the arguments of the git push of repo: the checked commit, not the branch name that
+// could move, to the one address that the checks and the program got. It has no force, no hook of
+// the repository, no submodule and no tag that follows the commit.
+func pushArgs(repo localRepository) []string {
+	return []string{"-C", repo.Dir, "push", "--quiet", "--no-verify", "--no-recurse-submodules", "--no-follow-tags", "--",
+		localPushAddress(repo.PushURL), repo.Head + ":refs/heads/" + repo.Branch}
+}
+
+// pushBranch pushes the head that the checks saw to the branch of repo, with the person's git
+// configuration and login, and with no input: a command that asks for one fails.
 func pushBranch(ctx context.Context, repo localRepository) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repo.Dir, "push", "origin", "refs/heads/"+repo.Branch+":refs/heads/"+repo.Branch)
+	cmd := exec.CommandContext(ctx, "git", pushArgs(repo)...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
