@@ -169,9 +169,7 @@ var EngineVariables = []string{
 	"CONTAINERD_NAMESPACE",
 }
 
-// Checker runs the push checks of one run, and the submit program with [Checker.RunProgram]:
-// the program needs only the fields of the container, Home, Image, User, Engine, Dir, Runtime,
-// Limits, Label and Mask.
+// Checker runs the push checks of one run.
 type Checker struct {
 	// Home is the composed home, mounted read-only at this path in the check's container,
 	// where the wall mounts it for the agent.
@@ -205,8 +203,6 @@ type Checker struct {
 	InputsData []byte
 	// Limit, when set, replaces [Limit]. Tests set it.
 	Limit time.Duration
-	// ProgramLimit, when set, replaces [ProgramLimit]. Tests set it.
-	ProgramLimit time.Duration
 }
 
 // Failure is a check that did not pass, or a push that the check cannot read.
@@ -388,12 +384,8 @@ func (c *Checker) Check(ctx context.Context, artifactType string, files []File) 
 // writeNew writes content to a new file at path, and fails with an error that is
 // [fs.ErrExist] when a file is there: on a file system that ignores case or the form of
 // an accent, also one whose name differs in those alone.
-func writeNew(path string, content []byte) error { return writeNewMode(path, content, 0o644) }
-
-// writeNewMode is [writeNew] with the mode of the new file, which it has from its creation: a
-// umask can only narrow it.
-func writeNewMode(path string, content []byte, mode os.FileMode) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+func writeNew(path string, content []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
 	}
@@ -528,27 +520,19 @@ func (c *Checker) run(ctx context.Context, program string, args []string, pulled
 	}
 	create = append(create, "--entrypoint", program, c.Image)
 	create = append(create, args...)
-	return c.execute(ctx, "the check", name, program, create, c.Limit, Limit)
-}
-
-// execute creates the container name of what, "the check" or "the submit program", with the engine's create command line create, starts it
-// attached for at most limit, or fallback when limit is 0, and returns how it ended; program is
-// the container's program, which a start error is read against. The container is removed in
-// every case.
-func (c *Checker) execute(ctx context.Context, what, name, program string, create []string, limit, fallback time.Duration) (ended, error) {
-	container := what + "'s container"
 	// The container is removed whole in every case, also once ctx has ended.
 	defer c.engine(context.WithoutCancel(ctx), engineWait, nil, nil, "rm", "--force", "--volumes", name)
 	var errOut bytes.Buffer
 	if err := c.engine(ctx, engineWait, nil, &errOut, create...); err != nil {
 		if noSuchImage(errOut.String()) {
-			return ended{}, fmt.Errorf("the engine does not have the image %s for %s: %s", exports.Value(c.Image, false), container, engineError(errOut.Bytes(), err))
+			return ended{}, fmt.Errorf("the engine does not have the image %s for the check's container: %s", exports.Value(c.Image, false), engineError(errOut.Bytes(), err))
 		}
-		return ended{}, fmt.Errorf("the engine did not create %s: %s", container, engineError(errOut.Bytes(), err))
+		return ended{}, fmt.Errorf("the engine did not create the check's container: %s", engineError(errOut.Bytes(), err))
 	}
 	stdout, stderr := &capped{limit: maxOutput}, &capped{limit: maxOutput}
+	limit := c.Limit
 	if limit == 0 {
-		limit = fallback
+		limit = Limit
 	}
 	startCtx, cancel := context.WithTimeout(ctx, limit)
 	startErr := c.engine(startCtx, 0, stdout, stderr, "start", "--attach", name)
@@ -556,25 +540,25 @@ func (c *Checker) execute(ctx context.Context, what, name, program string, creat
 	cancel()
 	switch {
 	case timedOut && ctx.Err() != nil:
-		return ended{}, fmt.Errorf("%s's time ran out: %w", what, ctx.Err())
+		return ended{}, fmt.Errorf("the check's time ran out: %w", ctx.Err())
 	case timedOut:
 		return ended{timedOut: true}, nil
 	}
 	var out, inspectErr bytes.Buffer
 	if err := c.engine(ctx, engineWait, &out, &inspectErr, "inspect", "--format", stateFormat, name); err != nil {
-		return ended{}, fmt.Errorf("the engine did not report how %s ended: %s (the start: %v)", container, engineError(inspectErr.Bytes(), err), startErr)
+		return ended{}, fmt.Errorf("the engine did not report how the check's container ended: %s (the start: %v)", engineError(inspectErr.Bytes(), err), startErr)
 	}
 	var s state
 	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &s); err != nil {
-		return ended{}, fmt.Errorf("the engine's report of %s does not read: %w", container, err)
+		return ended{}, fmt.Errorf("the engine's report of the check's container does not read: %w", err)
 	}
 	switch {
 	case s.Error != "":
 		// The container's init, not the program, failed to start: the init starts the
 		// program, and writes a program that does not start as exit 126 or 127.
-		return ended{}, fmt.Errorf("the engine did not start %s: %s", container, cleanLine(s.Error))
+		return ended{}, fmt.Errorf("the engine did not start the check's container: %s", cleanLine(s.Error))
 	case s.Status != "exited":
-		return ended{}, fmt.Errorf("%s is %s after its start, not exited (the start: %v)", container, exports.Value(s.Status, true), startErr)
+		return ended{}, fmt.Errorf("the check's container is %s after its start, not exited (the start: %v)", exports.Value(s.Status, true), startErr)
 	case s.ExitCode == exitCannotInvoke || s.ExitCode == exitNotFound:
 		if line, ok := notStarted(program, lastLine(stderr.Bytes())); ok {
 			return ended{startErr: line}, nil
