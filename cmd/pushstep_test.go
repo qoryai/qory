@@ -1473,6 +1473,9 @@ func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 // /Library/Developer/CommandLineTools/usr/share/git-core/gitconfig.
 func gitCredentialHelperOrigin(t *testing.T) string {
 	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
 	dir := tempDir(t)
 	empty := filepath.Join(dir, "empty")
 	writeFile(t, empty, "")
