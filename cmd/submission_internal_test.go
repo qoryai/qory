@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -231,6 +232,65 @@ func TestTheDraftIsNoneWithItsReason(t *testing.T) {
 			}
 			if !strings.Contains(string(raw), `"`+c.want+`"`) {
 				t.Errorf("the document has no reason %q:\n%s", c.want, raw)
+			}
+		})
+	}
+}
+
+// TestAHandoffStepKeyIsAFullLowerCaseCommitID is the key of a step: 40 or 64 lower-case
+// hexadecimal digits, as the format's commit has them. Any other key is dropped, counted in one
+// line with no content of the key, and the commit with that id has the step unreviewed.
+func TestAHandoffStepKeyIsAFullLowerCaseCommitID(t *testing.T) {
+	sha256 := strings.Repeat("ab12cd34", 8)
+	cases := []struct {
+		name, key string
+		kept      bool
+	}{
+		{"40 digits", commitA, true},
+		{"64 digits", sha256, true},
+		{"upper case, 40", strings.ToUpper(commitA), false},
+		{"upper case, 64", strings.ToUpper(sha256), false},
+		{"a short id", commitA[:12], false},
+		{"41 digits", commitA + "a", false},
+		{"not hexadecimal", strings.Repeat("g", 40), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h, err := readHandoff(handoffIn(t, `{"steps":{"`+c.key+`":"implement"}}`))
+			if err != nil || h == nil {
+				t.Fatalf("%v, %v", h, err)
+			}
+			if _, kept := h.Steps[c.key]; kept != c.kept {
+				t.Errorf("the step is kept: %v, want %v", kept, c.kept)
+			}
+			if got, want := len(h.dropped), map[bool]int{true: 0, false: 1}[c.kept]; got != want {
+				t.Errorf("%d lines are dropped, want %d: %v", got, want, h.dropped)
+			}
+			if !c.kept && strings.Contains(h.dropped[0], c.key) {
+				t.Errorf("the line has the key: %q", h.dropped[0])
+			}
+		})
+	}
+}
+
+// TestAHandoffTitleWithAControlCharacterDropsTheText is a title with a tab, a line end, a NUL
+// or a DEL, which the format's title pattern refuses: the text is dropped with a line that has
+// the position of the character, and a title with none stays.
+func TestAHandoffTitleWithAControlCharacterDropsTheText(t *testing.T) {
+	for title, at := range map[string]int{`Add\ta page`: 4, `Add a page\n`: 11, `\u0000Add`: 1, `Add\u007f`: 4, `é\u001f`: 2, `Add a page é`: 0} {
+		t.Run(title, func(t *testing.T) {
+			h, err := readHandoff(handoffIn(t, `{"text":{"title":"`+title+`","description":"d"}}`))
+			if err != nil || h == nil {
+				t.Fatalf("%v, %v", h, err)
+			}
+			if at == 0 {
+				if h.text() == nil || len(h.dropped) != 0 {
+					t.Errorf("the text is %v with the lines %v, want it kept", h.text(), h.dropped)
+				}
+				return
+			}
+			if want := fmt.Sprintf(textDroppedControl, at); h.text() != nil || len(h.dropped) != 1 || h.dropped[0] != want {
+				t.Errorf("the text is %v with the lines %q, want it dropped with %q", h.text(), h.dropped, want)
 			}
 		})
 	}

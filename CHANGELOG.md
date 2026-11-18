@@ -539,8 +539,9 @@ release may change what an existing document does, and states it under Upgrading
   place of the module of that name in the harness, and prints a line for the replacement.
 - A session hands its title, description and the step of each commit to the submit step in
   the file that `QORY_SUBMISSION_HANDOFF` names. A commit with no step is `unreviewed`. qory
-  reads the file inside the checkout and follows no link, and drops a title, description or
-  step that is over a limit of the submission format, with a line that states the
+  reads the file inside the checkout and follows no link, and drops a title with a control
+  character, a title, description or step that is over a limit of the submission format, and a
+  step whose key is not a full lower-case commit id, with a line that states the
   cause and the values.
 - qory adds `/.qory/handoff/` to the checkout's `.git/info/exclude` for a run on a work
   item's branch, so `git add -A` and `git commit -a` leave the hand-off file out of a commit.

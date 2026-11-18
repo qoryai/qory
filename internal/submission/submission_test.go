@@ -142,6 +142,15 @@ func TestCheck(t *testing.T) {
 		{replace(sha1+`", "commit_url`, sha1[:39]+`", "commit_url`), false},
 		{replace(sha1+`", "commit_url`, sha256+`", "commit_url`), true},
 		{replace(sha1+`", "commit_url`, strings.ToUpper(sha1)+`", "commit_url`), false},
+		{replace(`"commit": "`+sha1+`", "step"`, `"commit": "`+sha256+`", "step"`), true},
+		{replace(`"commit": "`+sha1+`", "step"`, `"commit": "`+strings.ToUpper(sha256)+`", "step"`), false},
+		{replace(`"commit": "`+sha1+`", "step"`, `"commit": "`+strings.ToUpper(sha1)+`", "step"`), false},
+		{replace(`"title": "Add a page", "description"`, `"title": "Add\ta page", "description"`), false},
+		{replace(`"title": "Add a page", "description"`, `"title": "Add\u0001 page", "description"`), false},
+		{replace(`"title": "Add a page", "description"`, `"title": "Add\u007f page", "description"`), false},
+		{replace(`"title": "Add a page", "description"`, `"title": "Add a page\n", "description"`), false},
+		{replace(`"title": "Add a page", "description"`, `"title": "Ajouter une pagé é", "description"`), true},
+		{replace(`"description": "Adds it."`, `"description": "Adds it.\nTwo lines."`), true},
 		{`{"ref": "qory/wi_1", "verdict": "passed", "repositories": []}`, false},
 	} {
 		var doc any
@@ -179,5 +188,18 @@ func TestCheckHidesASecret(t *testing.T) {
 	err := submission.Check([]byte(strings.Replace(valid(), "acme/web", "acme web "+secret, 1)))
 	if err == nil || strings.Contains(err.Error(), secret) {
 		t.Errorf("%v", err)
+	}
+}
+
+// TestCommitID is the commit id of the format: 40 or 64 lower-case hexadecimal digits, as the
+// schema's pattern has it.
+func TestCommitID(t *testing.T) {
+	for id, want := range map[string]bool{
+		sha1: true, sha256: true, strings.ToUpper(sha1): false, strings.ToUpper(sha256): false,
+		sha1[:39]: false, sha1 + "0": false, "": false, strings.Repeat("g", 40): false, "abc": false,
+	} {
+		if got := submission.CommitID(id); got != want {
+			t.Errorf("CommitID(%q) = %v, want %v", id, got, want)
+		}
 	}
 }

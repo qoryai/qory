@@ -115,15 +115,34 @@ func readHandoff(root string) (*handoff, error) {
 const (
 	textDroppedTitle       = "Title: %d characters, over the limit of %d. qory dropped the text."
 	textDroppedDescription = "Description: %d characters, over the limit of %d. qory dropped the text."
+	textDroppedControl     = "Title: has a control character at character %d. qory dropped the text."
+	textDroppedKeys        = "%d step keys are not a full commit id of 40 or 64 lower-case hexadecimal digits. qory dropped them."
 	textDroppedStep        = "Step of commit %s: %d characters, over the limit of %d. qory dropped the step."
 	textDroppedFurther     = "%d further steps are over the limit of %d characters. qory dropped them."
 	maxDroppedSteps        = 5
 )
 
+// controlAt is the 1-based position of the first control character of title, a character
+// of U+0000 to U+001F or U+007F, which the format's title pattern refuses; 0 for none.
+func controlAt(title string) int {
+	i := 0
+	for _, r := range title {
+		i++
+		if r < 0x20 || r == 0x7f {
+			return i
+		}
+	}
+	return 0
+}
+
 // limit drops the parts of h that are over a limit of the submission format.
 func (h *handoff) limit() {
 	if h.Text != nil {
 		switch title, description := utf8.RuneCountInString(h.Text.Title), utf8.RuneCountInString(h.Text.Description); {
+		case controlAt(h.Text.Title) > 0:
+			at := controlAt(h.Text.Title)
+			h.Text = nil
+			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedControl, at))
 		case title > maxTitle:
 			h.Text = nil
 			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedTitle, title, maxTitle))
@@ -131,6 +150,16 @@ func (h *handoff) limit() {
 			h.Text = nil
 			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedDescription, description, maxDescription))
 		}
+	}
+	badKeys := 0
+	for commit := range h.Steps {
+		if !submission.CommitID(commit) {
+			delete(h.Steps, commit)
+			badKeys++
+		}
+	}
+	if badKeys > 0 {
+		h.dropped = append(h.dropped, fmt.Sprintf(textDroppedKeys, badKeys))
 	}
 	var over []string
 	for commit, step := range h.Steps {

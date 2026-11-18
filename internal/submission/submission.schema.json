@@ -15,7 +15,7 @@
       "required": ["title", "description"],
       "additionalProperties": false,
       "properties": {
-        "title": {"type": "string", "minLength": 1, "maxLength": 256},
+        "title": {"description": "One line: no tab and no other control character.", "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\u0000-\u001f\u007f]+$"},
         "description": {"type": "string", "maxLength": 20000}
       }
     },

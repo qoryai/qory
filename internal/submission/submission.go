@@ -9,6 +9,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sync"
 
 	"github.com/qoryai/qory/internal/exports"
@@ -106,6 +107,13 @@ func None(reason string, exit int) json.RawMessage {
 	}
 	return json.RawMessage(fmt.Sprintf(`{"none":%q}`, reason))
 }
+
+// commitID is the pattern of a commit id in the schema: 40 or 64 lower-case hexadecimal digits.
+var commitID = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+
+// CommitID reports whether v is a commit id of the format: a full id of 40 or 64 lower-case
+// hexadecimal digits, as the schema's pattern for each commit.
+func CommitID(v string) bool { return commitID.MatchString(v) }
 
 // Name is the name of the branch of the work item with the id workItemID.
 func Name(workItemID string) string { return prefix + workItemID }

@@ -2863,8 +2863,11 @@ before the session starts, with the line `/.qory` that the compose adds. That fi
 to the clone and no commit has it, so `git add -A` and `git commit -a` leave the hand-off
 file out. `git add -f` can still stage it: step 4 of the push step stops that push.
 
-qory reads `text` and `steps` and nothing else. A commit with no entry in `steps` has the
-step `unreviewed`. That includes the commit that qory makes of what the agent left, which
+qory reads `text` and `steps` and nothing else. A commit that a step made gets that step: its
+entry in `steps`, whose key is the full commit id, 40 or 64 lower-case hexadecimal digits, and
+whose value is the id of a ledger row, such as `deliverable:d-1`, `fix:f1`, `plan`, `checks`,
+`small-change` or `script:scenario-2#3`. Any commit with no entry in `steps` gets the step
+`unreviewed`. That includes the commit that qory makes of what the agent left, which
 the hand-off cannot list, so a run that reached its time limit stores the edits it left as
 one commit with the step `unreviewed`.
 
@@ -2883,11 +2886,14 @@ the file read or of the JSON reader.
 qory also checks the file against the limits of the submission format, and drops the part
 that is over a limit and keeps the rest: a `text` whose `title` has more than 256 characters or
 whose `description` has more than 20000 is dropped whole, and a step of more than 128
-characters is dropped, so its commit is `unreviewed`. qory prints `qory run: The hand-off
+characters is dropped, so its commit is `unreviewed`. A `text` whose `title` has a control
+character, such as a tab or a line end, is dropped whole, and so is a step whose key is not a
+full commit id of 40 or 64 lower-case hexadecimal digits. qory prints `qory run: The hand-off
 file has a part the submission format does not allow, so qory dropped it.`, then one line
 indented by two spaces for each part: `Title: <n> characters, over the limit of 256. qory
 dropped the text.`, `Description: <n> characters, over the limit of 20000. qory dropped the
-text.`, and `Step of commit <commit>: <n> characters, over the limit of 128. qory dropped the
+text.`, `Title: has a control character at character <n>. qory dropped the text.`, `<n> step
+keys are not a full commit id of 40 or 64 lower-case hexadecimal digits. qory dropped them.`, and `Step of commit <commit>: <n> characters, over the limit of 128. qory dropped the
 step.`, for at most 5 steps, then `<n> further steps are over the limit of 128 characters.
 qory dropped them.` It prints no content of the file. A step for a commit that this run did not make is not used. The run
 never fails because of the file.
