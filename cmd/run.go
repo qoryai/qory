@@ -49,6 +49,7 @@ import (
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/render"
+	"github.com/qoryai/qory/internal/render/codex"
 	"github.com/qoryai/qory/internal/report"
 	"github.com/qoryai/qory/internal/runcopy"
 	"github.com/qoryai/qory/internal/runtimeinstall"
@@ -738,7 +739,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var copied *runCopy
 			// prepareLaunch composes the harness into the home the session starts on and
 			// makes the session's launch from it, writing the compose's lines to w;
-			// freshHome is true for a dispatched walled run of a runtime that is a
+			// freshHome is true for a walled run of a runtime that is a
 			// [render.AgentHomer], whose agent starts on a new, empty configuration
 			// directory.
 			// readOnly and level are set once the compose has the workflows: readOnly is whether
@@ -750,6 +751,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// link is the transcript link of a run whose agent starts on a fresh home, see
 			// [transcriptLinkFor].
 			var link transcriptLink
+			// codexFrom is what a walled Codex run writes its Codex home from, set by the
+			// compose, see [walledCodexHome].
+			var codexFrom codexParts
 			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
 				composing.writable = nil
 				for _, m := range spec.Mounts {
@@ -861,6 +865,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return false, err
 					}
 				}
+				// A refusal of the arguments stops the run here, as a refusal of the
+				// harness's settings stops the compose.
+				if walled {
+					if launchArgs, err = walledArgs(renderer, launchArgs, at.home); err != nil {
+						return false, err
+					}
+				}
 				rt, err := catalog.Lookup(name, filepath.Join(user, DescriptorsDir))
 				if err != nil {
 					return false, input(err)
@@ -880,9 +891,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				spec.Runtime, spec.Command, spec.Args, spec.Declared, spec.Harness = rt, launch.Command, launchArgs, rep.Hosts(), harness
 				spec.LaunchFixed, spec.LaunchDefaults, spec.HarnessHome = launch.Fixed, launch.Defaults, launch.HarnessHome
-				if h, ok := renderer.(render.AgentHomer); ok && dispatched && walled {
+				if h, ok := renderer.(render.AgentHomer); ok && walled {
 					spec.LaunchFixed, freshHome = withAgentHome(spec.LaunchFixed, h.AgentHomeVariable()), true
 					link = transcriptLinkFor(renderer, rt)
+				}
+				// A walled Codex run starts Codex on the home that codexHomeWork writes.
+				if walled && name == codex.Runtime {
+					spec.LaunchFixed, spec.LaunchDefaults = withCodexHome(spec.LaunchFixed, spec.LaunchDefaults)
+					codexFrom = c.codex
 				}
 				return freshHome, nil
 			}
@@ -1128,6 +1144,36 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return nil
 			}
+			// codexHomeWork writes the Codex home of a walled Codex run, see [walledCodexHome],
+			// once hostWork has bound the checkout or its copy, and mounts it. The home goes in
+			// the copy's folder, <user cache>/qory/runs/<run id>, or, for a run with no copy,
+			// in a new folder at that path. Both go when the run ends, as the copy does; the
+			// home goes also when the copy stays.
+			codexHomeWork := func() error {
+				checkout, root := at.root, ""
+				if copied != nil {
+					checkout, root = copied.dir.Work(), copied.dir.Root()
+					cleanups = append(cleanups, func() { removeCodexHome(root, said) })
+				} else {
+					d, err := runcopy.NewCodexHome(spec.RunID, state, spec.RunsDir)
+					if err != nil {
+						return &runLineError{codeLine(err)}
+					}
+					cleanups = append(cleanups, func() {
+						if err := d.Remove(); err != nil {
+							said(fmt.Sprintf(textCopyNoRemove, exports.Value(d.Root(), false), exports.HideError(err)))
+						}
+					})
+					root = d.Root()
+				}
+				mounts, err := walledCodexHome(root, at.home, checkout, spec.Dir, spec.Args, readOnly, codexFrom)
+				if err != nil {
+					return &runLineError{codeLine(err)}
+				}
+				spec.Mounts = append(spec.Mounts, mounts...)
+				spec.Written = writtenPlaces(checkout, spec.Mounts)
+				return nil
+			}
 			// setupWork runs the setup of a walled run whose run configuration lists
 			// repositories, see [runSetup], within the run's time limit. A setup command that
 			// exits otherwise than 0 is the run's error line, and a mount refusal of the
@@ -1210,6 +1256,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var prepErr error
 			if ctx.Err() == nil && (timeout == 0 || time.Since(opened) < timeout) {
 				prepErr = hostWork()
+				if prepErr == nil && walled && name == codex.Runtime {
+					prepErr = codexHomeWork()
+				}
 				if prepErr == nil && walled {
 					prepErr = imageWork()
 				}
@@ -1295,6 +1344,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					onVariables(a)
 				}
 			}
+			// A walled Codex run with no setup container tests /etc/codex in the agent's
+			// container before Codex starts. A run whose workspace is bound read-only
+			// cannot: Forager refuses a session's setup beside it.
+			insideCheck := walled && name == codex.Runtime && run.Repositories() == "" && !spec.WorkspaceReadOnly
+			if insideCheck {
+				withCodexSettingsCheck(&spec)
+			}
 			// The agent's session is the run's first join, so the gateway numbers it 1.
 			suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, fullSuite: fullSuiteOf(fromCode), extensions: extensions, said: said})
 			closeRoute := route.open(1)
@@ -1306,6 +1362,17 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				suiteLimit = opened.Add(timeout)
 			}
 			out, suiteErr := suites.after(ctx, again, suiteLimit, res, out)
+			// The test found /etc/codex, so Codex never started: qory closes the run as
+			// failed, as a failed Check tools step does, prints the line and exits 1.
+			if insideCheck && err == nil && res != nil && codexSettingsRefused(res.Dir) {
+				closeRun(session.Outcome{State: event.StateFailed, ExitCode: -1})
+				lines.done(nil)
+				said(image.CodexSettingsFix())
+				if recorded(record) {
+					said("the record is in " + record)
+				}
+				return reported(&exitError{code: 1})
+			}
 			// pushWork is the push step of a run with an agent session that may write, see
 			// [keepsWork], before the close: Qory Apiary takes no version of a run that ended.
 			// The step runs under [pushContext], since a stop has ended ctx or spent the time
@@ -1768,11 +1835,14 @@ var beforeJoin func()
 // sessionOutcome is the run's outcome qory closes the run with once its one session
 // ended with res, or did not start, err: the time limit's, cancelled with timeout and
 // 124; a stop from where the run was started, cancelled with interrupted and the
-// runtime's exit code; a session that paused at the model key limit, paused with
-// model_key_limit and the runtime's exit code; otherwise succeeded or failed by the
-// session's state, with the runtime's exit code. A session that did not start, or whose
-// run the gateway closed, is failed with -1: Forager closes a run the gateway closed
-// with the gateway's end.
+// runtime's exit code; a session paused after the model provider rejected its key while
+// another key is usable, paused with model_key_switch and the runtime's exit code; any
+// other paused session, at the model key limit, paused with model_key_limit and the
+// runtime's exit code; a session failed after the model provider rejected every key,
+// failed with model_key_unauthorized and the runtime's exit code; otherwise succeeded or
+// failed by the session's state, with the runtime's exit code. A session that did not
+// start, or whose run the gateway closed, is failed with -1: Forager closes a run the
+// gateway closed with the gateway's end.
 func sessionOutcome(res *session.Result, err error) session.Outcome {
 	switch {
 	case err != nil || res == nil || res.RunClosed:
@@ -1781,9 +1851,13 @@ func sessionOutcome(res *session.Result, err error) session.Outcome {
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
 	case res.Cancelled:
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: res.ExitCode}
+	case res.State == event.StatePaused && res.Reason == reasonModelKeySwitch:
+		return session.Outcome{State: event.StatePaused, Reason: reasonModelKeySwitch, ExitCode: res.ExitCode}
 	case res.State == event.StatePaused:
-		// Forager pauses a session only at the model key limit, model_key_limit.
+		// Forager pauses a session otherwise only at the model key limit, model_key_limit.
 		return session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: res.ExitCode}
+	case res.State == event.StateFailed && res.Reason == reasonModelKeyUnauthorized:
+		return session.Outcome{State: event.StateFailed, Reason: reasonModelKeyUnauthorized, ExitCode: res.ExitCode}
 	case res.State == event.StateSucceeded:
 		return session.Outcome{State: event.StateSucceeded, ExitCode: res.ExitCode}
 	}
@@ -1902,7 +1976,7 @@ func runEnded(u *ui.UI, res *session.Result, e runEnd) error {
 	switch {
 	case res.RunClosed:
 		o := outcomeOf(res.State, res.Reason)
-		say(o, o.said()+", and "+accesskey.ShownName(e.runtime, false)+" was stopped")
+		say(o, o.stopped(accesskey.ShownName(e.runtime, false)))
 		return reported(&exitError{code: o.exitCode()})
 	case res.TimedOut:
 		u.Fail(fmt.Errorf("the run was cancelled: it reached the time limit of %s, and %s was stopped", e.timeout, accesskey.ShownName(e.runtime, false)))
@@ -3347,7 +3421,7 @@ func reallyWithin(root, path string) bool {
 // run's code into, the exec step that starts the launch with the names nothing sets
 // unset, the program that keeps the setup container running, and the runner of a setup
 // command inside the wall; [agentEnvArgs] selects agent-env, which starts the agent of
-// a dispatched walled run of Claude Code. Each verb carries [inWall], so no look for a
+// a walled run of Claude Code. Each verb carries [inWall], so no look for a
 // release runs inside a container.
 var (
 	relayArgs        = []string{"run", "relay"}
@@ -3545,13 +3619,68 @@ const checkToolsStep = "Check tools"
 // run's repository and then runs the start commands of the repository's development
 // container configuration. With gitSession set, for a run that has a git session after the
 // agent, the step [checkToolsStep] comes first, so an image with no program of that session
-// stops the run before the agent.
-func setupCommands(gitSession bool) []session.SetupCommand {
+// stops the run before the agent. On a run of the runtime named runtime codex, the step also
+// stops an image with /etc/codex, see [image.CodexSessionCheckScript], and a Codex run with no
+// git session gets the step with that check alone, see [image.CodexSettingsCheckScript].
+func setupCommands(gitSession bool, runtime string) []session.SetupCommand {
+	var script string
+	switch {
+	case gitSession && runtime == codex.Runtime:
+		script = image.CodexSessionCheckScript()
+	case gitSession:
+		script = image.SessionCheckScript()
+	case runtime == codex.Runtime:
+		script = image.CodexSettingsCheckScript()
+	}
 	var commands []session.SetupCommand
-	if gitSession {
-		commands = append(commands, session.SetupCommand{Name: checkToolsStep, Args: []string{"/bin/sh", "-c", image.SessionCheckScript()}})
+	if script != "" {
+		commands = append(commands, session.SetupCommand{Name: checkToolsStep, Args: []string{"/bin/sh", "-c", script}})
 	}
 	return append(commands, session.SetupCommand{Name: setupStep, Args: append([]string{wall.HelperPath}, prepareArgs...)})
+}
+
+// withCodexSettingsCheck puts the step [checkToolsStep] with
+// [image.CodexSettingsInsideScript] first in the session's setup of spec, before any
+// command the setup has, and sets the setup runner when the spec has none.
+func withCodexSettingsCheck(spec *runSpec) {
+	check := session.SetupCommand{Name: checkToolsStep, Args: []string{"/bin/sh", "-c", image.CodexSettingsInsideScript()}}
+	spec.SessionSpec.Setup = append([]session.SetupCommand{check}, spec.SessionSpec.Setup...)
+	if len(spec.SetupRunner) == 0 {
+		spec.SetupRunner = append([]string{wall.HelperPath}, setupCommandArgs...)
+	}
+}
+
+// codexSettingsRefused reports whether the record in dir, session.jsonl, has the last
+// setup step named [checkToolsStep] ending with [image.CodexSettingsInsideExit]: the test
+// that [withCodexSettingsCheck] adds found /etc/codex. A record that cannot be read has no
+// such step.
+func codexSettingsRefused(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "session.jsonl"))
+	if err != nil {
+		return false
+	}
+	step, code := 0, -1
+	for line := range bytes.Lines(data) {
+		var ev struct {
+			Type string `json:"type"`
+			Data struct {
+				Step     int    `json:"step"`
+				Kind     string `json:"kind"`
+				Name     string `json:"name"`
+				ExitCode *int   `json:"exit_code"`
+			} `json:"data"`
+		}
+		if json.Unmarshal(line, &ev) != nil {
+			continue
+		}
+		switch {
+		case ev.Type == event.StepStarted && ev.Data.Kind == event.StepSetup && ev.Data.Name == checkToolsStep:
+			step, code = ev.Data.Step, -1
+		case ev.Type == event.StepExited && step > 0 && ev.Data.Step == step && ev.Data.ExitCode != nil:
+			code = *ev.Data.ExitCode
+		}
+	}
+	return code == image.CodexSettingsInsideExit
 }
 
 // toolFixes is what a person reads of err, a step [checkToolsStep] of the run with the record
@@ -3603,10 +3732,14 @@ func toolFixes(dir string, err error) []string {
 // the run's image on the wall's network, which runs until the run closes, or on a read
 // run until [removeSetup]. The setup container is checked and limited as the session is: it gets the session's working
 // folder, ForagerFiles, Written and Limits, and the agent's variables, see [setupEnv].
-// Inside, the setup commands get the agent's environment. gitSession is what
-// [setupCommands] takes.
+// Inside, the setup commands get the agent's environment. gitSession and the name of the
+// spec's runtime are what [setupCommands] takes.
 func runSetup(ctx context.Context, run openedRun, spec *runSpec, gitSession bool) error {
-	commands := setupCommands(gitSession)
+	runtime := ""
+	if spec.Runtime != nil {
+		runtime = spec.Runtime.Name()
+	}
+	commands := setupCommands(gitSession, runtime)
 	if spec.setupWhere == config.SetupInside {
 		spec.SessionSpec.Setup = commands
 		spec.SetupRunner = append([]string{wall.HelperPath}, setupCommandArgs...)

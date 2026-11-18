@@ -538,6 +538,18 @@ release may change what an existing document does, and states it under Upgrading
   nothing. If qory cannot post the verdict, the run closes `failed`. A stop of `qory run` during
   the suite closes the run `cancelled`, with the reason `interrupted`. See The full suite in
   `docs/run.md`.
+- A run whose model key the model provider rejected, while another model key of the run
+  is usable, ends with `✗ the run was paused: the model provider rejected a model key,
+  and the run can continue on another key` after the runtime's line, exit 1. When the
+  gateway closed the run, the line is `✗ the run was paused: the model provider rejected
+  a model key, <runtime> was stopped, and the run can continue on another key`. qory
+  closes the run `paused` with the reason `model_key_switch` and the runtime's exit
+  status, and a control plane can continue the run on the other key. `qory run resend`
+  says the end of such a run as `paused: the model provider rejected a model key, and the
+  run can continue on another key`. A run whose model keys the model
+  provider all rejected ends with `✗ the run failed: the model provider rejected every
+  model key` after the runtime's line, exit 1, and qory closes it `failed` with the reason
+  `model_key_unauthorized` and the runtime's exit status. See `docs/run.md`.
 
 ### Changed
 
@@ -673,6 +685,45 @@ release may change what an existing document does, and states it under Upgrading
     `user:pw@registry.example/agent@sha256:…`, shows as `registry.example/agent@sha256:…`
     in qory's lines, errors and the record. The manifest check no longer sends the
     login as a path to Docker Hub's registry.
+
+- A person's walled run of Claude Code starts Claude Code on an empty configuration folder,
+  as a walled run given a run key does: `CLAUDE_CONFIG_DIR` is `/tmp/qory-agent-home`, and
+  its `projects` folder links to the run's transcript folder. Before, Claude Code read
+  `~/.claude` and `~/.claude.json` in the image's `HOME`. A `CLAUDE_CONFIG_DIR` in
+  `harness.launch.claude.env` no longer applies behind a wall. Claude Code gets none of the
+  image's values of the variables qory removes on a run given a run key, such as
+  `ANTHROPIC_*`, `CLAUDE_*` and `NODE_OPTIONS`, and the run stops when the image has
+  `/etc/claude-code`. A read run also gets `/tmp/qory-artifacts` new and empty for its
+  artifact files, and stops when the image has something at that path. An unwalled run is
+  unchanged. See Claude Code behind a wall in `docs/run.md`.
+- On a walled run of Claude Code whose `ANTHROPIC_API_KEY` is the gateway's placeholder,
+  qory writes `.claude.json` with the approval of that placeholder into the empty
+  configuration folder, so an interactive Claude Code starts without asking you to
+  approve the key.
+- A walled run starts `codex exec` with `--sandbox danger-full-access` after `exec`,
+  unless an argument before `--` sets a sandbox mode, bypasses one, or is
+  `--approve-for-me` or `--not-so-yolo`, which Codex refuses beside `--sandbox`. Inside
+  the wall every other sandbox mode of Codex fails before it runs a command. The prompt
+  of a walled `codex exec` mentions the skill by its path,
+  `[$<name>](/var/lib/qory-codex-home/skills/<name>/SKILL.md)`, not `$<name>`, when the
+  composed harness has that skill. An unwalled run is unchanged.
+- A walled Codex run starts Codex on a new home: `CODEX_HOME` is
+  `/var/lib/qory-codex-home`, where qory binds `<user cache>/qory/runs/<run id>/codex-home`
+  writable for Codex's sessions, temporary files and state database. qory writes
+  `config.toml` with its additions, which mark untrusted the checkout, the working folder
+  and each folder that a `-C` or `--cd` argument names, `hooks.json` with no hook, an empty `.env`,
+  `environments.toml` and `AGENTS.override.md`, the harness's `AGENTS.md`, and copies of
+  `rules/`, `skills/` and `agents/` into `<user cache>/qory/runs/<run id>/codex-fixed`,
+  and binds each read-only at its path in the home. A walled Codex run copies the
+  composed home's `skills/`, `rules/` and `agents/` with every link replaced by the file
+  or folder it leads to, since Codex 0.167.2 passes over a `SKILL.md` that is a link. A
+  link whose target lies outside the composed home, the folders of the harness's modules
+  and qory's module cache fails the run with ``Remove the link `<path>` from the harness:
+  it leads to `<target>`, outside the harness's modules, and a Codex run copies only files
+  inside them.`` qory removes both folders when the run ends. Before, `CODEX_HOME` was the
+  runtime's directory of the composed home, which a walled run binds read-only. A
+  `CODEX_HOME` in `harness.launch.codex.env` no longer applies behind a wall. An unwalled
+  run is unchanged. See Codex behind a wall in `docs/run.md`.
 - `qory gateway` keeps its runs when SIGINT or SIGTERM stops it: a gateway started again
   on the same directory within 120 seconds continues them, and the agent sessions behind
   it go on. Before, a run open at a gateway that stopped was over. The directory is
@@ -1150,6 +1201,107 @@ release may change what an existing document does, and states it under Upgrading
 - Compose refuses a Claude Code settings `env` that sets one of 10 model or effort
   variables, such as `ANTHROPIC_MODEL`. It refuses them the same way in the
   configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export.
+- Compose refuses a Codex `settings/codex/config.toml` that sets `model_provider`,
+  `model_providers`, `projects`, `hooks.state`, `features`, `analytics`, `otel`,
+  `notify`, `web_search`, `feedback.enabled`, `check_for_update_on_startup`,
+  `openai_base_url`, `chatgpt_base_url`, `responses_api_metadata`, a key of the form
+  `experimental_realtime_*_base_url`, `profile`, `profiles`,
+  `cli_auth_credentials_store`, `allow_login_shell`, `model_instructions_file`,
+  `experimental_compact_prompt_file`, `model_catalog_json`, `js_repl_node_path`,
+  `sqlite_home` or `log_dir`, with
+  ``Remove `<key>` from the harness's `settings/codex/config.toml`: a Codex run takes
+  this key from qory and Forager, not from the harness.`` A fragment may still set the
+  other keys of `hooks`, such as `hooks.Stop`.
+- A walled Codex run refuses Codex arguments before `--` that set one of those keys or
+  `model_reasoning_effort`, a key under one, or a table above one, such as
+  `-c features.shell_snapshot=true` or `--config model_providers={}`, in the forms
+  `--config`, `--config=`, `-c`, `-c<key>=<value>` and `-c=<key>=<value>`, with
+  ``Remove `--config <key>` from the run's Codex arguments: a Codex run takes this key
+  from qory and Forager, not from the arguments.`` The run stops before the agent starts, with exit status 1.
+  Forager puts its `--config` flags first, and Codex takes the last one for a key. An
+  unwalled run gets Forager's shorter check, in the entry for unwalled Codex runs.
+- A walled Codex run refuses `--oss` and `--local-provider` before `--`, with
+  ``Remove `<flag>` from the run's Codex arguments: a Codex run takes its model provider
+  from qory and Forager, not from the arguments.``, and `--profile` in the forms
+  `--profile <name>`, `--profile=<name>`, `-p <name>`, `-p<name>` and `-p=<name>`, with
+  ``Remove `--profile` from the run's Codex arguments: a Codex run takes its settings
+  from qory and Forager, not from a profile.`` The run stops before the agent starts,
+  with exit status 1. An unwalled run gets Forager's shorter check, in the entry for
+  unwalled Codex runs. A run of another runtime is unchanged.
+- A walled Codex run refuses `--enable <feature>` and `--disable <feature>` before `--`,
+  also as `--enable=<feature>`, for every feature, the legacy name `connectors` too:
+  Codex reads them as `--config features.<feature>=true` or `false`. The text is
+  ``Remove `--enable <feature>` from the run's Codex arguments: a Codex run takes this
+  key from qory and Forager, not from the arguments.``, or the same with `--disable`.
+- A walled Codex run refuses `--ignore-user-config` before `--`, with ``Remove
+  `--ignore-user-config` from the run's Codex arguments: a Codex run takes its settings
+  from qory and Forager, not from the arguments.``, and `--search`, with ``Remove
+  `--search` from the run's Codex arguments: a Codex run takes its web search setting
+  from qory and Forager, not from the arguments.``
+- A walled Codex run refuses `--dangerously-bypass-hook-trust` before `--`, with
+  ``Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments: a Codex run
+  takes its hook trust from qory and Forager, not from the arguments.``, and `--remote`
+  and `--remote-auth-token-env`, also with `=`, with ``Remove `--remote` from the run's
+  Codex arguments: a Codex run takes its app server from qory and Forager, not from the
+  arguments.`` (`--remote-auth-token-env` likewise).
+- A walled Codex run refuses `--config` keys at `skills` or `cloud.skills`, under one,
+  or above one, such as `-c skills.bundled.enabled=true` or `-c cloud={}`, with the
+  `--config` line.
+- An unwalled Codex run stops before Codex starts, with exit status 1, when a Codex
+  argument before `--` sets a key Forager sets for Codex, such as `model_provider` or
+  `web_search`, or `model_providers`, `profile`, `profiles`, `projects`,
+  `responses_api_metadata`, `openai_base_url`, `chatgpt_base_url`,
+  `experimental_realtime_*_base_url`, `skills` or `cloud.skills`, a key under one or a
+  table above one; when it enables or disables `plugins`, `apps` or `connectors`; or
+  when it is `--oss`, `--local-provider`, `--profile`, `-p`, `--search`,
+  `--ignore-user-config`, `--dangerously-bypass-hook-trust` or `--remote`. qory prints
+  Forager's line, such as ``✗ remove the -c that sets model_provider from the launch's
+  arguments: the session sets that setting for Codex, or the setting changes where Codex
+  sends its requests`` for `-c model_provider=x`, or ``✗ remove the --config pair that
+  sets model_provider from the launch's arguments: the session sets model_provider, and a
+  later pair overrides the session's value`` for `--config model_provider=x`. Before, an
+  unwalled run passed every argument unchanged.
+- A refusal of a walled Codex run's arguments writes each control character of the key
+  or feature it repeats as an escape, such as `\n`.
+- On a walled Codex run that lists repositories, the `Check tools` setup step fails when
+  the image has anything at `/etc/codex`, with ``Use an image without /etc/codex: Codex
+  reads its settings there before qory's, so the run does not start.`` A write run in a
+  copy runs this test in the step it has; any other such run, such as a read run, gets
+  the step with this test alone. The step of a Claude Code run is unchanged.
+- A walled Codex run that lists no repositories, except a read run, tests `/etc/codex` in
+  a `Check tools` setup step in the agent's container before Codex starts. When the image
+  has anything there, qory prints the same line, the run closes as failed, and qory run
+  exits with 1.
+- The line for an image with no `sh` reads ``the setup of a walled run runs sh from these
+  folders``, in place of ``the git session of a walled run``.
+- Compose accepts `settings/codex/read-access.rules`, Codex execpolicy rules for a run
+  whose access is `read`. It merges the file into no target file and places it in no
+  home. A walled read run on Codex writes it to `read-access.rules` in the `rules/`
+  folder of the Codex home; a run with any other access gets none. Several modules'
+  files are joined in module order. Any other file under `settings/` that is neither
+  `.json` nor `.toml` is still refused. See `contracts/harness/v1/README.md`.
+- The home of a walled Codex run disables, by name, every skill that no
+  `Skill(harness:<name>)` rule in `permissions.allow` of the harness's
+  `settings/claude/settings.json` allows: each skill in the home and in the checkout's
+  `.codex/skills` and `.agents/skills`, and every skill of the checkout by its path,
+  whatever its name. `Skill(harness:*)` allows every skill of the harness. It turns off
+  the skills Codex ships and a cloud's skills. See the codex entry
+  in `contracts/harness/v1/README.md`.
+- Compose refuses a Codex `settings/codex/config.toml` or `settings/codex/hooks.json`
+  with a hook whose `timeout` or `additionalContextLimit` is negative or fractional,
+  with ``Set `<key>` of the `<event>` hook in the harness's `settings/codex/<file>` to a
+  whole number of 0 or more: Codex ignores the whole file otherwise.`` Codex 0.167.2
+  starts with its defaults when `config.toml` has such a number, and drops every hook of
+  a `hooks.json` that has one. A float such as 2.0 counts as fractional.
+- Compose refuses a module that ships `files/codex/auth.json`, Codex's login file, with
+  ``Remove `files/codex/auth.json` from module <name>: a Codex run takes its model key
+  from the run, not from a file.``
+- Compose refuses a module that ships `files/codex/hooks.json`, `files/codex/.env`,
+  `files/codex/environments.toml` or `files/codex/AGENTS.override.md`, with ``Remove
+  `files/codex/<path>` from module <name>: qory writes it for every walled Codex run.``
+  It refuses a module that ships `files/codex/rules/read-access.rules` with ``Remove
+  `files/codex/rules/read-access.rules` from module <name>: qory writes it for a walled
+  Codex run that only reads, from the harness's `settings/codex/read-access.rules`.``
 - A walled `qory run` given a run key does not start when `--env` or `wall.env` names a
   variable the runtime reads its model key from: `ANTHROPIC_API_KEY`,
   `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_AUTH_TOKEN` for Claude Code. An unwalled run,
@@ -1228,6 +1380,22 @@ release may change what an existing document does, and states it under Upgrading
   workflow, such as `agents/demo-author` and `capture-demos`, and the fix: add a module
   that fills the role, or drop the workflow. The other failures of the same check follow
   it in the same error. Before, the line showed only the skill and the agent.
+- The Codex directory of a home, `codex`, contains the skills as folders and regular
+  files copied from the modules, not as links. Each skill is copied within the limits of
+  a copy of one module entry, leaves out `.git`, and keeps each file's permission bits
+  without write for group and others. A skill edit reaches a Codex run on the
+  next compose. Until then `qory harness compose --check` exits 6 and names the changed
+  file, such as `codex/skills/review/SKILL.md  changed`.
+- A skill with a link to a folder that contains the link, such as `self -> .` or a link
+  to the module's folder, stops every compose that includes Codex with `copy <path> for
+  the Codex home: the folder contains itself through a link`.
+- The copy of `rules` and `agents` into a walled Codex run's home takes at most 10,000
+  files, directories and links, 1 GiB in all and 64 MiB a file, and leaves out `.git`.
+  Past a limit it fails with ``Ship fewer files in the modules. codex/<folder> contains
+  more than 10,000 files, directories and links, the most a walled Codex run takes.``,
+  ``Ship fewer files in the modules. The files of codex/<folder> add up to more than
+  1 GiB, the most a walled Codex run takes.`` or ``Ship codex/<path> under 64 MiB. The
+  file is larger than 64 MiB, the most a walled Codex run takes for one file.``
 
 ### Removed
 
@@ -1324,6 +1492,9 @@ release may change what an existing document does, and states it under Upgrading
   A git URL with a password in its user part prints as `https://user:(hidden)@host/…`.
   `qory harness launch` and its `--json` line print the values as written, since a person
   copies that line to run it.
+- A Codex run outside the wall loads every skill of the harness. Codex 0.167.2 skips a
+  `SKILL.md` that is a link, and the Codex home had the `SKILL.md` of a skill with a
+  reference in another of its files as a link.
 
 ### Security
 

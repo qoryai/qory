@@ -3,7 +3,13 @@ package cmd
 import (
 	"context"
 	"errors"
+	"go/ast"
+	gobuild "go/build"
+	"go/parser"
+	"go/token"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -121,6 +127,23 @@ func TestRunEndedSaysTheOutcome(t *testing.T) {
 			"claude ended on the signal SIGTERM\nthe run was paused: every model key reached its limit\n", 1},
 		{"exit 0 at the model key limit", &session.Result{State: "paused", Reason: event.ReasonModelKeyLimit}, "",
 			"claude exited 0\nthe run was paused: every model key reached its limit\n", 1},
+		// A model key the model provider rejected: the run pauses while another key is
+		// usable, and fails when none is. Forager stopped the runtime, so the outcome
+		// follows the runtime's line whatever its exit.
+		{"a kill at a rejected key", &session.Result{State: "paused", Reason: reasonModelKeySwitch, ExitCode: -1, Signal: "SIGTERM"}, "",
+			"claude ended on the signal SIGTERM\nthe run was paused: the model provider rejected a model key, and the run can continue on another key\n", 1},
+		{"exit 0 at a rejected key", &session.Result{State: "paused", Reason: reasonModelKeySwitch}, "",
+			"claude exited 0\nthe run was paused: the model provider rejected a model key, and the run can continue on another key\n", 1},
+		{"a kill at every key rejected", &session.Result{State: "failed", Reason: reasonModelKeyUnauthorized, ExitCode: -1, Signal: "SIGTERM"}, "",
+			"claude ended on the signal SIGTERM\nthe run failed: the model provider rejected every model key\n", 1},
+		{"exit 3 at every key rejected", &session.Result{State: "failed", Reason: reasonModelKeyUnauthorized, ExitCode: 3}, "",
+			"claude exited 3\nthe run failed: the model provider rejected every model key\n", 1},
+		{"exit 0 at every key rejected", &session.Result{State: "failed", Reason: reasonModelKeyUnauthorized}, "",
+			"claude exited 0\nthe run failed: the model provider rejected every model key\n", 1},
+		{"a key rejected, closed paused", closed("paused", reasonModelKeySwitch), "",
+			"the run was paused: the model provider rejected a model key, claude was stopped, and the run can continue on another key\n", 1},
+		{"every key rejected, closed failed", closed("failed", reasonModelKeyUnauthorized), "",
+			"the run failed: the model provider rejected every model key, and claude was stopped\n", 1},
 	} {
 		said, code := endOf(c.res, runEnd{runtime: "claude", timeout: 5 * time.Minute, got: c.got})
 		if said != c.want || code != c.code {
@@ -146,6 +169,14 @@ func TestRunEndedMarksTheOutcome(t *testing.T) {
 		{&session.Result{State: "failed", Reason: "checks_failed"}, "✓ claude exited 0\n✗ the run failed: checks failed\n"},
 		{&session.Result{State: "succeeded", ExitCode: 2}, "✗ claude exited 2\n✓ the run completed\n"},
 		{&session.Result{State: "paused", Reason: event.ReasonModelKeyLimit}, "✓ claude exited 0\n✗ the run was paused: every model key reached its limit\n"},
+		{&session.Result{State: "paused", Reason: reasonModelKeySwitch, ExitCode: 143},
+			"✗ claude exited 143\n✗ the run was paused: the model provider rejected a model key, and the run can continue on another key\n"},
+		{&session.Result{State: "failed", Reason: reasonModelKeyUnauthorized, ExitCode: 143},
+			"✗ claude exited 143\n✗ the run failed: the model provider rejected every model key\n"},
+		{&session.Result{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "paused", Reason: reasonModelKeySwitch},
+			"✗ the run was paused: the model provider rejected a model key, claude was stopped, and the run can continue on another key\n"},
+		{&session.Result{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "paused", Reason: event.ReasonModelKeyLimit},
+			"✗ the run was paused: every model key reached its limit, and claude was stopped\n"},
 	} {
 		var out strings.Builder
 		runEnded(ui.New(&out), c.res, runEnd{runtime: "claude"})
@@ -185,6 +216,7 @@ func TestGatewayEndedResendSaysTheOutcome(t *testing.T) {
 		{session.ResendResult{RunClosed: true, ClosedReason: oldReasonCredentialExpired}, "the run has ended (cancelled: the run credential expired)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonSessionLost}, "the run has ended (lost: it lost contact with the gateway for 1m30s)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "paused", Reason: event.ReasonModelKeyLimit}, "the run has ended (paused: every model key reached its limit)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "paused", Reason: reasonModelKeySwitch}, "the run has ended (paused: the model provider rejected a model key, and the run can continue on another key)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonBatchRefused}, "the run has ended (failed: its events could not be recorded)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: oldReasonCredentialInvalid}, "the run has ended (failed: its run credential could not be checked)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: "another_code"}, "the run has ended (failed: the gateway stopped during the run)" + tail},
@@ -326,6 +358,8 @@ func TestEndsAsSaysTheResendsEnd(t *testing.T) {
 		{"cancelled", event.ReasonInterrupted, "cancelled"},
 		{"paused", event.ReasonModelKeyLimit, "paused: every model key reached its limit"},
 		{"paused", "", "paused: every model key reached its limit"},
+		{"paused", reasonModelKeySwitch, "paused: the model provider rejected a model key, and the run can continue on another key"},
+		{"failed", reasonModelKeyUnauthorized, "failed: the model provider rejected every model key"},
 	} {
 		if got := endsAs(c.state, c.reason); got != c.want {
 			t.Errorf("%q, %q: %q, want %q", c.state, c.reason, got, c.want)
@@ -591,7 +625,9 @@ func TestThePushHasTwoMinutesPastTheLimit(t *testing.T) {
 
 // TestSessionOutcome is the outcome qory closes a run with for each end of its one
 // session: a session paused at the model key limit closes the run paused with
-// model_key_limit and the runtime's exit code.
+// model_key_limit, one paused at a rejected model key paused with model_key_switch, and
+// one failed at every model key rejected failed with model_key_unauthorized, each with the
+// runtime's exit code.
 func TestSessionOutcome(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -610,11 +646,80 @@ func TestSessionOutcome(t *testing.T) {
 			session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: 143}},
 		{"paused, exit 0", &session.Result{State: event.StatePaused, Reason: event.ReasonModelKeyLimit}, nil,
 			session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit}},
+		{"paused with no reason", &session.Result{State: event.StatePaused, ExitCode: 143}, nil,
+			session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: 143}},
+		{"paused at a rejected model key", &session.Result{State: event.StatePaused, Reason: reasonModelKeySwitch, ExitCode: 143}, nil,
+			session.Outcome{State: event.StatePaused, Reason: reasonModelKeySwitch, ExitCode: 143}},
+		{"failed at every model key rejected", &session.Result{State: event.StateFailed, Reason: reasonModelKeyUnauthorized, ExitCode: 143}, nil,
+			session.Outcome{State: event.StateFailed, Reason: reasonModelKeyUnauthorized, ExitCode: 143}},
+		{"failed at every model key rejected, exit 0", &session.Result{State: event.StateFailed, Reason: reasonModelKeyUnauthorized}, nil,
+			session.Outcome{State: event.StateFailed, Reason: reasonModelKeyUnauthorized}},
+		{"closed by the gateway at every model key rejected", &session.Result{RunClosed: true, State: event.StateFailed, Reason: reasonModelKeyUnauthorized}, nil,
+			session.Outcome{State: event.StateFailed, ExitCode: -1}},
 		{"succeeded", &session.Result{State: event.StateSucceeded}, nil, session.Outcome{State: event.StateSucceeded}},
 		{"failed", &session.Result{State: event.StateFailed, ExitCode: 3}, nil, session.Outcome{State: event.StateFailed, ExitCode: 3}},
+		{"failed with another reason", &session.Result{State: event.StateFailed, Reason: "checks_failed", ExitCode: 3}, nil,
+			session.Outcome{State: event.StateFailed, ExitCode: 3}},
 	} {
 		if got := sessionOutcome(c.res, c.err); got != c.want {
 			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestModelKeyReasonsMatchForagers checks qory's reasons for a rejected model key against
+// Forager's event.ReasonModelKeySwitch and event.ReasonModelKeyUnauthorized, read from the
+// source of the Forager this build uses. It skips at a Forager without them.
+func TestModelKeyReasonsMatchForagers(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := gobuild.Import("github.com/qoryai/forager/event", wd, gobuild.FindOnly)
+	if err != nil {
+		t.Fatalf("finding Forager's event package: %v", err)
+	}
+	fset := token.NewFileSet()
+	found := map[string]string{}
+	files, err := filepath.Glob(filepath.Join(pkg.Dir, "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", name, err)
+		}
+		for _, decl := range f.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				vs := spec.(*ast.ValueSpec)
+				for i, id := range vs.Names {
+					if i >= len(vs.Values) {
+						continue
+					}
+					if lit, ok := vs.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+						if v, err := strconv.Unquote(lit.Value); err == nil {
+							found[id.Name] = v
+						}
+					}
+				}
+			}
+		}
+	}
+	want := map[string]string{"ReasonModelKeySwitch": reasonModelKeySwitch, "ReasonModelKeyUnauthorized": reasonModelKeyUnauthorized}
+	if _, ok := found["ReasonModelKeySwitch"]; !ok {
+		t.Skipf("the Forager in %s has no ReasonModelKeySwitch", pkg.Dir)
+	}
+	for name, v := range want {
+		if found[name] != v {
+			t.Errorf("Forager's event.%s is %q, qory's %q", name, found[name], v)
 		}
 	}
 }

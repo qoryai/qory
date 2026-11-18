@@ -86,9 +86,10 @@
 //
 // A fragment is settings/<runtime>/<file>, where <file> is the target file that runtime
 // reads and its extension decides the format. Compose reads .json and .toml and refuses
-// any other extension. A TOML document is decoded into the map and list types the JSON
-// decoder produces, so both formats merge under the same rules. Fragments for the same
-// runtime and the same target file merge in module order:
+// any other extension, except settings/codex/read-access.rules, which it keeps as
+// [Result.CodexReadRules] and merges into no file. A TOML document is decoded into the
+// map and list types the JSON decoder produces, so both formats merge under the same
+// rules. Fragments for the same runtime and the same target file merge in module order:
 //
 //   - Maps merge by key, at every depth.
 //   - A list under the top-level key permissions concatenates and drops duplicates.

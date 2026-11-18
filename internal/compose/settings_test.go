@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/stack"
 )
 
@@ -265,6 +266,97 @@ func TestSettingsRefuseAFragmentQoryCannotRead(t *testing.T) {
 			}
 			if !strings.HasSuffix(err.Error(), c.file+".") {
 				t.Fatalf("error %q does not end with the file %q", err, c.file)
+			}
+		})
+	}
+}
+
+// readRules is Codex execpolicy rules in the shape of a harness's
+// settings/codex/read-access.rules: forbidden rules and no allow rule.
+const readRules = `# The shell rules of a read run on Codex.
+prefix_rule(pattern=["rm"], decision="forbidden", justification="read run: rm deletes or moves files")
+prefix_rule(pattern=["git", "push"], decision="forbidden", justification="read run: git push reaches the network")
+`
+
+// TestCodexReadRulesAreKeptForTheRun composes settings/codex/read-access.rules from two
+// modules: compose merges neither into config.toml or any other target file, and keeps
+// both, joined in module order, each ending in a newline, for a read run.
+func TestCodexReadRulesAreKeptForTheRun(t *testing.T) {
+	res, err := composeTree(t, map[string]string{
+		stack.FileName: twoModules,
+		"modules/a/settings/codex/read-access.rules": readRules,
+		"modules/a/settings/codex/config.toml":       "model = \"o3\"\n",
+		"modules/b/settings/codex/read-access.rules": `prefix_rule(pattern=["curl"], decision="forbidden")`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := readRules + "prefix_rule(pattern=[\"curl\"], decision=\"forbidden\")\n"; string(res.CodexReadRules) != want {
+		t.Errorf("read rules:\n%s\nwant:\n%s", res.CodexReadRules, want)
+	}
+	if got := res.SettingsFiles("codex"); !reflect.DeepEqual(got, []string{"config.toml"}) {
+		t.Errorf("codex target files %v, want only config.toml", got)
+	}
+}
+
+// TestCodexReadRulesAreNoneWithoutTheFile leaves CodexReadRules nil for a harness that
+// ships no settings/codex/read-access.rules.
+func TestCodexReadRulesAreNoneWithoutTheFile(t *testing.T) {
+	res, err := composeTree(t, map[string]string{
+		stack.FileName:                         twoModules,
+		"modules/a/settings/codex/config.toml": "model = \"o3\"\n",
+		"modules/b/":                           "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.CodexReadRules != nil {
+		t.Errorf("read rules %q, want none", res.CodexReadRules)
+	}
+}
+
+// TestAnExtendingModuleMayShipCodexReadRules is an extending module with
+// settings/codex/read-access.rules, under a base stack that lets an extending module set
+// no setting: the rules set no key, so the compose keeps them.
+func TestAnExtendingModuleMayShipCodexReadRules(t *testing.T) {
+	isolateAll(t)
+	dir := writeTree(t, map[string]string{
+		"base/" + stack.FileName:                         "apiVersion: qory.dev/v1alpha1\nname: core\nextending:\n  kinds: [skills]\nmodules:\n  - name: a\n    source:\n      path: modules/a\n",
+		"base/modules/a/qory-module.yaml":                "apiVersion: qory.dev/v1alpha1\nname: a\n",
+		"app/" + config.FileName:                         "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: ../base}\n  target:\n    runtime: codex\n  modules:\n    - name: b\n",
+		"app/modules/b/qory-module.yaml":                 "apiVersion: qory.dev/v1alpha1\nname: b\n",
+		"app/modules/b/settings/codex/read-access.rules": readRules,
+	})
+	p, err := config.Compose(filepath.Join(dir, "app", config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, base, err := compose.LoadBase(p, "", compose.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := compose.ComposeWith(merged, compose.Options{Base: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(res.CodexReadRules) != readRules {
+		t.Errorf("read rules %q, want %q", res.CodexReadRules, readRules)
+	}
+}
+
+// TestSettingsRefuseAnotherRulesFile accepts read-access.rules only under codex: another
+// .rules name, and the same name under another runtime, are refused with the text of any
+// other extension.
+func TestSettingsRefuseAnotherRulesFile(t *testing.T) {
+	for _, file := range []string{"codex/default.rules", "codex/read-access.rule", "claude/read-access.rules"} {
+		t.Run(file, func(t *testing.T) {
+			_, err := composeTree(t, map[string]string{
+				stack.FileName:               twoModules,
+				"modules/a/settings/" + file: readRules,
+				"modules/b/":                 "",
+			})
+			if err == nil || !strings.HasPrefix(err.Error(), "module a: ") || !strings.HasSuffix(err.Error(), "settings/"+file+": settings fragments are .json or .toml") {
+				t.Fatalf("error %v, want today's refusal of settings/%s", err, file)
 			}
 		})
 	}

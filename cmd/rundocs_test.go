@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 	"github.com/qoryai/integrations/contracts"
@@ -197,6 +198,14 @@ var codeAtGateway bool
 // codeRunAPI, when set, is the base URL of the run API of each run that [runFromCodeGiven] opens.
 var codeRunAPI string
 
+// codeGatewayServer is the control plane of the gateway of [codeAtGateway], as
+// [cmd.Nowhere] GatewayServer is; nil starts that gateway with none. A test sets it.
+var codeGatewayServer *gateway.Server
+
+// codeGatewayAllow is the allow list of the policy of the gateway of [codeAtGateway], as
+// [cmd.Nowhere] GatewayAllow is; nil starts that gateway with none. A test sets it.
+var codeGatewayAllow []string
+
 // codePolicyImage is the image the policy of each run [runFromCodeGiven] opens selects,
 // as [cmd.Nowhere] PolicyImage is; "" selects none. A test sets it.
 var codePolicyImage string
@@ -283,15 +292,17 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 		System: proxygittest.Host, Repositories: codeRepositories,
 		Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
 		StackProxy: h.server.Proxy.URL, StackCABundle: h.server.Proxy.CABundle,
-		OnOpen:      func(s session.OpenSpec) { r.open = s },
-		FetchImage:  codeFetchImage,
-		Setup:       codeSetup,
-		RemoveSetup: codeRemoveSetup,
-		Real:        codeReal,
-		AtGateway:   codeAtGateway,
-		PolicyImage: codePolicyImage,
-		OnImage:     func(i session.Image) { r.image = i },
-		RunAPI:      codeRunAPI,
+		OnOpen:        func(s session.OpenSpec) { r.open = s },
+		FetchImage:    codeFetchImage,
+		Setup:         codeSetup,
+		RemoveSetup:   codeRemoveSetup,
+		Real:          codeReal,
+		AtGateway:     codeAtGateway,
+		GatewayServer: codeGatewayServer,
+		GatewayAllow:  codeGatewayAllow,
+		PolicyImage:   codePolicyImage,
+		OnImage:       func(i session.Image) { r.image = i },
+		RunAPI:        codeRunAPI,
 	})
 	defer restore()
 	if given == nil {

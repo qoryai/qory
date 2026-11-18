@@ -163,7 +163,19 @@ type Result struct {
 	// Excludes are the entries the modules left out, in module order, by kind.
 	Excludes []Exclude
 	// Settings are the merged fragments: per runtime, per target file, in module order.
+	// [CodexReadRules] is not among them.
 	Settings map[string]map[string]map[string]any
+	// CodexReadRules is every module's settings/codex/read-access.rules, Codex
+	// execpolicy rules for a run whose access is read, joined in module order, each
+	// ending in a newline; nil when no module ships one. Compose merges the file into
+	// no target file, and no render places it in a home: the Codex renderer's
+	// WriteWalledHome writes it to the rules folder of a walled read run's home.
+	CodexReadRules []byte
+	// CodexHooksJSON are the bytes of every module's settings/codex/hooks.json fragment,
+	// as written, in module order; nil when no module ships one. The fragments are also
+	// merged into Settings like any other; the Codex renderer reads these to tell a
+	// number such as 2.0, which Codex refuses, from 2, which the merge cannot.
+	CodexHooksJSON [][]byte
 	// MCP contains the composed MCP servers by name, each the object its module's
 	// mcp/<name>.json contains, with every $QORY_HARNESS_HOME as written, before
 	// substitution. [Result.MCPFor] renders it for a home.
@@ -206,6 +218,9 @@ type Result struct {
 	// checked against the base stack; nil when it lists none. A build writes them into
 	// hooks.json.
 	Hooks []Hook
+	// Cache is the folder git sources are fetched to, [Options.Cache] or
+	// [source.CacheDir]; "" when neither is known.
+	Cache string
 	// roots are the module roots the compose opened, which [Result.Close] closes.
 	roots []*os.Root
 	// setBy is the module that set each settings leaf, keyed
@@ -280,7 +295,11 @@ func Compose(p *stack.Stack) (*Result, error) { return ComposeWith(p, Options{})
 // be fetched a [*source.FetchError]. The package comment has the order of the rules and
 // the merge semantics.
 func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
-	res := &Result{Stack: p, Base: opts.Base, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, Exported: map[string]string{}, setBy: map[string]string{}}
+	cache := opts.Cache
+	if cache == "" {
+		cache, _ = source.CacheDir()
+	}
+	res := &Result{Stack: p, Base: opts.Base, Cache: cache, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, Exported: map[string]string{}, setBy: map[string]string{}}
 	defer func() {
 		if err != nil {
 			res.Close()
@@ -450,6 +469,24 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 				res.Settings[runtime] = map[string]map[string]any{}
 			}
 			for file, path := range files {
+				if runtime == "codex" && file == CodexReadRulesName {
+					data, err := readFile(path)
+					if err != nil {
+						return nil, exports.HideError(err)
+					}
+					if len(data) > 0 && data[len(data)-1] != '\n' {
+						data = append(data, '\n')
+					}
+					res.CodexReadRules = append(res.CodexReadRules, data...)
+					continue
+				}
+				if runtime == "codex" && file == "hooks.json" {
+					data, err := readFile(path)
+					if err != nil {
+						return nil, exports.HideError(err)
+					}
+					res.CodexHooksJSON = append(res.CodexHooksJSON, data)
+				}
 				if res.Settings[runtime][file] == nil {
 					res.Settings[runtime][file] = map[string]any{}
 				}
@@ -1549,6 +1586,10 @@ func collisions(owners map[string][]string, modules []Module, base *Base, checko
 	return e
 }
 
+// CodexReadRulesName is the one file under settings/codex/ that is no fragment: Codex
+// execpolicy rules for a read run, kept as [Result.CodexReadRules].
+const CodexReadRulesName = "read-access.rules"
+
 // mergeFile decodes one settings fragment of the named module, read with readFile, and
 // folds it into the result's target file for the runtime. The extension decides the format, and a TOML
 // document is normalized to the types the JSON decoder produces. The top-level key
@@ -1751,6 +1792,25 @@ func (r *Result) SettingsFor(runtime, file, home string) map[string]any {
 		src = map[string]any{}
 	}
 	return ForHome(src, home).(map[string]any)
+}
+
+// SourceDirs are the folders the compose read its modules from: each module's Dir and,
+// when it differs, its RealDir, in module order without repeats, then [Result.Cache]
+// when it is known. qory copies a file that a link in a Codex home leads to only when it
+// lies in the composed home or in one of them.
+func (r *Result) SourceDirs() []string {
+	var dirs []string
+	for _, m := range r.Modules {
+		for _, d := range []string{m.Dir, m.RealDir} {
+			if d != "" && !slices.Contains(dirs, d) {
+				dirs = append(dirs, d)
+			}
+		}
+	}
+	if r.Cache != "" && !slices.Contains(dirs, r.Cache) {
+		dirs = append(dirs, r.Cache)
+	}
+	return dirs
 }
 
 // MCPFor is a copy of the composed MCP servers rendered for a home, name to object, with

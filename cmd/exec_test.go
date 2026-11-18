@@ -129,8 +129,8 @@ func TestExecPassesNoServerVariable(t *testing.T) {
 // TestAWalledRunStartsThroughTheExecVerb is a walled run whose launch starts through
 // the real qory run exec, with the arguments Forager gives it, in a container whose
 // image sets the server's variables, a name Claude Code's descriptor denies and its
-// configuration folder: the runtime gets none of them, and the image's other
-// variables as they are.
+// configuration folder: the runtime gets none of them, its configuration folder is the
+// agent's home that qory sets, and the image's other variables are as they are.
 func TestAWalledRunStartsThroughTheExecVerb(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
@@ -159,6 +159,6 @@ func TestAWalledRunStartsThroughTheExecVerb(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := "\n" + string(data)
-	wants(t, env, "\nIMAGE_KEPT=stays\n")
-	lacks(t, env, "from-the-image", "\nANTHROPIC_BASE_URL=", "\nCLAUDE_CONFIG_DIR=", "QORY_TEST_EXEC", "QORY_TEST_IMAGE_ENV")
+	wants(t, env, "\nIMAGE_KEPT=stays\n", "\nCLAUDE_CONFIG_DIR=/tmp/qory-agent-home\n")
+	lacks(t, env, "from-the-image", "\nANTHROPIC_BASE_URL=", "/image/claude", "QORY_TEST_EXEC", "QORY_TEST_IMAGE_ENV")
 }

@@ -80,6 +80,21 @@ func stepsToTheJoin(t *testing.T, path string) []string {
 	return steps
 }
 
+// wallHelper builds qory for this engine's machines, as the helper of a real wall, and
+// returns its path.
+func wallHelper(t *testing.T) string {
+	t.Helper()
+	_, arch, _ := strings.Cut(dockerOut(t, "", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"), "/")
+	helper := filepath.Join(t.TempDir(), "qory-linux")
+	build := exec.Command("go", "build", "-o", helper, ".")
+	build.Dir = ".."
+	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+arch)
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	return helper
+}
+
 // realWallImage builds qory for this engine's machines, as the helper of a real wall, and an
 // image on alpine with git from the distribution's packages and the program agent at
 // /usr/local/bin/name, which the test removes at its end. It returns the helper's path and
@@ -89,14 +104,7 @@ func realWallImage(t *testing.T, name, agent string) (helper, image string) {
 	var id [4]byte
 	_, _ = rand.Read(id[:])
 	dir := t.TempDir()
-	_, arch, _ := strings.Cut(dockerOut(t, "", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"), "/")
-	helper = filepath.Join(dir, "qory-linux")
-	build := exec.Command("go", "build", "-o", helper, ".")
-	build.Dir = ".."
-	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+arch)
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
-	}
+	helper = wallHelper(t)
 	writeFile(t, filepath.Join(dir, "image", "agent"), agent)
 	writeFile(t, filepath.Join(dir, "image", "Dockerfile"), "FROM public.ecr.aws/docker/library/alpine:3.22\nRUN apk add --no-cache git\nCOPY agent /usr/local/bin/"+name+"\nRUN chmod 755 /usr/local/bin/"+name+"\nUSER 1000:1000\n")
 	image = "qory-test-" + name + ":" + hex.EncodeToString(id[:])
