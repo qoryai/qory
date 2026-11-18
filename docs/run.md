@@ -2984,7 +2984,7 @@ that the file has twice is not stored.
 
 `base.branch` is the branch that qory read as the repository's default when it fetched the
 repository at the start of the run, such as `main`: one name for each repository, since each
-has its own default branch. The submit program bases a pull request on it. A repository
+has a default branch that can differ from the others. The submit program bases a pull request on it. A repository
 that qory cloned and whose HEAD names no branch has no `base.branch`, and the program may
 not change it.
 
@@ -3021,8 +3021,8 @@ threat model has five limits:
    above, which only this user and root open, so the container's user reaches them and
    no other user of this machine does.
 2. The relay copies bytes both ways to one address, the push proxy's. A client that closes
-   its writing side after its request still reads the reply: each direction ends on its own,
-   and the connection closes when both have ended. It reads and adds
+   its writing side after its request still reads the reply: each direction ends when its copy
+   ends, whatever the other does, and the connection closes when both have ended. It reads and adds
    nothing, so the push proxy's rules, its credential's hosts and paths and its refusal of
    a push that is not a plain push to the work item's branch, are the only limit on what the
    program reaches, and the program holds the proxy's password, not the push credential.

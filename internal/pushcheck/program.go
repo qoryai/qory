@@ -229,10 +229,10 @@ func bindMountMode(src, dst string, readonly bool) (string, error) {
 }
 
 // programAccess is how the folders of the submit program's container are given to the run's
-// user. owned: this process can give each folder and file to the user, so they keep the
-// modes 0700 and 0600 and only that user and this one open them. Otherwise, with a run's user
-// that is another user and no right to give files to it, the folders and files get the wider
-// modes that user needs, below the folder of [Checker.RunProgram], which is mode 0700 and
+// user. When this process can give each folder and file to that user (chown), they keep the
+// modes 0700 and 0600, and only that user and this one open them. Otherwise, with a run's user
+// that is another user and no right to give files to it (widen), the folders and files get the
+// wider modes that user needs, below the folder of [Checker.RunProgram], which is mode 0700 and
 // which no other user opens. The engine mounts work and net from there as they are.
 type programAccess struct {
 	// uid and gid are the run's user; chown is set when this process gives paths to it.

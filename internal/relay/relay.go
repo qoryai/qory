@@ -10,7 +10,7 @@
 //
 // What the relay carries: the bytes of each connection, both ways, to the one address it
 // was started with. A client that closes its writing side after its request, as a half-close,
-// still reads the reply: each direction ends on its own, and the connections close when both
+// still reads the reply: each direction ends when its copy ends, whatever the other does, and the connections close when both
 // have ended or the relay closes. That is the push proxy's address, so the program's requests carry the
 // proxy's password. The relay reads, checks and adds nothing: every limit on what a request
 // may reach, the push credential's list of paths and hosts, stays with the push proxy.
