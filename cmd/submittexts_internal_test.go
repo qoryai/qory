@@ -16,11 +16,12 @@ func TestTheTextsOfTheSubmitStepHaveAShortLineOne(t *testing.T) {
 	fixFirst := map[string]string{
 		"textPushNoReadProxy":   "Take ",
 		"textPushChecksMissing": "Push ",
+		"textLocalNoCommits":    "Open ",
 		"textPushRefused":       "Fix ",
 		"textLocalPushFailed":   "Fix ",
 		"textLocalNoHistory":    "Fix ",
 		"textLocalNoRemote":     "Set ",
-		"textLocalPushURLs":     "Keep ",
+		"textLocalPushURLs":     "Remove ",
 	}
 	texts := map[string]string{
 		"textHandoffIgnored":    textHandoffIgnored,
@@ -37,6 +38,7 @@ func TestTheTextsOfTheSubmitStepHaveAShortLineOne(t *testing.T) {
 		"textPushRefused":       textPushRefused,
 		"textLocalPushFailed":   textLocalPushFailed,
 		"textLocalNoHistory":    textLocalNoHistory,
+		"textLocalNoCommits":    textLocalNoCommits,
 		"textLocalNoRemote":     textLocalNoRemote,
 		"textLocalPushURLs":     textLocalPushURLs,
 	}

@@ -3,6 +3,7 @@ package cmd_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -213,14 +214,15 @@ func TestALocalRunWithNoCheckPushesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	const line = "qory run: Push your commits and open the draft by hand: the push checks are not available yet."
+	const line = "qory run: Push the branch and open the draft by hand: this qory version has no push checks."
 	if len(line) > 100 {
 		t.Fatalf("the line has %d characters", len(line))
 	}
 	if n := strings.Count(out, line); n != 1 {
 		t.Errorf("the output has the line %d times, want 1:\n%s", n, out)
 	}
-	wants(t, out, line+"\n  qory pushed nothing and opened no draft.")
+	wants(t, out, line+"\n  Branch: qory/run-")
+	wants(t, out, ".\n  qory pushed nothing and opened no draft.\n")
 	lacks(t, out, "hand-off")
 	if got := pushedBranches(t, bare); got != "" {
 		t.Errorf("the bare repository has %q, want none", got)
@@ -338,7 +340,7 @@ func TestALocalRunNeedsEveryPushCheck(t *testing.T) {
 		t.Fatalf("the required checks are %v, want key and scope", names)
 	}
 	pass := func(context.Context, string, string) error { return nil }
-	const line = "qory run: Push your commits and open the draft by hand: the push checks are not available yet."
+	const line = "qory run: Push the branch and open the draft by hand: this qory version has no push checks."
 	for _, c := range []struct {
 		name  string
 		given []string
@@ -434,7 +436,35 @@ func TestALocalRunWithTwoPushAddressesPushesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "qory run: Keep one push address of remote origin with git remote set-url --push origin <address>.\n  The remote origin has 2 push addresses, so qory pushed nothing and opened no draft.")
+	wants(t, out, pushURLsText(2))
+	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 {
+		t.Errorf("pushed %q and started %d programs, want none", got, timesStarted(t, started))
+	}
+}
+
+// pushURLsText is the text of a remote origin with n push addresses, up to the branch and from
+// the line after it: the fix for each way to have several, then the cause and the values.
+func pushURLsText(n int) string {
+	return fmt.Sprintf("qory run: Remove the extra push addresses of remote origin, so it has one.\n"+
+		"  The remote origin has %d push addresses, so qory pushed nothing and opened no draft.\n  Branch: qory/run-", n)
+}
+
+// TestALocalRunWithTwoUrlValuesPushesNothing is a remote origin with two url values and no pushurl:
+// git has two push addresses then, and qory pushes nothing and gives the commands of both ways to
+// have several: git remote set-url --push origin <address> leaves one push address of several
+// url values, and git remote set-url --delete --push origin <address> removes one of several pushurl values.
+func TestALocalRunWithTwoUrlValuesPushesNothing(t *testing.T) {
+	root, bare, started := localProgramCheckout(t)
+	runGit(t, root, "remote", "set-url", "--add", "origin", "https://git.example.com/acme/second.git")
+	passingCheck(t)
+	agentInCopy(t, handsOffText(t))
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wants(t, out, pushURLsText(2))
+	wants(t, out, ".\n  If remote.origin.url has several values, run: git remote set-url --push origin <address>\n"+
+		"  If remote.origin.pushurl has several values, run once for each address to drop: git remote set-url --delete --push origin <address-to-drop>\n")
 	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 {
 		t.Errorf("pushed %q and started %d programs, want none", got, timesStarted(t, started))
 	}
@@ -572,6 +602,46 @@ func TestALocalRunWithAnAddressThatIsNotAForgePushesNothing(t *testing.T) {
 	lacks(t, out, "needle")
 	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 {
 		t.Errorf("pushed %q and started %d programs, want none", got, timesStarted(t, started))
+	}
+}
+
+// TestALocalRunWithNoRemoteOriginPushesNothingAndSaysSo is a repository that lost its remote origin
+// after the run began: reading the push address fails before any push, so the text says qory
+// pushed nothing and opened no draft, and says to fix the cause and run again.
+func TestALocalRunWithNoRemoteOriginPushesNothingAndSaysSo(t *testing.T) {
+	root, bare, started := localProgramCheckout(t)
+	runGit(t, root, "remote", "remove", "origin")
+	passingCheck(t)
+	out := runLocal(t, handsOffText(t))
+	wants(t, out, "qory run: Fix the cause below, then run again: qory could not read the branch or its origin.\n"+
+		"  qory pushed nothing and opened no draft.\n  Branch: qory/run-")
+	wants(t, out, ".\n  Cause: ")
+	lacks(t, out, "qory pushed the branch")
+	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 {
+		t.Errorf("pushed %q and started %d programs, want none", got, timesStarted(t, started))
+	}
+}
+
+// TestALocalRunThatCannotListItsCommitsAfterThePushSaysThePushLanded is a push that lands and a
+// repository whose configuration breaks right after it, so reading the commits of the branch fails:
+// the branch is on the forge, qory ran no program, and the text says to open the draft by hand,
+// not to run again, which would push again.
+func TestALocalRunThatCannotListItsCommitsAfterThePushSaysThePushLanded(t *testing.T) {
+	root, bare, started := localProgramCheckout(t)
+	config := filepath.Join(root, ".git", "config")
+	hook := filepath.Join(bare, "hooks", "post-receive")
+	writeFile(t, hook, "#!/bin/sh\necho '[' >> '"+config+"'\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	passingCheck(t)
+	out := runLocal(t, handsOffText(t))
+	wants(t, out, "qory run: Open the draft by hand: qory pushed the branch but could not list the run's commits.\n"+
+		"  qory ran no program, so it opened no draft.\n  Branch: qory/run-")
+	wants(t, out, ".\n  Cause: ")
+	lacks(t, out, "then run again")
+	if got := pushedBranches(t, bare); !strings.HasPrefix(got, "qory/run-") || timesStarted(t, started) != 0 {
+		t.Errorf("pushed %q and started %d programs, want the branch and none", got, timesStarted(t, started))
 	}
 }
 

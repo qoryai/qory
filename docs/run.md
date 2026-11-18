@@ -2978,16 +2978,33 @@ pushes the head commit of that branch for each repository, as it was when the ch
 the push address of the remote `origin` (`git remote get-url --push origin`, after git's
 `insteadOf` and `pushInsteadOf` rewrites), with your git login and configuration. qory pushes to
 `origin` by its name, so git applies its rewrites once, and the push goes to the address that the
-checks and the program got. The push has no force, no pre-push hook, no submodule push and no tag that follows the commit. The remote
-must have one push address: with two or more, qory pushes nothing and prints `qory run: Keep
-one push address of remote origin with git remote set-url --push origin <address>.`, then
-`The remote origin has <n> push addresses, so qory pushed nothing and opened no draft.` and
-the branch on lines indented by two spaces. The push address must be a
+checks and the program got. The push has no force, no pre-push hook, no submodule push and no tag that follows the commit.
+
+The remote must have one push address. With two or more, qory pushes nothing and prints `qory
+run: Remove the extra push addresses of remote origin, so it has one.`, then these lines
+indented by two spaces:
+
+- `The remote origin has <n> push addresses, so qory pushed nothing and opened no draft.`
+- `Branch: <branch>.`
+- `If remote.origin.url has several values, run: git remote set-url --push origin <address>`
+- `If remote.origin.pushurl has several values, run once for each address to drop: git remote
+  set-url --delete --push origin <address-to-drop>`
+
+Git has one push address for each `pushurl` value, and with no `pushurl` it has one for each
+`url` value. The first command sets one `pushurl` and leaves the `url` values as they are. It fails
+when the remote has several `pushurl` values, so the second command drops the extra ones.
+
+If qory cannot read the branch or the push address of `origin`, it pushes nothing and prints `qory
+run: Fix the cause below, then run again: qory could not read the branch or its origin.`, then
+`qory pushed nothing and opened no draft.`, `Branch: <branch>.` and `Cause: <cause>` on lines
+indented by two spaces.
+
+The push address must be a
 host and a repository path of a forge, over `https`, `http`, `ssh`, `git` or the form
 `git@host:owner/repo`, with a host name of dotted labels of letters, digits and hyphens, which qory writes in lower case, so `GitHub.com` is `github.com`. Any other address, such as
 `file://`, a path or a host with no dot, stops the run the same way with `qory run: Set remote
 origin to a forge repository address, then run again; qory pushed nothing.`, then `qory opened
-no draft.`, the branch and the cause on lines indented by two spaces. The lines never show the
+no draft.`, the branch and the cause on lines indented by two spaces. No line contains the
 address. `QORY_SUBMIT_SYSTEM` and
 `QORY_SUBMIT_PATH` come from that address.
 
@@ -3001,10 +3018,21 @@ the run's commits) and `scope` (a change to a file that the session may not chan
 refuses, qory pushes nothing and runs no program, and prints `qory run: Fix the cause below, then run
 again: a push check refused the push.`, then `qory pushed nothing and opened no draft.`,
 `Branch: <branch>.` and `Cause: <cause>` on lines indented by two spaces. A push that fails prints `qory run: Fix the cause below, then run
-again: the push failed, so qory opened no draft.` and leaves that repository out of the program. In this build neither check is
-registered, so a run with no run code and no run key pushes nothing, runs no program and prints `qory run: Push your commits and open the draft by hand: the push checks are not
-available yet.` and the line `qory pushed nothing and opened no draft.` indented by two spaces.
-Until the checks exist, a run with no run code and no run key opens no draft.
+again: the push failed, so qory opened no draft.` and leaves that repository out of the program.
+
+If the push lands and qory then cannot list the run's commits on the branch, it runs no program
+for that repository and prints `qory run: Open the draft by hand: qory pushed the branch but could not list the run's commits.`, then
+`qory ran no program, so it opened no draft.`, `Branch: <branch>.` and `Cause: <cause>` on lines
+indented by two spaces. The branch is on the forge with the run's commits, so a second run would push
+again: open the draft from the branch by hand.
+
+In this build neither check is registered, so a run with no run code and no run key pushes
+nothing, runs no program and prints `qory run: Push the branch and open the draft by hand: this
+qory version has no push checks.`, then `Branch: <branch>.` and `qory pushed nothing and opened no
+draft.` on lines indented by two spaces. `<branch>` is the branch in the line `the run's commits
+are on <branch> in <path>.`, or the branches, separated by `, `, for a run with commits in
+several repositories. A run with no run code and no run key opens no draft until
+the checks are registered.
 
 When the program returns a draft for a repository, qory prints `Draft: <address>` on standard
 output, one line for each such repository in the order of the repositories, as the last lines of

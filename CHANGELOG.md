@@ -620,9 +620,14 @@ release may change what an existing document does, and states it under Upgrading
   branch stays pushed. A program that runs past 120 seconds is `program-timeout`. The
   submission format has the reason `login-needed`, the exit 0 for `program-failed`, and the
   draft states `closed` and `merged`. In this build no push check is registered, so a run with
-  no run code and no run key pushes nothing, runs no program and prints `qory run: Push your
-  commits and open the draft by hand: the push checks are not available yet.` and a second
-  line. See The submit program in `docs/run.md`.
+  no run code and no run key pushes nothing, runs no program and prints `qory run: Push the
+  branch and open the draft by hand: this qory version has no push checks.`, the branch and
+  a third line. A remote with several push addresses gets `qory run: Remove the extra push
+  addresses of remote origin, so it has one.` and the two commands that fix it: one for
+  several `url` values and one for several `pushurl` values. A push that landed, followed by
+  a failure to list the run's commits, gets `qory run: Open the draft by hand: qory pushed
+  the branch but could not list the run's commits.` and no second push. See The submit program
+  in `docs/run.md`.
 - A push that landed with no version stored has one way out in the line of `qory run`:
   `delete branch qory/<work item id> of <path> on <system>`. A branch whose head is not the
   commit the run expected is refused before any push, with the line `Set the branch to the
