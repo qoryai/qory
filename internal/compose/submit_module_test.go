@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
 )
@@ -184,5 +185,109 @@ func TestSubmitModuleRefusesTheSameNameFromAnotherSource(t *testing.T) {
 		if !strings.Contains(err.Error(), "The module in qory.yaml is at ") {
 			t.Errorf("%s: refusal %q has no line for the source in the file", c.name, err)
 		}
+	}
+}
+
+// shortLink is a link in /tmp to the folder of the repository url, and the file URL of the
+// link: a git address of at most 20 characters, so a refusal that has it fits in 100.
+func shortLink(t *testing.T, url string) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "qs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	link := filepath.Join(dir, "r")
+	if err := os.Symlink(strings.TrimPrefix(url, "file://"), link); err != nil {
+		t.Fatal(err)
+	}
+	return "file://" + link
+}
+
+// TestSubmitModuleRefusalKeepsTheCauseOnLineOneWhenItFits is a listed module of the same name
+// from another git source, where the run's address is short: the refusal is one line of
+// at most 100 characters with the fix, then the cause, and the second line is the module's
+// source in the file. TestSubmitModuleRefusesTheSameNameFromAnotherSource has the long form.
+func TestSubmitModuleRefusalKeepsTheCauseOnLineOneWhenItFits(t *testing.T) {
+	isolateAll(t)
+	long, _, _ := forgeRepo(t)
+	otherURL, _, _ := forgeRepo(t)
+	url := shortLink(t, long)
+	list := "  - name: forge\n    source: {git: " + otherURL + ", ref: main, path: forge}\n"
+	sub := &compose.SubmitModule{Source: stack.Source{Git: url, Ref: "main", Path: "forge"}}
+	_, err := compose.ComposeWith(submitStack(t, list), compose.Options{Cache: t.TempDir(), Memo: source.NewMemo(), Submit: sub})
+	if err == nil {
+		t.Fatal("composed, want a refusal")
+	}
+	want := "Remove module forge from qory.yaml: the run adds it from " + url + "@main."
+	first, rest, _ := strings.Cut(err.Error(), "\n")
+	if first != want || len([]rune(first)) > 100 {
+		t.Errorf("line 1 is %q (%d characters), want %q", first, len([]rune(first)), want)
+	}
+	if strings.Contains(rest, "The run adds it from") || !strings.HasPrefix(rest, "  The module in qory.yaml is at ") {
+		t.Errorf("the next lines are %q, want the module's source alone", rest)
+	}
+}
+
+// baseWithForge is a base stack in git that lists the module forge from the git source of
+// the forge repository at ref, and a checkout whose qory.yaml extends it. It returns the
+// checkout's stack with the base merged, and the base.
+func baseWithForge(t *testing.T, forgeURL, ref, forgePath string) (*stack.Stack, *compose.Base) {
+	t.Helper()
+	baseURL := gitRepo(t, "", map[string]string{
+		"stacks/web/" + stack.FileName: "apiVersion: qory.dev/v1alpha1\nname: web\nextending: {}\nmodules:\n  - name: forge\n    source: {git: " + forgeURL + ", ref: " + ref + ", path: " + forgePath + "}\n",
+	})
+	checkout := filepath.Join(t.TempDir(), "qory.yaml")
+	body := "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {git: \"" + baseURL + "\", ref: main, path: stacks/web}\n  target: {runtime: claude}\n"
+	if err := os.WriteFile(checkout, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := config.Compose(checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, base, err := compose.LoadBase(p, "", compose.Options{Cache: t.TempDir(), Memo: source.NewMemo()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return merged, base
+}
+
+// TestSubmitModuleOfTheSameNameAsABaseStacksModule is a base stack, which the checkout extends,
+// that lists the module forge: from the same git source at another ref, the run reads it at
+// the commit Qory Apiary pins and the line names the base stack as the place; from another
+// git source, the compose fails and the fix adds that the checkout can stop extending the base.
+func TestSubmitModuleOfTheSameNameAsABaseStacksModule(t *testing.T) {
+	isolateAll(t)
+	url, first, second := forgeRepo(t)
+	opts := func(base *compose.Base) compose.Options {
+		return compose.Options{Base: base, Cache: t.TempDir(), Memo: source.NewMemo(),
+			Submit: &compose.SubmitModule{Source: stack.Source{Git: url, Ref: second, Path: "forge"}}}
+	}
+	p, base := baseWithForge(t, url, first, "forge")
+	res, err := compose.ComposeWith(p, opts(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Close()
+	if got := moduleNames(res); got != "forge" || res.Modules[0].Commit != second {
+		t.Errorf("modules %s at %s, want forge at the pinned %s", moduleNames(res), res.Modules[0].Commit, second)
+	}
+	if !res.Modules[0].Base {
+		t.Error("the replaced module is not marked as the base's")
+	}
+	want := "forge from " + url + "@" + second + ", in place of " + first + " in stack web@main"
+	if res.Replaced == nil || res.Replaced.Line() != want {
+		t.Errorf("replaced %+v, want the line %q", res.Replaced, want)
+	}
+
+	otherURL, _, _ := forgeRepo(t)
+	p, base = baseWithForge(t, otherURL, "main", "forge")
+	_, err = compose.ComposeWith(p, opts(base))
+	if err == nil {
+		t.Fatal("composed with a base module of another source, want a refusal")
+	}
+	if text := err.Error(); !strings.HasPrefix(text, "Remove module forge from stack web@main, or stop extending it") || !strings.Contains(text, "The module in stack web@main is at ") {
+		t.Errorf("the refusal is\n%s", text)
 	}
 }
