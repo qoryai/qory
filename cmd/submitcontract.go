@@ -12,10 +12,11 @@ import (
 	"unicode/utf8"
 )
 
-// The submit program contract of the integrations repository, contracts/run/v1/submit-program/
-// README.md, in one place: the names of the inputs that qory sets, the keys of the lines that
-// the program prints, the exit statuses, and the limits. A change of a name in the contract is
-// a change here.
+// The submit program contract of the integrations module that go.mod pins: the README
+// contracts/run/v1/submit-program/README.md and the names in contracts/submit_program.go, in one
+// place here: the inputs that qory sets, the keys of the lines that the program prints, the exit
+// statuses, and the limits. A change of a name in the contract is a change here, and
+// TestTheSubmitContractNamesAreThePinnedOnes compares them with the pinned module.
 const (
 	qoryEnvPrefix            = "QORY_"
 	submitEnvSystem          = "QORY_SUBMIT_SYSTEM"

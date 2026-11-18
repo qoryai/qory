@@ -42,8 +42,8 @@ const (
 	maxLeftOut       = 5
 )
 
-// programLimit is how long the submit program may run, from its start; the contract has no
-// limit, and a program that waits on a login prompt would stop the run's end.
+// programLimit is how long the submit program may run, from its start: the contract's
+// SubmitTimeLimit, so a program that waits on a login prompt does not stop the run's end.
 const programLimit = 120 * time.Second
 
 // submitLimit, when not 0, is how long the submit program may run, in place of [programLimit]; a
