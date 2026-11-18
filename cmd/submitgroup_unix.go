@@ -7,8 +7,8 @@ import (
 	"syscall"
 )
 
-// inOwnGroup starts cmd in a new session, which has no controlling terminal and is a process
-// group of its own, and has the context's end kill the whole group, so a helper that the program
+// inOwnGroup starts cmd in a new session, which has no controlling terminal and is a new process
+// group with the program as its leader, and has the context's end kill the whole group, so a helper that the program
 // started stops with it.
 func inOwnGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

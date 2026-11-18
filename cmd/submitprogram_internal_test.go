@@ -358,7 +358,7 @@ func TestParseSubmitLines(t *testing.T) {
 
 // TestTheProgramGetsNoVariableOfQoryAndNoPrompt is a person's environment with the variables that
 // qory runs with (an access key, a server secret, a run key, a status descriptor, a value of the
-// contract's inputs) and the person's own login and network variables: the program gets none
+// contract's inputs) and the person's login and network variables: the program gets none
 // whose name starts with QORY_ except the contract's inputs, gets the login and network variables,
 // and cannot prompt.
 func TestTheProgramGetsNoVariableOfQoryAndNoPrompt(t *testing.T) {
