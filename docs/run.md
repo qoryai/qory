@@ -2867,7 +2867,9 @@ a stop or the time limit cut closes the run as the sections above say.
 After the push and the report of the pushed commits, the push step stores the submission,
 the document of the [submission format](../contracts/harness/v1/README.md#the-submission-format),
 as a version of the artifact `main` of the type `submission`. A `write-no-push` run and a
-read run have no submit step. The document has:
+read run have no submit step. The step stores one version for each pushing session that ends
+with a verdict. Until reviewer runs exist, such a session is the whole review round; the call
+moves to the end of the round with them. The document has:
 
 - `ref`: `qory/<work item id>`.
 - `verdict`: the newest verdict of the work item, `passed`, `changes-requested` or

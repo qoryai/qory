@@ -568,7 +568,8 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
-- The push step stores a version of the artifact type `submission`, in place of `branch`.
+- The push step stores a version of the artifact type `submission`, in place of `branch`,
+  one for each pushing session that ends with a verdict.
   The step checks the head of the branch on the forge before it pushes. A head that is not
   the commit the run expected ends the run `failed` with the code `push_head_changed`, after a
   session that passed, failed or timed out. The push replaces the branch only when its head
