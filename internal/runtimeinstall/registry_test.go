@@ -89,7 +89,7 @@ func TestTheRegistryFetchRefuses(t *testing.T) {
 			bad := bytes.Clone(good)
 			bad[len(bad)/2] ^= 0xff
 			r.Publish("2.1.320", true, map[string]rt.Layer{"amd64": {Tarball: good, Served: bad}})
-		}, "Ask Qory Apiary's instance admin to check the registry's runtime cache\nThe layer of claude 2.1.320 does not match its digest sha256:"},
+		}, "Ask Qory Apiary's instance admin to check the registry's runtime cache\nThe layer of claude 2.1.320 does not match its digest\n  sha256:"},
 		{"sha512 checksum", func(t *testing.T, r *rt.Registry) {
 			r.Publish("2.1.320", true, map[string]rt.Layer{"amd64": {Tarball: rt.PlainTarball(t, "2.1.320"), Integrity: rt.Integrity([]byte("another tarball"))}})
 		}, "The tarball of claude 2.1.320 does not match the checksum\n  sha512-"},
@@ -98,7 +98,7 @@ func TestTheRegistryFetchRefuses(t *testing.T) {
 			newest := r.Tag("newest")
 			r.Publish("2.1.320", false, map[string]rt.Layer{"amd64": {Tarball: rt.PlainTarball(t, "other")}})
 			r.SetTag("newest", newest)
-		}, "Ask Qory Apiary's instance admin to check the registry's runtime cache\nshared/runtimes/claude:2.1.320 has the digest sha256:"},
+		}, "Ask Qory Apiary's instance admin to check the registry's runtime cache\nshared/runtimes/claude:2.1.320 has the digest\n  sha256:"},
 		{"version that climbs", func(t *testing.T, r *rt.Registry) {
 			r.Publish("..", true, map[string]rt.Layer{"amd64": {Tarball: rt.PlainTarball(t, "x")}})
 		}, `shared/runtimes/claude:newest has the version "..", and a version is 1 to 64 letters`},

@@ -885,8 +885,8 @@ func TestCauseOnlyDropsTheFixLine(t *testing.T) {
 // TestCauseOnlySplitsALongRealmLine is causeOnly on the two refusals of a registry's
 // token realm, with an address of 200 characters: a dispatched run shows the cause, whose
 // first line, with "qory run: ", has at most 100 characters. The first refusal goes on
-// after its first comma, on an indented line; the second has the realm on an indented
-// line of its own. A short cause stays on one line.
+// after its first comma, on an indented line; the second has the realm on a separate
+// indented line. A short cause stays on one line.
 func TestCauseOnlySplitsALongRealmLine(t *testing.T) {
 	long := "https://apiary-" + strings.Repeat("a", 158) + ".example.com/registry/token"
 	for _, c := range []struct{ err, want string }{

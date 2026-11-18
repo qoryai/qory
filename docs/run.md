@@ -1146,7 +1146,7 @@ If the install fails, no session starts and `qory run` exits 1 with the error, w
 line is the fix; a run with a control plane closes `failed` with -1. A run from a run key
 or a run code, which Qory Apiary started, prints the cause alone, with no fix line, its
 first letter in lower case. A long value in a cause, such as a URL, a checksum or a path
-in a tarball, is on an indented line of its own:
+in a tarball, is on a separate indented line:
 
 ```text
 qory run: the tarball of claude 2.1.320 does not match the checksum
@@ -1166,7 +1166,9 @@ stops the run with:
 
 ```text
 qory run: Remove the version's folder once no run uses it, then run again
-<runtimes>/claude/2.1.320 was not installed from the tarball with the checksum sha512-<checksum>
+<runtimes>/claude/2.1.320
+  was not installed from the tarball with the checksum
+  sha512-<checksum>
 ```
 
 ## Hosts a module declares

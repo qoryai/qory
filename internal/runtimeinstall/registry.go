@@ -192,7 +192,7 @@ func (r *registry) resolve(ctx context.Context, arch string) (Release, error) {
 		return Release{}, err
 	}
 	if again != digest {
-		return Release{}, fmt.Errorf(textCache+"%s:%s has the digest %s, and :%s has %s", r.repository, version, again, newestTag, digest)
+		return Release{}, fmt.Errorf(textCache+"%s:%s has the digest\n  %s,\n  and :%s has\n  %s", r.repository, version, again, newestTag, digest)
 	}
 	if _, _, err := r.platformLayer(ctx, entry, version, arch); err != nil {
 		return Release{}, err
@@ -228,7 +228,7 @@ func (r *registry) platformLayer(ctx context.Context, entry descriptor, version,
 		return descriptor{}, nil, err
 	}
 	if digest != entry.Digest || entry.Size != int64(len(body)) {
-		return descriptor{}, nil, fmt.Errorf(textCache+"%s does not match its digest %s", upper(what), entry.Digest)
+		return descriptor{}, nil, fmt.Errorf(textCache+"%s does not match its digest\n  %s", upper(what), entry.Digest)
 	}
 	m, err := decode(body, mediaManifest)
 	if err != nil {
@@ -310,7 +310,7 @@ func (r *registry) manifest(ctx context.Context, ref, version string) ([]byte, s
 	sum := sha256.Sum256(body)
 	digest := "sha256:" + hex.EncodeToString(sum[:])
 	if got := resp.Header.Get("Docker-Content-Digest"); got != "" && got != digest {
-		return nil, "", fmt.Errorf(textCache+"%s has the digest %s, and the registry sent %q", upper(what), digest, got)
+		return nil, "", fmt.Errorf(textCache+"%s has the digest\n  %s,\n  and the registry sent %q", upper(what), digest, got)
 	}
 	return body, digest, nil
 }
@@ -355,7 +355,7 @@ func (b *checkedBlob) Read(p []byte) (int, error) {
 			return n, &checkError{fmt.Errorf(textCache+"%s has %d bytes, and its manifest lists %d", upper(b.what), b.n, b.layer.Size)}
 		}
 		if "sha256:"+hex.EncodeToString(b.h.Sum(nil)) != b.layer.Digest {
-			return n, &checkError{fmt.Errorf(textCache+"%s does not match its digest %s", upper(b.what), b.layer.Digest)}
+			return n, &checkError{fmt.Errorf(textCache+"%s does not match its digest\n  %s", upper(b.what), b.layer.Digest)}
 		}
 	}
 	return n, err

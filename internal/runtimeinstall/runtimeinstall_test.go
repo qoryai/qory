@@ -267,7 +267,7 @@ func TestAFolderOfAnotherTarballIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = in.install()
-	want := "Remove the version's folder once no run uses it, then run again\n" + got.Dir + " was not installed from the tarball with the checksum " + rt.Integrity(rt.PlainTarball(t, "2.1.320"))
+	want := "Remove the version's folder once no run uses it, then run again\n" + got.Dir + "\n  was not installed from the tarball with the checksum\n  " + rt.Integrity(rt.PlainTarball(t, "2.1.320"))
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %s", err, want)
 	}

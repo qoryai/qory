@@ -61,7 +61,7 @@ func (f folder) complete(version, integrity string) (bool, error) {
 	held, err := readSmall(filepath.Join(dir, checksumFile))
 	if err != nil || strings.TrimSpace(held) != integrity {
 		return false, fmt.Errorf("Remove the version's folder once no run uses it, then run again\n"+
-			"%s was not installed from the tarball with the checksum %s", dir, integrity)
+			"%s\n  was not installed from the tarball with the checksum\n  %s", dir, integrity)
 	}
 	return true, nil
 }
