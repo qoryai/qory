@@ -1128,6 +1128,66 @@ func TestALinkedHandoffFolderIsNotRead(t *testing.T) {
 	lacks(t, r.log(), "From the host")
 }
 
+// TestTheHandoffFileIsNeverInAPushedCommit is a session that writes the hand-off file and
+// then commits everything: git add -A with git commit, and git commit -a, push no commit that
+// has a path under .qory/handoff, and the file still gives its text.
+func TestTheHandoffFileIsNeverInAPushedCommit(t *testing.T) {
+	commits := map[string]func(t *testing.T, dir string){
+		"git add -A and git commit": func(t *testing.T, dir string) { commitAll(t, dir, "Add everything") },
+		"git commit -a": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "README.md"), "changed\n")
+			proxygittest.Git(t, dir, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-a", "-m", "Change the readme")
+		},
+	}
+	for name, commit := range commits {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			r := p.run(t, func(dir string) {
+				writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
+				writeFile(t, filepath.Join(dir, ".qory", "handoff", "submission.json"), `{"text":{"title":"Add a file","description":"A file."}}`)
+				exclude, err := os.ReadFile(filepath.Join(dir, ".git", "info", "exclude"))
+				if err != nil || strings.Count("\n"+string(exclude), "\n/.qory/handoff/\n") != 1 {
+					t.Errorf("the exclude file has the line /.qory/handoff/ %d times, want once: %v", strings.Count("\n"+string(exclude), "\n/.qory/handoff/\n"), err)
+				}
+				commit(t, dir)
+				writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+			}, nil)
+			r.wantsClose(t, event.StateSucceeded, 0)
+			if got := proxygittest.Git(t, p.bare, "log", "--name-only", "--format=%H", "qory/"+workItem); strings.Contains(got, ".qory") {
+				t.Errorf("a pushed commit has a path under .qory:\n%s", got)
+			}
+			if doc := p.api.document(t, 1); doc.Text == nil || doc.Text.Title != "Add a file" {
+				t.Errorf("the text is %+v, want the hand-off's", doc.Text)
+			}
+		})
+	}
+}
+
+// TestAForcedAddOfTheHandoffFileStopsThePush is a session that stages the hand-off file with
+// git add -f and commits it: qory pushes nothing, stores no version, and the run closes
+// failed with a line that states the cause, then the repository, the commit and the path on
+// indented lines.
+func TestAForcedAddOfTheHandoffFileStopsThePush(t *testing.T) {
+	p := newPushRepo(t, "write")
+	var commit string
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
+		writeFile(t, filepath.Join(dir, ".qory", "handoff", "submission.json"), `{"text":{"title":"Add a file","description":"A file."}}`)
+		proxygittest.Git(t, dir, "add", "-f", ".qory/handoff/submission.json", "committed.txt")
+		proxygittest.Git(t, dir, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "Add the hand-off")
+		commit = gitHead(t, dir)
+	}, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	wants(t, r.out, "qory run: A commit of this run has a path under .qory/handoff/, so qory did not push.\n"+
+		"  Repository "+proxygittest.Host+"/acme/site.\n  Commit "+commit+".\n  Path .qory/handoff/submission.json.")
+	if got := p.branchHead(t); got != "" {
+		t.Errorf("the forge has the branch at %s, want none", got)
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST, want 0", posts)
+	}
+}
+
 // earlierPush pushes a commit on top of the commit that the run started at to the branch on
 // the forge, as an earlier run of the work item did, and returns it.
 func (p *pushRepo) earlierPush(t *testing.T) string {

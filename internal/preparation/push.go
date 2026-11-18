@@ -152,6 +152,15 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			return nil, err
 		}
 	}
+	// No repository is pushed when a commit of one has a path of the hand-off folder.
+	for i, r := range b.Repositories {
+		if heads[i] == "" {
+			continue
+		}
+		if err := handoffCommitted(ctx, stepGit(noRemote, ""), folders[i], b.system, r, r.Start, heads[i]); err != nil {
+			return nil, err
+		}
+	}
 	b.pushed = nil
 	leases := make([]string, len(b.Repositories))
 	readGit := stepGit(&read, "")

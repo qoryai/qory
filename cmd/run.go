@@ -830,7 +830,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 					if branch != nil {
 						// The hand-off file is in the checkout's .qory, which no commit has: a
-						// walled session writes it through the checkout's mount.
+						// walled session writes it through the checkout's mount. Its folder is
+						// in the checkout's .git/info/exclude, which no commit has either, so a
+						// git add -A or git commit -a of the agent leaves the file out.
+						if err := render.Exclude(at.root, handoffExclude); err != nil {
+							return false, err
+						}
 						handoffRoot = at.root
 						spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{handoffEnv: handoffPath(at.root)})
 					}

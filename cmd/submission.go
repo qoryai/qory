@@ -52,6 +52,10 @@ type handoff struct {
 // handoffRel is the hand-off file of a run, in the checkout.
 var handoffRel = filepath.Join(".qory", "handoff", "submission.json")
 
+// handoffExclude is the line of the checkout's .git/info/exclude that keeps the hand-off
+// folder out of a commit: the file is in the checkout, and only qory reads it.
+const handoffExclude = "/.qory/handoff/"
+
 // handoffPath is the hand-off file of a run in the checkout at root: .qory/handoff/submission.json.
 func handoffPath(root string) string { return filepath.Join(root, handoffRel) }
 

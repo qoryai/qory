@@ -2638,16 +2638,23 @@ The step does this, in order:
    container, so what it changed counts as what the agent left. No hook in `.git` runs.
    The commits of all repositories come before the first push, so a failed commit pushes
    nothing.
-4. qory checks the head of the branch on the forge, for each repository whose `HEAD` is past
+4. qory checks each commit from the start commit to `HEAD`, merges included, in each
+   repository. A commit that has a path under `.qory/handoff/`, as `git add -f` makes one,
+   stops the step before any push, in any repository, and the run closes `failed`. qory
+   prints `qory run: A commit of this run has a path under .qory/handoff/, so qory did not
+   push.`, then three lines indented by two spaces: `Repository <system>/<path>.`, `Commit
+   <commit>.` and `Path <path>.` A commit that added the path and a later commit that
+   removed it counts too, since the push would send the file in the history.
+5. qory checks the head of the branch on the forge, for each repository whose `HEAD` is past
    the commit the run expected, as [The head check](#the-head-check) says. When one
    repository fails the check, qory pushes nothing in any repository.
-5. qory pushes each of these repositories to `refs/heads/qory/<work item id>`, through the
+6. qory pushes each of these repositories to `refs/heads/qory/<work item id>`, through the
    run's push proxy: a fast-forward push, or a push with a lease where the head check asks
    for one. It prints `qory run: pushed qory/<work item id> to <path> at <commit>`, where
    `<commit>` is the commit's first 12 characters. With no new commit in any repository,
    it prints `qory run: no new commits to push`, and the step ends with no push and no
    version.
-6. qory stores a new version of the artifact `main` of the type `submission`, with one file,
+7. qory stores a new version of the artifact `main` of the type `submission`, with one file,
    `submission.json`, in the [submission format](../contracts/harness/v1/README.md#the-submission-format),
    as [The submit step](#the-submit-step) says. After a 429, qory waits for `Retry-After`,
    at most 60 seconds, and sends the request again, at most 5 requests in all. After a
@@ -2735,6 +2742,9 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   [The head check](#the-head-check) says. A push that the forge rejects with the status
   `[rejected]`, such as a lease that no longer matches, ends the step with the same text,
   with the head read again
+- `A commit of this run has a path under .qory/handoff/, so qory did not push.`, then three
+  lines indented by two spaces: `Repository <system>/<path>.`, `Commit <commit>.` and `Path
+  <path>.`
 - `The run's host proxy could not read the head of the branch, so qory did not push.`, then
   two lines indented by two spaces: `Repository <system>/<path>.` and `Cause: <error>; the
   code is used`
@@ -2845,6 +2855,13 @@ in the checkout. The file is JSON:
 {"text": {"title": "Add an orders page", "description": "The page lists open orders."},
  "steps": {"<full commit id>": "<ledger step>"}}
 ```
+
+The file is in the checkout, the one place on the host that a session of a pool run can
+write: the home, the record and the inputs are mounted read-only, and a pool refuses
+`wall.mounts`. qory adds the line `/.qory/handoff/` to the checkout's `.git/info/exclude` once
+before the session starts, with the line `/.qory` that the compose adds. That file is local
+to the clone and no commit has it, so `git add -A` and `git commit -a` leave the hand-off
+file out. `git add -f` can still stage it: step 4 of the push step stops that push.
 
 qory reads `text` and `steps` and nothing else. A commit with no entry in `steps` has the
 step `unreviewed`. That includes the commit that qory makes of what the agent left, which

@@ -542,6 +542,10 @@ release may change what an existing document does, and states it under Upgrading
   reads the file inside the checkout and follows no link, and drops a title, description or
   step that is over a limit of the submission format, with a line that states the
   cause and the values.
+- qory adds `/.qory/handoff/` to the checkout's `.git/info/exclude` for a run on a work
+  item's branch, so `git add -A` and `git commit -a` leave the hand-off file out of a commit.
+  A commit of the run that has a path under `.qory/handoff/`, as `git add -f` makes one,
+  stops the push step before any push, and the run closes `failed`.
 - The push step runs the `submit_program` of the composed harness after the push of a run at
   the access `write` and before it stores the version. The program runs in a container of the
   wall's default image with no network, as the run's user, for at most 120 seconds, and
