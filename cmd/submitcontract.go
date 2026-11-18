@@ -25,17 +25,14 @@ const (
 	submitEnvBaseCommit      = "QORY_SUBMIT_BASE_COMMIT"
 	submitEnvCommits         = "QORY_SUBMIT_COMMITS"
 	submitEnvDraft           = "QORY_SUBMIT_DRAFT"
-	submitEnvDraftNumber     = "QORY_SUBMIT_DRAFT_NUMBER"
 	submitEnvTitle           = "QORY_SUBMIT_TITLE"
-	submitEnvPreviousTitle   = "QORY_SUBMIT_PREVIOUS_TITLE"
 	submitEnvDescriptionFile = "QORY_SUBMIT_DESCRIPTION_FILE"
 )
 
 // The values of QORY_SUBMIT_DRAFT.
 const (
-	submitDraftOpen   = "open"
-	submitDraftUpdate = "update"
-	submitDraftNone   = "none"
+	submitDraftOpen = "open"
+	submitDraftNone = "none"
 )
 
 // The keys of the lines that the program prints on its standard output.
@@ -76,13 +73,10 @@ type submitInput struct {
 	Branch, BaseBranch, BaseCommit string
 	// Commits is each commit of the run, oldest first, the head last.
 	Commits []string
-	// Draft is one of the submitDraft values. Number is the draft to update, for submitDraftUpdate
-	// alone. Title and DescriptionFile are set unless Draft is submitDraftNone. PreviousTitle is
-	// "" for none.
+	// Draft is one of the submitDraft values. Title and DescriptionFile are set unless Draft is
+	// submitDraftNone.
 	Draft           string
-	Number          int
 	Title           string
-	PreviousTitle   string
 	DescriptionFile string
 }
 
@@ -101,15 +95,9 @@ func (in submitInput) env(base []string) []string {
 	set(submitEnvBaseCommit, in.BaseCommit)
 	set(submitEnvCommits, strings.Join(in.Commits, " "))
 	set(submitEnvDraft, in.Draft)
-	if in.Draft == submitDraftUpdate {
-		set(submitEnvDraftNumber, strconv.Itoa(in.Number))
-	}
 	if in.Draft != submitDraftNone {
 		set(submitEnvTitle, in.Title)
 		set(submitEnvDescriptionFile, in.DescriptionFile)
-	}
-	if in.PreviousTitle != "" {
-		set(submitEnvPreviousTitle, in.PreviousTitle)
 	}
 	return out
 }

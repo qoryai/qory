@@ -2947,14 +2947,12 @@ repository lists them (`contracts/run/v1/submit-program/README.md`):
 | Variable | Value |
 |---|---|
 | `QORY_SUBMIT_SYSTEM`, `QORY_SUBMIT_PATH` | The repository's `system` and `path`. |
-| `QORY_SUBMIT_BRANCH` | The branch that qory pushed, `qory/run-<run id>`. |
+| `QORY_SUBMIT_BRANCH` | The branch that qory pushed, the head of the draft. The program reads the name and assumes none. |
 | `QORY_SUBMIT_BASE_BRANCH` | `base.branch`, the branch that the draft is based on: the branch that your checkout of the repository is on when the run ends. Not set for a detached HEAD. |
 | `QORY_SUBMIT_BASE_COMMIT` | `base.commit`. |
 | `QORY_SUBMIT_COMMITS` | The commits of the repository, oldest first, the head last, separated by single spaces. The program is not run for a repository with more than 100 commits. |
-| `QORY_SUBMIT_DRAFT` | `open`, or `none` when the session did not pass or wrote no hand-off text. A run with no run code has no previous version, so it never gets `update`. |
-| `QORY_SUBMIT_DRAFT_NUMBER` | Not set: it is for `update` alone. |
+| `QORY_SUBMIT_DRAFT` | `open`, or `none` when the session did not pass or wrote no hand-off text. |
 | `QORY_SUBMIT_TITLE`, `QORY_SUBMIT_DESCRIPTION_FILE` | The `title` of the text, and the path of a file of mode 0600 with its `description`. Not set for `none`. |
-| `QORY_SUBMIT_PREVIOUS_TITLE` | Not set: a run with no run code has no work item, so no previous version. |
 
 qory gives the program no credential, no token and no proxy address. The program may
 run for 120 seconds. qory prints at most 20 lines of its standard error, masked and of at most

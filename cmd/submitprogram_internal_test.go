@@ -122,25 +122,6 @@ echo "stdin=$(cat | wc -c | tr -d ' ')"
 	}
 }
 
-// TestTheProgramUpdatesTheDraftOfThePreviousVersion is a work item whose previous version has
-// a draft: the program gets its number and the previous title, and the draft is an update.
-func TestTheProgramUpdatesTheDraftOfThePreviousVersion(t *testing.T) {
-	previous := passedDocument()
-	previous.Text.Title = "Add a first page"
-	previous.Repositories[0].Draft = json.RawMessage(`{"number":7,"url":"https://git.example.com/acme/shop/pull/7","title":"Add a first page","state":"draft","action":"opened"}`)
-	seen := filepath.Join(t.TempDir(), "seen")
-	program := &submitProgram{previous: previous, command: []string{programScript(t,
-		`echo "$QORY_SUBMIT_DRAFT $QORY_SUBMIT_DRAFT_NUMBER $QORY_SUBMIT_PREVIOUS_TITLE" > `+seen+"\n")}}
-	got, _ := runProgram(t, program, passedDocument())
-	data, _ := os.ReadFile(seen)
-	if string(data) != "update 7 Add a first page\n" {
-		t.Errorf("the program saw %q", data)
-	}
-	if string(got.Repositories[0].Draft) != `{"none":"program-failed","exit":0}` {
-		t.Errorf("a program that printed no draft left the draft %s", got.Repositories[0].Draft)
-	}
-}
-
 // TestARoundThatDidNotPassGetsTheAddressesAndNoDraft is a repository whose draft is not the
 // placeholder: the program gets the draft none and no title, its draft lines are not read, and
 // the addresses are stored.

@@ -57,10 +57,7 @@ var submitLimit time.Duration
 // adapter opens its draft from the stored submission.
 type submitProgram struct {
 	command []string
-	// previous is the previous version of the work item's submission, nil for none: it gives the
-	// number of the draft to update and the previous title.
-	previous *submission.Submission
-	limit    time.Duration
+	limit   time.Duration
 }
 
 // programEnd is how one run of the program ended.
@@ -181,7 +178,8 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 
 // input is the inputs for repository r of document, with its description in a file in dir.
 // The draft is none for a repository whose draft is not the [placeholder], as after a session
-// that did not pass; it is an update when the previous version has a draft of the repository.
+// that did not pass. A run with no run code has no earlier submission, so a draft is never an
+// update.
 func (p *submitProgram) input(document *submission.Submission, r submission.Repository, commits []string, dir string) (submitInput, error) {
 	in := submitInput{
 		System: r.System, Path: r.Path, Branch: document.Ref, BaseBranch: r.Base.Branch, BaseCommit: r.Base.Commit,
@@ -196,17 +194,6 @@ func (p *submitProgram) input(document *submission.Submission, r submission.Repo
 		return in, err
 	}
 	in.DescriptionFile = file
-	if prev := p.previous; prev != nil {
-		if prev.Text != nil {
-			in.PreviousTitle = prev.Text.Title
-		}
-		for _, was := range prev.Repositories {
-			var pr pullRequest
-			if was.System == r.System && was.Path == r.Path && json.Unmarshal(was.Draft, &pr) == nil && pr.Number > 0 {
-				in.Draft, in.Number = submitDraftUpdate, pr.Number
-			}
-		}
-	}
 	return in, nil
 }
 
