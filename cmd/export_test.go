@@ -311,22 +311,30 @@ func SetLoadPushChecks(f func(home string) ([]compose.PushCheck, error)) func() 
 }
 
 // RegisterPushCheck sets the push check with name for a local run, called with the repository's
-// folder and the branch about to be pushed, and returns what restores the checks.
-func RegisterPushCheck(name string, check func(ctx context.Context, dir, branch string) error) func() {
+// folder and the commit about to be pushed, as the real checks get it, and returns what restores
+// the checks.
+func RegisterPushCheck(name string, check func(ctx context.Context, dir, head string) error) func() {
 	before := maps.Clone(localPushChecks)
-	registerPushCheck(name, func(ctx context.Context, repo localRepository) error { return check(ctx, repo.Dir, repo.Branch) })
+	registerPushCheck(name, func(ctx context.Context, repo localRepository) error { return check(ctx, repo.Dir, repo.Head) })
 	return func() { localPushChecks = before }
 }
 
 // PushChecksRequired is the names of the push checks that a local run needs.
 func PushChecksRequired() []string { return slices.Clone(requiredPushChecks) }
 
-// SetLocalPushAddress makes a local run's push go to route(address) in place of address, and
-// returns what restores it.
+// SetLocalPushAddress makes a local run's push of address go to route(address), a repository on
+// disk, by a real url.<route>.insteadOf rule in the push's configuration, and returns what
+// restores it. The checks and the program still get the address.
 func SetLocalPushAddress(route func(address string) string) func() {
-	before := localPushAddress
-	localPushAddress = route
-	return func() { localPushAddress = before }
+	before := localPushConfig
+	localPushConfig = func(address string) []string {
+		to := route(address)
+		if to == address {
+			return nil
+		}
+		return []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=url." + to + ".insteadOf", "GIT_CONFIG_VALUE_0=" + address}
+	}
+	return func() { localPushConfig = before }
 }
 
 // SetBranchWait makes the push step pass each wait to f in place of waiting, and returns

@@ -82,9 +82,10 @@ func pushChecks() ([]localPushCheck, bool) {
 	return checks, true
 }
 
-// localPushAddress is the address that git gets for a push. Tests set it to reach a repository on
-// disk for an address of a forge; it is the identity otherwise.
-var localPushAddress = func(address string) string { return address }
+// localPushConfig is the git configuration, as GIT_CONFIG_* environment entries, that a push gets
+// for the push address address, on top of the person's. Tests set it to rewrite the address of a
+// forge to a repository on disk with a real url.<base>.insteadOf rule; it is empty otherwise.
+var localPushConfig = func(address string) []string { return nil }
 
 // submitLocal is the submit step of a local run, a run with no run code that works in a copy:
 // after the run's commits are in the person's repositories, on the branches in c.landed, it reads
@@ -250,11 +251,14 @@ func localSubmission(ctx context.Context, repo localRepository, given *handoff, 
 }
 
 // pushArgs is the arguments of the git push of repo: the checked commit, not the branch name that
-// could move, to the one address that the checks and the program got. It has no force, no hook of
-// the repository, no submodule and no tag that follows the commit.
+// could move, to the remote origin by its name. A push to the name goes to what `git remote
+// get-url --push --all origin` reports, the address that the checks and the program got; a push
+// to that address as an argument would get git's insteadOf and pushInsteadOf rules a second time
+// and could land elsewhere. It has no force, no hook of the repository, no submodule and no tag
+// that follows the commit.
 func pushArgs(repo localRepository) []string {
 	return []string{"-C", repo.Dir, "push", "--quiet", "--no-verify", "--no-recurse-submodules", "--no-follow-tags", "--",
-		localPushAddress(repo.PushURL), repo.Head + ":refs/heads/" + repo.Branch}
+		"origin", repo.Head + ":refs/heads/" + repo.Branch}
 }
 
 // pushBranch pushes the head that the checks saw to the branch of repo, with the person's git
@@ -271,7 +275,7 @@ func pushBranch(ctx context.Context, repo localRepository) (string, error) {
 // configuration and login, and no prompt on the terminal.
 func pushCommand(ctx context.Context, repo localRepository) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", pushArgs(repo)...)
-	cmd.Env = localGitEnv()
+	cmd.Env = append(localGitEnv(), localPushConfig(repo.PushURL)...)
 	return cmd
 }
 

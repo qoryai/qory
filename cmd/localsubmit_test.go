@@ -80,6 +80,9 @@ func bothChecks(t *testing.T, check func(ctx context.Context, dir, branch string
 	calls := new(int)
 	count := func(ctx context.Context, dir, branch string) error { *calls++; return check(ctx, dir, branch) }
 	names := cmd.PushChecksRequired()
+	if len(names) != 2 {
+		t.Fatalf("the push checks required are %q, want 2", names)
+	}
 	t.Cleanup(cmd.RegisterPushCheck(names[0], count))
 	t.Cleanup(cmd.RegisterPushCheck(names[1], func(context.Context, string, string) error { return nil }))
 	return calls
@@ -142,11 +145,11 @@ func timesStarted(t *testing.T, started string) int {
 func TestALocalWriteRunWithAHandoffPushesThroughTheChecksThenRunsTheProgram(t *testing.T) {
 	root, bare, started := localProgramCheckout(t)
 	var checked []string
-	bothChecks(t, func(_ context.Context, dir, branch string) error {
+	bothChecks(t, func(_ context.Context, dir, head string) error {
 		if got := pushedBranches(t, bare); got != "" {
 			t.Errorf("the bare repository has %q before the check ends", got)
 		}
-		checked = append(checked, dir+" "+branch)
+		checked = append(checked, dir+" "+head)
 		return nil
 	})
 	agentInCopy(t, handsOffText(t))
@@ -158,8 +161,8 @@ func TestALocalWriteRunWithAHandoffPushesThroughTheChecksThenRunsTheProgram(t *t
 	if !strings.HasPrefix(branch, "qory/run-") {
 		t.Errorf("the branch is %s, want qory/run-<run id>", branch)
 	}
-	if len(checked) != 1 || !strings.HasSuffix(checked[0], " "+branch) {
-		t.Errorf("the checks ran on %v, want once on %s", checked, branch)
+	if head := gitOutput(t, root, "rev-parse", branch); len(checked) != 1 || !strings.HasSuffix(checked[0], " "+head) {
+		t.Errorf("the checks ran on %v, want once on the head %s of %s", checked, head, branch)
 	}
 	if got := pushedBranches(t, bare); got != branch {
 		t.Errorf("the bare repository has %q, want %s", got, branch)
@@ -369,8 +372,9 @@ func TestALocalRunNeedsEveryPushCheck(t *testing.T) {
 func TestACheckThatMovesTheBranchCannotChangeThePushedCommit(t *testing.T) {
 	_, bare, _ := localProgramCheckout(t)
 	var checked string
-	bothChecks(t, func(_ context.Context, dir, branch string) error {
-		checked = gitOutput(t, dir, "rev-parse", "refs/heads/"+branch)
+	bothChecks(t, func(_ context.Context, dir, head string) error {
+		checked = head
+		branch := strings.TrimSpace(gitOutput(t, dir, "for-each-ref", "--points-at", head, "--format=%(refname:short)", "refs/heads/qory/"))
 		moved := gitOutput(t, dir, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit-tree", "-p", checked, "-m", "later", checked+"^{tree}")
 		gitOutput(t, dir, "update-ref", "refs/heads/"+branch, moved)
 		return nil
@@ -679,5 +683,66 @@ func TestALocalRunWhoseSecondRepositoryIsRefusedPushesNothingAtAll(t *testing.T)
 	wants(t, out, "a key is in a commit of the second repository")
 	if a, b := pushedBranches(t, bare), pushedBranches(t, otherBare); a != "" || b != "" || count != 2 || timesStarted(t, started) != 0 {
 		t.Errorf("pushed %q and %q after %d checks and %d programs, want nothing after 2 checks", a, b, count, timesStarted(t, started))
+	}
+}
+
+// rewriteTarget is a bare repository at <dir>/acme/app that a git rewrite of an address would
+// reach, and the <dir>/ that a rule maps to it.
+func rewriteTarget(t *testing.T) (bare, base string) {
+	t.Helper()
+	base = tempDir(t) + "/rewrite/"
+	bare = filepath.Join(base, "acme", "app")
+	if err := os.MkdirAll(bare, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, bare, "init", "--quiet", "--bare", "--initial-branch=main")
+	return bare, base
+}
+
+// TestAPushIsNotRewrittenAgainByInsteadOf is a remote origin written as gh:acme/app, with the rule
+// gh: to http://127.0.0.1:1/ that the checks and the program see, and a second rule from that
+// address to a repository on disk. git applies a rule once to the address of a remote, so the
+// push goes to http://127.0.0.1:1/acme/app, where nothing listens, and fails; it never goes
+// to the repository on disk, as a push to the address as an argument would, which git rewrites again.
+func TestAPushIsNotRewrittenAgainByInsteadOf(t *testing.T) {
+	root, _, started := localProgramCheckout(t)
+	elsewhere, base := rewriteTarget(t)
+	runGit(t, root, "remote", "set-url", "origin", "gh:acme/app")
+	runGit(t, root, "config", "url.http://127.0.0.1:1/.insteadOf", "gh:")
+	runGit(t, root, "config", "url."+base+".insteadOf", "http://127.0.0.1:1/")
+	passingCheck(t)
+	out := runLocal(t, handsOffText(t))
+	wants(t, out, "qory run: The push of the branch failed, so qory opened no draft.")
+	if got := gitOutput(t, elsewhere, "for-each-ref", "refs/heads/"); got != "" {
+		t.Errorf("the push reached the repository of the second rewrite: %q", got)
+	}
+	if n := timesStarted(t, started); n != 0 {
+		t.Errorf("the program started %d times, want 0", n)
+	}
+}
+
+// TestAPushIsNotRewrittenAgainByPushInsteadOf is the same for the push address of a remote: the
+// pushurl http://127.0.0.1:2/acme/app with a pushInsteadOf rule to a repository on disk. The checks
+// see the address, and the push goes to it, not to the repository on disk.
+func TestAPushIsNotRewrittenAgainByPushInsteadOf(t *testing.T) {
+	root, _, started := localProgramCheckout(t)
+	elsewhere, base := rewriteTarget(t)
+	runGit(t, root, "remote", "set-url", "--push", "origin", "http://127.0.0.1:2/acme/app")
+	runGit(t, root, "config", "url."+base+".pushInsteadOf", "http://127.0.0.1:2/")
+	var seen []string
+	bothChecks(t, func(_ context.Context, dir, head string) error {
+		seen = append(seen, gitOutput(t, dir, "remote", "get-url", "--push", "origin"))
+		return nil
+	})
+	out := runLocal(t, handsOffText(t))
+	wants(t, out, "qory run: The push of the branch failed, so qory opened no draft.")
+	if len(seen) != 1 || strings.TrimSpace(seen[0]) != "http://127.0.0.1:2/acme/app" {
+		t.Errorf("the push address is %q, want http://127.0.0.1:2/acme/app", seen)
+	}
+	if got := gitOutput(t, elsewhere, "for-each-ref", "refs/heads/"); got != "" {
+		t.Errorf("the push reached the repository of the pushInsteadOf rule: %q", got)
+	}
+	if n := timesStarted(t, started); n != 0 {
+		t.Errorf("the program started %d times, want 0", n)
 	}
 }
