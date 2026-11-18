@@ -626,9 +626,10 @@ release may change what an existing document does, and states it under Upgrading
   branch by hand: the key and scope push checks of qory run are not registered.`, then one
   `Branch: <branch> in <folder>.` line for each repository with commits. A remote with
   several push addresses gets `qory run: Remove the extra push addresses of remote origin, so
-  it has one.`, how to list the configured addresses, and two commands that leave one:
-  `git config --unset-all remote.origin.pushurl` (with `--global` or `--system` for a value
-  of another file) and `git remote set-url --push origin <address>`. A push that landed,
+  it has one.`, how to list the configured addresses with the file of each, how to remove
+  the `pushurl` values of the repository file (`git config --unset-all
+  remote.origin.pushurl`), the global file (`--global`) and the system file (`--system`), a
+  hand edit for an included file, and `git remote set-url --push origin <address>`. A push that landed,
   followed by a failure to list the run's commits, gets `qory run: Open a draft by hand if
   you want one: qory pushed the branch but could not list commits.`, and the next line is
   that qory ran no program for that repository. A second run does the work again on a new

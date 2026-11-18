@@ -493,9 +493,10 @@ func pushURLsText(n int) string {
 
 // pushURLsHow is the lines of the text of a remote origin with several push addresses that follow
 // the branch.
-const pushURLsHow = ".\n  List the configured addresses and the file of each with git config --show-origin --get-all remote.origin.pushurl, or with git config --get-all remote.origin.url when that prints none.\n" +
+const pushURLsHow = ".\n  List the configured addresses and the file of each with git config --show-origin --get-all remote.origin.pushurl, or with git config --show-origin --get-all remote.origin.url when that prints none.\n" +
 	"  Do not use git remote get-url --push --all: it shows the addresses after the insteadOf rewrites of git.\n" +
-	"  Remove the values of each file with git config --unset-all remote.origin.pushurl, and for a value of another file with git config --global --unset-all remote.origin.pushurl (or --system); exit status 5 means that file has none.\n" +
+	"  Compare the file that --show-origin shows with these files. Remove the values in the repository file with git config --unset-all remote.origin.pushurl, and the values in the global file with git config --global --unset-all remote.origin.pushurl (the system file: --system, which usually needs administrator rights). Exit status 5 means that file has no value.\n" +
+	"  If --show-origin shows another file (an included file), edit that file.\n" +
 	"  Then run git remote set-url --push origin <address> with the address to keep.\n"
 
 // TestALocalRunWithTwoUrlValuesPushesNothing is a remote origin with two url values and no pushurl:

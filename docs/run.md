@@ -2992,20 +2992,27 @@ indented by two spaces:
 - `The remote origin has <n> push addresses, so qory pushed nothing and opened no draft.`
 - `Branch: <branch>.`
 - `List the configured addresses and the file of each with git config --show-origin --get-all
-  remote.origin.pushurl, or with git config --get-all remote.origin.url when that prints none.`
+  remote.origin.pushurl, or with git config --show-origin --get-all remote.origin.url when that
+  prints none.`
 - `Do not use git remote get-url --push --all: it shows the addresses after the insteadOf
   rewrites of git.`
-- `Remove the values of each file with git config --unset-all remote.origin.pushurl, and for a
-  value of another file with git config --global --unset-all remote.origin.pushurl (or
-  --system); exit status 5 means that file has none.`
+- `Compare the file that --show-origin shows with these files. Remove the values in the
+  repository file with git config --unset-all remote.origin.pushurl, and the values in the
+  global file with git config --global --unset-all remote.origin.pushurl (the system file:
+  --system, which usually needs administrator rights). Exit status 5 means that file has no
+  value.`
+- `If --show-origin shows another file (an included file), edit that file.`
 - `Then run git remote set-url --push origin <address> with the address to keep.`
 
 Git has one push address for each `pushurl` value, and with no `pushurl` it has one for each
-`url` value. The commands leave one push address in each case: several `url` values, several
-`pushurl` values in the repository's file, several in the global file, and a mix. `git remote
-set-url --push origin <address>` alone fails when the repository's file has several `pushurl`
-values (`remote.origin.pushurl has multiple values`), and adds one more value when another file
-has them.
+`url` value. The commands leave one push address in each case: several `url` values, and
+several `pushurl` values in the repository file, in the global file, in the system file, or in a
+mix of them. A `pushurl` value in a file that `include.path` or `includeIf` pulls in, or in
+`config.worktree`, is in none of these files: `--unset-all` exits with status 5 for the
+repository and the global file, `git remote set-url --push origin <address>` adds one more value,
+and the person edits that file by hand. `git remote set-url --push origin <address>` alone fails
+when the repository file has several `pushurl` values (`remote.origin.pushurl has multiple
+values`), and adds one more value when another file has them.
 `git remote set-url --delete --push origin <address>` is not in the text: it reads its address as
 a regular expression that matches part of an address, so deleting `.../p1` also deletes
 `.../p10`.
