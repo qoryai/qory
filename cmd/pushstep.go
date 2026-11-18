@@ -543,23 +543,32 @@ func (e *pushEnding) settle(now stopRead) {
 
 // outcome is the outcome a run closes with after its push step failed with err. A refusal
 // because the branch moved ([*preparation.HeadChanged]) closes the run failed with the end code
-// push_head_changed after any session, whether it succeeded, failed or timed out: the next run
-// of the work item needs that code. Any other failure after a session that did not succeed
-// keeps the session's end, whatever the step did. After a session that succeeded, a cut step
-// closes the run as a stop does, and a failed one closes it failed with the status of err.
+// push_head_changed after a session that succeeded, failed or timed out, since the next run of
+// the work item needs that code; after a session that failed or timed out, the close keeps the
+// session's exit code. A stop that landed after the refusal still wins, and a session that was
+// interrupted, cancelled or paused keeps its end. Any other failure after a session that did not
+// succeed keeps the session's end, whatever the step did. After a session that succeeded, a cut
+// step closes the run as a stop does, and a failed one closes it failed with the status of err.
 func (e pushEnding) outcome(err error) session.Outcome {
-	if changed := (*preparation.HeadChanged)(nil); errors.As(err, &changed) {
-		return session.Outcome{State: event.StateFailed, ExitCode: ExitCode(err), Reason: string(contracts.EndCodePushHeadChanged)}
-	}
+	changed := errors.As(err, new(*preparation.HeadChanged))
 	switch {
 	case e.session.State != event.StateSucceeded:
+		failedOrTimedOut := e.session.State == event.StateFailed ||
+			e.session.State == event.StateCancelled && e.session.Reason == event.ReasonTimeout
+		if changed && failedOrTimedOut && !(e.cut && e.stopped) {
+			return session.Outcome{State: event.StateFailed, ExitCode: e.session.ExitCode, Reason: string(contracts.EndCodePushHeadChanged)}
+		}
 		return e.session
 	case e.cut && e.stopped:
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}
 	case e.cut:
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
 	}
-	return session.Outcome{State: event.StateFailed, ExitCode: ExitCode(err)}
+	out := session.Outcome{State: event.StateFailed, ExitCode: ExitCode(err)}
+	if changed {
+		out.Reason = string(contracts.EndCodePushHeadChanged)
+	}
+	return out
 }
 
 // copyOutcome is the outcome a run closes with when its copy step did not succeed or did not

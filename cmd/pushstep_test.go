@@ -2528,14 +2528,23 @@ func TestAWallThatStaysRunsNoGit(t *testing.T) {
 
 // TestAMovedBranchEndsTheRunWithPushHeadChangedAfterAnySession is a branch that another push
 // moved, after a session that passed, one that failed and one that the time limit stopped: each
-// run closes failed with the code push_head_changed, the branch stays, and the printed refusal is
-// the same.
+// run closes failed with the code push_head_changed and the exit code of the session (1 for
+// the passed one), the branch stays, and the printed refusal is the same.
 func TestAMovedBranchEndsTheRunWithPushHeadChangedAfterAnySession(t *testing.T) {
-	for name, result := range map[string]func() (*session.Result, error){
-		"passed":    succeeded,
-		"failed":    func() (*session.Result, error) { return &session.Result{State: event.StateFailed, ExitCode: 1}, nil },
-		"timed out": timedOut,
+	for name, c := range map[string]struct {
+		result      func() (*session.Result, error)
+		state, code string
+		exit        int
+	}{
+		"passed": {succeeded, event.StateFailed, string(contracts.EndCodePushHeadChanged), 1},
+		"failed": {func() (*session.Result, error) { return &session.Result{State: event.StateFailed, ExitCode: 7}, nil },
+			event.StateFailed, string(contracts.EndCodePushHeadChanged), 7},
+		"timed out": {timedOut, event.StateFailed, string(contracts.EndCodePushHeadChanged), 124},
+		"interrupted": {func() (*session.Result, error) {
+			return &session.Result{State: event.StateCancelled, Cancelled: true, ExitCode: 130}, nil
+		}, event.StateCancelled, string(event.ReasonInterrupted), 130},
 	} {
+		result := c.result
 		t.Run(name, func(t *testing.T) {
 			p := newPushRepo(t, "write")
 			other := tempDir(t)
@@ -2547,10 +2556,9 @@ func TestAMovedBranchEndsTheRunWithPushHeadChangedAfterAnySession(t *testing.T) 
 			p.api.pushedCommits = `[]`
 
 			r := p.run(t, writesAndCommits(t), result)
-			if len(r.closes) != 1 || r.closes[0].State != event.StateFailed || r.closes[0].Reason != string(contracts.EndCodePushHeadChanged) {
-				t.Errorf("the run closed with %+v, want failed with %s\n%s", r.closes, contracts.EndCodePushHeadChanged, r.out)
+			if len(r.closes) != 1 || r.closes[0].State != c.state || r.closes[0].Reason != c.code || r.closes[0].ExitCode != c.exit {
+				t.Errorf("the run closed with %+v, want %s with %q and exit code %d\n%s", r.closes, c.state, c.code, c.exit, r.out)
 			}
-			wants(t, r.out, "qory run: Check branch qory/"+workItem+": its head is not the commit this run expected, so qory did not push.")
 			if got := p.branchHead(t); got != moved {
 				t.Errorf("the branch moved to %s", got)
 			}

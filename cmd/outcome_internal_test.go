@@ -11,6 +11,7 @@ import (
 
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/ui"
@@ -465,6 +466,40 @@ func TestPushEndingOutcome(t *testing.T) {
 		{"cut step, paused session", pushEnding{session: paused, cut: true, stopped: true}, paused},
 	} {
 		if got := c.ending.outcome(refused); got != c.want {
+			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestPushEndingOutcomeOfAMovedBranch is the close of a run whose push step was refused because the
+// branch moved: failed with push_head_changed after a session that succeeded, failed or timed out,
+// with the session's exit code for the last two. A session that was interrupted, cancelled or paused
+// keeps its end, and a stop that landed after the refusal wins.
+func TestPushEndingOutcomeOfAMovedBranch(t *testing.T) {
+	succeeded := session.Outcome{State: event.StateSucceeded}
+	timedOut := session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
+	failed := session.Outcome{State: event.StateFailed, ExitCode: 3}
+	interrupted := session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: 130}
+	closed := session.Outcome{State: event.StateCancelled, Reason: "stopped", ExitCode: 1}
+	paused := session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: 143}
+	moved := &preparation.HeadChanged{Branch: "qory/w1", Head: strings.Repeat("a", 40), Expected: strings.Repeat("b", 40)}
+	code := string(contracts.EndCodePushHeadChanged)
+	for _, c := range []struct {
+		name   string
+		ending pushEnding
+		want   session.Outcome
+	}{
+		{"succeeded session", pushEnding{session: succeeded}, session.Outcome{State: event.StateFailed, ExitCode: 1, Reason: code}},
+		{"failed session", pushEnding{session: failed}, session.Outcome{State: event.StateFailed, ExitCode: 3, Reason: code}},
+		{"timed out session", pushEnding{session: timedOut}, session.Outcome{State: event.StateFailed, ExitCode: exitTimeout, Reason: code}},
+		{"interrupted session", pushEnding{session: interrupted}, interrupted},
+		{"session that a stop closed", pushEnding{session: closed}, closed},
+		{"paused session", pushEnding{session: paused}, paused},
+		{"stop after the refusal, succeeded session", pushEnding{session: succeeded, cut: true, stopped: true}, session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}},
+		{"stop after the refusal, failed session", pushEnding{session: failed, cut: true, stopped: true}, failed},
+		{"stop after the refusal, timed out session", pushEnding{session: timedOut, cut: true, stopped: true}, timedOut},
+	} {
+		if got := c.ending.outcome(moved); got != c.want {
 			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
 		}
 	}
