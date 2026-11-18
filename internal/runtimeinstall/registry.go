@@ -530,12 +530,12 @@ func (r *registry) failed(what string, err error) error {
 func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, error) {
 	params, ok := bearer(challenges)
 	if !ok {
-		return "", fmt.Errorf("Check that the registry at %s returns a Bearer challenge\nIt returned 401 with no Bearer challenge", r.host)
+		return "", fmt.Errorf("Check that the registry at %s returns a Bearer challenge\nThe registry at %s returned 401 with no Bearer challenge", r.host, r.host)
 	}
 	realm, err := url.Parse(params["realm"])
 	if err != nil || realm.Host == "" || realm.User != nil ||
 		realm.Scheme != "https" && (realm.Scheme != "http" || scheme(realm.Host) != "http") {
-		return "", fmt.Errorf("Check the registry at %s\nThe realm of its Bearer challenge is not an https URL, or http on loopback", r.host)
+		return "", fmt.Errorf("Check the registry at %s\nThe registry at %s returned a Bearer challenge whose realm\n  is not an https URL, or http on loopback", r.host, r.host)
 	}
 	if r.instance == "" {
 		return "", fmt.Errorf("Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe pool's forager.yaml sets no gateway.server.url, so qory cannot check the registry's token realm %s.", realm.Redacted())
@@ -574,7 +574,7 @@ func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, e
 		AccessToken string `json:"access_token"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, maxToken)).Decode(&reply) != nil || reply.Token == "" && reply.AccessToken == "" {
-		return "", fmt.Errorf("Check the token realm at %s\nIts response contains no token", realm.Host)
+		return "", fmt.Errorf("Check the token realm at %s\nThe response of the token realm at %s contains no token", realm.Host, realm.Host)
 	}
 	if reply.Token == "" {
 		return reply.AccessToken, nil
@@ -591,11 +591,11 @@ const tokenPath = "/registry/token"
 func tokenRoute(instance string) (*url.URL, error) {
 	u, err := url.Parse(instance)
 	if err != nil || u.Host == "" || u.User != nil || u.Scheme != "https" && u.Scheme != "http" {
-		return nil, errors.New("Set the address of Qory Apiary to an https URL\nThe run's address of Qory Apiary is not one.")
+		return nil, errors.New("Set the address of Qory Apiary to an https URL\nThe run's address of Qory Apiary is not an http or https URL with a host and no user")
 	}
 	if strings.TrimSuffix(u.Path, "/") != "" {
 		// [CheckInstance] refuses a path too: the route is on the instance's host.
-		return nil, fmt.Errorf("Set gateway.server.url in forager.yaml to an address with no path\nThe address is %q.", instance)
+		return nil, fmt.Errorf("Set gateway.server.url in forager.yaml to an address with no path\nThe address of Qory Apiary has a path:\n  %q", instance)
 	}
 	return &url.URL{Scheme: u.Scheme, Host: u.Host, Path: tokenPath}, nil
 }

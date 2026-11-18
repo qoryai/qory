@@ -132,7 +132,7 @@ func TestTheNpmFetchRefuses(t *testing.T) {
 		{
 			name: "registry over http off loopback",
 			base: "http://registry.example",
-			want: "Set the npm registry to an https URL\n\"http://registry.example\" is not one",
+			want: "Set the npm registry to an https URL\nThe npm registry's address is not an https URL:\n  \"http://registry.example\"",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {

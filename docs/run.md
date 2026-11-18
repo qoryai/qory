@@ -887,7 +887,8 @@ one, and from npm otherwise:
 
   ```text
   qory run: Set pool.registry to an image name on a host of letters, digits, . and -
-  The host is "registry.example:0"; a port, if any, is from 1 to 65535.
+  The registry's host is not a host of letters, digits, . and -
+    with an optional port from 1 to 65535: "registry.example:0"
   ```
 
   With a registry, `qory run pool` also checks `gateway.server.url`, the address it writes
@@ -896,7 +897,8 @@ one, and from npm otherwise:
 
   ```text
   qory run: Set gateway.server.url in forager.yaml to an https URL of a host and an optional port alone
-  The address is "https://bad_host.example".
+  The address of Qory Apiary is not an https URL of a host and an optional port alone:
+    "https://bad_host.example"
   ```
 
   `qory run` takes the same host from the run-code file only. The registry's host decides

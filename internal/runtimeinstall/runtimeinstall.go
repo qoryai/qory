@@ -175,7 +175,7 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 			"%q is not a runtime's name, which has 1 to 64 characters.", o.Runtime)
 	}
 	if !filepath.IsAbs(o.Folder) {
-		return Installed{}, fmt.Errorf("Keep runtimes in an absolute folder\n%q is not one.", o.Folder)
+		return Installed{}, fmt.Errorf("Keep runtimes in an absolute folder\nThe folder for runtimes is not an absolute path:\n  %q", o.Folder)
 	}
 	if o.Progress != nil {
 		ctx = context.WithValue(ctx, progressKey{}, o.Progress)
@@ -218,7 +218,7 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 		return in, nil
 	case rel.Open == nil:
 		in.Release()
-		return Installed{}, errors.New(textRelease + "It returned no tarball")
+		return Installed{}, fmt.Errorf(textRelease+"The source of the runtime's releases returned no tarball of %s %s", o.Runtime, rel.Version)
 	}
 	// A second run that needs the version waits here for the run that reads its tarball,
 	// and then finds the folder.

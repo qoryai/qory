@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +11,9 @@ import (
 	"testing"
 
 	"github.com/qoryai/forager/accesskey"
+
+	"github.com/qoryai/qory/internal/runtimeinstall"
+	rt "github.com/qoryai/qory/internal/runtimeinstall/runtimeinstalltest"
 )
 
 // fakeMountsEngine writes a program in place of docker whose ps prints ids, one a line, and
@@ -87,5 +92,77 @@ func TestEngineMountsFindsNoRunningContainerWithNoEngineProgram(t *testing.T) {
 	got, err := engineMounts("qory-test-no-such-engine")(context.Background())
 	if err != nil || len(got) != 0 {
 		t.Errorf("mounts = %v, %v, want none and no error", got, err)
+	}
+}
+
+// TestTheInstallCausesStandAlone installs claude with a registry that returns 401 with
+// no Bearer challenge, a token realm whose response has no token, an instance address
+// with a path, and a source that returns a release with no tarball. A dispatched run
+// from a run code shows each cause alone, with "; the code is used", as [causeOnly] makes
+// it, and each says what is wrong without the fix line. A person's run shows the fix
+// line, then the cause.
+func TestTheInstallCausesStandAlone(t *testing.T) {
+	registry := func(t *testing.T, challenge bool, path string) (string, string) {
+		var srv *httptest.Server
+		srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.URL.Path == "/registry/token":
+				w.Write([]byte("{}"))
+			case challenge:
+				w.Header().Set("WWW-Authenticate", `Bearer realm="`+srv.URL+`/registry/token",service="registry"`)
+				w.WriteHeader(http.StatusUnauthorized)
+			default:
+				w.WriteHeader(http.StatusUnauthorized)
+			}
+		}))
+		t.Cleanup(srv.Close)
+		host := strings.TrimPrefix(srv.URL, "http://")
+		return host, srv.URL + path
+	}
+	install := func(t *testing.T, fetch runtimeinstall.Fetch) error {
+		_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: fetch, Runtime: "claude", Folder: t.TempDir(), Keys: rt.Keys()})
+		if err == nil {
+			t.Fatal("the install succeeded")
+		}
+		return err
+	}
+	noTarball := func(context.Context, string) (runtimeinstall.Release, error) {
+		integrity := rt.Integrity(rt.PlainTarball(t, "2.1.320"))
+		signed := "@anthropic-ai/claude-code-linux-x64@2.1.320"
+		return runtimeinstall.Release{Version: "2.1.320", Integrity: integrity, Signed: signed, Signatures: rt.Signatures(signed, integrity)}, nil
+	}
+	for _, c := range []struct {
+		name string
+		err  func(t *testing.T) (string, error)
+	}{
+		{"a 401 with no Bearer challenge", func(t *testing.T) (string, error) {
+			host, instance := registry(t, false, "")
+			return "the registry at " + host + " returned 401 with no Bearer challenge; the code is used",
+				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", instance))
+		}},
+		{"a token response with no token", func(t *testing.T) (string, error) {
+			host, instance := registry(t, true, "")
+			return "the response of the token realm at " + host + " contains no token; the code is used",
+				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", instance))
+		}},
+		{"an address of Qory Apiary with a path", func(t *testing.T) (string, error) {
+			host, instance := registry(t, true, "/base")
+			return "the address of Qory Apiary has a path:\n  \"" + instance + "\"; the code is used",
+				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", instance))
+		}},
+		{"a release with no tarball", func(t *testing.T) (string, error) {
+			return "the source of the runtime's releases returned no tarball of claude 2.1.320; the code is used", install(t, noTarball)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			want, err := c.err(t)
+			if got := causeOnly(installFailed(err)).Error() + codeUsed; got != want {
+				t.Errorf("a dispatched run shows %q, want %q", got, want)
+			}
+		})
+	}
+	person := installFailed(install(t, noTarball)).Error()
+	if want := "Check the source of the runtime's releases\nThe source of the runtime's releases returned no tarball of claude 2.1.320"; person != want {
+		t.Errorf("a person's run shows %q, want %q", person, want)
 	}
 }

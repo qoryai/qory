@@ -85,7 +85,7 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 		}
 		root, err := url.Parse(strings.TrimSuffix(base, "/"))
 		if err != nil || root.Host == "" || root.Scheme != "https" && !(root.Scheme == "http" && loopback(root.Hostname())) {
-			return Release{}, fmt.Errorf("Set the npm registry to an https URL\n%q is not one", base)
+			return Release{}, fmt.Errorf("Set the npm registry to an https URL\nThe npm registry's address is not an https URL:\n  %q", base)
 		}
 		n := &npm{client: sameHost(client, root), root: root, runtime: runtime}
 		var tags map[string]string
