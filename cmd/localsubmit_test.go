@@ -493,9 +493,10 @@ func pushURLsText(n int) string {
 
 // pushURLsHow is the lines of the text of a remote origin with several push addresses that follow
 // the branch.
-const pushURLsHow = ".\n  List the configured addresses with git config --get-all remote.origin.pushurl, or with git config --get-all remote.origin.url when that prints none.\n" +
+const pushURLsHow = ".\n  List the configured addresses and the file of each with git config --show-origin --get-all remote.origin.pushurl, or with git config --get-all remote.origin.url when that prints none.\n" +
 	"  Do not use git remote get-url --push --all: it shows the addresses after the insteadOf rewrites of git.\n" +
-	"  Then run git config --unset-all remote.origin.pushurl (exit status 5 means it had no value), and git remote set-url --push origin <address> with the address to keep.\n"
+	"  Remove the values of each file with git config --unset-all remote.origin.pushurl, and for a value of another file with git config --global --unset-all remote.origin.pushurl (or --system); exit status 5 means that file has none.\n" +
+	"  Then run git remote set-url --push origin <address> with the address to keep.\n"
 
 // TestALocalRunWithTwoUrlValuesPushesNothing is a remote origin with two url values and no pushurl:
 // git has two push addresses then, and qory pushes nothing and gives the same text as for two
@@ -671,7 +672,7 @@ func TestALocalRunWithNoRemoteOriginPushesNothingAndSaysSo(t *testing.T) {
 // TestALocalRunThatCannotListItsCommitsAfterThePushSaysThePushLanded is a push that lands and a
 // repository whose configuration breaks right after it, so reading the commits of the branch fails:
 // the branch is on the forge, qory ran no program, and the text says to open the draft by hand,
-// not to run again, which would push again.
+// not to run again.
 func TestALocalRunThatCannotListItsCommitsAfterThePushSaysThePushLanded(t *testing.T) {
 	root, bare, started := localProgramCheckout(t)
 	config := filepath.Join(root, ".git", "config")
@@ -683,8 +684,7 @@ func TestALocalRunThatCannotListItsCommitsAfterThePushSaysThePushLanded(t *testi
 	passingCheck(t)
 	out := runLocal(t, handsOffText(t))
 	wants(t, out, "qory run: Open a draft by hand if you want one: qory pushed the branch but could not list commits.\n"+
-		"  qory ran no program for the repository named by Branch:, so it opened no draft for it.\n  Branch: qory/run-")
-	wants(t, out, ".\n  Cause: ")
+		"  qory ran no program for that repository, so it opened no draft for it.\n  Branch: "+runBranchOf(t, out)+" in "+root+".\n  Cause: ")
 	lacks(t, out, "then run again")
 	if got := pushedBranches(t, bare); !strings.HasPrefix(got, "qory/run-") || timesStarted(t, started) != 0 {
 		t.Errorf("pushed %q and started %d programs, want the branch and none", got, timesStarted(t, started))

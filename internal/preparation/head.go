@@ -17,7 +17,7 @@ import (
 // head that is not there reads "none".
 const (
 	textHeadChanged  = "qory run: Set the branch to the expected commit or delete it; its head is not that commit.\n  Branch %[1]s. Repository %[2]s/%[3]s. Head: %[4]s. Expected: %[5]s, %[6]s. qory did not push."
-	textHeadMissing  = "qory run: Create the branch at the expected commit on the forge; it is not there.\n  Branch %[1]s. Repository %[2]s/%[3]s. Head: %[4]s. Expected: %[5]s, %[6]s. qory did not push.\n  Run git push <remote> %[5]s:refs/heads/%[1]s, with the remote of that repository; fetch the commit first if the checkout has no such commit."
+	textHeadMissing  = "qory run: Create the branch at the expected commit on the forge; it is not there.\n  Branch %[1]s. Repository %[2]s/%[3]s. Head: %[4]s. Expected: %[5]s, %[6]s. qory did not push.\n  Run git push <remote> %[5]s:refs/heads/%[1]s, where <remote> is the remote that points to %[2]s/%[3]s; fetch the commit first if the checkout has no such commit."
 	textHeadLoss     = "\n  Setting the branch to that commit or deleting it loses the commits on it that no version has."
 	textHeadRecorded = "\n  Expected is this run's last push: %s works only if Qory Apiary recorded that push."
 	textHeadStart    = "the start commit"

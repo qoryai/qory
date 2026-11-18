@@ -28,10 +28,10 @@ const (
 	textPushRefused       = "qory run: Fix the cause below, then run again: a push check refused the push.\n  qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalPushFailed   = "qory run: Fix the cause below, then run again: the push failed, so qory opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalNoHistory    = "qory run: Fix the cause below, then run again: qory could not read the branch or its origin.\n  qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
-	textLocalNoCommits    = "qory run: Open a draft by hand if you want one: qory pushed the branch but could not list commits.\n  qory ran no program for the repository named by Branch:, so it opened no draft for it.\n  Branch: %s.\n  Cause: %s"
+	textLocalNoCommits    = "qory run: Open a draft by hand if you want one: qory pushed the branch but could not list commits.\n  qory ran no program for that repository, so it opened no draft for it.\n  Branch: %s in %s.\n  Cause: %s"
 	textDraftLine         = "Draft: "
 	textLocalNoRemote     = "qory run: Set remote origin to a forge repository address, then run again; qory pushed nothing.\n  qory opened no draft.\n  Branch: %s.\n  Cause: %s"
-	textLocalPushURLs     = "qory run: Remove the extra push addresses of remote origin, so it has one.\n  The remote origin has %d push addresses, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  List the configured addresses with git config --get-all remote.origin.pushurl, or with git config --get-all remote.origin.url when that prints none.\n  Do not use git remote get-url --push --all: it shows the addresses after the insteadOf rewrites of git.\n  Then run git config --unset-all remote.origin.pushurl (exit status 5 means it had no value), and git remote set-url --push origin <address> with the address to keep."
+	textLocalPushURLs     = "qory run: Remove the extra push addresses of remote origin, so it has one.\n  The remote origin has %d push addresses, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  List the configured addresses and the file of each with git config --show-origin --get-all remote.origin.pushurl, or with git config --get-all remote.origin.url when that prints none.\n  Do not use git remote get-url --push --all: it shows the addresses after the insteadOf rewrites of git.\n  Remove the values of each file with git config --unset-all remote.origin.pushurl, and for a value of another file with git config --global --unset-all remote.origin.pushurl (or --system); exit status 5 means that file has none.\n  Then run git remote set-url --push origin <address> with the address to keep."
 )
 
 // localPushCheck is a check of a push that a local run makes: it gets the repository and the
@@ -166,7 +166,7 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 	for _, repo := range pushed {
 		document, err := localSubmission(ctx, repo, given, verdict)
 		if err != nil {
-			fmt.Fprintf(w, textLocalNoCommits+"\n", shownText(repo.Branch), shownError(err))
+			fmt.Fprintf(w, textLocalNoCommits+"\n", shownText(repo.Branch), shownText(repo.Dir), shownError(err))
 			continue
 		}
 		result, err := program.apply(ctx, w, document)

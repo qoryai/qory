@@ -55,7 +55,7 @@ func TestAMissingBranchTakesAFirstPushOnly(t *testing.T) {
 	changed := headError(t, err)
 	want := "qory run: Create the branch at the expected commit on the forge; it is not there.\n" +
 		"  Branch qory/wi_1. Repository git.example.com/acme/shop. Head: none. Expected: " + start + ", the start commit. qory did not push.\n" +
-		"  Run git push <remote> " + start + ":refs/heads/qory/wi_1, with the remote of that repository; fetch the commit first if the checkout has no such commit."
+		"  Run git push <remote> " + start + ":refs/heads/qory/wi_1, where <remote> is the remote that points to git.example.com/acme/shop; fetch the commit first if the checkout has no such commit."
 	if err.Error() != want {
 		t.Errorf("the refusal is\n%s\nwant\n%s", err, want)
 	}
@@ -493,7 +493,7 @@ func TestTheRefusalOfAMovedBranchSaysWhatIsLostAndWhatApiaryRecorded(t *testing.
 		loss       = "\n  Setting the branch to that commit or deleting it loses the commits on it that no version has."
 		recorded   = "\n  Expected is this run's last push: moving the branch to it works only if Qory Apiary recorded that push."
 		created    = "\n  Expected is this run's last push: creating the branch at it works only if Qory Apiary recorded that push."
-		push       = "\n  Run git push <remote> %s:refs/heads/qory/wi_1, with the remote of that repository; fetch the commit first if the checkout has no such commit."
+		push       = "\n  Run git push <remote> %s:refs/heads/qory/wi_1, where <remote> is the remote that points to git.example.com/acme/shop; fetch the commit first if the checkout has no such commit."
 	)
 	line2 := func(head, from string) string {
 		return "  Branch qory/wi_1. Repository git.example.com/acme/shop. Head: " + head + ". Expected: " + expected + ", " + from + ". qory did not push."

@@ -569,9 +569,8 @@ release may change what an existing document does, and states it under Upgrading
 ### Changed
 
 - The push step stores a version of the artifact type `submission`, in place of `branch`,
-  one for each pushing session, with the verdict `none` when the session wrote none. Until
-  reviewer runs exist (Q-35), such a session is the whole review round; Q-35 moves the call
-  to the end of the round.
+  one for each pushing session, with the verdict `none` when the session wrote none. Such a
+  session is the whole review round.
   The step checks the head of the branch on the forge before it pushes. A head that is not
   the commit the run expected ends the run `failed` with the code `push_head_changed`, after a
   session that passed, failed or timed out. The push replaces the branch only when its head
@@ -628,11 +627,12 @@ release may change what an existing document does, and states it under Upgrading
   `Branch: <branch> in <folder>.` line for each repository with commits. A remote with
   several push addresses gets `qory run: Remove the extra push addresses of remote origin, so
   it has one.`, how to list the configured addresses, and two commands that leave one:
-  `git config --unset-all remote.origin.pushurl` and `git remote set-url --push origin
-  <address>`. A push that landed, followed by a failure to list the run's commits, gets `qory
-  run: Open a draft by hand if you want one: qory pushed the branch but could not list
-  commits.` and a line with the fact that qory ran no program for that repository; a second run does
-  the work again on a new branch. See The submit program in `docs/run.md`.
+  `git config --unset-all remote.origin.pushurl` (with `--global` or `--system` for a value
+  of another file) and `git remote set-url --push origin <address>`. A push that landed,
+  followed by a failure to list the run's commits, gets `qory run: Open a draft by hand if
+  you want one: qory pushed the branch but could not list commits.`, and the next line is
+  that qory ran no program for that repository. A second run does the work again on a new
+  branch. See The submit program in `docs/run.md`.
 - A push that landed with no version stored has one way out in the line of `qory run`:
   `delete branch qory/<work item id> of <path> on <system>`. A branch whose head is not the
   commit the run expected is refused before any push, with the line `Set the branch to the
@@ -640,10 +640,10 @@ release may change what an existing document does, and states it under Upgrading
   line. To go on, do one of the two, then take the work item in again. Moving the branch back
   works when the `Expected:` line shows `the start commit`; with `this run's last
   push` it works only when Qory Apiary recorded that push, and otherwise the next run refuses
-  again, so delete the branch. A third line is the loss: either way, the commits on the branch
-  that no version has are lost. A branch that is not on the forge cannot be deleted: its
+  again, so delete the branch. Line 3 of the text is the loss: either way, the commits on the
+  branch that no version has are lost. A branch that is not on the forge cannot be deleted: its
   refusal starts with `Create the branch at the expected commit on the forge`, has
-  `Head: none`, and gives the `git push` command that creates the branch. The next run creates
+  `Head: none`, and has the `git push` command that creates the branch. The next run creates
   a deleted branch at `target_version` when no version exists, and starts from the last
   version otherwise.
 - The lines that stopped a run on a stored branch version with a fix for Qory Apiary
