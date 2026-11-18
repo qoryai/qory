@@ -217,7 +217,7 @@ release may change what an existing document does, and states it under Upgrading
   as it is. Every criterion id has the form `ac-` and a number from 1 to 9999 with no
   leading zero. See The acceptance criteria format in `contracts/harness/v1/README.md`.
 - Version 1 of the verification format, `contracts/harness/v1/verification.schema.json`:
-  the `commit` that was checked, the `matrix` of rows (`criterion`, `state` of `verified`
+  the `target_version` that was checked, the `matrix` of rows (`criterion`, `state` of `verified`
   or `failed`, `evidence`), `not_verified` with the criteria that were not checked and the
   `reason` for each, and `model_families`. See The verification format in
   `contracts/harness/v1/README.md`.

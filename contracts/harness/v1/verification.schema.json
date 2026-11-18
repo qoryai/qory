@@ -4,10 +4,10 @@
   "title": "The verification format, version 1",
   "description": "The result of checking a work item's acceptance criteria against one version of its work: the file of a version of a structured artifact type. matrix has one row for each criterion that was checked, and not_verified lists each criterion that was not, with the reason. A criterion is in matrix or in not_verified, never in both, which a JSON Schema cannot check. The ids are the criterion ids of acceptance-criteria.schema.json, and each is one of the ids in the newest version of the acceptance criteria, which a JSON Schema cannot check either. The file's size limit is the artifact type's, which a JSON Schema cannot check. No object has a member this schema does not define.",
   "type": "object",
-  "required": ["commit", "matrix", "not_verified", "model_families"],
+  "required": ["target_version", "matrix", "not_verified", "model_families"],
   "additionalProperties": false,
   "properties": {
-    "commit": {"description": "The version of the work that was checked, as a full commit id: 40 or 64 lower-case hexadecimal digits.", "type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"},
+    "target_version": {"description": "The exact version of the target that the verification checked, never a name that can later point to another version. For a repository, a commit. The grammar is generic, because a target in another system has another kind of version: 1 to 255 letters, digits and the characters ._/-.", "type": "string", "pattern": "^[A-Za-z0-9._/-]{1,255}$"},
     "matrix": {
       "description": "One row for each criterion that was checked, in the order of the criteria: empty when no criterion was checked.",
       "type": "array",

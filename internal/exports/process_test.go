@@ -1185,8 +1185,8 @@ func TestArtifactTypesSchemaMatchesTheReader(t *testing.T) {
 // acceptance-criteria.schema.json, verification.schema.json, branch.schema.json,
 // questions.schema.json, review-comments.schema.json, proposal-sources.schema.json and
 // verdict.schema.json, as the json_schema of a custom type: it passes the check and
-// process.schema.json, with a size limit that a structured type can have. The same type with a schema that does not compile fails, so the check
-// reads the entry.
+// process.schema.json, with a size limit that a structured type can have. The same type
+// with a schema that does not compile fails, so the check reads the entry.
 func TestContractSchemasPassAsCustomTypes(t *testing.T) {
 	processSchema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/process.schema.json")
 	if err != nil {

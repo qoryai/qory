@@ -783,7 +783,11 @@ func TestQuestionsSchema(t *testing.T) {
 		{withItem(`""`), false},
 		{withItem(`"login"`), true},
 		{withItem(`"Login screen"`), true},
-		{withItem(`"AC-3"`), true},
+		{withItem(`"AC-3"`), false},
+		{withItem(`"Ac-0"`), false},
+		{withItem(`"aC-3"`), false},
+		{withItem(`"screen-2"`), true},
+		{withItem(`"acme"`), true},
 		{withItem(`"` + strings.Repeat("a", 32) + `"`), true},
 		{withItem(`"` + strings.Repeat("a", 33) + `"`), false},
 		{withItem(`"a\nb"`), false},
@@ -1293,7 +1297,7 @@ func TestAcceptanceCriteriaSchema(t *testing.T) {
 // verificationDocument is a document of verification.schema.json that passes: a row that
 // is verified, a row that failed, a criterion that was not verified and two model
 // families.
-const verificationDocument = `{"commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
+const verificationDocument = `{"target_version": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
  "matrix": [
   {"criterion": "ac-1", "state": "verified", "evidence": "The price page shows 12.50."},
   {"criterion": "ac-2", "state": "failed", "evidence": "The page still shows 10.00 in the footer."}
@@ -1314,8 +1318,8 @@ func TestVerificationSchema(t *testing.T) {
 		return strings.Replace(verificationDocument, from, to, 1)
 	}
 	const (
-		commit = `"5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e"`
-		matrix = `"matrix": [
+		version = `"5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e"`
+		matrix  = `"matrix": [
   {"criterion": "ac-1", "state": "verified", "evidence": "The price page shows 12.50."},
   {"criterion": "ac-2", "state": "failed", "evidence": "The page still shows 10.00 in the footer."}
  ]`
@@ -1330,22 +1334,29 @@ func TestVerificationSchema(t *testing.T) {
 		{verificationDocument, true},
 		{`{}`, false},
 		{`[]`, false},
-		{`{"commit": ` + commit + `, "matrix": [], "not_verified": [], "model_families": ["anthropic"]}`, true},
-		{replace(`"commit": `+commit+`,`, ``), false},
+		{`{"target_version": ` + version + `, "matrix": [], "not_verified": [], "model_families": ["anthropic"]}`, true},
+		{replace(`"target_version": `+version+`,`, ``), false},
 		{replace(matrix+`,`, ``), false},
 		{replace(notVer+`,`, ``), false},
 		{replace(",\n "+families, ``), false},
-		{replace(`{"commit"`, `{"title": "Check", "commit"`), false},
-		// commit: a full id of 40 or 64 lower-case hexadecimal digits
-		{replace(commit, `"`+strings.Repeat("a", 40)+`"`), true},
-		{replace(commit, `"`+strings.Repeat("a", 64)+`"`), true},
-		{replace(commit, `"`+strings.Repeat("a", 39)+`"`), false},
-		{replace(commit, `"`+strings.Repeat("a", 41)+`"`), false},
-		{replace(commit, `"`+strings.Repeat("a", 63)+`"`), false},
-		{replace(commit, `"`+strings.Repeat("A", 40)+`"`), false},
-		{replace(commit, `"`+strings.Repeat("g", 40)+`"`), false},
-		{replace(commit, `"5d6e7f8"`), false},
-		{replace(commit, `null`), false},
+		{replace(`{"target_version"`, `{"title": "Check", "target_version"`), false},
+		{replace(`"target_version": `+version+`,`, `"commit": `+version+`,`), false},
+		// target_version: 1 to 255 letters, digits and the characters ._/-
+		{replace(version, `"`+strings.Repeat("a", 40)+`"`), true},
+		{replace(version, `"`+strings.Repeat("a", 64)+`"`), true},
+		{replace(version, `"2026-11-18.3"`), true},
+		{replace(version, `"v1.2.3"`), true},
+		{replace(version, `"release/2026_11"`), true},
+		{replace(version, `"A"`), true},
+		{replace(version, `"`+strings.Repeat("a", 255)+`"`), true},
+		{replace(version, `"`+strings.Repeat("a", 256)+`"`), false},
+		{replace(version, `""`), false},
+		{replace(version, `"2026 11"`), false},
+		{replace(version, `"v1:2"`), false},
+		{replace(version, `"v1\n"`), false},
+		{replace(version, `"v1@x"`), false},
+		{replace(version, `12`), false},
+		{replace(version, `null`), false},
 		// the matrix rows
 		{replace(row, `{"criterion": "ac-9999", "state": "verified", "evidence": "Seen."}`), true},
 		{replace(`"state": "verified"`, `"state": "failed"`), true},

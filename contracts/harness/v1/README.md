@@ -807,11 +807,11 @@ other than those in the table. A JSON Schema cannot check that each `id` is uniq
 ## The verification format
 
 A verification document records the result of checking a work item's acceptance criteria
-against one version of the work. The format names no kind of work. This is version 1 of the
+against one version of its target. The format names no kind of work. This is version 1 of the
 format ([verification.schema.json](verification.schema.json)):
 
 ```json
-{"commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
+{"target_version": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
  "matrix": [{"criterion": "ac-1", "state": "verified", "evidence": "The price page shows 12.50."},
             {"criterion": "ac-2", "state": "failed", "evidence": "The page still shows 10.00 in the footer."}],
  "not_verified": [{"criterion": "ac-3", "reason": "The payment sandbox was down."}],
@@ -820,7 +820,7 @@ format ([verification.schema.json](verification.schema.json)):
 
 | Member | Meaning |
 |---|---|
-| `commit` | the version of the work that was checked, a full commit id: 40 or 64 lower-case hexadecimal digits |
+| `target_version` | the exact version of the target that the verification checked, never a name that can later point to another version; for a repository, a commit. 1 to 255 letters, digits and the characters `._/-`, such as `5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e` or `2026-11-18.3` |
 | `matrix` | one row for each criterion that was checked, empty when none was |
 | `criterion` | the id of the criterion, in the form of `id` in the acceptance criteria format |
 | `state` | `verified`: the check shows that the criterion is met; `failed`: the check shows that it is not |
@@ -860,8 +860,8 @@ forms:
   as `main`. `item` is optional: the id of the entry of that artifact that the question
   concerns, as one of two forms. A criterion id has the form `ac-` and a number from 1 to
   9999 with no leading zero, such as `ac-3`. The id of an entry of any other output, such
-  as a screen of a mockup, is 1 to 32 characters on one line that do not start with `ac-`,
-  so `ac-0`, `ac-01` and `ac-10000` fail the schema.
+  as a screen of a mockup, is 1 to 32 characters on one line that do not start with `ac-` in any letter case,
+  so `ac-0`, `ac-01`, `ac-10000`, `AC-3` and `Ac-0` fail the schema.
 
 No member of `about` is a work item id: the document is for one work item. A JSON Schema
 cannot check that the work item has the artifact or that the artifact has the entry.

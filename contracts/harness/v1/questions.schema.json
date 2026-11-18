@@ -104,10 +104,10 @@
         "type": {"description": "The artifact type's name, such as proposal: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
         "name": {"description": "The artifact's name, such as main: 1 to 64 characters on one line. A JSON Schema cannot check that the work item has that artifact.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 64},
         "item": {
-          "description": "The id of the entry of the artifact that the question concerns: a criterion id, ac- and a number from 1 to 9999 with no leading zero, such as ac-3, or the id of an entry of another kind of output, such as a screen: 1 to 32 characters on one line that do not start with ac-. A JSON Schema cannot check that the artifact has that entry.",
+          "description": "The id of the entry of the artifact that the question concerns: a criterion id, ac- and a number from 1 to 9999 with no leading zero, such as ac-3, or the id of an entry of another kind of output, such as a screen: 1 to 32 characters on one line that do not start with ac- in any letter case. A JSON Schema cannot check that the artifact has that entry.",
           "anyOf": [
             {"$ref": "#/$defs/criterion_id"},
-            {"$ref": "#/$defs/line", "minLength": 1, "maxLength": 32, "not": {"pattern": "^ac-"}}
+            {"$ref": "#/$defs/line", "minLength": 1, "maxLength": 32, "not": {"pattern": "^[Aa][Cc]-"}}
           ]
         }
       }
