@@ -92,7 +92,16 @@ func TestNone(t *testing.T) {
 	if got := string(submission.None(submission.NoneNoProgram, 0)); got != `{"none":"no-program"}` {
 		t.Errorf("None = %s", got)
 	}
-	if got := string(submission.None(submission.NoneProgramFailed, 1)); got != `{"none":"program-failed","exit":1}` {
+	for reason, want := range map[string]string{
+		submission.NoneProgramFailed:  `{"none":"program-failed","exit":1}`,
+		submission.NoneLoginNeeded:    `{"none":"login-needed","exit":1}`,
+		submission.NoneProgramTimeout: `{"none":"program-timeout"}`,
+	} {
+		if got := string(submission.None(reason, 1)); got != want {
+			t.Errorf("None(%s, 1) = %s, want %s", reason, got, want)
+		}
+	}
+	if got := string(submission.None(submission.NoneProgramFailed, 0)); got != `{"none":"program-failed","exit":0}` {
 		t.Errorf("None = %s", got)
 	}
 }
@@ -118,7 +127,15 @@ func TestCheck(t *testing.T) {
 		{replace(draft, `"draft": {"none": "other"}`), false},
 		{replace(draft, `"draft": {"none": "program-timeout"}`), true},
 		{replace(draft, `"draft": {}`), false},
-		{replace(`"state": "draft"`, `"state": "closed"`), false},
+		{replace(`"state": "draft"`, `"state": "closed"`), true},
+		{replace(`"state": "draft"`, `"state": "merged"`), true},
+		{replace(`"state": "draft"`, `"state": "archived"`), false},
+		{replace(draft, `"draft": {"none": "program-failed", "exit": 0}`), true},
+		{replace(draft, `"draft": {"none": "program-failed", "exit": 3}`), false},
+		{replace(draft, `"draft": {"none": "login-needed", "exit": 3}`), true},
+		{replace(draft, `"draft": {"none": "login-needed", "exit": 1}`), false},
+		{replace(draft, `"draft": {"none": "login-needed"}`), false},
+		{replace(draft, `"draft": {"none": "program-timeout", "exit": 1}`), false},
 		{replace(`"action": "opened"`, `"action": "kept"`), true},
 		{replace(",\n "+draft, ""), false},
 		{replace(`"verdict": "passed"`, `"verdict": "none"`), true},

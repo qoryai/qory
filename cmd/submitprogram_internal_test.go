@@ -136,7 +136,7 @@ func TestTheProgramUpdatesTheDraftOfThePreviousVersion(t *testing.T) {
 	if string(data) != "update 7 Add a first page\n" {
 		t.Errorf("the program saw %q", data)
 	}
-	if string(got.Repositories[0].Draft) != `{"none":"program-failed","exit":1}` {
+	if string(got.Repositories[0].Draft) != `{"none":"program-failed","exit":0}` {
 		t.Errorf("a program that printed no draft left the draft %s", got.Repositories[0].Draft)
 	}
 }
@@ -170,15 +170,14 @@ func TestAProgramByHowItEnded(t *testing.T) {
 		urls              bool
 		printed           []string
 	}{
-		{"finished with no draft", `echo done >&2`, `{"none":"program-failed","exit":1}`, false,
+		{"finished with no draft", `echo done >&2`, `{"none":"program-failed","exit":0}`, false,
 			[]string{"qory run: submit program: done", "qory run: The submit program printed no whole draft, so a repository has no draft.", "  Exit code: 0.", "  Draft of the repository: program-failed."}},
 		{"closed draft", `echo "draft_number 7"
 echo "draft_url https://git.example.com/acme/shop/pull/7"
 echo "draft_title T"
 echo "draft_state merged"
 echo "draft_action kept"
-`, `{"none":"program-failed","exit":1}`, false,
-			[]string{"qory run: The draft is closed or merged, so the submission has no draft for it.", "  Draft state: merged.", "  Draft of the repository: program-failed."}},
+`, `{"number":7,"url":"https://git.example.com/acme/shop/pull/7","title":"T","state":"merged","action":"kept"}`, false, nil},
 		{"failed call after its lines", fillScript + "echo 'no permission' >&2\nexit 1", `{"number":7,"url":"https://git.example.com/acme/shop/pull/7","title":"Add a page","state":"draft","action":"opened"}`, true,
 			[]string{"qory run: submit program: no permission"}},
 		{"failed call, no draft", "echo 'no permission' >&2\nexit 1", `{"none":"program-failed","exit":1}`, false,
@@ -187,8 +186,10 @@ echo "draft_action kept"
 			[]string{"qory run: The submit program failed, so a repository it did not finish has no draft.", "  Exit code: 2.", "  Draft of the repository: program-failed."}},
 		{"another status", fillScript + "exit 137", `{"none":"program-failed","exit":1}`, false,
 			[]string{"qory run: The submit program failed, so a repository it did not finish has no draft.", "  Exit code: 137.", "  Draft of the repository: program-failed."}},
-		{"no login", "echo 'Run `gh auth login`, then `qory run` again.' >&2\nexit 1", `{"none":"program-failed","exit":1}`, false,
-			[]string{"qory run: submit program: Run `gh auth login`, then `qory run` again.", "qory run: The submit program failed, so a repository it did not finish has no draft.", "  Exit code: 1.", "  Draft of the repository: program-failed."}},
+		{"no login", fillScript + "echo 'Run `gh auth login`, then `qory run` again.' >&2\nexit 3", `{"none":"login-needed","exit":3}`, false,
+			[]string{"qory run: submit program: Run `gh auth login`, then `qory run` again."}},
+		{"ended by a signal", fillScript + "kill -9 $$", `{"none":"program-failed","exit":1}`, false,
+			[]string{"qory run: The submit program failed, so a repository it did not finish has no draft.", "  Exit code: -1.", "  Draft of the repository: program-failed."}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got, printed := runProgram(t, &submitProgram{command: []string{programScript(t, c.body)}}, passedDocument())
@@ -199,7 +200,7 @@ echo "draft_action kept"
 			if (r.CommitURL != "") != c.urls {
 				t.Errorf("the address of the head is %q, want one: %v", r.CommitURL, c.urls)
 			}
-			if lines := strings.Split(strings.TrimSuffix(printed, "\n"), "\n"); strings.Join(lines, "\n") != strings.Join(c.printed, "\n") {
+			if strings.TrimSuffix(printed, "\n") != strings.Join(c.printed, "\n") {
 				t.Errorf("the step printed:\n%s\nwant:\n%s", printed, strings.Join(c.printed, "\n"))
 			}
 		})
@@ -246,7 +247,7 @@ echo "commit_url $QORY_SUBMIT_BASE_COMMIT https://git.example.com/acme/shop/comm
 `
 	got, printed := runProgram(t, &submitProgram{command: []string{programScript(t, body)}}, passedDocument())
 	r := got.Repositories[0]
-	if string(r.Draft) != `{"none":"program-failed","exit":1}` || r.Base.CommitURL != commitLink(baseID) {
+	if string(r.Draft) != `{"none":"program-failed","exit":0}` || r.Base.CommitURL != commitLink(baseID) {
 		t.Errorf("the repository is %+v", r)
 	}
 	for _, want := range []string{

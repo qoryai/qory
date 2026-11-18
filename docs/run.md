@@ -2842,8 +2842,10 @@ read run have no submit step. The document has:
   `escalate`; `not-passed` when the verdict is any other than `passed`; `no-text` when the
   verdict is `passed` and `text` is absent; `no-program` when the verdict is `passed`, `text`
   is there, and the run has a run code, or the composed harness has no submit program, or the
-  program left the draft alone; `program-failed` or `program-timeout` when the program ran and did not finish the
-  repository, as [The submit program](#the-submit-program) says.
+  program left the draft alone; `program-failed` (with `exit` 0, 1 or 2), `program-timeout`
+  or `login-needed` (with `exit` 3) when the program ran and did not finish the repository, as
+  [The submit program](#the-submit-program) says. A draft that a person closed or merged has the
+  `state` `closed` or `merged` and the `action` `kept`.
 - `commit_url` of each repository, of its `base` and of each of its `commits`: the addresses
   that the submit program of a run with no run code prints. They are absent when no program
   ran, as on a run with a run code.
@@ -2980,18 +2982,20 @@ prints one of these, each with line 1 as the cause, then lines indented by two s
   100 commits, or a folder or file that qory could not make.
 - `qory run: The submit program printed no whole draft, so a repository has no draft.`,
   `Exit code: <code>.`, `Draft of the repository: program-failed.`
-- `qory run: The draft is closed or merged, so the submission has no draft for it.`, `Draft
-  state: <state>.`, `Draft of the repository: program-failed.` The submission format has the
-  states `draft` and `open` alone.
+
+After exit 3 qory prints no more than the program's standard error lines, which start with the
+login command, so the person sees `qory run: submit program: Run `gh auth login`, then `qory run`
+again.` for a forge whose command line is `gh`.
 
 The program's exit status says how it ended:
 
 | Exit | The step stores |
 |---|---|
-| 0 | The addresses and the draft of the lines. With no whole draft, `{"none": "program-failed", "exit": 1}` in place of `no-program`: the contract records the exit 0, and the submission format has the exits 1 and 2. |
-| 1 | The addresses and the draft of the lines, a call to the forge having failed. With no whole draft, `{"none": "program-failed", "exit": 1}` in place of `no-program`. A person who is not logged in to the forge's command line gets this status: the program prints the command to log in on its standard error, such as `gh auth login`, and qory prints that line. The branch stays pushed. |
+| 0 | The addresses and the draft of the lines. With no whole draft, `{"none": "program-failed", "exit": 0}` in place of `no-program`. |
+| 1 | The addresses and the draft of the lines, a call to the forge having failed. With no whole draft, `{"none": "program-failed", "exit": 1}` in place of `no-program`. |
 | 2 | The same as 1 with `"exit": 2`: the program found its input wrong. |
-| another status, or the program did not start | No line is read, and `{"none": "program-failed", "exit": 1}`. |
+| 3 | No line is read, and `{"none": "login-needed", "exit": 3}`: the person has no login of the forge's command line. The program prints the command that logs in as the first line of its standard error, for `gh`: ``Run `gh auth login`, then `qory run` again.`` The branch stays pushed. |
+| another status, a signal, or the program did not start | No line is read, and `{"none": "program-failed", "exit": 1}`. |
 | it ran past 120 seconds | No line is read, and `{"none": "program-timeout"}`. |
 
 A repository whose draft is not `no-program` keeps its draft and gets the addresses alone. The

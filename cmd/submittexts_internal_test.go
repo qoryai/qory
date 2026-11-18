@@ -20,7 +20,6 @@ func TestTheTextsOfTheSubmitStepStateTheCauseInLineOne(t *testing.T) {
 		"textProgramNoStart":  textProgramNoStart,
 		"textProgramTooMany":  textProgramTooMany,
 		"textProgramNoDraft":  textProgramNoDraft,
-		"textProgramClosed":   textProgramClosed,
 		"textProgramLeftOut":  textProgramLeftOut,
 		"textProgramNoFolder": textProgramNoFolder,
 		"textPushNoReadProxy": "qory run: " + textPushNoReadProxy,

@@ -76,7 +76,7 @@
                   "number": {"type": "integer", "minimum": 1},
                   "url": {"type": "string", "minLength": 1},
                   "title": {"type": "string"},
-                  "state": {"enum": ["draft", "open"]},
+                  "state": {"enum": ["draft", "open", "closed", "merged"]},
                   "action": {"enum": ["opened", "updated", "kept"]}
                 }
               },
@@ -85,12 +85,14 @@
                 "required": ["none"],
                 "additionalProperties": false,
                 "properties": {
-                  "none": {"enum": ["not-passed", "no-text", "escalated", "no-program", "program-failed", "program-timeout"]},
-                  "exit": {"enum": [1, 2]}
+                  "none": {"enum": ["not-passed", "no-text", "escalated", "no-program", "program-failed", "program-timeout", "login-needed"]},
+                  "exit": {"enum": [0, 1, 2, 3]}
                 },
-                "if": {"properties": {"none": {"const": "program-failed"}}},
-                "then": {"required": ["exit"]},
-                "else": {"not": {"required": ["exit"]}}
+                "allOf": [
+                  {"if": {"properties": {"none": {"const": "program-failed"}}}, "then": {"required": ["exit"], "properties": {"exit": {"enum": [0, 1, 2]}}}},
+                  {"if": {"properties": {"none": {"const": "login-needed"}}}, "then": {"required": ["exit"], "properties": {"exit": {"const": 3}}}},
+                  {"if": {"properties": {"none": {"enum": ["not-passed", "no-text", "escalated", "no-program", "program-timeout"]}}}, "then": {"not": {"required": ["exit"]}}}
+                ]
               }
             ]
           }

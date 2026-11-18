@@ -87,6 +87,7 @@ const (
 	NoneNoProgram      = "no-program"
 	NoneProgramFailed  = "program-failed"
 	NoneProgramTimeout = "program-timeout"
+	NoneLoginNeeded    = "login-needed"
 )
 
 // Submission is one document of the format.
@@ -101,10 +102,11 @@ type Submission struct {
 	Repositories []Repository `json:"repositories"`
 }
 
-// None is the draft member of a repository with no draft: {"none": reason}, with the
-// exit status for [NoneProgramFailed], 0 for any other reason.
+// None is the draft member of a repository with no draft: {"none": reason}, with the exit
+// status for [NoneProgramFailed] (0, 1 or 2) and [NoneLoginNeeded] (3), and no exit for any
+// other reason.
 func None(reason string, exit int) json.RawMessage {
-	if exit != 0 {
+	if reason == NoneProgramFailed || reason == NoneLoginNeeded {
 		return json.RawMessage(fmt.Sprintf(`{"none":%q,"exit":%d}`, reason, exit))
 	}
 	return json.RawMessage(fmt.Sprintf(`{"none":%q}`, reason))

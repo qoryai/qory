@@ -48,14 +48,16 @@ const (
 	submitKeyCommitURL = "commit_url"
 )
 
-// The exit statuses of the program that qory reads its lines after: 0 it finished, 1 a call
-// to the forge failed (also a missing login of the forge's command line, which the program
-// reports on its standard error), 2 it could not use its inputs. After any other status, or when
-// the program did not start, qory reads no line.
+// The exit statuses of the program that qory reads: 0 it finished, 1 a call to the forge
+// failed, 2 it could not use its inputs; qory reads its lines after these. 3 means the person has
+// no login of the forge's command line: the program prints the login command as the first line
+// of its standard error, and qory reads no line. After any other status, a signal, a time-out,
+// or when the program did not start, qory reads no line.
 const (
-	submitExitDone  = 0
-	submitExitForge = 1
-	submitExitInput = 2
+	submitExitDone    = 0
+	submitExitForge   = 1
+	submitExitInput   = 2
+	submitExitNoLogin = 3
 )
 
 // The limits of the contract: commits in the one input, characters of a title, bytes of an
