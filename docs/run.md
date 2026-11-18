@@ -2052,6 +2052,27 @@ A run stops before the agent starts when:
 - the target's commit has another `.qory` than `target_version`;
 - git does not check out a commit.
 
+Each of these lines stops the run, exit 1. `<c>` is a commit's first 12 characters, and
+`<git line>` is the line that git wrote:
+
+- `Version <n> of the artifact branch has a ref other than <ref>, so the run did not start;
+  the code is used`
+- `Version <n> of the artifact branch does not have exactly one file of at most 65536
+  bytes, so the run did not start; the code is used`
+- `Version <n> of the artifact branch does not match the branch format, so the run did not
+  start: <cause>; the code is used`
+- `The stored version of the artifact branch has commit <c>, which is not a commit on
+  <path> on <system>, so the run did not start; the code is used`, then a line indented by
+  two spaces: `The fetch through the run's gateway failed: <git line>`
+- `The stored version of the artifact branch has <value> for <path>, which is not a commit,
+  so the run did not start; the code is used`
+- `Commit <c> of <ref> has a .qory folder that differs from the one at target version <c>,
+  so the run did not start; the code is used`, then the line `qory keeps the files of the
+  run in .qory.` indented by two spaces
+- `git cannot check out commit <c> of <ref>, the stored version of the artifact branch, so
+  the run did not start; the code is used`, then a line indented by two spaces: `The
+  checkout in <path> failed: <git line>`
+
 An instance without the feature `workflow_model` returns 404 with no error code to the run
 API. The run then works on `target_version` with no branch.
 
@@ -2704,8 +2725,10 @@ One repository can be pushed before another fails, and a push can succeed before
 is stored. The branch is then past every version of the artifact `submission`. When Qory
 Apiary has no record of the push (see The report of a push), the head of the branch is past
 the commit the next run starts at, and the next run ends `failed` with the end code
-`push_head_changed`. Each line for that state gives both ways out: add a version of the
-artifact `submission` with the head of the branch, or delete the branch.
+`push_head_changed`. Each line for that state gives one way out: delete the branch.
+Deleting it loses the commits on that branch that no version has. When the work item has no
+version, the next run creates the branch at `target_version`, not at the commit that the
+deleted branch had; with a version, it starts from the last one.
 
 On a run that can push, each of these lines stops the run after the setup, before the
 agent starts, and closes it `failed` with `no_session`:
@@ -2771,22 +2794,18 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   pushes the run's commits, did not open: <error>; the code is used`
 - `take the work item in again in Qory Apiary: the run API, which stores the version of the
   artifact submission, is not reachable from this run: <error>; the code is used`
-- `Define the artifact type submission in the workspace's Artifact types, then add a new
-  version of the artifact submission in Qory Apiary with the head of qory/<work item id> on
-  <path>, or delete that branch on <system>, then run the round again`, when the workspace
+- `Define the artifact type branch in the workspace's Artifact types, then delete branch
+  qory/<work item id> of <path> on <system>, then run the round again`, when the workspace
   has no artifact type `submission`
-- `add a new version of the artifact submission in Qory Apiary with the head of qory/<work
-  item id> on <path>, or delete that branch on <system>, then take the work item in again:
-  qory pushed <branch>, and the version of the artifact submission was not stored: <error>;
-  the code is used`
-- `check the artifact submission of the work item in Qory Apiary; with no version of this
-  run, add a new version of the artifact submission in Qory Apiary with the head of
-  qory/<work item id> on <path>, or delete that branch on <system>; then take the work item
-  in again: qory pushed <branch>, and the request that stores its version ended with no
+- `delete branch qory/<work item id> of <path> on <system>, then take the work item in
+  again: qory pushed <branch>, and the version of the artifact submission was not stored:
+  <error>; the code is used`
+- `check the artifact submission of the work item in Qory Apiary; with no version of this run,
+  delete branch qory/<work item id> of <path> on <system>; then take the work item in
+  again: qory pushed <branch>, and the request that stores its version ended with no
   response, so the version may or may not be stored: <error>; the code is used`
-- `add a new version of the artifact submission in Qory Apiary with the head of qory/<work
-  item id> on <path>, or delete that branch on <system>: qory pushed <path> and stored no version,
-  because the push of the next repository failed: <line of that failure>`
+- `delete branch qory/<work item id> of <path> on <system>: qory pushed <path> and stored
+  no version, because the push of the next repository failed: <line of that failure>`
 
 #### The head check
 
@@ -3122,10 +3141,9 @@ run got a second signal`, `qory run got <signal>, and the step reached its limit
 
 - `take the work item in again in Qory Apiary: <cause> during the push step, and the run's
   commits may not have reached the branch; the code is used`
-- `check the artifact submission of the work item in Qory Apiary; with no version of this
-  run, add a new version of the artifact submission in Qory Apiary with the head of
-  qory/<work item id> on <path>, or delete that branch on <system>; then take the work item
-  in again: qory pushed <path>, and <cause>, so the version may or may not be stored; the
+- `check the artifact submission of the work item in Qory Apiary; with no version of this run,
+  delete branch qory/<work item id> of <path> on <system>; then take the work item in
+  again: qory pushed <branch>, and <cause>, so the version may or may not be stored; the
   code is used`
 
 ### Runs of a node pool

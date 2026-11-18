@@ -666,7 +666,7 @@ func TestThePushStepChecksItsVersion(t *testing.T) {
 		t.Errorf("the push step ended %s, want failed\n%s", state, r.out)
 	}
 	wants(t, r.log(),
-		"qory run: "+versionWays+", then take the work item in again: qory pushed qory/"+workItem+", and the version of the artifact submission was not stored: the version did not pass the check for submission; the code is used\n"+
+		"qory run: "+deleteBranch+", then take the work item in again: qory pushed qory/"+workItem+", and the version of the artifact submission was not stored: the version did not pass the check for submission; the code is used\n"+
 			"qory run: The check for submission failed:\nqory run: submission.json: the ref is not the work item's\n")
 	if strings.Contains(r.log(), "push again") || strings.Count(r.out, "The check for submission failed:") != 1 {
 		t.Errorf("the step's lines have \"push again\", or the check's line not once:\n%s", r.out)

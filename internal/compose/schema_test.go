@@ -588,13 +588,16 @@ func TestSchemasKnowWorkflowHooks(t *testing.T) {
 const questionsDocument = `{"questions": [
  {"id": "q1", "question": "Which database does the service use?",
   "context": "The service reads ` + "`DATABASE_URL`" + `.\n\n- one\n- two",
+  "about": {"work_item": true},
   "options": [{"title": "PostgreSQL", "explanation": "The database of the other services."}],
   "state": "answered", "asked": {"run": 1, "at": "2026-11-04T10:00:00Z"},
   "answer": {"option": "PostgreSQL", "by": {"name": "Sam Example"}, "at": "2026-11-04T11:00:00Z"},
   "history": [{"option": null, "note": "Not\nsure", "by": {"name": "Sam Example"}, "at": "2026-11-04T10:30:00Z", "reopened": {"run": 2, "at": "2026-11-04T10:45:00Z"}}]},
- {"id": "q-2", "question": "Which port does it listen on?", "options": [],
+ {"id": "q-2", "question": "Which port does it listen on?",
+  "about": {"type": "acceptance-criteria", "name": "main", "item": "ac-3"}, "options": [],
   "state": "open", "asked": {"run": 2, "at": "2026-11-04T10:45:00Z"}, "follows": ["q1"]},
  {"id": "q3", "question": "Which cache does the service use?",
+  "about": {"type": "proposal", "name": "main"},
   "options": [{"title": "Redis", "explanation": "The cache of the other services."}, {"title": "None", "explanation": "Every read goes to the database."}],
   "state": "decided", "asked": {"run": 2, "at": "2026-11-04T10:50:00Z"},
   "decision": {"option": "Redis", "reason": "The other services use Redis.", "run": 2, "at": "2026-11-04T10:51:00Z"}}
@@ -620,14 +623,17 @@ func TestQuestionsSchema(t *testing.T) {
 		return replace(option, strings.TrimSuffix(strings.Repeat(option+", ", n), ", "))
 	}
 	question := "Which database does the service use?"
-	// withProposal gives the document's first option the member proposal, and withCriterion
-	// gives the first question the member criterion.
-	withProposal := func(value string) string {
-		return replace(option, strings.Replace(option, `}`, `, "proposal": `+value+`}`, 1))
+	// proposalOn gives the first option of doc the member proposal, and withItem gives the
+	// first question the member about, an entry of the output proposal/main.
+	proposalOn := func(doc, value string) string {
+		return strings.Replace(doc, option, strings.Replace(option, `}`, `, "proposal": `+value+`}`, 1), 1)
 	}
-	withCriterion := func(doc string) string {
-		return strings.Replace(doc, `"question": "`+question+`",`, `"question": "`+question+`", "criterion": "ac-3",`, 1)
+	const workItem = `"about": {"work_item": true}`
+	withItemOf := func(typ, item string) string {
+		return replace(workItem, `"about": {"type": "`+typ+`", "name": "main", "item": `+item+`}`)
 	}
+	withItem := func(item string) string { return withItemOf("proposal", item) }
+	withCriterion := func(item string) string { return withItemOf("acceptance-criteria", item) }
 	// answerStart and historyStart start the answer and the history entry of the document.
 	const (
 		answerStart  = `"answer": {"option": "PostgreSQL"`
@@ -784,28 +790,81 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(`"follows": ["q1"]`, `"follows": ["q1", "q1"]`), false},
 		{replace(`"follows": ["q1"]`, `"follows": ["Q1"]`), false},
 		{replace(`"follows": ["q1"]`, `"follows": "q1"`), false},
-		// criterion
-		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-3"`), true},
-		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-9999"`), true},
-		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "AC-3"`), false},
-		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-0"`), false},
-		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-10000"`), false},
-		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": "ac-03"`), false},
-		{replace(`"follows": ["q1"]`, `"follows": ["q1"], "criterion": 3`), false},
-		// an option's proposal, only on a question with criterion
-		{withCriterion(withProposal(`"Use PostgreSQL 16."`)), true},
-		{withCriterion(withProposal(`"` + strings.Repeat("a", 2000) + `"`)), true},
-		{withCriterion(withProposal(`"Use PostgreSQL\n16."`)), true},
-		{withProposal(`"Use PostgreSQL 16."`), false},
+		// about
+		{replace("\n  "+workItem+`,`, ``), false},
+		{replace(workItem, `"about": null`), false},
+		{replace(workItem, `"about": {}`), false},
+		{replace(workItem, `"about": "work_item"`), false},
+		{replace(workItem, `"about": {"work_item": false}`), false},
+		{replace(workItem, `"about": {"work_item": "wi_7k2m9pq4xt3a8b1c"}`), false},
+		{replace(workItem, `"about": {"work_item": true, "type": "proposal", "name": "main"}`), false},
+		{replace(workItem, `"about": {"work_item": true, "id": "wi_7k2m9pq4xt3a8b1c"}`), false},
+		{replace(workItem, `"about": {"type": "proposal", "name": "main", "work_item": true}`), false},
+		{replace(workItem, `"criterion": "ac-3", "about": {"work_item": true}`), false},
+		{replace(workItem, workItem+`, "criterion": "ac-3"`), false},
+		{replace(workItem, `"about": {"type": "proposal", "name": "main"}`), true},
+		{replace(workItem, `"about": {"type": "proposal"}`), false},
+		{replace(workItem, `"about": {"name": "main"}`), false},
+		{replace(workItem, `"about": {"type": "proposal", "name": "main", "version": 1}`), false},
+		{replace(workItem, `"about": {"type": "Proposal", "name": "main"}`), false},
+		{replace(workItem, `"about": {"type": "proposal--x", "name": "main"}`), false},
+		{replace(workItem, `"about": {"type": "`+strings.Repeat("a", 64)+`", "name": "main"}`), true},
+		{replace(workItem, `"about": {"type": "`+strings.Repeat("a", 65)+`", "name": "main"}`), false},
+		{replace(workItem, `"about": {"type": "proposal", "name": ""}`), false},
+		{replace(workItem, `"about": {"type": "proposal", "name": "`+strings.Repeat("a", 64)+`"}`), true},
+		{replace(workItem, `"about": {"type": "proposal", "name": "`+strings.Repeat("a", 65)+`"}`), false},
+		{replace(workItem, `"about": {"type": "proposal", "name": "a\nb"}`), false},
+		{replace(workItem, `"about": {"type": 3, "name": "main"}`), false},
+		// about.item of the type acceptance-criteria is a criterion id
+		{withCriterion(`"ac-3"`), true},
+		{withCriterion(`"ac-1"`), true},
+		{withCriterion(`"ac-9999"`), true},
+		{withCriterion(`"screen-2"`), false},
+		{withCriterion(`"ac-0"`), false},
+		{withCriterion(`"ac-01"`), false},
+		{withCriterion(`"ac-03"`), false},
+		{withCriterion(`"ac-10000"`), false},
+		{withCriterion(`"ac-"`), false},
+		{withCriterion(`"ac-x"`), false},
+		{withCriterion(`"ac-3a"`), false},
+		{withCriterion(`"ac-3\n"`), false},
+		{withCriterion(`"AC-3"`), false},
+		{withCriterion(`3`), false},
+		{withCriterion(`null`), false},
+		{withCriterion(`""`), false},
+		{replace(workItem, `"about": {"type": "acceptance-criteria", "name": "main"}`), true},
+		// about.item of another type is any line of 1 to 32 characters
+		{withItemOf("mockup", `"screen-2"`), true},
+		{withItemOf("mockup", `"ac-3"`), true},
+		{withItemOf("mockup", `"ac-0"`), true},
+		{withItemOf("mockup", `"AC-3"`), true},
+		{withItem(`"screen-2"`), true},
+		{withItem(`"ac-3"`), true},
+		{withItem(`"login"`), true},
+		{withItem(`"Login screen"`), true},
+		{withItem(`"` + strings.Repeat("a", 32) + `"`), true},
+		{withItem(`"` + strings.Repeat("a", 33) + `"`), false},
+		{withItem(`3`), false},
+		{withItem(`null`), false},
+		{withItem(`""`), false},
+		{withItem(`"a\nb"`), false},
+		{withItem(`"a\u200bb"`), false},
+		// an option's proposal, only on a question that is about an entry
+		{proposalOn(withItem(`"ac-3"`), `"Use PostgreSQL 16."`), true},
+		{proposalOn(withItem(`"login"`), `"Use PostgreSQL 16."`), true},
+		{proposalOn(withItem(`"ac-3"`), `"`+strings.Repeat("a", 2000)+`"`), true},
+		{proposalOn(withItem(`"ac-3"`), `"Use PostgreSQL\n16."`), true},
+		{proposalOn(questionsDocument, `"Use PostgreSQL 16."`), false},
+		{proposalOn(replace(workItem, `"about": {"type": "proposal", "name": "main"}`), `"Use PostgreSQL 16."`), false},
 		{replace(`{"title": "None", "explanation": "Every read goes to the database."}`, `{"title": "None", "explanation": "Every read goes to the database.", "proposal": "Use no cache."}`), false},
-		{withCriterion(replace(redis, redis+`, "proposal": "Use Redis."`)), false},
-		{withCriterion(withProposal(`""`)), false},
-		{withCriterion(withProposal(`"` + strings.Repeat("a", 2001) + `"`)), false},
-		{withCriterion(withProposal(`null`)), false},
-		{withCriterion(withProposal(`7`)), false},
-		{withCriterion(withProposal(`"Use\u200bPostgreSQL."`)), false},
-		{withCriterion(questionsDocument), true},
-		{withCriterion(replace(option, recommended(`true`))), true},
+		{strings.Replace(replace(redis, redis+`, "proposal": "Use Redis."`), `"about": {"type": "proposal", "name": "main"}`, `"about": {"type": "proposal", "name": "main", "item": "ac-3"}`, 1), true},
+		{proposalOn(withItem(`"ac-3"`), `""`), false},
+		{proposalOn(withItem(`"ac-3"`), `"`+strings.Repeat("a", 2001)+`"`), false},
+		{proposalOn(withItem(`"ac-3"`), `null`), false},
+		{proposalOn(withItem(`"ac-3"`), `7`), false},
+		{proposalOn(withItem(`"ac-3"`), `"Use\u200bPostgreSQL."`), false},
+		{replace(workItem, `"about": {"type": "proposal", "name": "main", "item": "ac-3"}`), true},
+		{strings.Replace(withItem(`"ac-3"`), option, recommended(`true`), 1), true},
 		// history
 		{replace(`, "reopened": {"run": 2, "at": "2026-11-04T10:45:00Z"}`, ``), false},
 		{replace(`"reopened": {"run": 2, `, `"reopened": {"run": 0, `), false},
@@ -1190,6 +1249,219 @@ func TestProposalSourcesSchema(t *testing.T) {
 		// a member this schema does not define, at each level
 		{replace(`{"sources": [`, `{"version": 1, "sources": [`), false},
 		{replace(why, why+`, "title": "API"`), false},
+	} {
+		var doc any
+		if err := json.Unmarshal([]byte(c.doc), &doc); err != nil {
+			t.Fatalf("%s: %v", c.doc, err)
+		}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("%s: valid=%v err=%v", c.doc, c.valid, err)
+		}
+	}
+}
+
+// acceptanceCriteriaDocument is a document of acceptance-criteria.schema.json that
+// passes: a summary, a criterion and a criterion that is removed.
+const acceptanceCriteriaDocument = `{"summary": "A customer sees the new price before they pay.",
+ "criteria": [
+  {"id": "ac-1", "text": "The price page shows the new price.", "check": "Open the price page as a customer.\nThe price is 12.50."},
+  {"id": "ac-2", "text": "The old price is gone.", "check": "Search the price page for 10.00.",
+   "removed": {"reason": "The old price stays for existing customers."}}
+]}`
+
+// TestAcceptanceCriteriaSchema is each document that acceptance-criteria.schema.json
+// passes or fails.
+func TestAcceptanceCriteriaSchema(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/acceptance-criteria.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replace := func(from, to string) string {
+		if !strings.Contains(acceptanceCriteriaDocument, from) {
+			t.Fatalf("the document has no %s", from)
+		}
+		return strings.Replace(acceptanceCriteriaDocument, from, to, 1)
+	}
+	const (
+		summary = `"summary": "A customer sees the new price before they pay."`
+		text    = `"text": "The price page shows the new price."`
+		check   = `"check": "Search the price page for 10.00."`
+		removed = `"removed": {"reason": "The old price stays for existing customers."}`
+	)
+	for _, c := range []struct {
+		doc   string
+		valid bool
+	}{
+		{acceptanceCriteriaDocument, true},
+		{`{}`, false},
+		{`[]`, false},
+		{`{"summary": "One.", "criteria": []}`, false},
+		{`{"criteria": [{"id": "ac-1", "text": "One.", "check": "Look."}]}`, false},
+		{`{"summary": "One."}`, false},
+		{`{"summary": "One.", "criteria": {}}`, false},
+		{replace(`{"summary"`, `{"title": "Price", "summary"`), false},
+		// summary
+		{replace(summary, `"summary": ""`), false},
+		{replace(summary, `"summary": "`+strings.Repeat("a", 2000)+`"`), true},
+		{replace(summary, `"summary": "`+strings.Repeat("a", 2001)+`"`), false},
+		{replace(summary, `"summary": "One.\n\nTwo."`), true},
+		{replace(summary, `"summary": "One.​Two."`), false},
+		{replace(summary, `"summary": null`), false},
+		// the criterion's id: ac- and a number from 1 to 9999 with no leading zero
+		{replace(`"ac-1"`, `"ac-9999"`), true},
+		{replace(`"ac-1"`, `"ac-0"`), false},
+		{replace(`"ac-1"`, `"ac-01"`), false},
+		{replace(`"ac-1"`, `"ac-10000"`), false},
+		{replace(`"ac-1"`, `"AC-1"`), false},
+		{replace(`"ac-1"`, `"ac-1 "`), false},
+		{replace(`"ac-1"`, `"ac-"`), false},
+		{replace(`"ac-1"`, `"c1"`), false},
+		{replace(`"ac-1"`, `1`), false},
+		{replace(`"id": "ac-1", `, ``), false},
+		// text and check
+		{replace(text, `"text": ""`), false},
+		{replace(text, `"text": "`+strings.Repeat("a", 2000)+`"`), true},
+		{replace(text, `"text": "`+strings.Repeat("a", 2001)+`"`), false},
+		{replace(text, `"text": 1`), false},
+		{replace(text+`, `, ``), false},
+		{replace(check, `"check": ""`), false},
+		{replace(check, `"check": "`+strings.Repeat("a", 2001)+`"`), false},
+		{replace(check, `"check": "Search‮the page."`), false},
+		{replace(`, "check": "Open the price page as a customer.\nThe price is 12.50."`, ``), false},
+		// removed, with its reason
+		{replace(removed, `"removed": {"reason": "Not needed."}`), true},
+		{replace(removed, `"removed": {}`), false},
+		{replace(removed, `"removed": {"reason": ""}`), false},
+		{replace(removed, `"removed": {"reason": "`+strings.Repeat("a", 2001)+`"}`), false},
+		{replace(removed, `"removed": true`), false},
+		{replace(removed, `"removed": "Not needed."`), false},
+		{replace(removed, `"removed": {"reason": "Not needed.", "by": "Sam"}`), false},
+		{replace(`"check": "Open the price page as a customer.\nThe price is 12.50."`, `"check": "Open the price page as a customer.", `+removed), true},
+		// a member this schema does not define
+		{replace(`"id": "ac-1"`, `"id": "ac-1", "state": "open"`), false},
+		{replace(`"id": "ac-1"`, `"id": "ac-1", "criterion": "ac-1"`), false},
+	} {
+		var doc any
+		if err := json.Unmarshal([]byte(c.doc), &doc); err != nil {
+			t.Fatalf("%s: %v", c.doc, err)
+		}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("%s: valid=%v err=%v", c.doc, c.valid, err)
+		}
+	}
+}
+
+// verificationDocument is a document of verification.schema.json that passes: a row that
+// is met, a row that is not met, a criterion that was not verified and two model
+// families.
+const verificationDocument = `{"target_version": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
+ "matrix": [
+  {"criterion": "ac-1", "state": "met", "evidence": "The price page shows 12.50."},
+  {"criterion": "ac-2", "state": "not_met", "evidence": "The page still shows 10.00 in the footer."}
+ ],
+ "not_verified": [{"criterion": "ac-3", "reason": "The payment sandbox was down."}],
+ "model_families": ["anthropic", "openai"]}`
+
+// TestVerificationSchema is each document that verification.schema.json passes or fails.
+func TestVerificationSchema(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/verification.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replace := func(from, to string) string {
+		if !strings.Contains(verificationDocument, from) {
+			t.Fatalf("the document has no %s", from)
+		}
+		return strings.Replace(verificationDocument, from, to, 1)
+	}
+	const (
+		version = `"5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e"`
+		matrix  = `"matrix": [
+  {"criterion": "ac-1", "state": "met", "evidence": "The price page shows 12.50."},
+  {"criterion": "ac-2", "state": "not_met", "evidence": "The page still shows 10.00 in the footer."}
+ ]`
+		row      = `{"criterion": "ac-1", "state": "met", "evidence": "The price page shows 12.50."}`
+		notVer   = `"not_verified": [{"criterion": "ac-3", "reason": "The payment sandbox was down."}]`
+		families = `"model_families": ["anthropic", "openai"]`
+	)
+	for _, c := range []struct {
+		doc   string
+		valid bool
+	}{
+		{verificationDocument, true},
+		{`{}`, false},
+		{`[]`, false},
+		{`{"target_version": ` + version + `, "matrix": [], "not_verified": [], "model_families": ["anthropic"]}`, true},
+		{replace(`"target_version": `+version+`,`, ``), false},
+		{replace(matrix+`,`, ``), false},
+		{replace(notVer+`,`, ``), false},
+		{replace(",\n "+families, ``), false},
+		{replace(`{"target_version"`, `{"title": "Check", "target_version"`), false},
+		{replace(`"target_version": `+version+`,`, `"commit": `+version+`,`), false},
+		// target_version: 1 to 255 letters, digits and the characters ._/-
+		{replace(version, `"`+strings.Repeat("a", 40)+`"`), true},
+		{replace(version, `"`+strings.Repeat("a", 64)+`"`), true},
+		{replace(version, `"2026-11-18.3"`), true},
+		{replace(version, `"v1.2.3"`), true},
+		{replace(version, `"release/2026_11"`), true},
+		{replace(version, `"A"`), true},
+		{replace(version, `"`+strings.Repeat("a", 255)+`"`), true},
+		{replace(version, `"`+strings.Repeat("a", 256)+`"`), false},
+		{replace(version, `""`), false},
+		{replace(version, `"2026 11"`), false},
+		{replace(version, `"v1:2"`), false},
+		{replace(version, `"v1\n"`), false},
+		{replace(version, `"v1@x"`), false},
+		{replace(version, `12`), false},
+		{replace(version, `null`), false},
+		// the matrix rows
+		{replace(row, `{"criterion": "ac-9999", "state": "met", "evidence": "Seen."}`), true},
+		{replace(`"state": "met"`, `"state": "not_met"`), true},
+		{replace(`"state": "met"`, `"state": "verified"`), false},
+		{replace(`"state": "met"`, `"state": "failed"`), false},
+		{replace(`"state": "met"`, `"state": "not_verified"`), false},
+		{replace(`"state": "met"`, `"state": "passed"`), false},
+		{replace(`"state": "met"`, `"state": "Met"`), false},
+		{replace(`"state": "met"`, `"state": true`), false},
+		{replace(`"state": "met", `, ``), false},
+		{replace(`"criterion": "ac-1", "state"`, `"state"`), false},
+		{replace(`, "evidence": "The price page shows 12.50."`, ``), false},
+		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": ""`), false},
+		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": "`+strings.Repeat("a", 2000)+`"`), true},
+		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": "`+strings.Repeat("a", 2001)+`"`), false},
+		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": "Seen.\nTwice."`), true},
+		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": "Seen.​"`), false},
+		{replace(`"state": "met"`, `"state": "met", "by": "model"`), false},
+		{replace(matrix, `"matrix": {}`), false},
+		// a criterion id in a row, in not_verified: ac- and a number from 1 to 9999
+		{replace(`"ac-1"`, `"ac-0"`), false},
+		{replace(`"ac-1"`, `"ac-01"`), false},
+		{replace(`"ac-1"`, `"ac-10000"`), false},
+		{replace(`"ac-1"`, `"AC-1"`), false},
+		{replace(`"ac-1"`, `1`), false},
+		{replace(`"ac-3"`, `"ac-9999"`), true},
+		{replace(`"ac-3"`, `"ac-0"`), false},
+		{replace(`"ac-3"`, `"ac-01"`), false},
+		{replace(`"ac-3"`, `"ac-10000"`), false},
+		{replace(`"ac-3"`, `"q3"`), false},
+		// the criteria that were not verified, with their reason
+		{replace(`"reason": "The payment sandbox was down."`, `"reason": ""`), false},
+		{replace(`, "reason": "The payment sandbox was down."`, ``), false},
+		{replace(`"reason": "The payment sandbox was down."`, `"reason": "`+strings.Repeat("a", 2001)+`"`), false},
+		{replace(`"reason": "The payment sandbox was down."`, `"reason": "Down.", "state": "not_verified"`), false},
+		{replace(`"criterion": "ac-3", `, ``), false},
+		{replace(`"not_verified": [{"criterion": "ac-3", "reason": "The payment sandbox was down."}]`, `"not_verified": ["ac-3"]`), false},
+		// the model families
+		{replace(families, `"model_families": []`), false},
+		{replace(families, `"model_families": ["anthropic"]`), true},
+		{replace(families, `"model_families": "anthropic"`), false},
+		{replace(families, `"model_families": ["anthropic", "anthropic"]`), false},
+		{replace(families, `"model_families": [""]`), false},
+		{replace(families, `"model_families": ["`+strings.Repeat("a", 64)+`"]`), true},
+		{replace(families, `"model_families": ["`+strings.Repeat("a", 65)+`"]`), false},
+		{replace(families, `"model_families": ["a\nb"]`), false},
+		{replace(families, `"model_families": [1]`), false},
+		{replace(families, `"model_families": [{"name": "anthropic"}]`), false},
 	} {
 		var doc any
 		if err := json.Unmarshal([]byte(c.doc), &doc); err != nil {

@@ -210,7 +210,7 @@ func TestABranchCommitThatChangesQoryStopsAfterTheCompose(t *testing.T) {
 	if err == nil || n.joined {
 		t.Fatalf("%v (exit %d), want a stop before the join\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, out+err.Error(), "qory run: composed ", "commit "+changed[:12]+" of qory/"+workItem+" has another .qory")
+	wants(t, out+err.Error(), "qory run: composed ", "Commit "+changed[:12]+" of qory/"+workItem+" has a .qory folder that differs from the one at target version ", ", so the run did not start; the code is used\n  qory keeps the files of the run in .qory.")
 	gotReport, got := composed(t, h.dir)
 	sameCompose(t, gotReport, wantReport, got, want)
 	if _, err := os.Stat(filepath.Join(h.dir, ".qory", "notes.md")); !os.IsNotExist(err) {

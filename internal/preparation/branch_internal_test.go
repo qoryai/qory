@@ -194,8 +194,10 @@ func TestABranchCannotChangeTheComposedHarness(t *testing.T) {
 	b := fetchBranchAt(t, dir, "acme/shop", first, versionOf("acme/shop", commit))
 
 	_, err := switchTo(dir, b)
-	if err == nil || !strings.Contains(err.Error(), "commit "+commit[:12]+" of "+testRef+" has another .qory") {
-		t.Fatalf("err = %v", err)
+	want := "qory run: Commit " + commit[:12] + " of " + testRef + " has a .qory folder that differs from the one at target version " + first[:12] +
+		", so the run did not start; the code is used\n  qory keeps the files of the run in .qory."
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %s", err, want)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".qory", "harness")); !os.IsNotExist(err) {
 		t.Errorf(".qory/harness: %v", err)
@@ -224,9 +226,10 @@ func TestAFileInTheWayStopsTheCheckout(t *testing.T) {
 			}
 
 			_, err := switchTo(dir, b)
-			want := "qory run: add a new version of the artifact submission in Qory Apiary with a commit that git can check out"
-			if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), "; the code is used") {
-				t.Fatalf("err = %v", err)
+			want := "qory run: git cannot check out commit " + commit[:12] + " of " + testRef +
+				", the stored version of the artifact submission, so the run did not start; the code is used\n  The checkout in acme/shop failed: "
+			if err == nil || !strings.HasPrefix(err.Error(), want) {
+				t.Fatalf("err = %v, want it to start with %s", err, want)
 			}
 			if got := contentOf(t, filepath.Join(dir, "notes.md")); got != "in the way\n" {
 				t.Errorf("notes.md = %q", got)
@@ -244,9 +247,9 @@ func TestStopsOnABranchCommitTheRemoteLacks(t *testing.T) {
 
 	b := &WorkBranch{Ref: testRef, Version: versionOf("acme/shop", strings.Repeat("a", 40))}
 	_, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: first, Branch: b})
-	want := "qory run: add a new version of the artifact submission in Qory Apiary with a commit of acme/shop, then take the work item in again: the version has aaaaaaaaaaaa"
+	want := "qory run: The stored version of the artifact submission has commit aaaaaaaaaaaa, which is not a commit on acme/shop on git.example.com, so the run did not start; the code is used\n  The fetch through the run's gateway failed: "
 	if err == nil || !strings.HasPrefix(err.Error(), want) {
-		t.Fatalf("err = %v", err)
+		t.Fatalf("err = %v, want it to start with %s", err, want)
 	}
 }
 
@@ -259,7 +262,7 @@ func TestStopsOnABranchIDThatIsNoCommit(t *testing.T) {
 
 	b := &WorkBranch{Ref: testRef, Version: versionOf("acme/shop", tree)}
 	_, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: first, Branch: b})
-	want := "qory run: add a new version of the artifact submission in Qory Apiary with a commit of acme/shop, then take the work item in again: the version has " + tree[:12] + ", which is not a commit; the code is used"
+	want := "qory run: The stored version of the artifact submission has " + tree[:12] + " for acme/shop, which is not a commit, so the run did not start; the code is used"
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %s", err, want)
 	}

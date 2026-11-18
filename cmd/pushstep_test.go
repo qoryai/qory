@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -36,11 +37,11 @@ import (
 	"github.com/qoryai/qory/internal/submission"
 )
 
-// versionWays is the fix of a branch pushed with no version stored, and noType the line of
+// deleteBranch is the fix of a branch pushed with no version stored, and noType the line of
 // a workspace with no artifact type submission.
 const (
-	versionWays = "add a new version of the artifact submission in Qory Apiary with the head of qory/" + workItem + " on acme/site, or delete that branch on " + proxygittest.Host
-	noType      = "Define the artifact type submission in the workspace's Artifact types, then " + versionWays + ", then run the round again"
+	deleteBranch = "delete branch qory/" + workItem + " of acme/site on " + proxygittest.Host
+	noType       = "Define the artifact type submission in the workspace's Artifact types, then " + deleteBranch + ", then run the round again"
 )
 
 // pushRunNumber is the run's number in the work item of [pushAPI], and changesLeft the
@@ -1419,7 +1420,8 @@ func TestARateLimitIsBounded(t *testing.T) {
 	if len(p.waits) != 4 || p.waits[0] != time.Minute {
 		t.Errorf("the waits are %v, want 4 of a minute", p.waits)
 	}
-	wants(t, r.out, "qory run: "+versionWays+", then take the work item in again: qory pushed qory/"+workItem+", and the version of the artifact submission was not stored: ")
+	wants(t, r.out, "qory run: "+deleteBranch+", then take the work item in again: qory pushed qory/"+workItem+", and the version of the artifact submission was not stored: ")
+	lacks(t, r.out, "add a new version")
 }
 
 // TestNoResponseToAStoredVersionSendsNothingAgain is a POST that stored its version and
@@ -1488,12 +1490,12 @@ func TestNoResponseThatTheIndexDoesNotSettleFails(t *testing.T) {
 	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 6 {
 		t.Errorf("%d POST, %d reads, want 1, and the read of the fetch and 5", posts, reads)
 	}
-	wants(t, r.out, "qory run: check the artifact submission of the work item in Qory Apiary; with no version of this run, "+versionWays+"; then take the work item in again: qory pushed qory/"+workItem+
+	wants(t, r.out, "qory run: check the artifact submission of the work item in Qory Apiary; with no version of this run, "+deleteBranch+"; then take the work item in again: qory pushed qory/"+workItem+
 		", and the request that stores its version ended with no response, so the version may or may not be stored: ")
 }
 
 // TestAWorkspaceWithoutTheTypeFailsTheStep is unknown_type: the step fails after the push,
-// with the line of the workflow model and the two ways of a pushed branch.
+// with the line of the workflow model and the fix of a pushed branch.
 func TestAWorkspaceWithoutTheTypeFailsTheStep(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
@@ -1796,6 +1798,43 @@ func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 	}
 }
 
+// gitCredentialHelperOrigin is the file from which git reads a credential.helper outside
+// the test's configuration file, or "" if it reads none. It runs git with an empty system
+// file, no global file and an empty home, and with no repository, so what it finds comes
+// from a file that GIT_CONFIG_SYSTEM does not replace, such as Apple's
+// /Library/Developer/CommandLineTools/usr/share/git-core/gitconfig.
+func gitCredentialHelperOrigin(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	dir := tempDir(t)
+	empty := filepath.Join(dir, "empty")
+	writeFile(t, empty, "")
+	git := exec.Command("git", "config", "--show-origin", "--get-all", "credential.helper")
+	git.Dir = dir
+	git.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + dir,
+		"GIT_CONFIG_NOSYSTEM=0",
+		"GIT_CONFIG_SYSTEM=" + empty,
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CEILING_DIRECTORIES=" + dir,
+		"GIT_TERMINAL_PROMPT=0",
+	}
+	out, err := git.Output()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 && len(out) == 0 {
+		return ""
+	}
+	if err != nil {
+		t.Fatalf("git config credential.helper failed: %v", err)
+	}
+	line, _, _ := strings.Cut(string(out), "\n")
+	origin, _, _ := strings.Cut(line, "\t")
+	return origin
+}
+
 // TestACredentialHelperOfAConfigFileIsNotRead has a system or global configuration file
 // with a helper that writes a file. The helper does not run in a run that fetches and
 // pushes through a proxy with a password. A plain git with the same file and the same
@@ -1803,6 +1842,11 @@ func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 func TestACredentialHelperOfAConfigFileIsNotRead(t *testing.T) {
 	for name, variable := range map[string]string{"system": "GIT_CONFIG_SYSTEM", "global": "GIT_CONFIG_GLOBAL"} {
 		t.Run(name, func(t *testing.T) {
+			if variable == "GIT_CONFIG_SYSTEM" && runtime.GOOS == "darwin" {
+				if origin := gitCredentialHelperOrigin(t); origin != "" {
+					t.Skipf("git reads credential.helper from %s even with GIT_CONFIG_SYSTEM set, so the plain git would open the macOS keychain; CI on Linux runs this subtest", origin)
+				}
+			}
 			p := newPushRepo(t, "write")
 			marker := filepath.Join(tempDir(t), "helper-ran")
 			helper := filepath.Join(tempDir(t), "helper")
@@ -1815,6 +1859,8 @@ func TestACredentialHelperOfAConfigFileIsNotRead(t *testing.T) {
 			t.Setenv(variable, config)
 			if variable == "GIT_CONFIG_SYSTEM" {
 				t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
+			} else {
+				t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 			}
 			recordGit(t, config)
 			r := p.run(t, func(dir string) {
@@ -2007,10 +2053,10 @@ func TestTheMessageOfAnUnverifiedAnswerIsPrintedAsItIs(t *testing.T) {
 	wants(t, r.out, "the version of the artifact submission was not stored: "+message+"; the code is used")
 }
 
-// TestASecondRepositoryThatFailsGivesTheWays is a run of two repositories whose first push
-// landed and whose second failed: no version is stored, and the line has the two ways for
+// TestASecondRepositoryThatFailsGivesTheFix is a run of two repositories whose first push
+// landed and whose second failed: no version is stored, and the line has the fix for
 // the first and the fix of the second.
-func TestASecondRepositoryThatFailsGivesTheWays(t *testing.T) {
+func TestASecondRepositoryThatFailsGivesTheFix(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
 	bare := filepath.Join(p.h.server.Root, "acme", "lib.git")
@@ -2025,7 +2071,7 @@ func TestASecondRepositoryThatFailsGivesTheWays(t *testing.T) {
 		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
 	}, nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "qory run: "+versionWays+": qory pushed acme/site and stored no version, because the push of the next repository failed: change the rule on "+proxygittest.Host)
+	wants(t, r.out, "qory run: "+deleteBranch+": qory pushed acme/site and stored no version, because the push of the next repository failed: change the rule on "+proxygittest.Host)
 	if p.branchHead(t) == "" {
 		t.Error("the first repository has no branch")
 	}
@@ -2059,7 +2105,7 @@ func TestASecondRepositoryWhoseHeadMovedEndsTheRunWithPushHeadChanged(t *testing
 	if got := r.closes[0].Reason; got != string(contracts.EndCodePushHeadChanged) {
 		t.Errorf("the run closed with the reason %q, want %q", got, contracts.EndCodePushHeadChanged)
 	}
-	wants(t, r.out, "qory run: "+versionWays+": qory pushed acme/site and stored no version, because the push of the next repository failed: Check branch qory/"+workItem)
+	wants(t, r.out, "qory run: "+deleteBranch+": qory pushed acme/site and stored no version, because the push of the next repository failed: Check branch qory/"+workItem)
 	if got := proxygittest.Git(t, lib, "rev-parse", "refs/heads/qory/"+workItem); got != moved {
 		t.Errorf("the second repository's branch is at %s, want %s", got, moved)
 	}
@@ -2148,7 +2194,7 @@ func TestAStopAfterThePushShowsBothWaysOut(t *testing.T) {
 				t.Errorf("the forge has no branch\n%s", r.out)
 			}
 			wants(t, r.log(), "qory run: pushed qory/"+workItem+" to acme/site at ")
-			wants(t, r.out, "check the artifact submission of the work item in Qory Apiary; with no version of this run, "+versionWays+
+			wants(t, r.out, "check the artifact submission of the work item in Qory Apiary; with no version of this run, "+deleteBranch+
 				"; then take the work item in again: qory pushed acme/site, and "+c.cause+", so the version may or may not be stored; the code is used")
 			lacks(t, r.out, "may not have reached the branch")
 		})

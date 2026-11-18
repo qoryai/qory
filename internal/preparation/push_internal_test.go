@@ -222,6 +222,9 @@ func TestPushFailed(t *testing.T) {
 		if !strings.HasPrefix(got, want) || !strings.HasSuffix(got, "; the code is used") {
 			t.Errorf("pushFailed(%q) = %q, want it to start with %q", output, got, want)
 		}
+		if strings.Contains(got, "add a new version") {
+			t.Errorf("pushFailed(%q) offers a version: %q", output, got)
+		}
 		if strings.Contains(got, "token-123") {
 			t.Errorf("pushFailed(%q) shows the password: %q", output, got)
 		}
@@ -1168,5 +1171,15 @@ func TestABaseBranchOverTheFormatsLimitIsLeftOut(t *testing.T) {
 	}
 	if got := baseBranch(strings.Repeat("é", 256)); got != "" {
 		t.Errorf("a name of 256 characters is %q, want none", got)
+	}
+}
+
+// TestDeleteBranchIsTheOnlyWayOut is the fix of a branch that was pushed with no version
+// stored: delete the branch, because only a run stores a version.
+func TestDeleteBranchIsTheOnlyWayOut(t *testing.T) {
+	b := &WorkBranch{Ref: testRef, system: "git.example.com", pushed: []string{"acme/shop", "acme/lib"}}
+	want := "delete branch qory/wi_1 of acme/shop and acme/lib on git.example.com"
+	if got := b.DeleteBranch(); got != want {
+		t.Errorf("DeleteBranch() = %q, want %q", got, want)
 	}
 }

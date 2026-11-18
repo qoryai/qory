@@ -88,8 +88,8 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, timeout time.Du
 	}
 
 	if document.Ref != branch.Ref {
-		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary with the ref %s: version %d has another ref.%s",
-			submissionType, branch.Ref, version.Number, codeUsed)
+		return nil, fmt.Errorf("Version %d of the artifact %s has a ref other than %s, so the run did not start%s",
+			version.Number, submissionType, branch.Ref, codeUsed)
 	}
 
 	// A repository starts at the commit of the version; its commits, links and draft
@@ -177,8 +177,8 @@ func chosenSubmission(snapshot *runapi.Snapshot, index *runapi.Index) (*runapi.V
 // submission format.
 func readSubmissionVersion(ctx context.Context, client *runapi.Client, version *runapi.Version) (*submission.Submission, error) {
 	if len(version.Files) != 1 || version.Files[0].Size > maxSubmissionFile {
-		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary with one file of at most %d bytes: version %d has another size.",
-			submissionType, maxSubmissionFile, version.Number)
+		return nil, fmt.Errorf("Version %d of the artifact %s does not have exactly one file of at most %d bytes, so the run did not start",
+			version.Number, submissionType, maxSubmissionFile)
 	}
 
 	var content bytes.Buffer
@@ -187,12 +187,12 @@ func readSubmissionVersion(ctx context.Context, client *runapi.Client, version *
 	}
 
 	if err := submission.Check(content.Bytes()); err != nil {
-		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary in place of version %d: %w", submissionType, version.Number, err)
+		return nil, fmt.Errorf("Version %d of the artifact %s does not match the submission format, so the run did not start: %w", version.Number, submissionType, err)
 	}
 
 	var document submission.Submission
 	if err := json.Unmarshal(content.Bytes(), &document); err != nil {
-		return nil, fmt.Errorf("Add a new version of the artifact %s in Qory Apiary in place of version %d: %w", submissionType, version.Number, err)
+		return nil, fmt.Errorf("Version %d of the artifact %s cannot be read as a submission document, so the run did not start: %w", version.Number, submissionType, err)
 	}
 
 	return &document, nil

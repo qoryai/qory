@@ -43,7 +43,8 @@ const (
 	textNoCommitLeft     = "qory run: take the work item in again in Qory Apiary: the commit of what the agent left in %s failed: %s; the code is used"
 	textNoHistory        = "qory run: take the work item in again in Qory Apiary: the check that HEAD of %s descends from commit %s failed: %s; the code is used"
 	textNotFastForward   = "qory run: take the work item in again in Qory Apiary, and keep the run's commits on top of commit %[3]s: HEAD of %[1]s is at %[2]s, which does not descend from it, so a push would not be a fast-forward; the code is used"
-	textVersionWays      = "add a new version of the artifact submission in Qory Apiary with the head of %[1]s on %[2]s, or delete that branch on %[3]s"
+	textDeleteBranch     = "delete branch %[1]s of %[2]s on %[3]s"
+	textBranchMoved      = "qory run: " + textDeleteBranch + ", then take the work item in again: the branch moved since the run fetched it, and the push failed: %[4]s; the code is used"
 	textPushedNoVersion  = "qory run: %s: qory pushed %s and stored no version, because the push of the next repository failed: %s"
 	textPushRefused      = "qory run: change the rule on %[3]s that stops a push to %[1]s of %[2]s, then take the work item in again: the push failed: %[4]s; the code is used"
 	textPushForbidden    = "qory run: Contact support: the push was refused (403).\n  One of these most likely stopped it:\n  1. The run's push proxy refuses a push that is not a plain push to the push_ref of the push credential (for example a signed push or a push with push options), and qory pushes to refs/heads/%[3]s (wall:push-ref).\n  2. The run's push credential has no item for /%[1]s.git/git-receive-pack on %[2]s, and the push proxy refuses every other host and path.\n  3. The forge stopped the push: its permission for the push credential, or a branch rule.\n  The push of %[1]s to %[2]s returned 403: %[4]s; the code is used"
@@ -181,7 +182,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 		}
 		if err := pushTo(ctx, stepGit(&p, ""), readGit, folders[i], b, r, heads[i], leases[i], report); err != nil {
 			if len(b.pushed) > 0 {
-				return nil, &pushedNoVersion{text: fmt.Sprintf(textPushedNoVersion, b.VersionWays(), b.PushedPaths(), strings.TrimPrefix(err.Error(), "qory run: ")), err: err}
+				return nil, &pushedNoVersion{text: fmt.Sprintf(textPushedNoVersion, b.DeleteBranch(), b.PushedPaths(), strings.TrimPrefix(err.Error(), "qory run: ")), err: err}
 			}
 			return nil, err
 		}

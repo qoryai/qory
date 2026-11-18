@@ -2,7 +2,7 @@
 
 What `qory harness compose` reads and what it writes.
 
-## Ten files
+## Twelve files
 
 | File | Lives in | Defines |
 |---|---|---|
@@ -12,6 +12,8 @@ What `qory harness compose` reads and what it writes.
 | a role contract | optional; a file of a module that declares an agents role, at the path that `roles.agents.<role>.contract` in the module's `qory-module.yaml` is set to | the parts an agent needs to fill the role: level-2 headings, front-matter keys, tools, a tier, and the form of its report (§The role contract). The compose checks every agent that fills the role against it; the harness's checks read the report's form |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for, the modules it appends and the workflow hooks it adds, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 | a submission document | the file of a version of the structured artifact type `submission` | what a run submits for a work item: its branch, the commits in each repository, the verdict and the draft pull request (§The submission format). No compose reads it |
+| an acceptance criteria document | the file of a version of a structured artifact type for a work item's acceptance criteria | a summary of what the work item must achieve and the criteria that say when it is achieved, each with its check (§The acceptance criteria format). No compose reads it |
+| a verification document | the file of a version of a structured artifact type for a work item's verification | the result of checking the criteria against one version of the work (§The verification format). No compose reads it |
 | a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
 | a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
 | a proposal sources document | the file `sources.json` of a version of the artifact type `proposal` | every source a run used to write the proposal, with the reason for each (§The proposal sources format). No compose reads it |
@@ -787,6 +789,65 @@ artifact_types:
     json_schema: {…}             # the content of submission.schema.json
 ```
 
+## The acceptance criteria format
+
+An acceptance criteria document records what a work item must achieve and the criteria that
+say when it is achieved. The format names no kind of work, so a workspace that does not
+produce software uses it as it is. This is version 1 of the format
+([acceptance-criteria.schema.json](acceptance-criteria.schema.json)):
+
+```json
+{"summary": "A customer sees the new price before they pay.",
+ "criteria": [{"id": "ac-1", "text": "The price page shows the new price.",
+               "check": "Open the price page as a customer. The price is 12.50."},
+              {"id": "ac-2", "text": "The old price is gone.",
+               "check": "Search the price page for 10.00.",
+               "removed": {"reason": "The old price stays for existing customers."}}]}
+```
+
+| Member | Meaning |
+|---|---|
+| `summary` | what the work item must achieve, plain text, 1 to 2000 characters |
+| `criteria` | every criterion, at least one, in the order they were written; a removed criterion stays in the list |
+| `id` | the criterion's id, unique in the document: `ac-` and a number from 1 to 9999 with no leading zero, such as `ac-3` |
+| `text` | the condition that the finished work item meets, plain text, 1 to 2000 characters |
+| `check` | how to check that the condition is met, free text, 1 to 2000 characters |
+| `removed` | present when the criterion is dropped, and only then: an object with `reason`, why it is dropped, 1 to 2000 characters |
+
+The id form `ac-` and a number from 1 to 9999 with no leading zero is the one form of every
+criterion id in the contract: `ac-0`, `ac-01` and `ac-10000` fail the schema, in this
+format, in the verification format and in the questions format. A document has no member
+other than those in the table. A JSON Schema cannot check that each `id` is unique.
+
+## The verification format
+
+A verification document records the result of checking a work item's acceptance criteria
+against one version of its target. The format names no kind of work. This is version 1 of the
+format ([verification.schema.json](verification.schema.json)):
+
+```json
+{"target_version": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
+ "matrix": [{"criterion": "ac-1", "state": "met", "evidence": "The price page shows 12.50."},
+            {"criterion": "ac-2", "state": "not_met", "evidence": "The page still shows 10.00 in the footer."}],
+ "not_verified": [{"criterion": "ac-3", "reason": "The payment sandbox was down."}],
+ "model_families": ["anthropic", "openai"]}
+```
+
+| Member | Meaning |
+|---|---|
+| `target_version` | the exact version of the target that the verification checked, never a name that can later point to another version; for a repository, a commit. 1 to 255 letters, digits and the characters `._/-`, such as `5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e` or `2026-11-18.3` |
+| `matrix` | one row for each criterion that was checked, empty when none was |
+| `criterion` | the id of the criterion, in the form of `id` in the acceptance criteria format |
+| `state` | `met`: the check shows that the criterion is met; `not_met`: the check shows that it is not |
+| `evidence` | what the check found: what was looked at or run, and the result, plain text, 1 to 2000 characters |
+| `not_verified` | each criterion that was not checked, empty when every criterion was checked; each has `criterion` and `reason`, why it was not checked, 1 to 2000 characters |
+| `model_families` | the families of the models that checked the criteria, at least one, each 1 to 64 characters on one line, none twice |
+
+A criterion is in `matrix` or in `not_verified`, never in both, so `state` has no value for
+a criterion that was not checked. A document has no member other than those in the table. A
+JSON Schema cannot check that each id is a criterion of the newest acceptance criteria, or
+that a criterion is in only one of the two lists.
+
 ## The questions format
 
 A questions document records every question of a work item and its answer or a run's
@@ -799,16 +860,33 @@ one option of a question. An answer has
 the chosen option, or the member's answer when `option` is `null`. `note` is optional when
 the member chose an option and required when `option` is `null`.
 
-A question has the optional member `criterion`, the id of the acceptance criterion the
-question is about: `ac-` and a number from 1 to 9999 with no leading zero, such as `ac-3`.
-A question about no acceptance criterion has no `criterion`. The criterion ids of the
-mockup schema of Qory Apiary, `mockup.schema.json`, have the same form. `qory` does not
-ship that file.
+A question has the required member `about`, what the question is about. It has one of two
+forms:
 
-An option has the optional member `proposal`, the new wording of the question's criterion
-that the run proposes, for a member to edit before sending: plain text, 1 to 2000
-characters. Only an option of a question with `criterion` has `proposal`. The schema
-refuses `proposal` on an option of a question with no `criterion`.
+```json
+{"work_item": true}
+{"type": "acceptance-criteria", "name": "main", "item": "ac-3"}
+```
+
+- `{"work_item": true}`: the work item itself, before any output, such as the ticket. It
+  has no other member.
+- An output of the work item: `type` is the artifact type's name, as in `artifact` of a
+  review comment, and `name` is the artifact's name, 1 to 64 characters on one line, such
+  as `main`. `item` is optional: the id of the entry of that artifact that the question
+  concerns, 1 to 32 characters on one line, such as `screen-2` for a screen of a mockup.
+  When `type` is `acceptance-criteria`, `item` is a criterion id: `ac-` and a number from
+  1 to 9999 with no leading zero, such as `ac-3`, so `screen-2`, `ac-0`, `ac-01` and
+  `ac-10000` fail the schema. With any other `type`, `ac-3` is an id like any other.
+
+No member of `about` is a work item id: the document is for one work item. A JSON Schema
+cannot check that the work item has the artifact or that the artifact has the entry.
+`about` replaces the member `criterion`, which a question no longer has.
+
+An option has the optional member `proposal`, the new wording of the entry that `about.item`
+names, which the run proposes for a member to edit before sending: plain text, 1 to 2000
+characters. Only an option of a question whose `about` has `item` has `proposal`. The schema
+refuses `proposal` on an option of a question about the work item, and on one about an
+output with no `item`.
 
 A run that chooses an option without asking a member records a decided question: its
 `state` is `decided`, so it is not open, and it has `decision`. A decided question has at
