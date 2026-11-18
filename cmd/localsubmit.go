@@ -26,8 +26,9 @@ const (
 )
 
 // localPushCheck is a check of a push that a local run makes: it gets the repository and the
-// branch about to be pushed, and an error refuses the push. The checks of the keys in the commits
-// (Q-50) and of the scope of the push (Q-36) are registered with [registerPushCheck].
+// branch about to be pushed, and an error refuses the push. The check for keys in the commits and
+// the check for changes to files that a session may not change are registered with
+// [registerPushCheck].
 type localPushCheck func(ctx context.Context, repo localRepository) error
 
 // localRepository is the repository a local run pushes: its folder, its system and path, the
@@ -55,7 +56,6 @@ func registerPushCheck(check localPushCheck) { localPushChecks = append(localPus
 // that refuses ends the step before any push, and a push that fails leaves its repository out of
 // the program. Each line goes to w.
 func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitProgram, passed bool) {
-	given := readHandoffPrinting(w, c.dir.Work())
 	if len(c.landed) == 0 {
 		return
 	}
@@ -63,6 +63,7 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 		fmt.Fprintln(w, textPushChecksMissing)
 		return
 	}
+	given := readHandoffPrinting(w, c.dir.Work())
 	var repos []localRepository
 	for _, r := range c.repos {
 		branch := c.landed[r.Path]

@@ -152,12 +152,16 @@ func TestALocalRunWithARefusingCheckPushesNothing(t *testing.T) {
 	wants(t, out, "a key is in a commit")
 }
 
-// TestALocalRunWithNoCheckPushesNothing is a local run with a hand-off text and no push check
-// registered: the step fails closed. The output has the one line that says so, of at most 100
-// characters, and nothing is pushed or started.
+// TestALocalRunWithNoCheckPushesNothing is a local run with no push check
+// registered and a hand-off file that is not usable: the step fails closed. The output has the one
+// line that says so, of at most 100 characters, and nothing else, and nothing is pushed or started.
 func TestALocalRunWithNoCheckPushesNothing(t *testing.T) {
 	_, bare, started := localProgramCheckout(t)
-	agentInCopy(t, handsOffText(t))
+	agentInCopy(t, func(spec session.SessionSpec) {
+		handsOffText(t)(spec)
+		// A hand-off file that is not usable would print a line of its own if the step read it.
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "handoff", "submission.json"), "{")
+	})
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -169,6 +173,7 @@ func TestALocalRunWithNoCheckPushesNothing(t *testing.T) {
 	if n := strings.Count(out, line); n != 1 {
 		t.Errorf("the output has the line %d times, want 1:\n%s", n, out)
 	}
+	lacks(t, out, "hand-off")
 	if got := pushedBranches(t, bare); got != "" {
 		t.Errorf("the bare repository has %q, want none", got)
 	}

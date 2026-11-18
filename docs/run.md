@@ -2971,9 +2971,10 @@ output. The program prints its result on standard output, one line for each fact
 a line feed or a carriage return and a line feed: `draft_number`, `draft_url`, `draft_title`,
 `draft_state` (`draft`, `open`, `closed` or `merged`) and `draft_action` (`opened`, `updated`
 or `kept`, and `kept` for a draft that is `closed` or `merged`), each with its value after one
-space, and `commit_url <commit> <address>` for the base and each commit. qory stores the five
-draft lines as the draft, only when each is there once and valid, and each address in the
-`commit_url` of the repository, its `base` or its commit. A number has 1 to 9 digits and no
+space, and `commit_url <commit> <address>` for the base and each commit. qory takes the five
+draft lines as the draft, only when each is there once and valid, and each address as the
+`commit_url` of the repository, its `base` or its commit. A run with no run code keeps no record
+of them. A number has 1 to 9 digits and no
 leading zero, a title is UTF-8 of at most 256 characters with a character that is not a space
 and no control, bidirectional or invisible character, and an address is `https` on the
 repository's `system`, with a path, at most 2048 characters, of the ASCII characters that RFC
