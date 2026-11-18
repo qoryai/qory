@@ -122,7 +122,7 @@ workflows:                       # optional; the settings of the workflows a dis
   example:
     time_limit: 45m              # optional; a duration, such as 45m or 7h
     access: write                # optional; read, write-no-push, or write, read when left out
-    tier: thinking               # optional; light, fast, or thinking, none when left out
+    tier: thinking               # optional; light, balanced, or thinking, none when left out
     hook_points:                 # optional; where a checkout extending the stack may add workflow hooks
       after-review-round: {at: end, kinds: [check, review]}
 ```
@@ -208,7 +208,7 @@ schema is [config.schema.json](config.schema.json).
 | `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `Set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m.` with `The value is <value>.` and `workflows.<name> is in <file>.` on the next two lines. The `time_limit_minutes` in the run's documents, when they set it, applies instead, and a workflow without it runs for at most 3 hours |
 | `workflows.<name>.hook_points` | no | the points of the workflow where a checkout extending the stack may add workflow hooks, by the point's name: `{at: end, kinds: [check, review]}`. `at` is where the point sits in the workflow's session, `end`, `start` or `inside`; `kinds` is one or more of `check`, `review` and `enrich`, each once. A point's name has the form of a workflow's name, and is unique in the stack, since a hook selects a point by its name alone. Only a `qory-stack.yaml` declares points: a `qory.yaml` that defines a stack, which nothing extends, is refused with `Remove hook_points from the workflows in qory.yaml.` (§Workflow hooks) |
 | `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on: `read`, `write-no-push`, or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access to a valid level.` with `The levels are read, write-no-push, and write.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. A run takes the lower of this access and `access` in the run's documents, in the order `read`, `write-no-push`, `write`; documents with no target have no `access`, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A `write-no-push` run has a writable checkout, no push step, no submit, and no version of the artifact `branch`. At `write` the checkout is writable and qory pushes what the agent left |
-| `workflows.<name>.tier` | no | the tier that names the main session's model and effort for a dispatched run of the workflow: `light`, `fast`, or `thinking`; none when left out. qory stops with an error on any other value: `Set workflows.<name>.tier to a valid tier.` with `The tiers are light, fast, and thinking.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. qory passes nothing new to the run: Qory Apiary resolves the session's model and effort from the tier, and sends them as it sends the session's model. `qory run` does not read it |
+| `workflows.<name>.tier` | no | the tier that names the main session's model and effort for a dispatched run of the workflow: `light`, `balanced`, or `thinking`; none when left out. qory stops with an error on any other value: `Set workflows.<name>.tier to a valid tier.` with `The tiers are light, balanced, and thinking.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. qory passes nothing new to the run: Qory Apiary resolves the session's model and effort from the tier, and sends them as it sends the session's model. `qory run` does not read it |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 | `extending.hooks` | no | lets a checkout extending the stack add workflow hooks at the points of its workflows: `per_point`, the most hooks one point takes, 3 when left out; `per_workflow`, the most the points of one workflow take together, 10 when left out; `timeout`, a duration in whole seconds, 1s or more, the longest a hook may run and the timeout of a hook that sets none, 10 minutes when left out. A count below 1 is refused. Without the block a checkout adds no workflow hook (§Workflow hooks) |
 | `extending.target` | no | the runtimes and the models the stack is written for, `runtime` and `model`, each one name or a list, one of the two at least. A checkout's resolved target outside either list fails the compose; listed models make the model required, since a target without one runs whatever the runtime defaults to, which is a model the stack did not list. Left out, every target is accepted, a model left out included (§Extending a stack) |
@@ -790,6 +790,11 @@ A question about no acceptance criterion has no `criterion`. The criterion ids o
 mockup schema of Qory Apiary, `mockup.schema.json`, have the same form. `qory` does not
 ship that file.
 
+An option has the optional member `proposal`, the new wording of the question's criterion
+that the run proposes, for a member to edit before sending: plain text, 1 to 2000
+characters. Only an option of a question with `criterion` has `proposal`. The schema
+refuses `proposal` on an option of a question with no `criterion`.
+
 A run that chooses an option without asking a member records a decided question: its
 `state` is `decided`, so it is not open, and it has `decision`. A decided question has at
 least one option, and none has `recommended`. `decision` has four members, all required:
@@ -1170,7 +1175,7 @@ process.yaml                     a factory's process template, checked when expo
 <anything else>                  the module's other files, reached as $QORY_HARNESS_HOME/modules/<name>/<path>
 ```
 
-`model` may be a tier, `${qory:light}`, `${qory:fast}` or `${qory:thinking}`, which the compose replaces with the model id the tier maps to (§ The configuration). A tier with no map leaves the agent without a model, so it runs on the main model, and the compose prints a row.
+`model` may be a tier, `${qory:light}`, `${qory:balanced}` or `${qory:thinking}`, which the compose replaces with the model id the tier maps to (§ The configuration). A tier with no map leaves the agent without a model, so it runs on the main model, and the compose prints a row.
 
 `paths`, optional, lists the files of a change an agent reads, as globs from the checkout
 root: `paths: ["**/*.py", pyproject.toml]`, or one glob as a string. A glob matches a path
@@ -1293,7 +1298,7 @@ report: {}
 - `tools` are the tools the agent's `tools` key lists, as a comma-separated string or a
   list, each matched exactly: `Bash(git:*)` is not `Bash`. An agent without a `tools` key
   lacks every tool listed.
-- `tier: true` requires the agent's model to be a tier, such as `${qory:fast}`.
+- `tier: true` requires the agent's model to be a tier, such as `${qory:balanced}`.
 - `report` is the form of the agent's report, which the harness's checks read. The compose
   checks only that it is a map.
 
@@ -1313,7 +1318,7 @@ Complete agent python-developer of module python, or bind agents.developer to an
   - the heading "## Stop conditions"
   - the front-matter key model
   - the tool Bash
-  - a tier in model, such as ${qory:fast}
+  - a tier in model, such as ${qory:balanced}
 ```
 
 For a member of a group role, the fix line is `Complete agent python-reviewer, or remove
@@ -2085,7 +2090,7 @@ exports:                         # in a repository delivering stacks or modules 
 | `harness.runtime` | the document's `target.runtime` | one runtime name or a list; `--runtime` wins over it |
 | `harness.model` | the document's `target.model` | `--model` wins over it |
 | `harness.effort` | none | the effort value the main agent runs at, one of the values the runtime's descriptor in Forager lists for a run, passed in the place the descriptor lists for the effort: for `claude`, the flag `--effort`, with `low`, `medium`, `high`, `xhigh` or `max`. A runtime whose descriptor has no place for it gets none, and the compose prints a row. An empty value is no effort. `--effort` wins over it |
-| `harness.tiers` | none | the model id each tier maps to, for the agents whose `model` is `${qory:<tier>}`: a model id, or `{model, effort}`, the effort one of the values the runtime takes for an agent. The tiers are `light`, `fast` and `thinking`. In the user's file and an ancestor's it is the machine's map, the nearest file per tier; in the checkout root's file it is the repository's map, read under `extends` too. Per tier, `--tier`, with the effort of `--tier-effort` for the same tier, wins over the machine's map, and the machine's map over the repository's; an entry comes whole from one of the three, so `--tier-effort` needs `--tier` for its tier. |
+| `harness.tiers` | none | the model id each tier maps to, for the agents whose `model` is `${qory:<tier>}`: a model id, or `{model, effort}`, the effort one of the values the runtime takes for an agent. The tiers are `light`, `balanced` and `thinking`. In the user's file and an ancestor's it is the machine's map, the nearest file per tier; in the checkout root's file it is the repository's map, read under `extends` too. Per tier, `--tier`, with the effort of `--tier-effort` for the same tier, wins over the machine's map, and the machine's map over the repository's; an entry comes whole from one of the three, so `--tier-effort` needs `--tier` for its tier. |
 | `harness.force` | `false` | what `--force` does on every compose; `--force=false` wins over it |
 | `harness.update` | `never` | `always` fetches every git source again on each compose; `--update` and `--update=false` win over it |
 | `harness.home` | `.qory/harness` | where the harness is composed: `.qory/harness` in the checkout, or a directory outside it, absolute or under `~`, containing one home per checkout as `<name>-<digest>` (§Rendering); `--home` wins over it |

@@ -55,7 +55,7 @@ func Settings(rs *contracts.RunSettings) (runtime string, flags []Setting) {
 		for _, tier := range []struct {
 			name string
 			t    *contracts.Tier
-		}{{"light", t.Light}, {"fast", t.Fast}, {"thinking", t.Thinking}} {
+		}{{"light", t.Light}, {"balanced", t.Balanced}, {"thinking", t.Thinking}} {
 			if tier.t == nil || tier.t.Model == "" {
 				continue
 			}

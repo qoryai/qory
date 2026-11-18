@@ -85,7 +85,7 @@ func TestAnAgentThatLacksAPartFails(t *testing.T) {
 		{"heading", "## Stop conditions\n", "### Stop conditions\n", `the heading "## Stop conditions"`},
 		{"key", "description: Writes Python code.\n", "description: \"\"\n", "the front-matter key description"},
 		{"tool", "Write, Bash, Grep", "Write, Bash(git:*), Grep", "the tool Bash"},
-		{"tier", "model: ${qory:thinking}", "model: claude-sonnet-5", "a tier in model, such as ${qory:fast}"},
+		{"tier", "model: ${qory:thinking}", "model: claude-sonnet-5", "a tier in model, such as ${qory:balanced}"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := composeTree(t, contractFiles(strings.Replace(fullAgent, c.old, c.new, 1)))
@@ -102,7 +102,7 @@ func TestEveryMissingPartIsListed(t *testing.T) {
 	_, err := composeTree(t, contractFiles("Writes code.\n"))
 	want := contractRefusal(`the heading "## Guardrails"`, `the heading "## The work"`, `the heading "## Stop conditions"`, `the heading "## Expected output"`,
 		"the front-matter key name", "the front-matter key description", "the front-matter key tools", "the front-matter key model",
-		"the tool Read", "the tool Edit", "the tool Write", "the tool Bash", "a tier in model, such as ${qory:fast}")
+		"the tool Read", "the tool Edit", "the tool Write", "the tool Bash", "a tier in model, such as ${qory:balanced}")
 	if err == nil || err.Error() != want {
 		t.Fatalf("error:\n%v\nwant:\n%s", err, want)
 	}

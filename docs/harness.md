@@ -669,7 +669,7 @@ files.
 
 ## Tiers
 
-An agent in a module sets `model: ${qory:light}`, `${qory:fast}` or `${qory:thinking}` in place of a model id. You map each tier to a model id with `--tier`, `harness.tiers` in your `qory.yaml`, or `harness.tiers` in the repository's `qory.yaml`, in that order of precedence. A tier with no map leaves the agent on the main model.
+An agent in a module sets `model: ${qory:light}`, `${qory:balanced}` or `${qory:thinking}` in place of a model id. You map each tier to a model id with `--tier`, `harness.tiers` in your `qory.yaml`, or `harness.tiers` in the repository's `qory.yaml`, in that order of precedence. A tier with no map leaves the agent on the main model.
 
 A tier's entry may also set an effort value: `{model: claude-opus-5-5, effort: max}` in `harness.tiers`, or `--tier thinking=claude-opus-5-5 --tier-effort thinking=max` on the command line. The entry comes whole from one of the three places, so `--tier-effort` needs `--tier` for the same tier. In a claude agent, an entry with no effort leaves the effort the agent's file sets. For the other runtimes, qory writes no effort from the agent's file.
 

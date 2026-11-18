@@ -29,19 +29,19 @@ func isolated(t *testing.T) string {
 func TestTiersOfTheMachineAndOfTheRepository(t *testing.T) {
 	home := isolated(t)
 	user := filepath.Join(home, ".config", "qory", "qory.yaml")
-	write(t, user, "harness:\n  tiers:\n    light: claude-haiku-5-5\n    fast: {model: claude-sonnet-5-5, effort: low}\n")
+	write(t, user, "harness:\n  tiers:\n    light: claude-haiku-5-5\n    balanced: {model: claude-sonnet-5-5, effort: low}\n")
 	base := t.TempDir()
 	root := filepath.Join(base, "code", "app")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	ancestor := filepath.Join(base, "code", "qory.yaml")
-	write(t, ancestor, "harness:\n  tiers:\n    fast: claude-haiku-5-5\n")
+	write(t, ancestor, "harness:\n  tiers:\n    balanced: claude-haiku-5-5\n")
 	own := filepath.Join(root, "qory.yaml")
 	write(t, own, "harness:\n  tiers:\n    light: claude-opus-5-5\n    thinking: {model: claude-opus-5-5, effort: max}\n")
 	machine := map[string]stack.Tier{
-		"light": {Model: "claude-haiku-5-5", From: user},
-		"fast":  {Model: "claude-haiku-5-5", From: ancestor},
+		"light":    {Model: "claude-haiku-5-5", From: user},
+		"balanced": {Model: "claude-haiku-5-5", From: ancestor},
 	}
 	repo := map[string]stack.Tier{
 		"light":    {Model: "claude-opus-5-5", From: own},
@@ -67,7 +67,7 @@ func TestTiersOfTheMachineAndOfTheRepository(t *testing.T) {
 		}
 		want := map[string][2]string{
 			"harness.tiers.light":    {"claude-haiku-5-5", user},
-			"harness.tiers.fast":     {"claude-haiku-5-5", ancestor},
+			"harness.tiers.balanced": {"claude-haiku-5-5", ancestor},
 			"harness.tiers.thinking": {"claude-opus-5-5, effort max", own},
 		}
 		for key, w := range want {
@@ -85,16 +85,16 @@ func TestTiersRefuseAMistake(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "qory.yaml")
 	for body, want := range map[string]string{
-		"harness:\n  tiers:\n    heavy: claude-haiku-5-5\n":                       "Use one of the tiers light, fast, and thinking.\n  heavy is not a tier.\n  The name is in harness.tiers.heavy.\n  The file is {path}.",
-		"harness:\n  tiers:\n    \"he\\eavy\": a\n":                               "Use one of the tiers light, fast, and thinking.\n  he\\x1bavy is not a tier.\n  The name is in harness.tiers.he\\x1bavy.\n  The file is {path}.",
-		"harness:\n  tiers:\n    light: [a, b]\n":                                 "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
-		"harness:\n  tiers:\n    light: 5\n":                                      "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
-		"harness:\n  tiers:\n    light: \"\"\n":                                   "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
-		"harness:\n  tiers:\n    light: {effort: max}\n":                          "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
-		"harness:\n  tiers:\n    light: {model: a, effort: max, extra: 1}\n":      "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
-		"harness:\n  tiers:\n    light: {model: a, effort: \"\"}\n":               "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
-		"harness:\n  tiers:\n    light: ${qory:fast}\n":                           "Set harness.tiers.light to a model id.\n  ${qory:fast} is a tier placeholder, which goes only in an agent's model.\n  harness.tiers.light is in {path}.",
-		"harness:\n  tiers:\n    light: {model: \"${qory:fast}\", effort: max}\n": "Set harness.tiers.light to a model id.\n  ${qory:fast} is a tier placeholder, which goes only in an agent's model.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    heavy: claude-haiku-5-5\n":                           "Use one of the tiers light, balanced, and thinking.\n  heavy is not a tier.\n  The name is in harness.tiers.heavy.\n  The file is {path}.",
+		"harness:\n  tiers:\n    \"he\\eavy\": a\n":                                   "Use one of the tiers light, balanced, and thinking.\n  he\\x1bavy is not a tier.\n  The name is in harness.tiers.he\\x1bavy.\n  The file is {path}.",
+		"harness:\n  tiers:\n    light: [a, b]\n":                                     "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    light: 5\n":                                          "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    light: \"\"\n":                                       "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    light: {effort: max}\n":                              "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    light: {model: a, effort: max, extra: 1}\n":          "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    light: {model: a, effort: \"\"}\n":                   "Set harness.tiers.light to a model id, or to {model: <model id>, effort: <value>}.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    light: ${qory:balanced}\n":                           "Set harness.tiers.light to a model id.\n  ${qory:balanced} is a tier placeholder, which goes only in an agent's model.\n  harness.tiers.light is in {path}.",
+		"harness:\n  tiers:\n    light: {model: \"${qory:balanced}\", effort: max}\n": "Set harness.tiers.light to a model id.\n  ${qory:balanced} is a tier placeholder, which goes only in an agent's model.\n  harness.tiers.light is in {path}.",
 	} {
 		write(t, path, body)
 		_, err := config.Load(root, true)

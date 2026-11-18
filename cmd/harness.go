@@ -467,7 +467,7 @@ func composeFlags(c *cobra.Command, o *composeOptions) {
 	c.Flags().StringVarP(&o.file, "file", "f", "", "the qory-stack.yaml, qory.yaml or harness.yaml to compose instead of the one found, or a stack's folder in a git repository as <https URL>#<ref>:<folder>; when the checkout's document extends a stack, this one is its base")
 	c.Flags().StringVar(&o.model, "model", "", "write this model instead of target.model (qory.yaml: model)")
 	c.Flags().StringVar(&o.effort, "effort", "", "run the main agent at this effort value, one of the values the runtime's descriptor lists, such as high (qory.yaml: harness.effort)")
-	c.Flags().StringArrayVar(&o.tiers, "tier", nil, "map a tier to a model id for each agent whose model is ${qory:<tier>}, as <tier>=<model id>; repeat it for each tier (tiers: light, fast, thinking; qory.yaml: harness.tiers)")
+	c.Flags().StringArrayVar(&o.tiers, "tier", nil, "map a tier to a model id for each agent whose model is ${qory:<tier>}, as <tier>=<model id>; repeat it for each tier (tiers: light, balanced, thinking; qory.yaml: harness.tiers)")
 	c.Flags().StringArrayVar(&o.tierEfforts, "tier-effort", nil, "set the effort value for each agent whose model is ${qory:<tier>}, as <tier>=<effort>, beside --tier <tier>=<model id>; repeat it for each tier")
 }
 

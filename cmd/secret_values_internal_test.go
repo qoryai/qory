@@ -66,17 +66,17 @@ func TestTierRefusalsPrintNoSecret(t *testing.T) {
 	_, err := tierFlags([]string{"qak_light"}, nil)
 	wantsText(t, err, "--tier "+value+": write --tier <tier>=<model id>, such as --tier light=claude-haiku-5-5")
 	_, err = tierFlags([]string{"qak_x=m"}, nil)
-	wantsText(t, err, "Use one of the tiers light, fast, and thinking.\n  (a name that contains an access key secret) is not a tier.\n  The name is in --tier "+value+".")
+	wantsText(t, err, "Use one of the tiers light, balanced, and thinking.\n  (a name that contains an access key secret) is not a tier.\n  The name is in --tier "+value+".")
 	_, err = tierFlags([]string{"light=${qory:qak_x}"}, nil)
-	wantsText(t, err, "--tier "+value+": write a model id; "+value+" is a tier placeholder, which goes only in an agent's model")
+	wantsText(t, err, "--tier "+value+": write a model id, not a tier placeholder.\n  "+value+" goes only in an agent's model.")
 	_, err = tierFlags(nil, []string{"qak_light"})
 	wantsText(t, err, "--tier-effort "+value+": write --tier-effort <tier>=<effort>, such as --tier-effort thinking=high")
 	_, err = tierFlags(nil, []string{"qak_x=low"})
-	wantsText(t, err, "Use one of the tiers light, fast, and thinking.\n  (a name that contains an access key secret) is not a tier.\n  The name is in --tier-effort "+value+".")
+	wantsText(t, err, "Use one of the tiers light, balanced, and thinking.\n  (a name that contains an access key secret) is not a tier.\n  The name is in --tier-effort "+value+".")
 	_, err = tierFlags(nil, []string{"light=qrk_low"})
 	wantsText(t, err, "--tier-effort (a value that contains a run key): give --tier light=<model id> as well; the effort is for the model that --tier maps the tier to")
 	err = mainModelTier(&stack.Stack{File: "/work/app/qory.yaml"}, config.Config{}, "${qory:qak_x}")
-	wantsText(t, err, "--model "+value+" is a tier placeholder; set the main model by its id, and a tier only in an agent's model")
+	wantsText(t, err, "Set --model to a model id, not a tier placeholder.\n  "+value+" is a tier placeholder, which goes only in an agent's model.")
 }
 
 // wantsText fails the test unless err's text is want.
