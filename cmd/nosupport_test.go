@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// TestNoTextSaysToContactSupport reads every text file of the repository, code, tests, docs and the
+// TestNoTextSendsTheReaderToSupport reads every text file of the repository, code, tests, docs and the
 // CHANGELOG, and finds no text that sends the reader to the vendor's support desk, in any case and across a
 // line break (the phrase is split here, so this file does not match it): what to do is Qory Apiary's text for each reader, and qory prints the cause alone.
 func TestNoTextSendsTheReaderToSupport(t *testing.T) {
