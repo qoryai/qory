@@ -75,7 +75,26 @@ func TestReadRefusesAModelThatNamesNoTier(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Read("core", dir, m, "")
-	want := "Use one of the tiers light, fast, and thinking.\n  heavy is not a tier.\n  The name is in model ${qory:heavy}.\n  The model is in agents/explorer.md of module core."
+	want := "Use one of the tiers light, balanced, and thinking.\n  heavy is not a tier.\n  The name is in model ${qory:heavy}.\n  The model is in agents/explorer.md of module core."
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v\nwant %s", err, want)
+	}
+}
+
+// TestReadRefusesTheTierFast refuses an agent whose model is ${qory:fast}, which names no
+// tier since the middle tier is balanced, and lists the tiers.
+func TestReadRefusesTheTierFast(t *testing.T) {
+	isolate(t)
+	dir := tree(t, map[string]string{
+		ManifestName:         "apiVersion: qory.dev/v1alpha1\nname: core\n",
+		"agents/explorer.md": "---\nname: explorer\nmodel: ${qory:fast}\n---\nExplores.\n",
+	})
+	m, err := ReadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Read("core", dir, m, "")
+	want := "Use one of the tiers light, balanced, and thinking.\n  fast is not a tier.\n  The name is in model ${qory:fast}.\n  The model is in agents/explorer.md of module core."
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v\nwant %s", err, want)
 	}
@@ -169,7 +188,7 @@ func TestReadEscapesAControlCharacterInATierName(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = Read("core", dir, m, "")
-	want := "Use one of the tiers light, fast, and thinking.\n  he\\x1bavy is not a tier.\n  The name is in model ${qory:he\\x1bavy}.\n  The model is in agents/explorer.md of module core."
+	want := "Use one of the tiers light, balanced, and thinking.\n  he\\x1bavy is not a tier.\n  The name is in model ${qory:he\\x1bavy}.\n  The model is in agents/explorer.md of module core."
 	if err == nil || err.Error() != want {
 		t.Errorf("err = %q\nwant %q", err, want)
 	}

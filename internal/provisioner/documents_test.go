@@ -201,7 +201,7 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 			s["model"] = "example-small"
 			s["tiers"] = map[string]any{"light": "example-small"}
 		}), broken},
-		{"a tier's model not listed", withSettings(func(d map[string]any) { settings(d)["tiers"].(map[string]any)["fast"] = "example-tiny" }), broken},
+		{"a tier's model not listed", withSettings(func(d map[string]any) { settings(d)["tiers"].(map[string]any)["balanced"] = "example-tiny" }), broken},
 		{"a tier's effort not listed", withSettings(func(d map[string]any) {
 			settings(d)["tiers"].(map[string]any)["thinking"] = map[string]any{"model": "example-large", "effort": "huge"}
 		}), broken},
@@ -290,5 +290,32 @@ func TestLargestPrebuiltImageBytes(t *testing.T) {
 	raw := documentsOf(t, "explore-workflow.json", func(d map[string]any) { d["largest_prebuilt_image_bytes"] = 10000000000 })
 	if _, err := provisioner.ReadDocuments(raw); err == nil || err.Error() != broken {
 		t.Errorf("an explore run: %v, want %q", err, broken)
+	}
+}
+
+// TestRunSettingsWithTheTierBalancedMapToCompose maps the tiers light, balanced and
+// thinking of a documents fixture to the tier and tier-effort flags of the compose, and
+// refuses run settings whose tier map has the key fast, which is no tier.
+func TestRunSettingsWithTheTierBalancedMapToCompose(t *testing.T) {
+	doc, err := provisioner.ReadDocuments(documentsOf(t, "explore-run-settings.json", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, got := provisioner.Settings(doc.RunSettings)
+	var tiers []string
+	for _, g := range got {
+		if g.Flag == "tier" || g.Flag == "tier-effort" {
+			tiers = append(tiers, g.Flag+" "+g.Value)
+		}
+	}
+	want := []string{"tier light=example-small", "tier balanced=example-large", "tier thinking=example-large", "tier-effort thinking=max"}
+	if !reflect.DeepEqual(tiers, want) {
+		t.Errorf("the tier flags are %q, want %q", tiers, want)
+	}
+	fast := documentsOf(t, "explore-run-settings.json", func(d map[string]any) {
+		d["run_settings"].(map[string]any)["tiers"] = map[string]any{"fast": "example-small"}
+	})
+	if _, err := provisioner.ReadDocuments(fast); err == nil {
+		t.Error("run settings with the tier fast are read")
 	}
 }

@@ -20,7 +20,7 @@
       "$ref": "#/$defs/names"
     },
     "tier": {
-      "description": "true when the agent's model must be a tier, such as ${qory:fast}.",
+      "description": "true when the agent's model must be a tier, such as ${qory:balanced}.",
       "type": "boolean"
     },
     "report": {

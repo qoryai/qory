@@ -61,7 +61,7 @@ release may change what an existing document does, and states it under Upgrading
   When the run is already closed and Forager sends nothing (`session.ErrRunClosed`), qory
   sends the call once and prints the same two lines as for a 410 with the code `run_closed`,
   with no `Contact support` line and no end code of qory's.
-- A stack's workflow may set `tier` to `light`, `fast` or `thinking`, which names the
+- A stack's workflow may set `tier` to `light`, `balanced` or `thinking`, which names the
   main session's model and effort for a dispatched run. Any other value refuses the
   stack. `qory run` does not read it.
 - The `agent` image has the Node packages `typescript` 5.9.3, `libpg-query` 18.2.4,
@@ -296,7 +296,7 @@ release may change what an existing document does, and states it under Upgrading
   wrote it, in the place the runtime's descriptor in Forager lists for the effort, and
   only a value the descriptor lists: for Claude Code, its `--effort` flag, with `low`,
   `medium`, `high`, `xhigh` or `max`.
-- Map a tier to a model id for agents whose `model` is `${qory:light}`, `${qory:fast}` or
+- Map a tier to a model id for agents whose `model` is `${qory:light}`, `${qory:balanced}` or
   `${qory:thinking}`, with `--tier`, `harness.tiers` in your `qory.yaml`, or
   `harness.tiers` in the repository's `qory.yaml`.
 - Give the agents of a tier an effort value with `--tier-effort <tier>=<effort>` on
@@ -548,6 +548,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The middle model tier is named `balanced` in place of `fast`. The tiers are `light`,
+  `balanced` and `thinking`. `${qory:balanced}`, `--tier balanced=<model id>`,
+  `--tier-effort balanced=<effort>`, `harness.tiers.balanced`, a workflow's `tier: balanced`
+  and the key `balanced` in the `run_settings.tiers` of a run's documents take it. qory
+  refuses `fast` as it refuses any name that is not a tier, with the list of the tiers.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
   qory stops a run whose documents have one. A run whose documents set no
@@ -600,7 +605,7 @@ release may change what an existing document does, and states it under Upgrading
   files, settings, and tier placeholders, of a module's source and name, of a base stack,
   of a stack that `-f` fetches by reference, and of the URL checks of a run. A module that
   cannot be read starts with `Check that you can read the files of module <name>.`, and a
-  tier list reads `light, fast, and thinking`. Which input fails, and the exit status,
+  tier list reads `light, balanced, and thinking`. Which input fails, and the exit status,
   stay the same.
 - The first line of each error of a stack file, a stack reference (`-f`), a target, `qory.yaml`
   and `forager.yaml` that `qory run` and `qory harness compose` print at start, of the

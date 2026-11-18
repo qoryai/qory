@@ -48,7 +48,7 @@ func IsTier(name string) bool {
 	return stack.IsTier(name)
 }
 
-// TierList is the tiers for a message: "light, fast, and thinking".
+// TierList is the tiers for a message: "light, balanced, and thinking".
 func TierList() string {
 	return stack.TierList()
 }
