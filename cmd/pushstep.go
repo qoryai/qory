@@ -194,10 +194,8 @@ type sessionPush struct {
 	// [preparation.Push]: true for a walled run.
 	agentStopped bool
 	checks       *runPushChecks
-	// handoff is the checkout that has the session's hand-off file, "" for none, and program the
-	// composed harness's submit program, nil for none.
+	// handoff is the checkout that has the session's hand-off file, "" for none.
 	handoff string
-	program *submitProgram
 	// ended is the line that says the report of pushed commits found the run over, Qory
 	// Apiary's run_ended or the gateway's 410, see [runEndedLine]: no later push and no later
 	// session of the run goes on. It is "" while the run goes on. A loop over the run's
@@ -220,7 +218,7 @@ func (p *sessionPush) after(ending *pushEnding, out session.Outcome) (session.Ou
 	ctx, cancel := pushContext(p.ctx, p.again, p.limit, pushTimes.limit, pushTimes.signal)
 	defer cancel()
 	var err error
-	ending.noStep, err = removeThenPush(ctx, p.run, p.stderr, p.branch, p.dir, p.runID, p.runNumber, out, p.agentStopped, p.checks, &p.ended, p.handoff, p.program)
+	ending.noStep, err = removeThenPush(ctx, p.run, p.stderr, p.branch, p.dir, p.runID, p.runNumber, out, p.agentStopped, p.checks, &p.ended, p.handoff)
 	ending.settle(p.stopNow())
 	ending.cut = ctx.Err() != nil
 	if p.ended != "" {
@@ -247,11 +245,11 @@ var pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outc
 // working folder, so the check of the step is valid only once the container is gone. After a
 // failed removal [openedRun.PushProxy] fails and [openedRun.StartStep] still works, so this
 // check alone stops the push, and the run has no step.
-func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string, handoffRoot string, program *submitProgram) (noStep bool, err error) {
+func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string, handoffRoot string) (noStep bool, err error) {
 	if err := run.RemoveSetup(ctx); err != nil {
 		return true, fmt.Errorf(textSetupStays, shownError(err))
 	}
-	return false, pushWork(ctx, run, stderr, branch, dir, runID, runNumber, out, agentStopped, checks, ended, handoffRoot, program)
+	return false, pushWork(ctx, run, stderr, branch, dir, runID, runNumber, out, agentStopped, checks, ended, handoffRoot)
 }
 
 // pushWork is the run's step of kind push: it pushes what the agent left, through the
@@ -268,7 +266,7 @@ func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch
 // [runEndedLine] when the report found the run over, Qory Apiary's run_ended or the gateway's
 // 410, also when the push failed. The step then stores no version, and ends with no error
 // unless the push failed.
-func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string, handoffRoot string, program *submitProgram) error {
+func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string, handoffRoot string) error {
 	cut := func() bool { return ctx.Err() != nil }
 	return inStep(run, stderr, event.StepPush, pushStepName(branch, run.System()), cut, func(w io.Writer) error {
 		httpClient, base, err := run.RunAPI()
@@ -324,12 +322,6 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		}
 		given := readHandoffPrinting(w, handoffRoot)
 		document := assembleSubmission(branch, repositories, verdict, given)
-		if program != nil {
-			document, err = program.apply(ctx, w, document)
-			if err != nil {
-				return &runLineError{fmt.Errorf(textNotStored, branch.VersionWays(), branch.Ref, shownError(err))}
-			}
-		}
 		check := func(content []byte) error {
 			return checkSubmissionVersion(ctx, checks, branch, document.Ref, content)
 		}

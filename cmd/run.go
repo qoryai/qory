@@ -1419,7 +1419,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					ctx: ctx, again: again, limit: limit, stopNow: stopNow,
 					run: run, stderr: streams.errOut, branch: branch, dir: cwd, runID: spec.RunID,
 					runNumber: fromCode.runNumber, agentStopped: walled, checks: checks,
-					handoff: handoffRoot, program: program,
+					handoff: handoffRoot,
 				}
 				out, pushErr = pushAfterSession(push, &ending, out)
 			}
