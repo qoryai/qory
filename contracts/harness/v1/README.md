@@ -1070,8 +1070,13 @@ composed harness has one submit program, and both modules declare one.` on the n
 An empty command, a word that is not a string, and a program that is not a file in the
 module, or is in an entry an `exclude` or an `only` of the module leaves out, fail the
 compose as they do for a push check, with `submit_program` in place of the push check.
-qory runs the program at the end of each review round of a run that submits, see
-docs/run.md, §The submit step.
+qory runs the program once in the push step of a run at the access `write`, after the push
+and before it stores the version, in a new container of the wall's default image with no
+network. The program reads and rewrites the file at `QORY_SUBMISSION_FILE`, reaches the forge
+only through the unix socket at `QORY_PROXY_SOCKET` with the password in
+`QORY_PROXY_PASSWORD`, and may change only the `commit_url` members and the `draft` of a
+repository. Exit 0 is done, exit 1 a failed call to the forge, and exit 2 an input the program
+cannot use. See docs/run.md, §The submit program.
 
 **Push checks.** A push check runs in a run behind a wall, before a push of its type
 reaches Qory Apiary: for every push to the run API from inside the wall, through `qory

@@ -2826,10 +2826,15 @@ read run have no submit step. The document has:
   pushed also has `base`, the start commit, and `commits`, each commit from the start commit
   to `commit`, oldest first, with its `step`. A repository that the run did not push has no
   `base` and no `commits`.
-- `draft` of each repository: `{"none": <reason>}`. The reason is `escalated` when the
-  verdict is `escalate`; `not-passed` when the verdict is any other than `passed`;
-  `no-text` when the verdict is `passed` and `text` is absent; `no-program` when the verdict
-  is `passed` and `text` is there.
+- `draft` of each repository: `{"none": <reason>}`, or a draft pull request that the
+  [submit program](#the-submit-program) wrote. The reason is `escalated` when the verdict is
+  `escalate`; `not-passed` when the verdict is any other than `passed`; `no-text` when the
+  verdict is `passed` and `text` is absent; `no-program` when the verdict is `passed`, `text`
+  is there, and the composed harness has no submit program or the program left the draft
+  alone; `program-failed` or `program-timeout` when the program ran and did not finish the
+  repository, as [The submit program](#the-submit-program) says.
+- `commit_url` of each repository, of its `base` and of each of its `commits`: the links that
+  the submit program writes. They are absent when no program ran.
 
 The hand-off file is how a session gives qory its text and the ledger step of each
 commit. A run on a work item's branch at the access `write` has the variable
@@ -2867,13 +2872,92 @@ no content of the file. A step for a commit that this run did not make is not us
 never fails because of the file.
 
 A module manifest can declare `submit_program`, a command of the module: a file in the
-module, then its arguments (see `contracts/harness/v1/README.md`). A composed harness has
-at most one, and a second declaration fails the compose. The run's documents can set
+module, then its arguments (see `contracts/harness/v1/README.md`). A composed harness has at
+most one, and a second declaration fails the compose. The run's documents can set
 `submit_module`: a module's `name` in its manifest, and its git `source`, whose `ref` is a
 full commit id. qory adds that module after the modules of the stack. When a module of the
-stack has the same name in its manifest and the same git source, qory reads that module at
-the commit in place of its ref, and prints `qory run: <module> from <url>@<commit>, in place
-of <ref> in <place>`. A module of that name from another git source fails the compose.
+stack, or of the base stack that the checkout extends, has the same name in its manifest and
+the same git source, qory reads that module at the commit in place of its ref, and prints
+`qory run: <module> from <url>@<commit>, in place of <ref> in <place>`. A module of that name
+from another git source fails the compose. qory composes this module before it knows the
+run's access level, so a run that its stack or its documents lower to `write-no-push` or
+`read` still composes it, and a name clash still refuses the run, but the run runs no program.
+
+#### The submit program
+
+The program of the composed harness, `submit_program`, runs once in the push step of a run at
+the access `write`: after the push, after the report of the pushed commits, and before qory
+stores the version. The step gives it the submission it is about to store, and stores what the
+program leaves. A run with no `submit_program` stores the submission as it is, with the draft
+`no-program` for a passed round that has text. A run that pushed nothing, a `write-no-push`
+run and a read run run no program.
+
+qory runs the program in a new container of the docker wall's default image, `--image` or
+`wall.image` in `forager.yaml`, and not the image that the run's policy selects:
+
+```text
+docker create --network none --user <the run's user> --cap-drop ALL \
+  --security-opt no-new-privileges --init --pull never ...
+```
+
+The home is mounted read-only at its path, so the command is a path in it. The container has
+two more folders: `/qory-submit/work`, which it can write, with `submission.json`, and
+`/qory-submit/net`, which it can read, with the relay's socket `proxy.sock` and, when the run
+has one, the CA bundle `ca.pem`. The program gets these variables:
+
+| Variable | Value |
+|---|---|
+| `QORY_SUBMISSION_FILE` | `/qory-submit/work/submission.json`, the document to read and rewrite. It has no token or secret. |
+| `QORY_PROXY_SOCKET` | `/qory-submit/net/proxy.sock`, a unix socket of the relay. |
+| `QORY_PROXY_PASSWORD` | The password of the run's push proxy, which the program sends as `Proxy-Authorization: Basic` with the user `qory`. |
+| `SSL_CERT_FILE` | `/qory-submit/net/ca.pem`, the bundle that signs the proxy's certificates. |
+
+qory passes the password in a file that no container mounts, never on a command line. The
+program may run for 120 seconds, and qory prints at most 20 lines of what it printed, masked
+and of at most 300 characters each, standard output first. The program's exit status says how
+it ended:
+
+| Exit | The step stores |
+|---|---|
+| 0 | The file the program left. A repository whose draft is still `no-program` keeps it: the program did not handle that repository. |
+| 1 | The file, when it is good: a call to the forge failed. A repository whose draft is still `no-program` gets `{"none": "program-failed", "exit": 1}`. |
+| 2 | The same as 1 with `"exit": 2`: the program found its input wrong. |
+| another status, or the program did not start | The same as 1 with `"exit": 1`. |
+| it ran past 120 seconds | The file, when it is good, and `{"none": "program-timeout"}` in place of each `no-program` draft. |
+
+The program may change only `commit_url`, `base.commit_url` and each `commits[].commit_url`
+of a repository, and its `draft`, from `no-program` to a draft pull request. A file that
+changes anything else (the ref, the verdict, the text, a commit, a step, another draft, or the
+list of repositories), a file that is not a submission, and a file that is missing or is not a
+regular file of at most 4 MiB, are discarded: qory stores the submission it gave the program,
+with `program-failed` in each `no-program` draft, and prints `qory run: Check the submit
+program: <cause>, so qory kept the submission it gave the program and a repository has no
+draft (program-failed).`
+
+`QORY_SUBMIT_BASES`, which the program `open-draft` of the module `github` reads for the base
+branch of each pull request, is not set: qory does not build that file. That program stops
+with exit 2 and writes only the commit links, so a draft is not opened until the program or
+the file's source changes.
+
+##### What the relay carries
+
+The container has no network. It reaches the push proxy only through a relay, a unix socket
+that qory listens on in a temporary folder and that forwards to the proxy's address. The
+threat model has five limits:
+
+1. The folder is mode 0700 and the socket mode 0600, so only this user and the container that
+   mounts the folder connect. When the run's user is another user, the folder lists nothing
+   to it and the socket is open to it.
+2. The relay copies bytes both ways to one address, the push proxy's. It reads and adds
+   nothing, so the push proxy's rules, its credential's hosts and paths and its refusal of
+   a push that is not a plain push to the work item's branch, are the only limit on what the
+   program reaches, and the program holds the proxy's password, not the push credential.
+3. The relay takes 50 connections in all: after the 50th it stops listening. The program opens
+   one for each call, and calls the forge at most twice for each of 20 repositories.
+4. The relay stops when the container exits and before qory reads the file. The socket and
+   the folder are removed in every case, including a timeout.
+5. qory reads the file the program leaves inside the work folder, so a link the program
+   made there to a file of this machine is not followed.
 
 #### The report of a push
 

@@ -753,10 +753,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// [transcriptLinkFor].
 			var link transcriptLink
 			var branch *preparation.WorkBranch
-			// handoffRoot is the checkout that holds the hand-off file of a run on a work item's branch, and
-			// hasProgram whether the composed harness has a submit program.
+			// handoffRoot is the checkout that holds the hand-off file of a run on a work item's
+			// branch, and program the composed harness's submit program, nil for none.
 			var handoffRoot string
-			var hasProgram bool
+			var program *submitProgram
 			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
 				composing.writable = nil
 				for _, m := range spec.Mounts {
@@ -822,7 +822,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// Only a run at level write submits: a run at write-no-push or read has no
 				// submit program and no hand-off file.
 				if submitLevel == stack.AccessWrite {
-					hasProgram = c.submitProgram != nil
+					if c.submitProgram != nil {
+						program = &submitProgram{
+							command: c.submitProgram.Command, home: at.home, run: run,
+							spec: &spec, fromCode: code != nil, limit: submitLimit,
+						}
+					}
 					if branch != nil {
 						// The hand-off file is in the checkout's .qory, which no commit has: a
 						// walled session writes it through the checkout's mount.
@@ -1400,7 +1405,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					ctx: ctx, again: again, limit: limit, stopNow: stopNow,
 					run: run, stderr: streams.errOut, branch: branch, dir: cwd, runID: spec.RunID,
 					runNumber: fromCode.runNumber, agentStopped: walled, checks: checks,
-					handoff: handoffRoot, program: hasProgram,
+					handoff: handoffRoot, program: program,
 				}
 				out, pushErr = pushAfterSession(push, &ending, out)
 			}

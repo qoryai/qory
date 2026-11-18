@@ -179,7 +179,7 @@ func newestVerdict(ctx context.Context, client *runapi.Client, runID string) (st
 
 // noDraftReason is why a repository has no draft before the submit program runs: the
 // verdict is not passed, the session wrote no text, or the harness has no submit program.
-func noDraftReason(verdict string, text *submission.Text, program bool) string {
+func noDraftReason(verdict string, text *submission.Text) string {
 	switch {
 	case verdict == submission.VerdictEscalate:
 		return submission.NoneEscalated
@@ -188,8 +188,8 @@ func noDraftReason(verdict string, text *submission.Text, program bool) string {
 	case text == nil:
 		return submission.NoneNoText
 	}
-	// The program that opens the draft is not run yet: the draft stays none.
-	_ = program
+	// The draft is the placeholder that the submit program fills, or that stays when the
+	// harness has no program or the program handles no such repository.
 	return submission.NoneNoProgram
 }
 
@@ -199,10 +199,10 @@ func noDraftReason(verdict string, text *submission.Text, program bool) string {
 // its draft as [noDraftReason] has it. repositories are the entries of
 // [preparation.WorkBranch.Version]: a repository that this run did not push has its commit
 // alone.
-func assembleSubmission(branch *preparation.WorkBranch, repositories []submission.Repository, verdict string, h *handoff, program bool) *submission.Submission {
+func assembleSubmission(branch *preparation.WorkBranch, repositories []submission.Repository, verdict string, h *handoff) *submission.Submission {
 	text := h.text()
 	doc := &submission.Submission{Ref: branch.Ref, Verdict: verdict, Text: text}
-	reason := noDraftReason(verdict, text, program)
+	reason := noDraftReason(verdict, text)
 	for _, r := range repositories {
 		entry := submission.Repository{System: r.System, Path: r.Path, Commit: r.Commit, Base: r.Base, Draft: submission.None(reason, 0)}
 		for _, c := range r.Commits {

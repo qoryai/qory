@@ -154,7 +154,7 @@ func TestAHandoffPartOverTheFormatsLimitIsDropped(t *testing.T) {
 			}
 			branch := &preparation.WorkBranch{Ref: "qory/wi_1"}
 			repositories := []submission.Repository{{System: "git.example.com", Path: "acme/shop", Commit: commitB, Base: &submission.Base{Commit: commitA}, Commits: []submission.Commit{{Commit: commitA}, {Commit: commitB}}}}
-			raw, err := json.Marshal(assembleSubmission(branch, repositories, submission.VerdictPassed, h, false))
+			raw, err := json.Marshal(assembleSubmission(branch, repositories, submission.VerdictPassed, h))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -171,7 +171,7 @@ func TestAStepOfACommitOutsideTheRangeIsNotUsed(t *testing.T) {
 	branch := &preparation.WorkBranch{Ref: "qory/wi_1"}
 	repositories := []submission.Repository{{System: "git.example.com", Path: "acme/shop", Commit: commitB, Base: &submission.Base{Commit: commitA}, Commits: []submission.Commit{{Commit: commitB}}}}
 	h := &handoff{Steps: map[string]string{commitA: "base", commitC: "later", commitB: "implement"}}
-	raw, err := json.Marshal(assembleSubmission(branch, repositories, submission.VerdictNone, h, false))
+	raw, err := json.Marshal(assembleSubmission(branch, repositories, submission.VerdictNone, h))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,12 +190,12 @@ func TestACommitWithNoStepIsUnreviewed(t *testing.T) {
 		Commits: []submission.Commit{{Commit: commitB}, {Commit: commitC}},
 	}}
 	h := &handoff{Steps: map[string]string{commitB: "implement"}}
-	doc := assembleSubmission(branch, repositories, submission.VerdictPassed, h, false)
+	doc := assembleSubmission(branch, repositories, submission.VerdictPassed, h)
 	got := doc.Repositories[0].Commits
 	if got[0].Step != "implement" || got[1].Step != stepUnreviewed {
 		t.Errorf("the steps are %+v", got)
 	}
-	for _, c := range assembleSubmission(branch, repositories, submission.VerdictNone, nil, false).Repositories[0].Commits {
+	for _, c := range assembleSubmission(branch, repositories, submission.VerdictNone, nil).Repositories[0].Commits {
 		if c.Step != stepUnreviewed {
 			t.Errorf("commit %s has the step %q with no hand-off", c.Commit, c.Step)
 		}
@@ -221,7 +221,7 @@ func TestTheDraftIsNoneWithItsReason(t *testing.T) {
 		"passed, text":   {submission.VerdictPassed, text, submission.NoneNoProgram},
 	} {
 		t.Run(name, func(t *testing.T) {
-			doc := assembleSubmission(branch, repositories, c.verdict, c.h, false)
+			doc := assembleSubmission(branch, repositories, c.verdict, c.h)
 			raw, err := json.Marshal(doc)
 			if err != nil {
 				t.Fatal(err)

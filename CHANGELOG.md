@@ -541,6 +541,13 @@ release may change what an existing document does, and states it under Upgrading
   the file that `QORY_SUBMISSION_HANDOFF` names. A commit with no step is `unreviewed`. qory
   reads the file inside the checkout and follows no link, and drops a title, description or
   step that is over a limit of the submission format, with one line.
+- The push step runs the `submit_program` of the composed harness after the push of a run at
+  the access `write` and before it stores the version. The program runs in a container of the
+  wall's default image with no network, as the run's user, for at most 120 seconds, and
+  reaches the forge only through a unix socket that qory forwards to the run's push proxy. It
+  writes the commit links and the draft pull request into the submission; anything else it
+  changes is discarded. A repository whose draft the program did not finish gets
+  `program-failed` or `program-timeout`. See The submit program in `docs/run.md`.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
   qory stops a run whose documents have one. A run whose documents set no
