@@ -552,7 +552,9 @@ release may change what an existing document does, and states it under Upgrading
   wall's default image with no network, as the run's user, for at most 120 seconds, and
   reaches the forge only through a unix socket that qory forwards to the run's push proxy. It
   writes the commit links and the draft pull request into the submission; anything else it
-  changes is discarded. A repository whose draft the program did not finish gets
+  changes is discarded, and so is a link that is not `https` on the repository's system at the
+  path of its commit or pull request, a number that is not a plain whole number, and a title
+  with a control character. A repository whose draft the program did not finish gets
   `program-failed` or `program-timeout`. See The submit program in `docs/run.md`.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and

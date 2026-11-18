@@ -61,20 +61,22 @@ func testProgramMain(mode string) int {
 			os.Exit(1)
 		}
 	}
-	link := func(path, commit string) string { return "https://forge.example/" + path + "/commit/" + commit }
+	link := func(system, path, commit string) string {
+		return "https://" + system + "/" + path + "/commit/" + commit
+	}
 	repositories, _ := doc["repositories"].([]any)
 	links := func() {
 		for _, r := range repositories {
 			r := r.(map[string]any)
-			path := r["path"].(string)
-			r["commit_url"] = link(path, r["commit"].(string))
+			system, path := r["system"].(string), r["path"].(string)
+			r["commit_url"] = link(system, path, r["commit"].(string))
 			if base, ok := r["base"].(map[string]any); ok {
-				base["commit_url"] = link(path, base["commit"].(string))
+				base["commit_url"] = link(system, path, base["commit"].(string))
 			}
 			commits, _ := r["commits"].([]any)
 			for _, c := range commits {
 				c := c.(map[string]any)
-				c["commit_url"] = link(path, c["commit"].(string))
+				c["commit_url"] = link(system, path, c["commit"].(string))
 			}
 		}
 	}
@@ -85,9 +87,9 @@ func testProgramMain(mode string) int {
 		for _, r := range repositories {
 			r := r.(map[string]any)
 			if d, _ := r["draft"].(map[string]any); d["none"] == "no-program" && text != nil {
-				path := r["path"].(string)
-				r["draft"] = map[string]any{"number": 7, "url": "https://forge.example/" + path + "/pull/7", "title": text["title"], "state": "draft", "action": "opened"}
-				fmt.Printf("https://forge.example/%s/pull/7 opened\n", path)
+				system, path := r["system"].(string), r["path"].(string)
+				r["draft"] = map[string]any{"number": 7, "url": "https://" + system + "/" + path + "/pull/7", "title": text["title"], "state": "draft", "action": "opened"}
+				fmt.Printf("https://%s/%s/pull/7 opened\n", system, path)
 			}
 		}
 		if mode == "tamper" {
@@ -254,26 +256,26 @@ func TestTheSubmitProgramFillsTheLinksAndTheDraft(t *testing.T) {
 	doc := p.api.document(t, 1)
 	repo := doc.Repositories[0]
 	path := "acme/site"
-	if repo.CommitURL != "https://forge.example/"+path+"/commit/"+repo.Commit {
+	if repo.CommitURL != "https://"+proxygittest.Host+"/"+path+"/commit/"+repo.Commit {
 		t.Errorf("the commit link is %q", repo.CommitURL)
 	}
-	if repo.Base == nil || repo.Base.CommitURL != "https://forge.example/"+path+"/commit/"+p.first {
+	if repo.Base == nil || repo.Base.CommitURL != "https://"+proxygittest.Host+"/"+path+"/commit/"+p.first {
 		t.Errorf("the base is %+v", repo.Base)
 	}
 	if len(repo.Commits) != 1 {
 		t.Fatalf("the commits are %+v, want 1", repo.Commits)
 	}
 	for _, c := range repo.Commits {
-		if c.CommitURL != "https://forge.example/"+path+"/commit/"+c.Commit {
+		if c.CommitURL != "https://"+proxygittest.Host+"/"+path+"/commit/"+c.Commit {
 			t.Errorf("the link of commit %s is %q", c.Commit, c.CommitURL)
 		}
 	}
 	var draft map[string]any
-	if err := json.Unmarshal(repo.Draft, &draft); err != nil || draft["number"] != float64(7) || draft["url"] != "https://forge.example/acme/site/pull/7" ||
+	if err := json.Unmarshal(repo.Draft, &draft); err != nil || draft["number"] != float64(7) || draft["url"] != "https://"+proxygittest.Host+"/acme/site/pull/7" ||
 		draft["title"] != "Add a file" || draft["state"] != "draft" || draft["action"] != "opened" || len(draft) != 5 {
 		t.Errorf("the draft is %s, want number 7 and the pull request's url, title, state draft and action opened", repo.Draft)
 	}
-	if want := []string{"https://forge.example/acme/site/pull/7 opened", "proxy answered: HTTP/1.1 200 Connection established"}; !slices.Equal(programLines(r.log()), want) {
+	if want := []string{"https://" + proxygittest.Host + "/acme/site/pull/7 opened", "proxy answered: HTTP/1.1 200 Connection established"}; !slices.Equal(programLines(r.log()), want) {
 		t.Errorf("the program's lines are %q, want %q", programLines(r.log()), want)
 	}
 	if got := p.h.server.Tunnels(); got < 1 {

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -286,7 +287,10 @@ func programChanges(document *submission.Submission, left []byte, fileErr string
 				return nil, fmt.Errorf("it changed the commits of repository %d", i+1)
 			}
 		}
-		draft, err := draftAfterProgram(was.Draft, now.Draft)
+		if err := checkLinks(&was, now); err != nil {
+			return nil, fmt.Errorf("%w of repository %d", err, i+1)
+		}
+		draft, err := draftAfterProgram(was.Draft, now.Draft, was)
 		if err != nil {
 			return nil, fmt.Errorf("%w of repository %d", err, i+1)
 		}
@@ -295,9 +299,12 @@ func programChanges(document *submission.Submission, left []byte, fileErr string
 	return &got, nil
 }
 
-// draftAfterProgram is the draft the program left, compact, when it may stand: the draft that
-// was there, or, in place of the [placeholder], a pull request. Any other change is an error.
-func draftAfterProgram(was, now json.RawMessage) (json.RawMessage, error) {
+// draftAfterProgram is the draft the program left, as qory writes it, when it may stand: the
+// draft that was there, or, in place of the [placeholder], a pull request of repo that
+// [checkPullRequest] takes. Any other change is an error. A pull request is read into its
+// five members and written again, so a member twice in the file, or a number written as
+// 1.0, is never stored as the program wrote it.
+func draftAfterProgram(was, now json.RawMessage, repo submission.Repository) (json.RawMessage, error) {
 	var a, b any
 	if json.Unmarshal(was, &a) != nil || json.Unmarshal(now, &b) != nil {
 		return nil, errors.New("it left a draft that is not JSON")
@@ -309,9 +316,88 @@ func draftAfterProgram(was, now json.RawMessage) (json.RawMessage, error) {
 	if !bytes.Equal(was, placeholder) || !ok || fields["none"] != nil {
 		return nil, errors.New("it changed the draft")
 	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, now); err != nil {
+	var pr pullRequest
+	dec := json.NewDecoder(bytes.NewReader(now))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&pr); err != nil {
+		return nil, errors.New("it left a draft that is not a pull request")
+	}
+	if err := checkPullRequest(pr, repo); err != nil {
 		return nil, err
 	}
-	return compact.Bytes(), nil
+	return json.Marshal(pr)
 }
+
+// pullRequest is the draft pull request of a repository, as the submission format has it.
+type pullRequest struct {
+	Number json.Number `json:"number"`
+	URL    string      `json:"url"`
+	Title  string      `json:"title"`
+	State  string      `json:"state"`
+	Action string      `json:"action"`
+}
+
+// plainNumber is a number of a pull request: digits with no sign, point, exponent or leading
+// zero, at most 15 of them, so it is also a whole number in any JSON reader.
+var plainNumber = regexp.MustCompile(`^[1-9][0-9]{0,14}$`)
+
+// checkPullRequest checks the draft pr that the program left for repo: a plain number of 1 or
+// more, a title with no control character, and a link that is https on the repository's
+// system, at /<path>/pull/<number>. The error is a cause that names no value of the program.
+func checkPullRequest(pr pullRequest, repo submission.Repository) error {
+	if !plainNumber.MatchString(pr.Number.String()) {
+		return errors.New("it left a draft whose number is not a whole number of 1 or more")
+	}
+	if strings.ContainsFunc(pr.Title, isControl) {
+		return errors.New("it left a draft whose title has a control character")
+	}
+	if !forgeLink(pr.URL, repo, "pull", pr.Number.String()) {
+		return fmt.Errorf("it left a draft whose url is not https://%s/%s/pull/<number>", shownText(repo.System), shownText(repo.Path))
+	}
+	return nil
+}
+
+// checkLinks checks the commit_url that the program left in now, the repository, its base and
+// each of its commits, against was, the repository that qory gave it: each is empty, or an
+// https link on the repository's system at /<path>/commit/<that commit's id>.
+func checkLinks(was, now *submission.Repository) error {
+	check := func(link, commit string) error {
+		if link != "" && !forgeLink(link, *was, "commit", commit) {
+			return fmt.Errorf("it left a commit_url that is not https://%s/%s/commit/<commit>", shownText(was.System), shownText(was.Path))
+		}
+		return nil
+	}
+	if err := check(now.CommitURL, was.Commit); err != nil {
+		return err
+	}
+	if now.Base != nil && was.Base != nil {
+		if err := check(now.Base.CommitURL, was.Base.Commit); err != nil {
+			return err
+		}
+	}
+	for j, c := range was.Commits {
+		if err := check(now.Commits[j].CommitURL, c.Commit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// forgeLink reports whether link is https://<system>/<path>/<kind>/<id>, with the system as the
+// host and no port, user, query or fragment. The repository's path is compared in any letter
+// case, as a forge reads it; the id is compared as it is.
+func forgeLink(link string, repo submission.Repository, kind, id string) bool {
+	u, err := url.Parse(link)
+	if err != nil || u.Scheme != "https" || u.Opaque != "" || u.User != nil || u.RawQuery != "" || u.ForceQuery ||
+		u.Fragment != "" || u.RawPath != "" || strings.HasSuffix(link, "#") {
+		return false
+	}
+	if !strings.EqualFold(u.Host, repo.System) {
+		return false
+	}
+	prefix := "/" + repo.Path + "/" + kind + "/"
+	return len(u.Path) == len(prefix)+len(id) && strings.EqualFold(u.Path[:len(prefix)], prefix) && u.Path[len(prefix):] == id
+}
+
+// isControl reports whether r is a control character: U+0000 to U+001F or U+007F.
+func isControl(r rune) bool { return r < 0x20 || r == 0x7f }

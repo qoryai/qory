@@ -2967,10 +2967,22 @@ The program's exit status says how it ended:
 | another status, or the program did not start | The same as 1 with `"exit": 1`. |
 | it ran past 120 seconds | The file, when it is good, and `{"none": "program-timeout"}` in place of each `no-program` draft. |
 
+qory checks each value that the program writes. Each `commit_url` is empty or
+`https://<system>/<path>/commit/<commit>`, with the `system` and the `path` of the repository
+(the path in any letter case) and the commit that the entry has: the repository's `commit`,
+its `base.commit`, or that entry of `commits`. A draft pull request has exactly the members
+`number`, `url`, `title`, `state` and `action`. Its `number` is a whole number of 1 or more
+written with digits alone (`1.0` and `1e0` are refused), its `url` is
+`https://<system>/<path>/pull/<number>`, and its `title` has no control character. A link has
+no user, port, query or fragment, and its scheme is `https`: `javascript:`, `file:`, `http:`
+and another host are refused. qory writes the draft again from its five members, so a member
+that the file has twice is not stored.
+
 The program may change only `commit_url`, `base.commit_url` and each `commits[].commit_url`
 of a repository, and its `draft`, from `no-program` to a draft pull request. A file that
 changes anything else (the ref, the verdict, the text, a commit, a step, another draft, or the
-list of repositories), a file that is not a submission, and a file that is missing or is not a
+list of repositories), a file with a value that the rules below refuse, a file that is not a
+submission, and a file that is missing or is not a
 regular file of at most 4 MiB, are discarded: qory stores the submission it gave the program,
 with `program-failed` in each `no-program` draft, and prints `qory run: The submit
 program left a result qory cannot use, so a repository has no draft.`, then lines indented by
