@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // entryToken matches the name of a role or entry in a refusal, such as the reviewers of
@@ -75,6 +76,45 @@ func TestRefusalsKeepTheFixLineShortForLongNames(t *testing.T) {
 			for _, l := range long {
 				if strings.Contains(lines[0], exports.Short(l)) && !strings.Contains(strings.Join(lines[1:], "\n"), l) {
 					t.Errorf("the first line has %s shortened, and no later line has it whole:\n%s", exports.Short(l), err)
+				}
+			}
+		})
+	}
+}
+
+// TestTheFixLineOfANoteHasAtMost98CharactersWithNamesOf24Characters is a note in a skill
+// and a module whose names have 24 characters, the longest that no refusal shortens: line 1
+// of each refusal of a note has at most 98 characters, so at most 100 under the "✗ " that
+// qory prints before it, and the whole names are on a later line when line 1 has them
+// shortened.
+func TestTheFixLineOfANoteHasAtMost98CharactersWithNamesOf24Characters(t *testing.T) {
+	skill, mod := "python-naming-rules-0001", "technology-python-0001"
+	mod += strings.Repeat("x", 24-len(mod))
+	if len(skill) != 24 || len(mod) != 24 {
+		t.Fatalf("names have %d and %d characters", len(skill), len(mod))
+	}
+	for _, c := range []struct{ name, front string }{
+		{"a role no agent fills", "notes_for: tester\npaths: [\"*.py\"]\n"},
+		{"a notes_for that is no role", "notes_for: {a: b}\npaths: [\"*.py\"]\n"},
+		{"no paths", "notes_for: developer\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := composeTree(t, map[string]string{
+				stack.FileName:                                      "apiVersion: qory.dev/v1alpha1\nbind:\n  agents:\n    developer: dev\nmodules:\n  - name: " + mod + "\n    source:\n      path: modules/" + mod + "\n",
+				"modules/" + mod + "/agents/dev.md":                 "---\nname: dev\ndescription: d\n---\n\nWrites.\n",
+				"modules/" + mod + "/skills/" + skill + "/SKILL.md": "---\nname: " + skill + "\ndescription: s\n" + c.front + "---\n\nNotes.\n",
+			})
+			if err == nil {
+				t.Fatal("composed without an error")
+			}
+			lines := strings.Split(err.Error(), "\n")
+			if n := utf8.RuneCountInString(lines[0]); n > 98 {
+				t.Errorf("line 1 has %d characters, want at most 98: %s", n, lines[0])
+			}
+			rest := strings.Join(lines[1:], "\n")
+			for _, name := range []string{skill, mod} {
+				if !strings.Contains(lines[0], name) && !strings.Contains(rest, name) {
+					t.Errorf("line 1 has %s shortened, and no later line has it whole:\n%s", name, err)
 				}
 			}
 		})

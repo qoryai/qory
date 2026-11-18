@@ -1175,8 +1175,8 @@ process.yaml                     a factory's process template, checked when expo
 `paths`, optional, lists the files of a change an agent reads, as globs from the checkout
 root: `paths: ["**/*.py", pyproject.toml]`, or one glob as a string. A glob matches a path
 from the checkout root with forward slashes: `**` matches any number of directories, `*`
-and `?` match within one directory, and a glob without a slash matches at any depth only
-through `**/`. An agent without `paths` reads every change. The home's `roles.json`
+and `?` match within one directory, every other character, `[`, `{` and `\` included, is
+literal, and a glob without a slash matches at any depth only through `**/`. An agent without `paths` reads every change. The home's `roles.json`
 contains the `paths` of each member of a group role (§References), for a script that
 starts the members a change needs. qory leaves the key and its whole value out of every
 agent file it writes for a runtime, since not every runtime accepts a key it does not
@@ -1207,7 +1207,7 @@ leaves out is not checked. Each refusal has the fix as line 1, then the cause:
   globs.`, and `The skill is in skills/python-naming/SKILL.md of module python.` on the next
   lines;
 - a `notes_for` that is no role or list of roles: `Set notes_for in python-naming of module
-  python to a role or a list of roles.`
+  python to a role or roles.`
 
 The home contains `role-notes.json`, always written, and not the `notes.json` of a push
 check: `{"notes": [...]}`, one row per note in the order of the report's entries, each

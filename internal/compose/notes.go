@@ -3,6 +3,7 @@ package compose
 import (
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/exports"
 )
@@ -70,8 +71,27 @@ func checkNotes(res *Result) error {
 			if len(filled) == 0 {
 				return exports.Errorf("Remove notes_for from %s of module %s.\n  The stack fills no role.", shown(e.Name), module)
 			}
-			return exports.Errorf("Set notes_for in %s of module %s to a role the stack fills.\n  %s is none.\n  The stack fills %s.", shown(e.Name), module, shown(role), andList(shownAll(filled)))
+			const fix = "Set notes_for in %s of module %s to a role the stack fills."
+			skill, mod := shown(e.Name), module
+			full := ""
+			// Line 1 has at most 98 characters, so it has at most 100 under the "✗ " that
+			// qory prints before it, whatever the names are.
+			if utf8.RuneCountInString(fix)-4+utf8.RuneCountInString(skill)+utf8.RuneCountInString(mod) > 98 {
+				full = "\n  The full names are " + skill + " and " + mod + "."
+				skill, mod = squeeze(skill), squeeze(mod)
+			}
+			return exports.Errorf(fix+"\n  %s is none.\n  The stack fills %s."+full, skill, mod, shown(role), andList(shownAll(filled)))
 		}
 	}
 	return nil
+}
+
+// squeeze is name with its middle replaced by "…" when it has more than 20 characters: its
+// first 9 characters, "…", and its last 10.
+func squeeze(name string) string {
+	r := []rune(name)
+	if len(r) <= 20 {
+		return name
+	}
+	return string(r[:9]) + "…" + string(r[len(r)-10:])
 }

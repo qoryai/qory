@@ -366,7 +366,7 @@ func skillNote(data []byte, name, skill string) *Note {
 	where := "The skill is in " + exports.FilePlace + " of " + exports.ModulePlace + "."
 	roles, ok := stringList(v)
 	if !ok {
-		return &Note{Err: exports.Refuse("Set notes_for in "+shown+" of "+exports.ModulePlace+" to a role or a list of roles.",
+		return &Note{Err: exports.Refuse("Set notes_for in "+shown+" of "+exports.ModulePlace+" to a role or roles.",
 			"The value is not a role or a list of roles.", where)}
 	}
 	noPaths := func(cause string) *Note {

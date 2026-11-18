@@ -107,7 +107,7 @@ func TestABadNoteIsRefusedWithItsFixFirst(t *testing.T) {
 		{"an empty string for paths", "notes_for: developer\npaths: \"\"\n",
 			"Add paths to app-naming of module app.\n  A note needs one path or more, and the value is not a glob or a list of globs.\n  The skill is in skills/app-naming/SKILL.md of module app."},
 		{"a notes_for that is no role", "notes_for: {a: b}\n" + fillsDeveloper,
-			"Set notes_for in app-naming of module app to a role or a list of roles.\n  The value is not a role or a list of roles.\n  The skill is in skills/app-naming/SKILL.md of module app."},
+			"Set notes_for in app-naming of module app to a role or roles.\n  The value is not a role or a list of roles.\n  The skill is in skills/app-naming/SKILL.md of module app."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := composeExtending(t, notesTree(t, c.front))
