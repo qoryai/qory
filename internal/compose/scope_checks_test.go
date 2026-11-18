@@ -334,10 +334,13 @@ func TestThePlanRefusalIsOneLineWhenItFits(t *testing.T) {
 	if got := refuse("abcd", "xy"); got != at99 {
 		t.Errorf("99 characters: %q, want %q", got, at99)
 	}
-	long := refuse(strings.Repeat("p", 64), "w"+strings.Repeat("o", 54))
-	first, _, _ := strings.Cut(long, "\n")
-	if n := printedLength(first); n > 100 || !strings.HasPrefix(first, "Add a scope check for ") {
-		t.Errorf("longest names: first line %q has %d characters", first, n)
+	plan, workflow := strings.Repeat("p", 64), "w"+strings.Repeat("o", 54)
+	wantLong := "Add a scope check for ppppppppp…pppppppppp to a module's scope_checks.\n" +
+		"  You can also remove `plan: " + plan + "` from " + workflow + " in the stack.\n" +
+		"  No module of the stack declares a scope check for " + plan + ".\n" +
+		"  workflows." + workflow + " is in qory-stack.yaml."
+	if long := refuse(plan, workflow); long != wantLong || printedLength(strings.SplitN(long, "\n", 2)[0]) > 100 {
+		t.Errorf("longest names:\n%s\nwant:\n%s", long, wantLong)
 	}
 }
 
