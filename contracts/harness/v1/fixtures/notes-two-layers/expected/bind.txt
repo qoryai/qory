@@ -1,0 +1,2 @@
+agents/developer base-developer provides core
+agents/reviewers code-reviewer provides core group

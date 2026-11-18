@@ -1180,8 +1180,8 @@ process.yaml                     a factory's process template, checked when expo
 `paths`, optional, lists the files of a change an agent reads, as globs from the checkout
 root: `paths: ["**/*.py", pyproject.toml]`, or one glob as a string. A glob matches a path
 from the checkout root with forward slashes: `**` matches any number of directories, `*`
-and `?` match within one directory, and a glob without a slash matches at any depth only
-through `**/`. An agent without `paths` reads every change. The home's `roles.json`
+and `?` match within one directory, every other character, `[`, `{` and `\` included, is
+literal, and a glob without a slash matches at any depth only through `**/`. An agent without `paths` reads every change. The home's `roles.json`
 contains the `paths` of each member of a group role (§References), for a script that
 starts the members a change needs. qory leaves the key and its whole value out of every
 agent file it writes for a runtime, since not every runtime accepts a key it does not
@@ -1189,6 +1189,40 @@ know. The compose checks the `paths` of every agent, and any other value fails i
 `Set paths to globs, such as ["**/*.py"], or remove it.` as line 1, then `The value is not
 a glob or a list of globs.` and `The agent is in agents/python-reviewer.md of module core.`
 on the lines after it.
+
+A skill is a note when its frontmatter has `notes_for`: a role, or a list of roles, each
+written as in `bind` without the kind, `developer` for `agents/developer`, a group role such
+as `reviewers` too. A note also sets `paths`, one glob or a list of globs from the checkout
+root, read as an agent's `paths` is read, with the grammar of that key above: `**` matches
+any number of directories, `*` and `?` match within one directory, and every other
+character, `[`, `{` and `\` included, is literal. A skill with `paths` and no `notes_for`
+is no note. Technology modules and the modules of a repository write notes; a script
+attaches the ones that match a change to the start of an agent that fills a role. The
+compose checks both keys of every note it composes. A skill that an `exclude` or an `only`
+leaves out is not checked. Each refusal has the fix as line 1, then the cause:
+
+- a role that no agent fills, a role with no row in `roles.json`: `Set notes_for in
+  python-naming of module python to a role the stack fills.` with `The stack fills no
+  tester role.` and `The stack fills developer and reviewers.` on the next lines;
+- a stack that fills no role: `Remove notes_for from python-naming of module python.` with
+  `The stack fills no role.` on the next line;
+- no `paths`, an empty list, an empty string, or a value that is no string or list of
+  strings: `Add paths to python-naming of module python.` with `A note needs one path or
+  more.`, or `A note needs one path or more, and the value is not a glob or a list of
+  globs.`, and `The skill is in skills/python-naming/SKILL.md of module python.` on the next
+  lines;
+- a `notes_for` that is no role or list of roles: `Set notes_for in python-naming of module
+  python to a role or roles.`
+
+The home contains `role-notes.json`, always written, and not the `notes.json` of a push
+check: `{"notes": [...]}`, one row per note in the order of the report's entries, each
+`{name, roles, paths, module, layer}`: `name` is the skill's name, so its body is
+`skills/<name>/SKILL.md` in the home; `roles` is `notes_for` as a list, each role as
+`roles.json` writes it, `agents/<role>`; `paths` is the globs as written; `module` is the
+module that ships the skill; `layer` is the number 0 for a module of the checkout's
+`qory.yaml`, or of the stack composed when it extends none, and 1 for a module of the base
+stack it extends. With no note the file is `{"notes": []}`. A home that an earlier qory
+composed has no `role-notes.json`, and `--check` reports it until the next compose.
 
 Below `skills`, a folder with `SKILL.md` is a skill, and everything below it is that skill's
 files, a nested `SKILL.md` included. A real folder with no `SKILL.md` and with a folder below

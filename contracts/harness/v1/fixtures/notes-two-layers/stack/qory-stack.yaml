@@ -1,0 +1,9 @@
+apiVersion: qory.dev/v1alpha1
+name: base
+modules:
+  - name: core
+    source: {path: modules/core}
+  - name: python
+    source: {path: modules/python}
+extending:
+  kinds: [skills]
