@@ -46,9 +46,9 @@ func TestAMissingBranchTakesAFirstPushOnly(t *testing.T) {
 		t.Fatalf("first push: %v", err)
 	}
 	dir, b = onBranch(t, "acme/shop")
-	b.Fresh = false
-	leave(t, dir)
 	start := b.Repositories[0].Commit
+	b.Version = versionOf("acme/shop", start)
+	leave(t, dir)
 	_, _, err := pushOf(dir, b)
 	changed := headError(t, err)
 	want := "qory run: Check branch qory/wi_1: its head is not the commit this run expected, so qory did not push.\n" +
@@ -58,6 +58,47 @@ func TestAMissingBranchTakesAFirstPushOnly(t *testing.T) {
 	}
 	if changed.Head != "" || changed.NotAbove {
 		t.Errorf("refusal %+v, want no head and no third line", changed)
+	}
+}
+
+// TestAMissingBranchIsFreshPerRepository is a work item whose first submission lists the
+// repository acme/lib alone: a later run that changes acme/shop for the first time pushes its
+// branch, which the forge does not have, while a repository the version or a pushed commit
+// lists is refused with "none" as the head.
+func TestAMissingBranchIsFreshPerRepository(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		setup func(b *WorkBranch)
+		fresh bool
+	}{
+		{"the version lists another repository", func(b *WorkBranch) {
+			b.Version = versionOf("acme/lib", b.Repositories[1].Commit)
+		}, true},
+		{"a pushed commit of another repository", func(b *WorkBranch) {
+			b.Pushed = []Landed{{System: "git.example.com", Path: "acme/lib", Commit: b.Repositories[1].Commit}}
+		}, true},
+		{"the version lists the repository", func(b *WorkBranch) {
+			b.Version = versionOf("acme/shop", b.Repositories[0].Commit)
+		}, false},
+		{"a pushed commit of the repository", func(b *WorkBranch) {
+			b.Pushed = []Landed{{System: "git.example.com", Path: "acme/shop", Commit: b.Repositories[0].Commit}}
+		}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir, b := onBranch(t, "acme/shop,acme/lib")
+			c.setup(b)
+			leave(t, dir)
+			doc, _, err := pushOf(dir, b)
+			if c.fresh {
+				if err != nil || doc == nil {
+					t.Fatalf("the first push of acme/shop: %v", err)
+				}
+				return
+			}
+			if changed := headError(t, err); changed.Head != "" || changed.Path != "acme/shop" {
+				t.Errorf("refusal %+v, want acme/shop with no head", changed)
+			}
+		})
 	}
 }
 

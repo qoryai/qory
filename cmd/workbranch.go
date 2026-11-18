@@ -106,8 +106,7 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, timeout time.Du
 // pushedStarts sets what the work item's record of pushed commits gives branch: Pushed,
 // per repository the newest commit of a run that a person did not cancel, and Cancelled,
 // every commit of a cancelled run. The entries come ordered by run number and then by push
-// order, so the last one of a repository is its newest. Fresh is whether the run starts at
-// the run documents' checkout: no submission was chosen and no commit is Pushed.
+// order, so the last one of a repository is its newest.
 func pushedStarts(branch *preparation.WorkBranch, pushed []runapi.PushedEntry) {
 	newest := map[[2]string]preparation.Landed{}
 	order := [][2]string{}
@@ -131,8 +130,6 @@ func pushedStarts(branch *preparation.WorkBranch, pushed []runapi.PushedEntry) {
 	for _, key := range order {
 		branch.Pushed = append(branch.Pushed, newest[key])
 	}
-
-	branch.Fresh = len(branch.Version) == 0 && len(branch.Pushed) == 0
 }
 
 // featureOff reports whether err is a 404 with no error code, the error page of a server

@@ -100,8 +100,8 @@ func openHistory(ctx context.Context, read gitRunner, system, path string, commi
 	return h, remove, nil
 }
 
-// descends reports whether descendant has ancestor in its history; a commit is its own
-// descendant.
+// descends reports whether descendant has ancestor in its history; a commit descends from
+// itself.
 func (h *history) descends(ctx context.Context, ancestor, descendant string) (bool, error) {
 	_, err := h.read(ctx, h.dir, "merge-base", "--is-ancestor", ancestor, descendant)
 	if ge := (*gitError)(nil); errors.As(err, &ge) && ge.exit == 1 {
@@ -128,7 +128,8 @@ type headCheck struct {
 // checkHead reads the head of the branch of b at the forge through read and decides how r's
 // push may go, where r.Commit is the commit the run expected and head the commit it
 // pushes. A head at the expected commit is a plain push. A branch that is not there is a
-// plain push only while [WorkBranch.Fresh]. A head that descends from the commit the run
+// plain push only for a repository that [WorkBranch.fresh] says starts at the run
+// documents' checkout. A head that descends from the commit the run
 // started at, with each commit beyond that one among the commits of cancelled runs
 // ([WorkBranch.Cancelled]), is a push that replaces the branch with a lease on the head,
 // before the run's first push alone. Any other head is a [*HeadChanged].
@@ -141,7 +142,7 @@ func checkHead(ctx context.Context, read gitRunner, dir string, b *WorkBranch, r
 	switch {
 	case got == r.Commit:
 		return headCheck{}, nil
-	case got == "" && b.Fresh && r.Commit == r.Start:
+	case got == "" && b.fresh(b.system, r.Path) && r.Commit == r.Start:
 		return headCheck{}, nil
 	case got == "":
 		return headCheck{}, changed

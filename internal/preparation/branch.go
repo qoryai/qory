@@ -43,11 +43,8 @@ type WorkBranch struct {
 	// cancel, from the work item's record of pushed commits; the run starts there instead of
 	// at Version when that commit descends from the commit of Version, or from the
 	// repository's target commit when Version has none. Cancelled is every commit that a
-	// cancelled run pushed. Fresh is whether the run documents' checkout is the run's
-	// start: the work item has no submission and no pushed commit of a run that is not
-	// cancelled, so the branch may be missing at the forge.
+	// cancelled run pushed.
 	Pushed, Cancelled []Landed
-	Fresh             bool
 	// Repositories is every repository of the run, the target first, set by [RunAt] and
 	// [Switch].
 	Repositories []WorkRepository
@@ -107,6 +104,18 @@ func (b *WorkBranch) CommitOf(system, path string) string {
 		}
 	}
 	return ""
+}
+
+// fresh reports whether the run documents' checkout is the start of the repository path on
+// system: the branch version has no entry for it and no run that a person did not cancel
+// pushed a commit to it, so the branch may be missing at the forge.
+func (b *WorkBranch) fresh(system, path string) bool {
+	if b.CommitOf(system, path) != "" {
+		return false
+	}
+	return !slices.ContainsFunc(b.Pushed, func(l Landed) bool {
+		return l.System == system && sameRepository(system == ForgeGitHub, l.Path, path)
+	})
 }
 
 // fetchBranchCommit fetches the commit of the repository path in b, if its version has

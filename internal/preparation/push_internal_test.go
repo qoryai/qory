@@ -41,7 +41,6 @@ func onBranchIn(t *testing.T, list string) (string, *WorkBranch, string) {
 	version := run(t, filepath.Join(base, "acme", "shop.git"), "rev-parse", "main")
 	b := fetchBranchAt(t, dir, list, version, nil)
 	// A first run: no submission and no pushed commit, so the branch is not at the forge yet.
-	b.Fresh = true
 	if _, err := switchTo(dir, b); err != nil {
 		t.Fatal(err)
 	}
