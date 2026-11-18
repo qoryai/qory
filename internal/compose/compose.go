@@ -202,6 +202,11 @@ type Result struct {
 	// sorted by type, one per type; nil when no module declares one. [Result.PushChecksFor]
 	// renders them for a home.
 	PushChecks []PushCheck
+	// ScopeChecks are the scope checks the modules of the base stack declare, by the
+	// artifact type of a plan; nil when no module declares one. A module that a checkout
+	// adds to the base declares none that counts, since the repository under work must
+	// not supply the check of its own plan.
+	ScopeChecks map[string]ScopeCheck
 	// Hooks are the workflow hooks of the checkout's qory.yaml, in its order, each
 	// checked against the base stack; nil when it lists none. A build writes them into
 	// hooks.json.
@@ -430,6 +435,12 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		if err := addPushChecks(res, checkers, l.Dir, root, name, m.PushChecks); err != nil {
 			return nil, err
 		}
+		// A module that a checkout adds declares no scope check that counts.
+		if pl.Base || opts.Base == nil {
+			if err := addScopeChecks(res, l.Dir, root, name, m.ScopeChecks); err != nil {
+				return nil, err
+			}
+		}
 		res.Modules = append(res.Modules, rl)
 		for _, e := range l.Entries {
 			key := e.Kind + "/" + e.Name
@@ -521,6 +532,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	if err := workflowsShipped(p, declared, opts.Base, opts.StackAs); err != nil {
 		return nil, err
 	}
+	if err := checkPlans(res, p); err != nil {
+		return nil, err
+	}
 	if err := checkHooks(res, p, opts); err != nil {
 		return nil, err
 	}
@@ -589,19 +603,104 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 		if !info.Mode().IsRegular() {
 			return exports.Errorf("Set the push check for %s of module %s to a program file.\n  %s is not a file.", c.Type, shown(name), shownProgram)
 		}
-		for _, e := range res.Excludes {
-			if e.Module != name || e.Path == "" {
-				continue
-			}
-			entry, err := filepath.Rel(dir, e.Path)
-			if err != nil || entry != program && !strings.HasPrefix(program, entry+string(filepath.Separator)) {
-				continue
-			}
+		if e, ok := excludedProgram(res, dir, name, program); ok {
 			return exports.Errorf("%s\n  The program of the push check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
 				altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), c.Type, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
 		}
 		command := append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(program)}, c.Command[1:]...)
 		res.PushChecks = append(res.PushChecks, PushCheck{Type: c.Type, Module: name, Command: command, Reads: c.Reads})
+	}
+	return nil
+}
+
+// excludedProgram is the entry that the exclude or only of module name at dir leaves out
+// and that holds the program, a path inside the module, so the home can leave the program
+// out.
+func excludedProgram(res *Result, dir, name, program string) (Exclude, bool) {
+	for _, e := range res.Excludes {
+		if e.Module != name || e.Path == "" {
+			continue
+		}
+		entry, err := filepath.Rel(dir, e.Path)
+		if err != nil || entry != program && !strings.HasPrefix(program, entry+string(filepath.Separator)) {
+			continue
+		}
+		return e, true
+	}
+	return Exclude{}, false
+}
+
+// ScopeCheck is the scope check the composed harness declares for the plan of one
+// artifact type: the commands that qory runs, in this order, on a fresh clone of what a
+// session pushes. Each gets --base <start commit> and --artifacts <folder> after its
+// arguments, and all must exit 0.
+type ScopeCheck struct {
+	// Module is the module of the base stack that declares the check.
+	Module string `json:"module"`
+	// Commands are the programs and their arguments, in the order of the manifest. Each
+	// program is $QORY_HARNESS_HOME/modules/<module>/<path>, before substitution.
+	Commands [][]string `json:"commands"`
+}
+
+// addScopeChecks adds the scope checks of the module name at dir to the result. A type
+// that another module already declares a scope check for fails the compose, and so does
+// a program that is not a file in the module, read through root when it is not nil, and
+// one in an entry the module's exclude or only leaves out, since the home can leave out
+// such an entry.
+func addScopeChecks(res *Result, dir string, root *os.Root, name string, checks map[string][][]string) error {
+	if len(checks) == 0 {
+		return nil
+	}
+	if root == nil {
+		opened, err := os.OpenRoot(dir)
+		if err != nil {
+			return exports.HideError(err)
+		}
+		defer opened.Close()
+		root = opened
+	}
+	for _, typ := range slices.Sorted(maps.Keys(checks)) {
+		if other, ok := res.ScopeChecks[typ]; ok {
+			return exports.Errorf("Remove the scope check for %s from module %s or module %s.\n  A type has one scope check, and both modules declare one.", typ, shown(other.Module), shown(name))
+		}
+		var commands [][]string
+		for _, c := range checks[typ] {
+			program := c[0]
+			shownProgram := exports.Value(filepath.ToSlash(program), false)
+			info, err := root.Stat(program)
+			if err != nil {
+				return exports.Errorf("Add %s to module %s, or change its scope check for %s.\n  Module %s has no file at %s.", shownProgram, shown(name), typ, shown(name), shownProgram)
+			}
+			if !info.Mode().IsRegular() {
+				return exports.Errorf("Set the scope check for %s of module %s to a program file.\n  %s is not a file.", typ, shown(name), shownProgram)
+			}
+			if e, ok := excludedProgram(res, dir, name, program); ok {
+				return exports.Errorf("%s\n  The program of the scope check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
+					altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), typ, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
+			}
+			commands = append(commands, append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(program)}, c[1:]...))
+		}
+		if res.ScopeChecks == nil {
+			res.ScopeChecks = map[string]ScopeCheck{}
+		}
+		res.ScopeChecks[typ] = ScopeCheck{Module: name, Commands: commands}
+	}
+	return nil
+}
+
+// checkPlans refuses a workflow of the stack whose plan type no module of the base stack
+// declares a scope check for, one line for the first such workflow in sorted order, so
+// no plan goes unchecked. The check is the compose's, since the stack alone does not
+// know its modules.
+func checkPlans(res *Result, p *stack.Stack) error {
+	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
+		plan := p.Workflows[name].Plan
+		if plan == "" {
+			continue
+		}
+		if _, ok := res.ScopeChecks[plan]; !ok {
+			return exports.Errorf("Add a scope check for %s to a module's scope_checks, or remove `plan: %s` from %s in the stack.", plan, plan, name)
+		}
 	}
 	return nil
 }

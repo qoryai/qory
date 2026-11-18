@@ -81,6 +81,11 @@ type Manifest struct {
 	// PushChecks are the checks the module declares for the files of an artifact type,
 	// one per type, in the order of the file; nil when the manifest has none.
 	PushChecks []PushCheck
+	// ScopeChecks are the scope checks the module declares, by the artifact type of a
+	// plan: for each type, the commands in the order of the file, each the program, a
+	// path inside the module, cleaned, and its arguments. Nil when the manifest has none.
+	// Only a module of a run's base stack counts, see ScopeChecks of the compose result.
+	ScopeChecks map[string][][]string
 	// Contracts are the role contracts the module declares, each the path of the
 	// contract file inside the module, cleaned, keyed <kind>/<role>: the path in the
 	// role's map form, roles: {agents: {developer: {fill: one, contract: <path>}}}. Nil
@@ -129,6 +134,7 @@ type rawManifest struct {
 	Roles       yaml.Node              `yaml:"roles,omitempty"`
 	Provides    yaml.Node              `yaml:"provides,omitempty"`
 	PushChecks  []rawPushCheck         `yaml:"push_checks,omitempty"`
+	ScopeChecks yaml.Node              `yaml:"scope_checks,omitempty"`
 }
 
 // rawPushCheck is one push_checks item as it is written. The command's items stay nodes,
@@ -468,6 +474,9 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	if m.PushChecks, err = readPushChecks(path, raw.PushChecks); err != nil {
 		return nil, err
 	}
+	if m.ScopeChecks, err = readScopeChecks(path, &raw.ScopeChecks); err != nil {
+		return nil, err
+	}
 	if m.Contracts, err = readContracts(path, &raw.Roles); err != nil {
 		return nil, err
 	}
@@ -566,6 +575,60 @@ func readPushChecks(path string, items []rawPushCheck) ([]PushCheck, error) {
 			reads = append(reads, node.Value)
 		}
 		out = append(out, PushCheck{Type: item.Type, Command: command, Reads: reads})
+	}
+	return out, nil
+}
+
+// readScopeChecks checks the scope_checks key of the manifest at path, a map from an
+// artifact type, in the form [runapi.ArtifactName] checks, each type once, to a list of
+// commands that is not empty. A command is a list of strings that is not empty, with a
+// first item that is a path inside the module with no .. part. It returns the map with
+// each program's path cleaned, nil for a manifest with no key.
+func readScopeChecks(path string, node *yaml.Node) (map[string][][]string, error) {
+	if node.Kind == 0 {
+		return nil, nil
+	}
+	refuse := func(fix string, lines ...string) error {
+		return exports.Refuse(fix, append(lines, "The manifest is "+path+".")...)
+	}
+	const typeRule = "An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes."
+	if node.Kind != yaml.MappingNode {
+		return nil, refuse("Set scope_checks to a map from an artifact type to a list of commands.", "The value is not a map.")
+	}
+	out := map[string][][]string{}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, list := node.Content[i], node.Content[i+1]
+		if key.Kind != yaml.ScalarNode || !runapi.ArtifactName(key.Value) {
+			return nil, refuse("Set each key of scope_checks to an artifact type.", typeRule, "The key is "+exports.Value(key.Value, true)+".")
+		}
+		typ := key.Value
+		if _, dup := out[typ]; dup {
+			return nil, refuse(fmt.Sprintf("Remove one of the two scope_checks keys for %s.", typ), "A manifest has one list of commands per type.")
+		}
+		if list.Kind != yaml.SequenceNode || len(list.Content) == 0 {
+			return nil, refuse(fmt.Sprintf("Set scope_checks.%s to a list of commands.", typ), "The value is not a list, or the list is empty.")
+		}
+		var commands [][]string
+		for j, item := range list.Content {
+			at := fmt.Sprintf("scope_checks.%s[%d]", typ, j)
+			if item.Kind != yaml.SequenceNode || len(item.Content) == 0 {
+				return nil, refuse(fmt.Sprintf("Set %s to the program's path inside the module, then its arguments.", at), "The value is not a list, or the list is empty.")
+			}
+			words := make([]string, len(item.Content))
+			for k, word := range item.Content {
+				if word.Kind != yaml.ScalarNode || word.Tag != "!!str" {
+					return nil, refuse(fmt.Sprintf("Set %s[%d] to a string, quoted when it reads as a number or a boolean.", at, k), "The item is not a string.")
+				}
+				words[k] = word.Value
+			}
+			// No .. part at all, as the schema has it, though a/../b would stay inside.
+			program, ok := InsideModule(words[0])
+			if !ok || slices.Contains(strings.Split(filepath.ToSlash(words[0]), "/"), "..") {
+				return nil, refuse(fmt.Sprintf("Set the first item of %s to a path inside the module.", at), exports.Value(words[0], true)+" is not one.")
+			}
+			commands = append(commands, append([]string{program}, words[1:]...))
+		}
+		out[typ] = commands
 	}
 	return out, nil
 }
