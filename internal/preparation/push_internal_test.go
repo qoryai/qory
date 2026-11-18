@@ -1149,7 +1149,7 @@ func TestACommitThatFailsInAFurtherRepositoryPushesNothing(t *testing.T) {
 }
 
 // TestDeleteBranchIsTheOnlyWayOut is the fix of a branch that was pushed with no version
-// stored: delete the branch, and no way to add a version by hand.
+// stored: delete the branch, because only a run's push stores a version.
 func TestDeleteBranchIsTheOnlyWayOut(t *testing.T) {
 	b := &WorkBranch{Ref: testRef, system: "git.example.com", pushed: []string{"acme/shop", "acme/lib"}}
 	want := "delete branch qory/wi_1 of acme/shop and acme/lib on git.example.com"

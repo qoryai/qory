@@ -2053,8 +2053,6 @@ Each of these lines stops the run, exit 1. `<c>` is a commit's first 12 characte
   bytes, so the run did not start; the code is used`
 - `Version <n> of the artifact branch does not match the branch format, so the run did not
   start: <cause>; the code is used`
-- `Version <n> of the artifact branch cannot be read as a branch document, so the run did
-  not start: <cause>; the code is used`
 - `The stored version of the artifact branch has commit <c>, which is not a commit on
   <path> on <system>, so the run did not start; the code is used`, then a line indented by
   two spaces: `The fetch through the run's gateway failed: <git line>`
