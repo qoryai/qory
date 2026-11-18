@@ -591,6 +591,48 @@ func TestPushEndingLines(t *testing.T) {
 	}
 }
 
+// TestPushEndingPrintsTheRefusalOfAMovedBranchAfterACut is a run whose push step the head check
+// refused because the branch moved, and whose time limit then cut the step: the run closes failed
+// with push_head_changed and prints the refusal, as a step with no cut does, not the line of a cut
+// step. A stop after the refusal keeps the cut line, and a cut with no refusal prints it too.
+func TestPushEndingPrintsTheRefusalOfAMovedBranchAfterACut(t *testing.T) {
+	succeeded := session.Outcome{State: event.StateSucceeded}
+	failed := session.Outcome{State: event.StateFailed, ExitCode: 3}
+	timedOut := session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
+	moved := &preparation.HeadChanged{Branch: "qory/w1", System: "git.example.com", Path: "acme/shop", Head: strings.Repeat("a", 40), Expected: strings.Repeat("b", 40)}
+	refusal := "Set the branch to the expected commit or delete it; its head is not that commit.\n" +
+		"  Branch qory/w1. Repository git.example.com/acme/shop. Head: " + strings.Repeat("a", 40) + ". Expected: " + strings.Repeat("b", 40) + ", the start commit. qory did not push."
+	cutLine := "✗ take the work item in again in Qory Apiary: the run reached its time limit of 1h0m0s during the push step, and the run's commits may not have reached the branch; the code is used\n"
+	for _, c := range []struct {
+		name    string
+		ending  pushEnding
+		err     error
+		said    string // what the refusal line printed, "" for none
+		printed string // what the terminal got from the cut line
+		code    int
+	}{
+		{"cut after the refusal, succeeded session", pushEnding{session: succeeded, cut: true, limit: time.Hour}, moved, refusal, "", 1},
+		{"cut after the refusal, failed session", pushEnding{session: failed, cut: true, limit: time.Hour}, moved, refusal, "", 3},
+		{"cut after the refusal, timed out session", pushEnding{session: timedOut, cut: true, limit: time.Hour}, moved, refusal, "", 3},
+		{"stop after the refusal, succeeded session", pushEnding{session: succeeded, cut: true, stopped: true, got: "SIGTERM", limit: time.Hour}, moved, "", "✗ take the work item in again in Qory Apiary: qory run got SIGTERM, and the step reached its limit of 15s during the push step, and the run's commits may not have reached the branch; the code is used\n", 1},
+		{"cut with no refusal, succeeded session", pushEnding{session: succeeded, cut: true, limit: time.Hour}, errors.New("cut"), "", cutLine, exitTimeout},
+		{"no cut, succeeded session", pushEnding{session: succeeded}, moved, refusal, "", 1},
+	} {
+		var out strings.Builder
+		var said string
+		err := c.ending.ended(ui.New(&out), func(line string) { said += line }, c.err, &preparation.WorkBranch{}, reported(&exitError{code: 3}))
+		if said != c.said {
+			t.Errorf("%s: said %q, want %q", c.name, said, c.said)
+		}
+		if got := out.String(); got != c.printed {
+			t.Errorf("%s: printed %q, want %q", c.name, got, c.printed)
+		}
+		if got := ExitCode(err); got != c.code {
+			t.Errorf("%s: exit %d, want %d", c.name, got, c.code)
+		}
+	}
+}
+
 // TestFailedEnd is the one text of a run that did not succeed.
 func TestFailedEnd(t *testing.T) {
 	for out, want := range map[session.Outcome]string{

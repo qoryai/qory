@@ -598,9 +598,13 @@ func (e pushEnding) cutBy() string {
 // ended prints how a push step that failed with err ended, for a run on branch, and
 // returns qory run's exit status: ended, the session's, when the session did not succeed,
 // [exitTimeout] for a step cut at the run's time limit, and 1 otherwise. Each cut line
-// has the fix for a push that landed with no version stored.
+// has the fix for a push that landed with no version stored. A step that a refusal because the
+// branch moved ended prints the refusal, not a cut line.
 func (e pushEnding) ended(u *ui.UI, said func(string), err error, branch *preparation.WorkBranch, ended error) error {
-	if e.cut && !e.noStep {
+	out := e.outcome(err)
+	// A run that closes push_head_changed prints the refusal, also when the run's time limit cut the
+	// step after it: the cut line would say that the commits may have reached the branch.
+	if e.cut && !e.noStep && out.Reason != string(contracts.EndCodePushHeadChanged) {
 		if pushed := branch.PushedPaths(); pushed != "" {
 			u.Fail(fmt.Errorf(textPushCutPushed, branch.DeleteBranch(), pushed, e.cutBy()))
 		} else {
@@ -609,7 +613,6 @@ func (e pushEnding) ended(u *ui.UI, said func(string), err error, branch *prepar
 	} else {
 		said(strings.TrimPrefix(err.Error(), "qory run: "))
 	}
-	out := e.outcome(err)
 	switch {
 	case e.session.State != event.StateSucceeded:
 		return ended
