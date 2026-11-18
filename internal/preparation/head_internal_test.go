@@ -56,8 +56,8 @@ func TestAMissingBranchTakesAFirstPushOnly(t *testing.T) {
 	if err.Error() != want {
 		t.Errorf("the refusal is\n%s\nwant\n%s", err, want)
 	}
-	if changed.Head != "" || changed.NotAbove {
-		t.Errorf("refusal %+v, want no head and no third line", changed)
+	if changed.Head != "" {
+		t.Errorf("refusal %+v, want no head", changed)
 	}
 }
 
@@ -118,8 +118,8 @@ func TestAHeadAtTheExpectedCommitTakesAPlainPush(t *testing.T) {
 
 // TestAHeadThatAnotherPushMovedStopsThePush is a branch with a commit that no cancelled run
 // pushed, one or two on top of the start commit, and one that does not descend from it: the
-// push stops, the branch stays, and the refusal has the head and the expected commit, with
-// the third line for the head that does not descend.
+// push stops, the branch stays, and the refusal has the head and the expected commit. The text is the
+// same for each.
 func TestAHeadThatAnotherPushMovedStopsThePush(t *testing.T) {
 	for _, c := range []struct {
 		name      string
@@ -152,14 +152,14 @@ func TestAHeadThatAnotherPushMovedStopsThePush(t *testing.T) {
 			_, _, err := pushOf(dir, b)
 			changed := headError(t, err)
 			wantHead := run(t, bare, "rev-parse", b.Ref)
-			if changed.Head != wantHead || changed.Expected != start || changed.NotAbove != c.unrelated {
-				t.Errorf("refusal %+v, want head %s expected %s not above %v", changed, wantHead, start, c.unrelated)
+			if changed.Head != wantHead || changed.Expected != start {
+				t.Errorf("refusal %+v, want head %s expected %s", changed, wantHead, start)
 			}
 			if got := run(t, bare, "rev-parse", b.Ref); got != wantHead {
 				t.Errorf("the branch moved to %s", got)
 			}
 			text := err.Error()
-			if strings.Contains(text, "does not descend") != c.unrelated || !strings.Contains(text, "Head: "+wantHead+". Expected: "+start+", the start commit.") {
+			if strings.Contains(text, "does not descend") || !strings.Contains(text, "Head: "+wantHead+". Expected: "+start+", the start commit.") {
 				t.Errorf("the refusal is\n%s", text)
 			}
 		})
@@ -313,31 +313,30 @@ func TestOnlyARecordedHeadOfACancelledRunIsReplaced(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		// setup makes the branch and returns its head and the record.
-		setup    func(t *testing.T, bare, ref, start string) (head string, record []string)
-		notAbove bool
+		setup func(t *testing.T, bare, ref, start string) (head string, record []string)
 	}{
 		{"a commit on top of the recorded head", func(t *testing.T, bare, ref, start string) (string, []string) {
 			first := bareCommit(t, bare, ref, start, "cancelled")
 			return bareCommit(t, bare, ref, first, "another push"), []string{first}
-		}, false},
+		}},
 		{"a commit below the recorded head that the record does not list", func(t *testing.T, bare, ref, start string) (string, []string) {
 			first := bareCommit(t, bare, ref, start, "cancelled one")
 			second := bareCommit(t, bare, ref, first, "cancelled two")
 			bareCommit(t, bare, ref, second, "cancelled three")
 			run(t, bare, "update-ref", "refs/heads/"+ref, first)
 			return first, []string{second}
-		}, false},
+		}},
 		{"a recorded head that is unrelated to the start commit", func(t *testing.T, bare, ref, start string) (string, []string) {
 			orphan := run(t, bare, "commit-tree", run(t, bare, "rev-parse", start+"^{tree}"), "-m", "orphan")
 			run(t, bare, "update-ref", "refs/heads/"+ref, orphan)
 			return orphan, []string{orphan}
-		}, true},
+		}},
 		{"a recorded head that the forge does not have", func(t *testing.T, bare, ref, start string) (string, []string) {
 			return bareCommit(t, bare, ref, start, "cancelled"), []string{strings.Repeat("a", 40)}
-		}, false},
+		}},
 		{"an empty record", func(t *testing.T, bare, ref, start string) (string, []string) {
 			return bareCommit(t, bare, ref, start, "cancelled"), nil
-		}, false},
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir, b, base := onBranchIn(t, "acme/shop")
@@ -349,8 +348,8 @@ func TestOnlyARecordedHeadOfACancelledRunIsReplaced(t *testing.T) {
 			}
 			leave(t, dir)
 			_, _, err := pushOf(dir, b)
-			if changed := headError(t, err); changed.Head != head || changed.Expected != start || changed.NotAbove != c.notAbove {
-				t.Errorf("refusal %+v, want head %s expected %s not above %v", changed, head, start, c.notAbove)
+			if changed := headError(t, err); changed.Head != head || changed.Expected != start {
+				t.Errorf("refusal %+v, want head %s expected %s", changed, head, start)
 			}
 			if got := run(t, bare, "rev-parse", b.Ref); got != head {
 				t.Errorf("the branch moved to %s", got)

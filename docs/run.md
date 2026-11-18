@@ -2759,9 +2759,8 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `Check branch qory/<work item id>: its head is not the commit this run expected, so qory
   did not push.`, then a line indented by two spaces: `Repository <system>/<path>. Head:
   <head>. Expected: <commit>, <the start commit or this run's last push>.` `<head>` is
-  `none` when the branch is not on the forge. A third line, `The head does not descend from
-  the expected commit.`, follows when the head is not past the expected commit. Both
-  commits are in full. The step pushes nothing in any repository, and ends the run as
+  `none` when the branch is not on the forge. Both commits are in full. The step pushes
+  nothing in any repository, and ends the run as
   [The head check](#the-head-check) says. A push that the forge rejects with the status
   `[rejected]`, such as a lease that no longer matches, ends the step with the same text,
   with the head read again
@@ -2821,8 +2820,10 @@ credential alone. The result of each repository is one of these:
   pushed before) and has not pushed yet: qory pushes with no lease and creates the branch.
 - The head is past the start commit, the run has not pushed yet, and the head is one that a
   run which a person cancelled pushed, as the work item's record lists it (one head for each
-  push), and it descends from the start commit. qory reads no history: a head below, above or
-  beside a recorded head, or one that the record does not list, is any other head. qory pushes with
+  push), and it descends from the start commit. qory checks that one head and walks no
+  commits between it and the start commit: a head below, above or beside a recorded head, or
+  one that the record does not list, is any other head and is refused with no fetch of its
+  history. qory pushes with
   `--force-with-lease=refs/heads/qory/<work item id>:<head>`, so the push replaces
   those commits only while the branch is still at the head qory read.
 - Any other head, the branch missing where the run did not start at the checkout, or a head
@@ -2838,7 +2839,8 @@ so qory did not push.`, also in the list above.
 A refusal because the branch moved closes the run `failed` with the end code
 `push_head_changed`, after a session that succeeded, failed or timed out; after a session that
 failed or timed out, the exit code of the close is the session's. A session that was interrupted or
-cancelled keeps its end, and a stop that lands after the refusal closes the run `cancelled`. After a
+cancelled keeps its end. A stop that lands after the refusal closes the run `cancelled` after a
+session that succeeded, and keeps the end of the session after one that failed or timed out. After a
 session that did not succeed, any other failure of the step keeps the session's end, and a step that
 a stop or the time limit cut closes the run as the sections above say.
 

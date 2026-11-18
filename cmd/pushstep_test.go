@@ -2605,6 +2605,7 @@ func TestAMovedBranchEndsTheRunWithPushHeadChangedAfterAnySession(t *testing.T) 
 			if len(r.closes) != 1 || r.closes[0].State != c.state || r.closes[0].Reason != c.code || r.closes[0].ExitCode != c.exit {
 				t.Errorf("the run closed with %+v, want %s with %q and exit code %d\n%s", r.closes, c.state, c.code, c.exit, r.out)
 			}
+			wants(t, r.out, "qory run: Check branch qory/"+workItem+": its head is not the commit this run expected, so qory did not push.")
 			if got := p.branchHead(t); got != moved {
 				t.Errorf("the branch moved to %s", got)
 			}

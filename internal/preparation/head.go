@@ -17,7 +17,6 @@ import (
 // head that is not there reads "none".
 const (
 	textHeadChanged  = "qory run: Check branch %[1]s: its head is not the commit this run expected, so qory did not push.\n  Repository %[2]s/%[3]s. Head: %[4]s. Expected: %[5]s, %[6]s."
-	textHeadNotAbove = "\n  The head does not descend from the expected commit."
 	textHeadStart    = "the start commit"
 	textHeadLastPush = "this run's last push"
 	textHeadNone     = "none"
@@ -36,8 +35,6 @@ type HeadChanged struct {
 	// its start commit.
 	Head, Expected string
 	LastPush       bool
-	// NotAbove is whether Head does not descend from Expected.
-	NotAbove bool
 }
 
 // Error is the refusal's text.
@@ -50,9 +47,6 @@ func (e *HeadChanged) Error() string {
 		from = textHeadLastPush
 	}
 	text := fmt.Sprintf(textHeadChanged, e.Branch, shownPath(e.System), shownPath(e.Path), head, e.Expected, from)
-	if e.NotAbove {
-		text += textHeadNotAbove
-	}
 	return text
 }
 
@@ -128,7 +122,10 @@ type headCheck struct {
 // Equality with a recorded head is enough: the record lists one head for each push of a
 // cancelled run, and the push replaces the position of the branch that this run set, with every
 // commit below it. A branch head that is below a recorded head, above it or beside it is not a
-// position that a cancelled run set, so no history is read to cover commits one by one.
+// position that a cancelled run set, so qory checks the one head and walks no commits between
+// it and the start commit. A head that no record lists, or any head after the run's first push,
+// is refused before any fetch: the refusal is the same text for every such head, so the check
+// downloads no history for a head that someone else pushed.
 func checkHead(ctx context.Context, read gitRunner, dir string, b *WorkBranch, r WorkRepository) (headCheck, error) {
 	got, err := remoteHead(ctx, read, dir, b.system, r.Path, b.Ref)
 	if err != nil {
@@ -143,6 +140,10 @@ func checkHead(ctx context.Context, read gitRunner, dir string, b *WorkBranch, r
 	case got == "":
 		return headCheck{}, changed
 	}
+	if r.Commit != r.Start || !b.cancelledHead(b.system, r.Path, got) {
+		return headCheck{}, changed
+	}
+	// Only a head that a record lists reaches the history: any other head refuses with no fetch.
 	h, remove, err := openHistory(ctx, read, b.system, r.Path, r.Commit, got)
 	defer remove()
 	if err != nil {
@@ -152,11 +153,7 @@ func checkHead(ctx context.Context, read gitRunner, dir string, b *WorkBranch, r
 	if err != nil {
 		return headCheck{}, fmt.Errorf(textHeadNoRead, shownPath(r.Path), shownPath(b.system), integration.Printable(exports.HideURLError(err).Error()))
 	}
-	changed.NotAbove = !above
-	if !above || r.Commit != r.Start {
-		return headCheck{}, changed
-	}
-	if !b.cancelledHead(b.system, r.Path, got) {
+	if !above {
 		return headCheck{}, changed
 	}
 	return headCheck{lease: got}, nil
