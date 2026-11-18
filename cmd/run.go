@@ -1153,6 +1153,16 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err := copied.recordLinks(); err != nil {
 					return &runLineError{codeLine(err)}
 				}
+				// A local write run of a harness with a submit program hands its text over in a
+				// file of the copy, which no commit has: the copy's .qory stays out of the git
+				// session, and its folder out of a git add -A of the agent.
+				if program != nil && code == nil && !readOnly && !copied.plain {
+					if err := copied.dir.Exclude(handoffExclude); err != nil {
+						return &runLineError{codeLine(err)}
+					}
+					spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{handoffEnv: handoffPath(copied.dir.Work())})
+					copied.submits = true
+				}
 				return nil
 			}
 			// setupWork runs the setup of a walled run whose run configuration lists
@@ -1495,6 +1505,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				said(copied.stopped(textCopyWallKept).Error())
 			default:
 				back = copied.comeBack(backCtx, spec.RunID, said)
+			}
+			// A local run that came back whole submits, as a run from a run code does however its
+			// session ended: it pushes its branches and runs the harness's submit program. The
+			// program opens a draft only after a session that passed.
+			if back && copied.submits && program != nil {
+				copied.submitLocal(backCtx, streams.errOut, program, ExitCode(ended) == 0)
 			}
 			// A run the gateway closed as completed ends with an exit status of 0 that is not nil.
 			if (!back || !artifactsBack || returnFailed) && ExitCode(ended) == 0 {

@@ -309,6 +309,14 @@ func SetLoadPushChecks(f func(home string) ([]compose.PushCheck, error)) func() 
 	return func() { loadPushChecks = before }
 }
 
+// RegisterPushCheck adds check to the push checks of a local run, called with the repository's
+// folder and the branch about to be pushed, and returns what removes it again.
+func RegisterPushCheck(check func(ctx context.Context, dir, branch string) error) func() {
+	before := localPushChecks
+	registerPushCheck(func(ctx context.Context, repo localRepository) error { return check(ctx, repo.Dir, repo.Branch) })
+	return func() { localPushChecks = before }
+}
+
 // SetSubmitLimit makes the submit program's limit d in place of 120 seconds, and returns what
 // restores it.
 func SetSubmitLimit(d time.Duration) func() {

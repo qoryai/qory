@@ -13,16 +13,20 @@ import (
 // with no verb of an instruction.
 func TestTheTextsOfTheSubmitStepStateTheCauseInLineOne(t *testing.T) {
 	texts := map[string]string{
-		"textHandoffIgnored":  textHandoffIgnored,
-		"textHandoffDropped":  textHandoffDropped,
-		"textProgramFailed":   textProgramFailed,
-		"textProgramTimeout":  textProgramTimeout,
-		"textProgramNoStart":  textProgramNoStart,
-		"textProgramTooMany":  textProgramTooMany,
-		"textProgramNoDraft":  textProgramNoDraft,
-		"textProgramLeftOut":  textProgramLeftOut,
-		"textProgramNoFolder": textProgramNoFolder,
-		"textPushNoReadProxy": "qory run: " + textPushNoReadProxy,
+		"textHandoffIgnored":    textHandoffIgnored,
+		"textHandoffDropped":    textHandoffDropped,
+		"textProgramFailed":     textProgramFailed,
+		"textProgramTimeout":    textProgramTimeout,
+		"textProgramNoStart":    textProgramNoStart,
+		"textProgramTooMany":    textProgramTooMany,
+		"textProgramNoDraft":    textProgramNoDraft,
+		"textProgramLeftOut":    textProgramLeftOut,
+		"textProgramNoFolder":   textProgramNoFolder,
+		"textPushNoReadProxy":   "qory run: " + textPushNoReadProxy,
+		"textPushChecksMissing": textPushChecksMissing,
+		"textPushRefused":       textPushRefused,
+		"textLocalPushFailed":   textLocalPushFailed,
+		"textLocalNoHistory":    textLocalNoHistory,
 	}
 	for name, text := range texts {
 		line, _, _ := strings.Cut(text, "\n")

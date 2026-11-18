@@ -142,6 +142,23 @@ func controlAt(title string) int {
 	return 0
 }
 
+// readHandoffPrinting is [readHandoff] of root, with the lines that tell a person what was not
+// used: the cause when the file is not usable, and each part of it that the format does not
+// allow. It returns nil for no hand-off.
+func readHandoffPrinting(w io.Writer, root string) *handoff {
+	given, err := readHandoff(root)
+	if err != nil {
+		fmt.Fprintf(w, textHandoffIgnored+"\n", filepath.ToSlash(handoffRel), shownError(err))
+	}
+	if given != nil && len(given.dropped) > 0 {
+		fmt.Fprintln(w, textHandoffDropped)
+		for _, line := range given.dropped {
+			fmt.Fprintln(w, "  "+line)
+		}
+	}
+	return given
+}
+
 // jsonCause is the cause of an error of the JSON reader for the file of the agent, with no
 // content of the file: the reader's text can have the first character that it did not
 // expect, or a member's name.

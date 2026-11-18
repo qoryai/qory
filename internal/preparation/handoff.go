@@ -16,6 +16,13 @@ const HandoffDir = ".qory/handoff"
 // [HandoffDir]: line 1 states the cause, and the values follow on indented lines.
 const textHandoffCommitted = "qory run: A commit of this run has a path under " + HandoffDir + "/, so qory did not push.\n  Repository %s.\n  Commit %s.\n  Path %s."
 
+// HandoffCommitted is the refusal for a local run, whose commits are in the repository at dir
+// with the path path on system: the check of [Push] on the commits from start, not included, to
+// head, included.
+func HandoffCommitted(ctx context.Context, dir, system, path, start, head string) error {
+	return handoffCommitted(ctx, git, dir, system, WorkRepository{Path: path}, start, head)
+}
+
 // handoffCommitted checks the commits from start, not included, to head, included, of the
 // repository at dir, merges included, and returns the refusal for the first commit that has
 // a path under [HandoffDir]; nil for none. A commit that adds the path and a later one that

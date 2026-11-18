@@ -11,7 +11,6 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -323,16 +322,7 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		if err != nil {
 			return &runLineError{fmt.Errorf(textNotStored, branch.VersionWays(), branch.Ref, shownError(err))}
 		}
-		given, err := readHandoff(handoffRoot)
-		if err != nil {
-			fmt.Fprintf(w, textHandoffIgnored+"\n", filepath.ToSlash(handoffRel), shownError(err))
-		}
-		if given != nil && len(given.dropped) > 0 {
-			fmt.Fprintln(w, textHandoffDropped)
-			for _, line := range given.dropped {
-				fmt.Fprintln(w, "  "+line)
-			}
-		}
+		given := readHandoffPrinting(w, handoffRoot)
 		document := assembleSubmission(branch, repositories, verdict, given)
 		if program != nil {
 			document, err = program.apply(ctx, w, document)

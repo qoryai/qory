@@ -553,9 +553,11 @@ release may change what an existing document does, and states it under Upgrading
 - A run from a run code starts no submit program, relay, container or write token for the
   forge's API: the push step pushes and stores the submission, with the draft `no-program`,
   and the forge's adapter opens the draft pull request from it. The `submit_program` of the
-  composed harness is for a run with no run code: qory runs it on the person's machine, outside
-  the wall, with the person's login of the forge's command line, after the push and before it
-  stores the version, once for each repository. The program gets the inputs `QORY_SUBMIT_*` and
+  composed harness is for a run with no run code: qory pushes `qory/run-<run id>` for each
+  repository with the person's git login, then runs the program on the person's machine,
+  outside the wall, with the person's login of the forge's command line, once for each
+  repository. The program never pushes. A run whose session did not pass, or that wrote no
+  hand-off text, gets the draft `none`. The program gets the inputs `QORY_SUBMIT_*` and
   prints plain lines: the five `draft_` lines and a `commit_url` line for each commit. qory
   stores them as the draft and the commit addresses, checks each value, and leaves out a line
   that it cannot use. A program that ends with status 3 means that the person has no login of
@@ -563,8 +565,10 @@ release may change what an existing document does, and states it under Upgrading
   login command that the program prints as the first line of its standard error, and the
   branch stays pushed. A program that runs past 120 seconds is `program-timeout`. The
   submission format has the reason `login-needed`, the exit 0 for `program-failed`, and the
-  draft states `closed` and `merged`. This build has no push step for a run with no run code yet. See The submit
-  program in `docs/run.md`.
+  draft states `closed` and `merged`. In this build no push check is registered, so a run with
+  no run code pushes nothing, runs no program and prints `qory run: The push checks are not
+  available yet, so qory pushed nothing and opened no draft.` See The submit program in
+  `docs/run.md`.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
   qory stops a run whose documents have one. A run whose documents set no

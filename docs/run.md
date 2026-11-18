@@ -2928,11 +2928,25 @@ program, no container, no relay and no write token for the forge's API: the push
 git's push alone, and the forge's adapter opens or updates the draft pull request from the
 stored submission.
 
-A run with no run code runs the program of the composed harness, `submit_program`, on the
-person's machine, outside the wall, after the push and before qory stores the version. This
-build has no push step for such a run, so the program does not start yet; the rules below are
-what the step does with it. qory runs the command once for each repository that the run
-pushed, in a new empty folder, with no argument and with standard input closed. The program
+A run with no run code has no work item and no run API, so qory stores no submission for it.
+After the run's commits are back in your repositories on a branch `qory/run-<run id>`, qory
+pushes that branch for each repository with your git login and configuration, without force,
+and then runs the program of the composed harness, `submit_program`, on your machine, outside
+the wall. The program never pushes: it opens or updates the draft and prints the address of
+each commit. This holds whether the session passed or not, as for a run from a run code. A
+session that did not pass, or that wrote no hand-off text, gets the draft `none`.
+
+Before each push, qory runs the push checks on every repository. If one refuses, qory pushes
+nothing and runs no program, and prints `qory run: A push check refused the push, so qory
+pushed nothing and opened no draft.` with `Branch: <branch>.` and `Cause: <cause>` indented
+by two spaces. A push that fails prints `qory run: The push of the branch failed, so qory opened
+no draft.` and leaves that repository out of the program. In this build no push check is
+registered, so a run with no run code pushes nothing, runs no program and prints one line:
+`qory run: The push checks are not available yet, so qory pushed nothing and opened no draft.`
+Until the checks exist, a run with no run code opens no draft.
+
+qory runs the command once for each repository that it pushed, in a new empty folder, with no
+argument and with standard input closed. The program
 gets the environment of the person who runs `qory`, so the login of the forge's command line
 (`gh auth login`, or `GH_TOKEN`) is the person's, without the variables of `qory` that start with
 `QORY_SUBMIT_`, and these variables, as the submit program contract of the integrations
@@ -2941,14 +2955,14 @@ repository lists them (`contracts/run/v1/submit-program/README.md`):
 | Variable | Value |
 |---|---|
 | `QORY_SUBMIT_SYSTEM`, `QORY_SUBMIT_PATH` | The repository's `system` and `path`. |
-| `QORY_SUBMIT_BRANCH` | The work item's branch, `ref` of the submission. |
-| `QORY_SUBMIT_BASE_BRANCH` | `base.branch`, the repository's default branch. Not set when the submission has none. |
+| `QORY_SUBMIT_BRANCH` | The branch that qory pushed, `qory/run-<run id>`. |
+| `QORY_SUBMIT_BASE_BRANCH` | `base.branch`, the branch that the draft is based on: the branch that your checkout of the repository is on when the run ends. Not set for a detached HEAD. |
 | `QORY_SUBMIT_BASE_COMMIT` | `base.commit`. |
 | `QORY_SUBMIT_COMMITS` | The commits of the repository, oldest first, the head last, separated by single spaces. The program is not run for a repository with more than 100 commits. |
-| `QORY_SUBMIT_DRAFT` | `open`; `update` when the previous version of the work item has a draft of the repository; `none` when the draft is not `no-program`, as after a round that did not pass, or the submission has no text. |
-| `QORY_SUBMIT_DRAFT_NUMBER` | The number of that draft, for `update` alone. |
+| `QORY_SUBMIT_DRAFT` | `open`, or `none` when the session did not pass or wrote no hand-off text. A run with no run code has no previous version, so it never gets `update`. |
+| `QORY_SUBMIT_DRAFT_NUMBER` | Not set: it is for `update` alone. |
 | `QORY_SUBMIT_TITLE`, `QORY_SUBMIT_DESCRIPTION_FILE` | The `title` of the text, and the path of a file of mode 0600 with its `description`. Not set for `none`. |
-| `QORY_SUBMIT_PREVIOUS_TITLE` | The title of the previous version, when it had a text. |
+| `QORY_SUBMIT_PREVIOUS_TITLE` | Not set: a run with no run code has no work item, so no previous version. |
 
 qory gives the program no credential, no token and no proxy address. The program may
 run for 120 seconds. qory prints at most 20 lines of its standard error, masked and of at most
@@ -2989,7 +3003,7 @@ again.` for a forge whose command line is `gh`.
 
 The program's exit status says how it ended:
 
-| Exit | The step stores |
+| Exit | The draft of the repository |
 |---|---|
 | 0 | The addresses and the draft of the lines. With no whole draft, `{"none": "program-failed", "exit": 0}` in place of `no-program`. |
 | 1 | The addresses and the draft of the lines, a call to the forge having failed. With no whole draft, `{"none": "program-failed", "exit": 1}` in place of `no-program`. |
@@ -3002,11 +3016,11 @@ A repository whose draft is not `no-program` keeps its draft and gets the addres
 program cannot change the ref, the verdict, the text, a commit or a step: it has no file of the
 submission to write.
 
-`base.branch` is the branch that qory read as the repository's default when it fetched the
-repository at the start of the run, such as `main`: one name for each repository, since each
-has a default branch that can differ from the others. It is the branch that a pull request
-of the run is based on. A repository whose branch name qory could not read, or whose name has
-more than 255 characters, has no `base.branch`.
+`base.branch` is the branch that a pull request of the run is based on, one name for each
+repository. For a run with no run code it is the branch that your checkout of the repository is
+on when the run ends, such as `main`; for a detached HEAD there is none. A repository whose
+branch name qory could not read, or whose name has more than 255 characters, has no
+`base.branch`.
 
 #### The report of a push
 
