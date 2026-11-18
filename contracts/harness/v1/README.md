@@ -1079,9 +1079,9 @@ composed harness has one submit program, and both modules declare one.` on the n
 An empty command, a word that is not a string, and a program that is not a file in the
 module, or is in an entry an `exclude` or an `only` of the module leaves out, fail the
 compose as they do for a push check, with `submit_program` in place of the push check.
-A run from a run code runs no submit program: the forge's adapter opens the draft from the
-stored submission. A run with no run code runs the program on the person's machine, outside the
-wall, once for each repository after the push, with the person's login of the forge's command
+A run from a run code, or with a run key, runs no submit program: the forge's adapter opens the
+draft from the stored submission. A run with neither a run code nor a run key runs the program on
+the person's machine, outside the wall, once for each repository after the push, with the person's login of the forge's command
 line. The program gets the inputs `QORY_SUBMIT_*` and prints plain lines, as the submit program
 contract of the integrations repository states (`contracts/run/v1/submit-program/README.md`).
 Exit 0 is done, exit 1 a failed call to the forge, and exit 2 an input the program cannot use.

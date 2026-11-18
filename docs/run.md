@@ -2843,7 +2843,7 @@ read run have no submit step. The document has:
   to `commit`, oldest first, with its `step`. A repository that the run did not push has no
   `base` and no `commits`.
 - `draft` of each repository: `{"none": <reason>}`, or a draft pull request that the
-  [submit program](#the-submit-program) of a run with no run code wrote. The reason is `escalated` when the verdict is
+  [submit program](#the-submit-program) of a run with no run code and no run key wrote. The reason is `escalated` when the verdict is
   `escalate`; `not-passed` when the verdict is any other than `passed`; `no-text` when the
   verdict is `passed` and `text` is absent; `no-program` when the verdict is `passed`, `text`
   is there, and the run has a run code, or the composed harness has no submit program, or the
@@ -2852,7 +2852,7 @@ read run have no submit step. The document has:
   [The submit program](#the-submit-program) says. A draft that a person closed or merged has the
   `state` `closed` or `merged` and the `action` `kept`.
 - `commit_url` of each repository, of its `base` and of each of its `commits`: the addresses
-  that the submit program of a run with no run code prints. They are absent when no program
+  that the submit program of a run with no run code and no run key prints. They are absent when no program
   ran, as on a run with a run code.
 
 The hand-off file is how a session gives qory its text and the ledger step of each
@@ -2959,9 +2959,9 @@ refuses, qory pushes nothing and runs no program, and prints `qory run: A push c
 push, so qory pushed nothing and opened no draft.` with `Branch: <branch>.` and `Cause: <cause>`
 indented by two spaces. A push that fails prints `qory run: The push of the branch failed, so qory
 opened no draft.` and leaves that repository out of the program. In this build neither check is
-registered, so a run with no run code pushes nothing, runs no program and prints one line:
+registered, so a run with no run code and no run key pushes nothing, runs no program and prints one line:
 `qory run: The push checks are not available yet, so qory pushed nothing and opened no draft.`
-Until the checks exist, a run with no run code opens no draft.
+Until the checks exist, a run with no run code and no run key opens no draft.
 
 When the program returns a draft for a repository, qory prints `Draft: <address>` on standard
 output, one line for each such repository in the order of the repositories, as the last lines of
@@ -3004,7 +3004,7 @@ a line feed or a carriage return and a line feed: `draft_number`, `draft_url`, `
 or `kept`, and `kept` for a draft that is `closed` or `merged`), each with its value after one
 space, and `commit_url <commit> <address>` for the base and each commit. qory takes the five
 draft lines as the draft, only when each is there once and valid, and each address as the
-`commit_url` of the repository, its `base` or its commit. A run with no run code keeps no record
+`commit_url` of the repository, its `base` or its commit. A run with no run code and no run key keeps no record
 of them. A number has 1 to 9 digits and no
 leading zero, a title is UTF-8 of at most 256 characters with a character that is not a space
 and no control, bidirectional or invisible character, and an address is `https` on the
@@ -3049,7 +3049,7 @@ program cannot change the ref, the verdict, the text, a commit or a step: it has
 submission to write.
 
 `base.branch` is the branch that a pull request of the run is based on, one name for each
-repository. For a run with no run code it is the branch that your checkout of the repository is
+repository. For a run with no run code and no run key it is the branch that your checkout of the repository is
 on when the run ends, such as `main`; for a detached HEAD there is none. A repository whose
 branch name qory could not read, or whose name has more than 255 characters, has no
 `base.branch`.
