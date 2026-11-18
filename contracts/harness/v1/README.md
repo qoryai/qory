@@ -1149,8 +1149,8 @@ exclude or only of module core leaves skills/running out.` The home contains
 absolute path in the home; a harness whose modules declare no check has no such file.
 
 `submit_program`, optional, declares the program of the submit step: a forge's module ships
-the program that opens or updates the draft pull request and writes the links of the
-commits. `command` is the program, a file in the module and a relative path with no `..`
+the program that opens or updates the draft pull request and prints the forge's address of
+each commit. `command` is the program, a file in the module and a relative path with no `..`
 part, then its arguments. A composed harness has at most one: two modules that declare
 one fail the compose, `Remove submit_program from module core or module web.` with `A
 composed harness has one submit program, and both modules declare one.` on the next line.
@@ -1160,8 +1160,10 @@ compose as they do for a push check, with `submit_program` in place of the push 
 A run from a run code, or with a run key, runs no submit program: the forge's adapter opens the
 draft from the stored submission. A run with neither a run code nor a run key runs the program on
 the person's machine, outside the wall, once for each repository after the push, with the person's login of the forge's command
-line. The program gets the inputs `QORY_SUBMIT_*` and prints plain lines, as the submit program
-contract of the integrations repository states (`contracts/run/v1/submit-program/README.md`).
+line. The program gets the inputs `QORY_SUBMIT_*` and prints result lines on its standard output,
+as the submit program contract of the integrations repository lists them
+(`contracts/run/v1/submit-program/README.md`). qory reads the lines and checks each value,
+prints the draft's address as a `Draft: <address>` line, and stores nothing of them.
 Exit 0 is done, exit 1 a failed call to the forge, and exit 2 an input the program cannot use.
 See docs/run.md, §The submit program.
 

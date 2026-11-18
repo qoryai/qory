@@ -623,11 +623,14 @@ release may change what an existing document does, and states it under Upgrading
   no run code and no run key pushes nothing, runs no program and prints `qory run: The push
   checks are not available yet, so qory pushed nothing and opened no draft.` See The submit
   program in `docs/run.md`.
-- A push that landed with no version stored, and a push that fails as a branch that moved,
-  give one way out in the line of `qory run`: `delete branch qory/<work item id> of <path>
-  on <system>`. Deleting it loses the commits on that branch that no version has. The next
-  run creates the branch at `target_version` when no version exists, and starts from the
-  last version otherwise.
+- A push that landed with no version stored has one way out in the line of `qory run`:
+  `delete branch qory/<work item id> of <path> on <system>`. A branch whose head is not the
+  commit the run expected is refused before any push, with the line `Check branch
+  qory/<work item id>` and the head and the expected commit on the next line. To go on,
+  delete that branch or move it back to the expected commit, then take the work item in
+  again. Both lose the commits on the branch that no version has. The next run creates a
+  deleted branch at `target_version` when no version exists, and starts from the last
+  version otherwise.
 - The lines that stopped a run on a stored branch version with a fix for Qory Apiary
   (a ref, a file, a format, a commit that is missing, is no commit, differs in `.qory` or
   fails to check out) now state the fact first: `Version <n> of the artifact submission has a

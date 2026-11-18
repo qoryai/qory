@@ -2725,10 +2725,11 @@ One repository can be pushed before another fails, and a push can succeed before
 is stored. The branch is then past every version of the artifact `submission`. When Qory
 Apiary has no record of the push (see The report of a push), the head of the branch is past
 the commit the next run starts at, and the next run ends `failed` with the end code
-`push_head_changed`. Each line for that state gives one way out: delete the branch.
-Deleting it loses the commits on that branch that no version has. When the work item has no
-version, the next run creates the branch at `target_version`, not at the commit that the
-deleted branch had; with a version, it starts from the last one.
+`push_head_changed`, with the refusal that [The head check](#the-head-check) lists. To go on,
+delete the branch, or move it back to the commit that the second line of the refusal shows
+after `Expected:`. Both lose the commits on the branch that no version has. When the work
+item has no version, the next run creates a deleted branch at `target_version`, not at the
+commit that the deleted branch had; with a version, it starts from the last one.
 
 On a run that can push, each of these lines stops the run after the setup, before the
 agent starts, and closes it `failed` with `no_session`:
@@ -2793,7 +2794,7 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   pushes the run's commits, did not open: <error>; the code is used`
 - `take the work item in again in Qory Apiary: the run API, which stores the version of the
   artifact submission, is not reachable from this run: <error>; the code is used`
-- `Define the artifact type branch in the workspace's Artifact types, then delete branch
+- `Define the artifact type submission in the workspace's Artifact types, then delete branch
   qory/<work item id> of <path> on <system>, then run the round again`, when the workspace
   has no artifact type `submission`
 - `delete branch qory/<work item id> of <path> on <system>, then take the work item in
