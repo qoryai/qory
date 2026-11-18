@@ -260,17 +260,31 @@ func pushArgs(repo localRepository) []string {
 // pushBranch pushes the head that the checks saw to the branch of repo, with the person's git
 // configuration and login, and with no input: a command that asks for one fails.
 func pushBranch(ctx context.Context, repo localRepository) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", pushArgs(repo)...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd := pushCommand(ctx, repo)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
 	return out.String(), err
 }
 
+// pushCommand is the git push of repo with the person's environment, which has the person's git
+// configuration and login, and no prompt on the terminal.
+func pushCommand(ctx context.Context, repo localRepository) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", pushArgs(repo)...)
+	cmd.Env = localGitEnv()
+	return cmd
+}
+
+// localGitEnv is the person's environment with GIT_TERMINAL_PROMPT=0, for every git that the local
+// step runs: a command that needs a password or a question fails, and nothing is asked.
+func localGitEnv() []string {
+	return append(slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "GIT_TERMINAL_PROMPT=") }), "GIT_TERMINAL_PROMPT=0")
+}
+
 // localGit runs git in dir with the person's environment and returns its standard output.
 func localGit(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = localGitEnv()
 	var out, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &stderr
 	if err := cmd.Run(); err != nil {

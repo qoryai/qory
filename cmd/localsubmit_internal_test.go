@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"context"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -51,5 +53,28 @@ func TestOnlyTheAddressOfAForgeHasASystemAndAPath(t *testing.T) {
 		if ok != (c.system != "") || system != c.system || path != c.path {
 			t.Errorf("%q gives %q, %q, %v, want %q and %q", c.address, system, path, ok, c.system, c.path)
 		}
+	}
+}
+
+// TestEveryGitOfTheLocalStepRunsWithNoPrompt checks the push and the reads without running a git
+// that could read the person's credential helper: the push keeps the person's configuration, so
+// it has no -c credential.helper, and its environment has GIT_TERMINAL_PROMPT=0 as the last
+// setting, whatever the person's shell has. The same holds for the git of the reads.
+func TestEveryGitOfTheLocalStepRunsWithNoPrompt(t *testing.T) {
+	t.Setenv("GIT_TERMINAL_PROMPT", "1")
+	repo := localRepository{Dir: "/work", PushURL: "https://git.example.com/acme/app.git", Branch: "qory/run-1", Head: strings.Repeat("a", 40)}
+	for name, env := range map[string][]string{"push": pushCommand(context.Background(), repo).Env, "reads": localGitEnv()} {
+		var prompts []string
+		for _, kv := range env {
+			if strings.HasPrefix(kv, "GIT_TERMINAL_PROMPT=") {
+				prompts = append(prompts, kv)
+			}
+		}
+		if !slices.Equal(prompts, []string{"GIT_TERMINAL_PROMPT=0"}) {
+			t.Errorf("the %s environment has %q, want GIT_TERMINAL_PROMPT=0 once", name, prompts)
+		}
+	}
+	if args := pushArgs(repo); slices.Contains(args, "-c") {
+		t.Errorf("the push has %q, want the person's git configuration, with no -c", args)
 	}
 }
