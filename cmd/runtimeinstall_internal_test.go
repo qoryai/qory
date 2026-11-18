@@ -97,10 +97,11 @@ func TestEngineMountsFindsNoRunningContainerWithNoEngineProgram(t *testing.T) {
 
 // TestTheInstallCausesStandAlone installs claude with a registry that returns 401 with
 // no Bearer challenge, a token realm whose response has no token, an instance address
-// with a path, and a source that returns a release with no tarball. A dispatched run
-// from a run code shows each cause alone, with "; the code is used", as [causeOnly] makes
-// it, and each says what is wrong without the fix line. A person's run shows the fix
-// line, then the cause.
+// that is no URL, one with a path, and a source that returns a release with no tarball.
+// A dispatched run from a run code shows each cause alone, with "; the code is used" at
+// its end, as [causeOnly] makes it, and each says what is wrong without the fix line.
+// The first line of the address that is no URL, with "qory run: ", has at most 100
+// characters. A person's run shows the fix line, then the cause.
 func TestTheInstallCausesStandAlone(t *testing.T) {
 	registry := func(t *testing.T, challenge bool, path string) (string, string) {
 		var srv *httptest.Server
@@ -145,6 +146,11 @@ func TestTheInstallCausesStandAlone(t *testing.T) {
 			return "the response of the token realm at " + host + " contains no token; the code is used",
 				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", instance))
 		}},
+		{"an address of Qory Apiary that is no URL", func(t *testing.T) (string, error) {
+			host, _ := registry(t, true, "")
+			return "the run's address of Qory Apiary is not an http or https URL\n  with a host and no user; the code is used",
+				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", "ftp://apiary.example.com"))
+		}},
 		{"an address of Qory Apiary with a path", func(t *testing.T) (string, error) {
 			host, instance := registry(t, true, "/base")
 			return "the address of Qory Apiary has a path:\n  \"" + instance + "\"; the code is used",
@@ -158,6 +164,9 @@ func TestTheInstallCausesStandAlone(t *testing.T) {
 			want, err := c.err(t)
 			if got := causeOnly(installFailed(err)).Error() + codeUsed; got != want {
 				t.Errorf("a dispatched run shows %q, want %q", got, want)
+			}
+			if first, _, _ := strings.Cut("qory run: "+want, "\n"); c.name == "an address of Qory Apiary that is no URL" && len(first) > 100 {
+				t.Errorf("the first line has %d characters: %s", len(first), first)
 			}
 		})
 	}

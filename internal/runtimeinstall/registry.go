@@ -591,7 +591,7 @@ const tokenPath = "/registry/token"
 func tokenRoute(instance string) (*url.URL, error) {
 	u, err := url.Parse(instance)
 	if err != nil || u.Host == "" || u.User != nil || u.Scheme != "https" && u.Scheme != "http" {
-		return nil, errors.New("Set the address of Qory Apiary to an https URL\nThe run's address of Qory Apiary is not an http or https URL with a host and no user")
+		return nil, errors.New("Set the address of Qory Apiary to an https URL\nThe run's address of Qory Apiary is not an http or https URL\n  with a host and no user")
 	}
 	if strings.TrimSuffix(u.Path, "/") != "" {
 		// [CheckInstance] refuses a path too: the route is on the instance's host.
