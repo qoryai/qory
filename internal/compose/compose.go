@@ -695,8 +695,8 @@ func addScopeChecks(res *Result, dir string, root *os.Root, name string, checks 
 
 // duplicateScopeCheck is the refusal for a type that the modules first and second both
 // declare a scope check for. The fix line names the type and the modules when it fits in
-// 100 characters. Otherwise the fix line is the same without the values, and the second
-// line has them, so no length of a name or a type moves the fix past 100 characters.
+// 98 characters. Otherwise the fix line is the same without the values, and the second
+// line has them, so no length of a name or a type moves the fix past 98 characters.
 func duplicateScopeCheck(typ, first, second string) error {
 	if fix := fmt.Sprintf("Remove the scope check for %s from module %s or %s.", typ, shown(first), shown(second)); fits(fix) {
 		return exports.Errorf("%s\n  A type has one scope check, and both modules declare one.", fix)
@@ -706,7 +706,7 @@ func duplicateScopeCheck(typ, first, second string) error {
 
 // checkPlans refuses a workflow of the stack whose plan type no module of the base stack
 // declares a scope check for, for the first such workflow in sorted order, so no plan
-// goes unchecked. The refusal is one line when it fits in 100 characters, and the
+// goes unchecked. The refusal is one line when it fits in 98 characters, and the
 // alternative moves to a second line otherwise, as [altFix] does. The check is the compose's, since the stack alone does not
 // know its modules.
 func checkPlans(res *Result, p *stack.Stack) error {

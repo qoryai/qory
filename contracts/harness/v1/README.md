@@ -212,7 +212,7 @@ schema is [config.schema.json](config.schema.json).
 | `workflows.<name>.hook_points` | no | the points of the workflow where a checkout extending the stack may add workflow hooks, by the point's name: `{at: end, kinds: [check, review]}`. `at` is where the point sits in the workflow's session, `end`, `start` or `inside`; `kinds` is one or more of `check`, `review` and `enrich`, each once. A point's name has the form of a workflow's name, and is unique in the stack, since a hook selects a point by its name alone. Only a `qory-stack.yaml` declares points: a `qory.yaml` that defines a stack, which nothing extends, is refused with `Remove hook_points from the workflows in qory.yaml.` (§Workflow hooks) |
 | `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on: `read`, `write-no-push`, or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access to a valid level.` with `The levels are read, write-no-push, and write.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. A run takes the lower of this access and `access` in the run's documents, in the order `read`, `write-no-push`, `write`; documents with no target have no `access`, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A `write-no-push` run has a writable checkout, no push step, no submit, and no version of the artifact `branch`. At `write` the checkout is writable and qory pushes what the agent left |
 | `workflows.<name>.tier` | no | the tier that names the main session's model and effort for a dispatched run of the workflow: `light`, `balanced`, or `thinking`; none when left out. qory stops with an error on any other value: `Set workflows.<name>.tier to a valid tier.` with `The tiers are light, balanced, and thinking.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. qory passes nothing new to the run: Qory Apiary resolves the session's model and effort from the tier, and sends them as it sends the session's model. `qory run` does not read it |
-| `workflows.<name>.plan` | no | the artifact type whose launch version sets what a dispatched run of the workflow may push, such as `build-plan`: lowercase letters and digits in groups joined by single hyphens, 64 bytes at most; none when left out. Only a workflow with `access: write` names one. qory stops with an error on a value that is no artifact type: `Set workflows.<name>.plan to an artifact type.` with `An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines; and on a `plan` in a workflow whose access is `read`, `write-no-push` or left out: `` Remove `plan` from <name>, or set its access to write. `` The compose stops when no module of the stack declares the scope check for the type in `scope_checks` (§The module manifest): `Add a scope check for <type> to a module's scope_checks.` with `` You can also remove `plan: <type>` from <name> in the stack. `` on the next line, or both on one line when they fit in 100 characters. `qory run` does not read `plan` |
+| `workflows.<name>.plan` | no | the artifact type whose launch version sets what a dispatched run of the workflow may push, such as `build-plan`: lowercase letters and digits in groups joined by single hyphens, 64 bytes at most; none when left out. Only a workflow with `access: write` names one. qory stops with an error on a value that is no artifact type: `Set workflows.<name>.plan to an artifact type.` with `An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines; and on a `plan` in a workflow whose access is `read`, `write-no-push` or left out: `` Remove `plan` from <name>, or set its access to write. `` The compose stops when no module of the stack declares the scope check for the type in `scope_checks` (§The module manifest): `Add a scope check for <type> to a module's scope_checks.` with `` You can also remove `plan: <type>` from <name> in the stack. `` on the next line, or both on one line when the first line has at most 98 characters. `qory run` does not read `plan` |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 | `extending.hooks` | no | lets a checkout extending the stack add workflow hooks at the points of its workflows: `per_point`, the most hooks one point takes, 3 when left out; `per_workflow`, the most the points of one workflow take together, 10 when left out; `timeout`, a duration in whole seconds, 1s or more, the longest a hook may run and the timeout of a hook that sets none, 10 minutes when left out. A count below 1 is refused. Without the block a checkout adds no workflow hook (§Workflow hooks) |
 | `extending.target` | no | the runtimes and the models the stack is written for, `runtime` and `model`, each one name or a list, one of the two at least. A checkout's resolved target outside either list fails the compose; listed models make the model required, since a target without one runs whatever the runtime defaults to, which is a model the stack did not list. Left out, every target is accepted, a model left out included (§Extending a stack) |
@@ -1154,7 +1154,7 @@ command that is not a string, and a program that is empty, absolute or has a `..
 the compose, each with the manifest's path. The compose also fails when two modules declare
 one type, `Remove the scope check for build-plan from module core or web.` with `A
 type has one scope check, and both modules declare one.` on the next line (when the first line
-would have more than 100 characters, it is `Remove the scope check for the type from one of the
+would have more than 98 characters, it is `Remove the scope check for the type from one of the
 two modules.`, and the next line has the type and both module names, whole); when a program
 is not a file in the module, `Add checks/check.js to module core, or change its scope check
 for build-plan.` with `Module core has no file at checks/check.js.`; and when a program is
@@ -1456,7 +1456,7 @@ For a member of a group role, the fix line is `Complete agent python-reviewer, o
 it from provides.agents.reviewers of module python.` The fix line ends with the list that
 added the member: `bind.agents.reviewers in qory-stack.yaml` for a bind in the stack you
 compose, and `bind.agents.reviewers in qory.yaml` (or `in harness.yaml`) for a bind in a
-checkout's file. When the fix line would pass 100 characters, it ends with `remove it
+checkout's file. When the fix line would pass 98 characters, it ends with `remove it
 from the list that adds it.`, and `This list adds it:` follows with the list on the next
 line. When two or more lists add the member, the fix line is `Complete agent
 python-reviewer, or remove it from the lists that add it.`, and `These lists add it:`
@@ -1477,7 +1477,7 @@ base module. When one such list alone adds the member and a module of the checko
 python.`, and the cause line names the list. When a base module ships the agent, the
 block offers an exclude in `qory.yaml`, or asks the base stack's maintainer, and the
 cause line names the list, the base stack, its pin and the contract. The fix line names
-the agent's module when the line stays within 100 characters, and the cause line names it
+the agent's module when the line has at most 98 characters, and the cause line names it
 otherwise:
 
 ```
@@ -1486,7 +1486,7 @@ Exclude agents/python-reviewer in qory.yaml, or ask the base stack's maintainer 
   - the tool Read
 ```
 
-When the line without the module still passes 100 characters, the fix line is `Exclude
+When the line without the module still passes 98 characters, the fix line is `Exclude
 the agent in qory.yaml, or ask the base stack's maintainer to complete it.`, and the
 cause line names `agents/python-reviewer` and its module. A base module is named as the
 checkout's `qory.yaml` lists it, by the name of the export when the base lists an export
@@ -1660,7 +1660,9 @@ runtime: the resolution happens in the composed tree, per path.
    the fix is `Remove commands/ship from the exclude of module core, or ship it in a
    module of the repository.`, then `The skill deploy of module core requires command
    ship.` and `The exclude of module core in qory.yaml leaves command ship out.` on the
-   next two lines; for a provided entry, the middle line ends `which module ts provides
+   next two lines, and the fix is `Remove <kind>/<name> from the exclude of module <m>.` with
+   `You can also ship it in a module of the repository.` on the next line when the first
+   line would pass 98 characters; for a provided entry, the middle line ends `which module ts provides
    as agent ts-developer.` A binding is checked first: one that selects an entry that is
    not composed fails with `Ship agent rails-coder in a module, or change bind
    agents.coder.` and `The bind agents.coder selects agent rails-coder, and no module
@@ -1681,13 +1683,13 @@ runtime: the resolution happens in the composed tree, per path.
    as in §The role contract. When two or more lists add it, the fix is `Ship agent
    python-reviewer, or remove it from the lists that add it.`, then `No module ships
    agent python-reviewer, and these lists add it:` and a line per list, and a single list
-   that would make the fix line pass 100 characters goes on the next line after `No
+   that would make the fix line pass 98 characters goes on the next line after `No
    module ships agent python-reviewer, and this list adds it:`. When the bind of the base
    stack a checkout extends or the `provides` of a base module adds the member, which the
    checkout does not edit, the fix is `Ship agent python-reviewer in a module of
    qory.yaml, or ask the base stack's maintainer to ship it.`, or `Ship the agent in a
    module of qory.yaml, or ask the base stack's maintainer to ship it.` when that line
-   would pass 100 characters, since an agent that a module of `qory.yaml` ships fills the
+   would pass 98 characters, since an agent that a module of `qory.yaml` ships fills the
    member, with the lists on the lines after `No module ships agent python-reviewer, and
    this list adds it:`. When the base's `extending.kinds` does not list `agents`, the fix
    is `Ask the base stack's maintainer to ship agent python-reviewer.` A member that only

@@ -165,6 +165,8 @@ func TestTheDuplicateScopeCheckRefusalFixFitsInAHundredCharacters(t *testing.T) 
 	}{
 		{"short names", "core", "web", "build-plan"},
 		{"20 characters", strings.Repeat("a", 20), strings.Repeat("b", 20), "build-plan"},
+		{"a first line of 98 characters", strings.Repeat("a", 22), strings.Repeat("b", 21), "build-plan"},
+		{"a first line of 99 characters", strings.Repeat("a", 22), strings.Repeat("b", 22), "build-plan"},
 		{"24 characters", strings.Repeat("a", 24), strings.Repeat("b", 24), "build-plan"},
 		{"40 characters", strings.Repeat("a", 40), strings.Repeat("b", 40), "build-plan"},
 		{"24 characters and a 64-character type", strings.Repeat("a", 24), strings.Repeat("b", 24), strings.Repeat("p", 64)},
@@ -187,8 +189,13 @@ func TestTheDuplicateScopeCheckRefusalFixFitsInAHundredCharacters(t *testing.T) 
 		}
 		text := err.Error()
 		first, _, _ := strings.Cut(text, "\n")
-		if n := len([]rune(first)); n > 100 || !strings.HasPrefix(first, "Remove the scope check") {
+		if n := len([]rune(first)); n > 98 || !strings.HasPrefix(first, "Remove the scope check") {
 			t.Errorf("%s: first line %q has %d characters", c.name, first, n)
+		}
+		// With 98 characters or fewer in the full fix, line 1 has the type and both names.
+		full := "Remove the scope check for " + c.typ + " from module " + c.first + " or " + c.other + "."
+		if named := first == full; named != (len([]rune(full)) <= 98) {
+			t.Errorf("%s: first line %q, the full fix has %d characters", c.name, first, len([]rune(full)))
 		}
 		for _, value := range []string{c.first, c.other, c.typ} {
 			if !strings.Contains(text, value) {
@@ -281,8 +288,10 @@ func TestACheckoutModulesScopeCheckDoesNotCount(t *testing.T) {
 }
 
 // TestThePlanRefusalIsOneLineWhenItFits is a plan type and a workflow name short enough
-// for the fix and the alternative in 100 characters: the refusal is one line. With the
-// longest names, the first line is the fix, at most 100 characters.
+// for the fix and the alternative in 98 characters, which are 100 under the "✗ " that qory
+// prints before them: the refusal is one line. A line of 98 characters stays one line, one
+// of 99 moves the alternative to a second line, and with the longest names the first line
+// is the fix, at most 98 characters.
 func TestThePlanRefusalIsOneLineWhenItFits(t *testing.T) {
 	refuse := func(plan, workflow string) string {
 		t.Helper()
@@ -299,9 +308,17 @@ func TestThePlanRefusalIsOneLineWhenItFits(t *testing.T) {
 	if got := refuse("a1", "x"); got != want {
 		t.Errorf("short names: %q, want %q", got, want)
 	}
+	const at98 = "Add a scope check for abcd to a module's scope_checks, or remove `plan: abcd` from x in the stack."
+	if got := refuse("abcd", "x"); got != at98 || len([]rune(got)) != 98 {
+		t.Errorf("98 characters: %q (%d characters), want %q", got, len([]rune(got)), at98)
+	}
+	const at99 = "Add a scope check for abcd to a module's scope_checks.\n  You can also remove `plan: abcd` from xy in the stack."
+	if got := refuse("abcd", "xy"); got != at99 {
+		t.Errorf("99 characters: %q, want %q", got, at99)
+	}
 	long := refuse(strings.Repeat("p", 64), "w"+strings.Repeat("o", 54))
 	first, _, _ := strings.Cut(long, "\n")
-	if n := len([]rune(first)); n > 100 || !strings.HasPrefix(first, "Add a scope check for ") {
+	if n := len([]rune(first)); n > 98 || !strings.HasPrefix(first, "Add a scope check for ") {
 		t.Errorf("longest names: first line %q has %d characters", first, n)
 	}
 }

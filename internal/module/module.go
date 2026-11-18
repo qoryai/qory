@@ -1233,17 +1233,18 @@ func (r *skillReader) add(at, name, path string) error {
 	return nil
 }
 
-// fits reports whether line, the first line of a refusal, has at most 100 characters, with
+// fits reports whether line, the first line of a refusal, has at most [exports.LineMax]
+// characters, so it has at most 100 under the "✗ " that qory prints before it, with
 // [exports.ModulePlace] in it a module as long as a refusal prints one: "module " and a
 // name of [exports.NameMax] characters.
 func fits(line string) bool {
 	line = strings.ReplaceAll(line, exports.ModulePlace, strings.Repeat("m", len("module ")+exports.NameMax))
-	return utf8.RuneCountInString(line) <= 100
+	return utf8.RuneCountInString(line) <= exports.LineMax
 }
 
 // jsonObjectRefusal is the refusal of the MCP server file, a path in the module as a
 // message prints it, whose content is no JSON object. The path moves to the second line
-// when it would push the first past 100 characters.
+// when it would push the first past 98 characters.
 func jsonObjectRefusal(file, cause string) error {
 	fix := fmt.Sprintf("Write %s in %s as one JSON object.", file, exports.ModulePlace)
 	if !fits(fix) {

@@ -1286,6 +1286,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- A compose error that has a short form for a long first line switches to it when the
+  first line has more than 98 characters. The line that qory prints has the 2 characters
+  of `✗ ` before it, so a line of 99 or 100 characters printed at 101 or 102. This covers
+  the errors for a duplicate scope check, a plan with no scope check, and a member of a
+  role group that is not shipped, left out or lacks a part of its contract.
 - A push check's container runs under the `runtime` that `wall.images` sets for the
   wall's default image, such as `runsc` (gVisor). Until now, it ran under the engine's
   default runtime.

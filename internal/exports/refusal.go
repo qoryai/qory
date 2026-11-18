@@ -39,6 +39,11 @@ func Refuse(fix string, lines ...string) *Refusal {
 	return &Refusal{text: text}
 }
 
+// LineMax is the most characters the first line of a refusal has when a fix line is
+// chosen by its length: the terminal prints "✗ " before it, and the printed line then has
+// at most 100 characters.
+const LineMax = 98
+
 // NameMax is the longest name, in characters, that [Fit] leaves whole.
 const NameMax = 24
 
