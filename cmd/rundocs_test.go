@@ -101,9 +101,9 @@ func TestARunCodeTakesNoStackRuntimeOrArguments(t *testing.T) {
 // TestARunCodeWhoseAnswerQoryDoesNotRunStops is a redemption whose documents qory does
 // not run: none, documents that break the schema, a stack or a stack_reference, which
 // the schema does not allow, a step other than explore and prebuild, a prebuild on a
-// machine whose forager.yaml has no wall, no workflow, no runtime (no run settings, run
-// settings with no runtime, or an empty one), a runtime with no headless start, and a
-// runtime qory does not render.
+// machine whose forager.yaml has no wall, no workflow, no runtime (no run settings, null
+// run settings, run settings with no runtime, or an empty one), a runtime with no
+// headless start, and a runtime qory does not render.
 // Each stops the run after the one redemption, before it opens, with a line that starts
 // with its fix and, except for no runtime, ends "; the code is used": exit 2 for an
 // answer with no documents, which Forager refuses, and exit 1 for the rest.
@@ -138,6 +138,8 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 			d["stack"], d["stack_reference"] = "core", "https://code.example.com/team/stacks#release-7:core"
 		}), broken},
 		{"no run settings", codeDocuments(t, func(d map[string]any) { delete(d, "run_settings") }),
+			"Set `runtime` in the run settings to one of " + headlessRuntimes + ".\n  The document names no runtime."},
+		{"null run settings", codeDocuments(t, func(d map[string]any) { d["run_settings"] = nil }),
 			"Set `runtime` in the run settings to one of " + headlessRuntimes + ".\n  The document names no runtime."},
 		{"run settings with no runtime", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"model": "opus"} }),
 			"Set `runtime` in the run settings to one of " + headlessRuntimes + ".\n  The document names no runtime."},

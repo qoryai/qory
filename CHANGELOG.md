@@ -563,13 +563,15 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
-- A run from a run code whose documents contain no `run_settings` stops before
+- A run from a run code whose explore documents contain no `run_settings` stops before
   anything is installed or fetched, with ``Set `runtime` in the run settings to one of
   claude, codex, cursor, gemini, and opencode.`` Until now, such a run started on
-  `claude`. Documents whose `run_settings` have no `runtime`, or an empty one, stop with
-  the same line, where they stopped with `it breaks documents.schema.json`. A workflow runs on the runtime of the workspace, or of the workflow's settings
-  when they set one, which Qory Apiary sends. A prebuild needs no runtime and runs as
-  before.
+  `claude`. Explore documents start an agent session, so they require `run_settings`
+  with a `runtime`. Documents whose `run_settings` are null, or have no `runtime` or an
+  empty one, stop with the same line, where they stopped with `it breaks
+  documents.schema.json`. A workflow runs on the runtime of the workspace, or of the
+  workflow's settings when they set one, which Qory Apiary sends. A prebuild needs no
+  runtime and runs as before.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
   qory stops a run whose documents have one. A run whose documents set no

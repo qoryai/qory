@@ -2309,10 +2309,12 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   response to the run code has no workflow; the code is used`
 - ``Set `runtime` in the run settings to one of claude, codex, cursor, gemini, and
   opencode.`` and the next line ``The document names no runtime.``, when the documents
-  contain no `run_settings`, or `run_settings` with no `runtime` or an empty one, before
-  anything is installed or fetched. qory checks for a runtime in `run_settings` before
-  the schema check, which requires one. Qory Apiary sends the runtime of the workspace,
-  or of the workflow's settings when they set one; qory sets no default runtime
+  contain no `run_settings`, a null one, or `run_settings` with no `runtime` or an empty
+  one, before anything is installed or fetched. Documents of the step explore start an
+  agent session, so they require `run_settings` with a `runtime`; qory checks for them
+  before the schema check. Qory Apiary sends the runtime of the workspace, or of the
+  workflow's settings when they set one; qory sets no default runtime. The documents of
+  a prebuild start no agent session and contain no `run_settings`
 - `set another runtime for the workspace in Qory Apiary, then take the work item in
   again: qory starts a run code's workflow with a runtime's headless start, and has none
   for <runtime>; the code is used`, before anything is fetched

@@ -147,8 +147,9 @@ const harnessFile = "harness.yaml"
 // codeDocumentsOf reads documents, the documents of the answer to a run code, for a
 // step qory runs: explore, which [codeRunOf] reads further, or prebuild, which
 // [runCodePrebuild] runs. Each error is exit 1. Each ends with [codeUsed], except
-// [textNoRuntime] for explore documents whose run settings set no runtime: that check
-// runs before the schema's, which requires a runtime in run settings.
+// [textNoRuntime]: explore documents start an agent session, so they require run
+// settings with a runtime, and documents with no run settings, or run settings with no
+// runtime, get that refusal before the schema check, see [lacksRuntime].
 func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
 	if lacksRuntime(documents) {
 		return contracts.Documents{}, noRuntime()
@@ -177,7 +178,9 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	hidden := doc.HarnessHidden != nil && *doc.HarnessHidden
 	runtime, settings := provisioner.Settings(doc.RunSettings)
 	// A workflow runs on the runtime of the workspace or of its workflow settings, which
-	// Qory Apiary sends in run_settings: qory picks none.
+	// Qory Apiary sends in run_settings, required in explore documents; qory sets no
+	// default runtime. codeDocumentsOf refuses such documents first; this check covers
+	// documents that reach codeRunOf another way.
 	if runtime == "" {
 		return nil, noRuntime()
 	}
@@ -709,18 +712,27 @@ func noRuntime() error {
 	return fmt.Errorf(textNoRuntime, headlessList())
 }
 
-// lacksRuntime reports whether documents are for the step explore and have run settings
-// with no runtime or an empty one. Any other form, such as run settings that are no
-// object, is left to the schema check.
+// lacksRuntime reports whether documents are for the step explore, which starts an agent
+// session and so requires run settings with a runtime, and have no run_settings, a null
+// one, or run settings with no runtime or an empty one. Any other form, such as run
+// settings that are no object, is left to the schema check. A prebuild starts no agent
+// session, and the schema refuses run settings in its documents.
 func lacksRuntime(documents json.RawMessage) bool {
 	var d struct {
-		Step        string                     `json:"step"`
-		RunSettings map[string]json.RawMessage `json:"run_settings"`
+		Step        string          `json:"step"`
+		RunSettings json.RawMessage `json:"run_settings"`
 	}
-	if json.Unmarshal(documents, &d) != nil || d.Step != provisioner.StepExplore || d.RunSettings == nil {
+	if json.Unmarshal(documents, &d) != nil || d.Step != provisioner.StepExplore {
 		return false
 	}
-	runtime, ok := d.RunSettings["runtime"]
+	if len(d.RunSettings) == 0 || string(d.RunSettings) == "null" {
+		return true
+	}
+	var settings map[string]json.RawMessage
+	if json.Unmarshal(d.RunSettings, &settings) != nil {
+		return false
+	}
+	runtime, ok := settings["runtime"]
 	return !ok || string(runtime) == `""`
 }
 

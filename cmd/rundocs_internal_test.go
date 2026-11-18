@@ -681,9 +681,10 @@ func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 
 // TestDocumentsWithNoRuntimeAreRefused is codeRunOf for documents with no run settings
 // and with run settings that set no runtime: each is refused with the runtimes that have
-// a headless start, exit 1. codeDocumentsOf refuses explore documents whose run settings
-// set no runtime or an empty one before the schema check, and leaves a prebuild's
-// documents to that check.
+// a headless start, exit 1. codeDocumentsOf refuses explore documents with no run
+// settings, null ones, or run settings with no runtime or an empty one before the schema
+// check, since explore starts an agent session, and leaves a prebuild's documents to that
+// check.
 func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
 	var headless []string
 	for _, n := range render.Names() {
@@ -710,9 +711,11 @@ func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
 		{`{"step":"explore","run_settings":{}}`, true},
 		{`{"step":"explore","run_settings":{"runtime":""}}`, true},
 		{`{"step":"explore","run_settings":{"runtime":"codex"}}`, false},
-		{`{"step":"explore"}`, false},
+		{`{"step":"explore"}`, true},
+		{`{"step":"explore","run_settings":null}`, true},
 		{`{"step":"explore","run_settings":"claude"}`, false},
 		{`{"step":"prebuild","run_settings":{}}`, false},
+		{`{"step":"prebuild"}`, false},
 	} {
 		if got := lacksRuntime(json.RawMessage(c.documents)); got != c.lacks {
 			t.Errorf("%s: lacksRuntime is %v", c.documents, got)
@@ -743,22 +746,24 @@ func TestARunWritesOnlyWithAccessWriteInItsDocuments(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			var fields map[string]any
+			if err := json.Unmarshal(raw, &fields); err != nil {
+				t.Fatal(err)
+			}
 			if c.set != "" {
-				var doc map[string]any
-				if err := json.Unmarshal(raw, &doc); err != nil {
-					t.Fatal(err)
-				}
-				doc["access"] = c.set
-				if raw, err = json.Marshal(doc); err != nil {
-					t.Fatal(err)
-				}
+				fields["access"] = c.set
+			}
+			// Explore documents require run settings with a runtime, which the pinned
+			// contract's fixtures do not contain yet.
+			if _, ok := fields["run_settings"]; !ok {
+				fields["run_settings"] = map[string]any{"runtime": "claude"}
+			}
+			if raw, err = json.Marshal(fields); err != nil {
+				t.Fatal(err)
 			}
 			doc, err := codeDocumentsOf(raw)
 			if err != nil {
 				t.Fatal(err)
-			}
-			if doc.RunSettings == nil {
-				doc.RunSettings = &contracts.RunSettings{Runtime: "claude"}
 			}
 			r, err := codeRunOf(doc)
 			if err != nil {

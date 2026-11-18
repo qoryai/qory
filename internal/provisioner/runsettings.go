@@ -30,8 +30,9 @@ type Setting struct {
 	Flag, Value string
 }
 
-// Settings are the runtime and the compose flags of qory run that rs sets, nil for no
-// run settings, each value as rs has it:
+// Settings are the runtime and the compose flags of qory run that rs sets, each value as
+// rs has it. rs is nil for documents with no run settings, which qory refuses for a step
+// that starts an agent session:
 //
 //	runtime            the runtime; "" when rs is nil or sets none
 //	model              model
