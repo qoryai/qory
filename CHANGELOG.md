@@ -589,8 +589,8 @@ release may change what an existing document does, and states it under Upgrading
   composed harness is for a run with neither a run code nor a run key (a run with a run key and
   no run code pushes nothing locally and runs no program): qory pushes the checked head of
   `qory/run-<run id>` for each repository to the remote origin's one push address with the
-  person's git login, after the checks of every repository and before any program, then runs the program on the person's machine,
-  outside the wall, with the person's login of the forge's command line, once for each
+  person's git login, after the checks of every repository and before any program, then runs
+  the program on the person's machine, outside the wall, with the person's login of the forge's command line, once for each
   repository. The program never pushes. A run whose session did not pass, or that wrote no
   hand-off text, gets the draft `none`. For each repository whose program returned a draft,
   `qory run` prints `Draft: <address>` as its last lines. qory pushes to `origin` by its name,

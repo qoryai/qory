@@ -2915,8 +2915,9 @@ never fails because of the file.
 A module manifest can declare `submit_program`, a command of the module: a file in the
 module, then its arguments (see `contracts/harness/v1/README.md`). A composed harness has at
 most one, and a second declaration fails the compose. The run's documents have no member for
-the module of a submit program. A run with neither a run code nor a run key gets the program from a module that the
-`qory.yaml` of the person's checkout composes, and a run from a run code runs no program.
+the module of a submit program. A run with neither a run code nor a run key gets the program
+from a module that the `qory.yaml` of the person's checkout composes, and a run from a run code
+runs no program.
 
 #### The submit program
 
