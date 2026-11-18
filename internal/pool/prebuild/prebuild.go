@@ -260,13 +260,6 @@ type Result struct {
 	Image session.Built
 }
 
-// EndCodeEnvironmentImageMissing is the reason of a run whose environment image is not in its
-// registry: the step's session has joined by then, and Forager takes image_missing only for a
-// close before a join.
-//
-// TODO: move to contracts.EndCode when integrations is pinned.
-const EndCodeEnvironmentImageMissing contracts.EndCode = "environment_image_missing"
-
 // Launch runs the prebuild r, until it ends or ctx ends; at ctx's end the step running
 // is stopped, behind the wall too. The error is why it did not succeed. Once the run is
 // open, it closes once, as Launch returns:
@@ -368,7 +361,7 @@ func Launch(ctx context.Context, s Settings, r Run) (res Result, err error) {
 	got, err := s.step(ctx, run, r, dir)
 	switch {
 	case got.ImageMissing:
-		out = session.Outcome{State: event.StateFailed, Reason: string(EndCodeEnvironmentImageMissing), ExitCode: -1}
+		out = session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodeEnvironmentImageMissing), ExitCode: -1}
 	case got.ImageTooLarge:
 		out = session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePrebuiltImageTooLarge), ExitCode: -1}
 	}
