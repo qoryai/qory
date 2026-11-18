@@ -317,14 +317,6 @@ func RegisterPushCheck(check func(ctx context.Context, dir, branch string) error
 	return func() { localPushChecks = before }
 }
 
-// SetSubmitLimit makes the submit program's limit d in place of 120 seconds, and returns what
-// restores it.
-func SetSubmitLimit(d time.Duration) func() {
-	before := submitLimit
-	submitLimit = d
-	return func() { submitLimit = before }
-}
-
 // SetBranchWait makes the push step pass each wait to f in place of waiting, and returns
 // what restores the default.
 func SetBranchWait(f func(time.Duration)) func() {
