@@ -24,8 +24,8 @@ release may change what an existing document does, and states it under Upgrading
   command for each type. `qory harness compose` ends with an error when the `plan` of a
   workflow is not an artifact type, when a workflow with a `plan` has an access other
   than `write`, and when no module of the base stack declares a scope check for the type
-  of a `plan`. A module that a checkout adds to the base declares none that counts. `qory run` does not read `plan` or
-  `scope_checks`.
+  of a `plan`. A module that a checkout adds to the base declares none that counts.
+  `qory run` does not read `plan` or `scope_checks`.
 - A skill with the frontmatter keys `notes_for` (a role or a list of roles) and `paths` (one
   glob or more from the checkout root) is a note. The compose exits 2, with the fix as
   line 1, for a note with any of these:
