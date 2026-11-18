@@ -380,9 +380,9 @@ Set hooks[0].timeout to whole seconds, 1s or more, such as 90s or 5m.
   /work/app/qory.yaml sets "500ms".
 ```
 
-A role, module or entry name of more than 20 characters in a first line that passes 100
-characters is shortened to its first 9 and last 10 characters with `…` between them, and a
-last line of the refusal has the whole name: `The full name of <short> is <name>.`
+A role, module or entry name of more than 24 characters in a first line that has more than
+98 characters is shortened to 20 characters, its first 9 and last 10 with `…` between them,
+and a last line of the refusal has the whole name: `The full name of <short> is <name>.`
 
 Those rules are: both or neither of `run` and `agent`, a `review` hook with `run`, a
 kind other than the three, a missing `at` or `kind`, an empty value or null, a program path

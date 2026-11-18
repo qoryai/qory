@@ -620,7 +620,7 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 }
 
 // duplicatePushCheck is the refusal for a type that the modules first and second both
-// declare a push check for, shaped as [duplicateScopeCheck] is: the fix names the type and
+// declare a push check for, shaped as [duplicateScopeCheck] is: the fix has the type and
 // the modules when it has at most [exports.LineMax] characters, and otherwise has none of
 // them, and the second line has them.
 func duplicatePushCheck(typ, first, second string) error {
@@ -730,13 +730,13 @@ func checkPlans(res *Result, p *stack.Stack, base *Base, as string) error {
 	return nil
 }
 
-// stackFile is the file that defines the stack as a refusal names it: the qory-stack.yaml
-// of the base stack a checkout extends, the name the caller gives a stack it did not read
-// from a file, or the file of the stack.
+// stackFile is the file that defines the stack as a refusal prints it: the qory-stack.yaml
+// of the base stack a checkout extends, with the base's name and pin, the name the caller
+// gives a stack it did not read from a file, or the file of the stack.
 func stackFile(p *stack.Stack, base *Base, as string) string {
 	switch {
 	case base != nil:
-		return stack.FileName
+		return "the " + stack.FileName + " of the base stack " + base.String()
 	case as != "":
 		return as
 	case p.File != "":

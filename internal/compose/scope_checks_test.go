@@ -257,7 +257,7 @@ func TestACheckoutModulesScopeCheckDoesNotCount(t *testing.T) {
 		const want = "Add a scope check for change-plan to a module's scope_checks.\n" +
 			"  You can also remove `plan: change-plan` from fix in the stack.\n" +
 			"  No module of the stack declares a scope check for change-plan.\n" +
-			"  workflows.fix is in qory-stack.yaml."
+			"  workflows.fix is in the qory-stack.yaml of the base stack core@working-tree."
 		if err == nil || err.Error() != want {
 			t.Errorf("%v, want %q", err, want)
 		}

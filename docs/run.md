@@ -5058,12 +5058,11 @@ work cannot supply the check of its plan. `qory harness compose` and `qory run` 
 an error when the program of a scope check is no file in the module, is a folder, or is in
 an entry that an `exclude` or an `only` of the module leaves out. Line 1 of each of these
 errors is the fix alone, and the module, the type and the path are on line 2. They also end
-with an error when two modules declare a scope check for one type: line 1 names the type
-and both modules when it has at most 98 characters, and otherwise line 2 names them.
+with an error when two modules declare a scope check for one type: line 1 has the type
+and both modules when it has at most 98 characters, and otherwise line 2 has them.
 
-A stack in which no workflow names a plan needs no scope check: the compose accepts it, the
-result has no scope check unless a module declares one, and a `scope_checks` of a module is
-still read and checked.
+A stack in which no workflow has a `plan` needs no scope check: `qory harness compose`
+succeeds, and a `scope_checks` of a module is still read and checked.
 
 `qory run` reads neither `plan` nor `scope_checks`: a run does not run a scope check, and
 the push step does not read the plan type.
