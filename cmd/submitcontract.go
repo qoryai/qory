@@ -244,6 +244,12 @@ func submitDraftValue(key, value, system string) error {
 	return nil
 }
 
+// refusedInTitle reports whether a title may not have the character r: a control character, a
+// bidirectional control or other invisible format character, or a line or paragraph separator.
+func refusedInTitle(r rune) bool {
+	return unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
+}
+
 // plainTitle reports whether title has no control, bidirectional control, line or paragraph
 // separator or invisible format character, and one character that is not a space. It is the
 // rule of $defs.draft_title in the contract's definitions.schema.json, as Unicode's classes
@@ -252,7 +258,7 @@ func plainTitle(title string) bool {
 	visible := false
 	for _, r := range title {
 		switch {
-		case unicode.Is(unicode.Cc, r), unicode.Is(unicode.Cf, r), r == '\u2028', r == '\u2029':
+		case refusedInTitle(r):
 			return false
 		case !slices.Contains(titleSpaces, r):
 			visible = true

@@ -129,13 +129,15 @@ const (
 	maxDroppedSteps        = 5
 )
 
-// controlAt is the 1-based position of the first control character of title, a character
-// of U+0000 to U+001F or U+007F, which the format's title pattern refuses; 0 for none.
+// controlAt is the 1-based position of the first character of title that the draft's title
+// refuses, as [plainTitle] has it: a control character (U+0000 to U+001F, U+007F to U+009F), a
+// bidirectional control or invisible format character, or a line or paragraph separator; 0 for
+// none. A title that passes is one that the program's draft_title line may carry back.
 func controlAt(title string) int {
 	i := 0
 	for _, r := range title {
 		i++
-		if r < 0x20 || r == 0x7f {
+		if refusedInTitle(r) {
 			return i
 		}
 	}

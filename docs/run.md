@@ -2895,7 +2895,8 @@ qory also checks the file against the limits of the submission format, and drops
 that is over a limit and keeps the rest: a `text` whose `title` has more than 256 characters or
 whose `description` has more than 20000 is dropped whole, and a step of more than 128
 characters is dropped, so its commit is `unreviewed`. A `text` whose `title` has a control
-character, such as a tab or a line end, is dropped whole, and so is a step whose key is not a
+character, such as a tab or a line end, a bidirectional control or an invisible format character
+(Unicode classes Cc and Cf), or a line or paragraph separator, is dropped whole, and so is a step whose key is not a
 full commit id of 40 or 64 lower-case hexadecimal digits. qory prints `qory run: The hand-off
 file has a part the submission format does not allow, so qory dropped it.`, then one line
 indented by two spaces for each part: `Title: <n> characters, over the limit of 256. qory

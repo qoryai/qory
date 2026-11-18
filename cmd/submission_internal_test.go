@@ -273,11 +273,13 @@ func TestAHandoffStepKeyIsAFullLowerCaseCommitID(t *testing.T) {
 	}
 }
 
-// TestAHandoffTitleWithAControlCharacterDropsTheText is a title with a tab, a line end, a NUL
-// or a DEL, which the format's title pattern refuses: the text is dropped with a line that has
-// the position of the character, and a title with none stays.
+// TestAHandoffTitleWithAControlCharacterDropsTheText is a title with a tab, a line end, a NUL,
+// a DEL, a C1 control, a bidirectional override, a zero-width space or a line separator, which
+// the format's title pattern or the contract's draft_title refuses: the text is dropped with a
+// line that has the position of the character, so the program is never given a title that its
+// draft_title line may not carry back. A title with none stays.
 func TestAHandoffTitleWithAControlCharacterDropsTheText(t *testing.T) {
-	for title, at := range map[string]int{`Add\ta page`: 4, `Add a page\n`: 11, `\u0000Add`: 1, `Add\u007f`: 4, `é\u001f`: 2, `Add a page é`: 0} {
+	for title, at := range map[string]int{`Add\ta page`: 4, `Add a page\n`: 11, `\u0000Add`: 1, `Add\u007f`: 4, `é\u001f`: 2, `Add\u0085`: 4, `a\u202eb`: 2, `a\u200bb`: 2, `a\u2028b`: 2, `Add a page é`: 0} {
 		t.Run(title, func(t *testing.T) {
 			h, err := readHandoff(handoffIn(t, `{"text":{"title":"`+title+`","description":"d"}}`))
 			if err != nil || h == nil {
