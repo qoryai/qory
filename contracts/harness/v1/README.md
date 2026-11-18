@@ -1185,6 +1185,31 @@ know. The compose checks the `paths` of every agent, and any other value fails i
 a glob or a list of globs.` and `The agent is in agents/python-reviewer.md of module core.`
 on the lines after it.
 
+A skill is a note when its frontmatter has `notes_for`: a role, or a list of roles, each
+written as in `bind` without the kind, `developer` for `agents/developer`, a group role such
+as `reviewers` too. A note also sets `paths`, one glob or a list of globs from the checkout
+root, in the grammar of an agent's `paths`. A skill with `paths` and no `notes_for` is no
+note. Technology modules and the modules of a repository write notes; a script attaches
+the ones that match a change to the start of an agent that fills a role. The compose
+checks both keys of every composed note, and a skill that an `exclude` or an `only` leaves
+out is not checked. Each refusal has the fix as line 1, then the cause, then the skill's file:
+`Set notes_for in python-naming of module python to a role the stack fills, such as
+developer.` with `tester is none.` on the next line, for a role with no row in `roles.json`;
+`Add paths to python-naming of
+module python.` with `A note needs one path or more.` and `The skill is in
+skills/python-naming/SKILL.md of module python.` on the next lines, for a note with no
+`paths`, and the same with `A note needs one path or more, and "src/[a" is no glob.` for a
+glob that does not parse or a value that is no glob. The fix for a `notes_for` that is no
+role or list of roles is `Set notes_for in python-naming of module python to a role or a
+list of roles.` The home contains `role-notes.json`, always written, and not the
+`notes.json` of a push check: `{"notes": [...]}`, one row per note in the order of the
+report's entries, each `{name, roles, paths, module, layer}`: `name` is the skill's name,
+so its body is `skills/<name>/SKILL.md` in the home; `roles` is `notes_for` as a list,
+each role as `roles.json` writes it, `agents/<role>`; `paths` is the globs as written;
+`module` is the module that ships the skill; `layer` is the number 0 for a module of the
+checkout's `qory.yaml`, or of the stack composed when it extends none, and 1 for a module
+of the base stack it extends. With no note the file is `{"notes": []}`.
+
 Below `skills`, a folder with `SKILL.md` is a skill, and everything below it is that skill's
 files, a nested `SKILL.md` included. A real folder with no `SKILL.md` and with a folder below
 it is a group of skills, at any depth, read by the same rules. qory writes each skill flat for
