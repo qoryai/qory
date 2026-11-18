@@ -153,6 +153,51 @@ func TestScopeCheckProblemsOfAModuleAreRefused(t *testing.T) {
 	}
 }
 
+// TestTheDuplicateScopeCheckRefusalFixFitsInAHundredCharacters is two modules that declare
+// a scope check for one type, with names and a type of 3 lengths: the first line of the
+// refusal is the fix and has at most 100 characters, and the full text has both module
+// names and the type, whole.
+func TestTheDuplicateScopeCheckRefusalFixFitsInAHundredCharacters(t *testing.T) {
+	for _, c := range []struct {
+		name         string
+		first, other string
+		typ          string
+	}{
+		{"short names", "core", "web", "build-plan"},
+		{"20 characters", strings.Repeat("a", 20), strings.Repeat("b", 20), "build-plan"},
+		{"24 characters", strings.Repeat("a", 24), strings.Repeat("b", 24), "build-plan"},
+		{"40 characters", strings.Repeat("a", 40), strings.Repeat("b", 40), "build-plan"},
+		{"24 characters and a 64-character type", strings.Repeat("a", 24), strings.Repeat("b", 24), strings.Repeat("p", 64)},
+		{"40 characters and a 64-character type", strings.Repeat("a", 40), strings.Repeat("b", 40), strings.Repeat("p", 64)},
+	} {
+		manifest := func(name string) string {
+			return "apiVersion: qory.dev/v1alpha1\nname: " + name + "\nscope_checks:\n  " + c.typ + ":\n    - [check.sh]\n"
+		}
+		_, err := composeTree(t, map[string]string{
+			stack.FileName:                  "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + c.first + "\n    source: {path: modules/a}\n  - name: " + c.other + "\n    source: {path: modules/b}\nworkflows:\n  fix:\n    access: write\n    plan: " + c.typ + "\n",
+			"modules/a/qory-module.yaml":    manifest(c.first),
+			"modules/a/check.sh":            "x\n",
+			"modules/a/skills/fix/SKILL.md": "text\n",
+			"modules/b/qory-module.yaml":    manifest(c.other),
+			"modules/b/check.sh":            "x\n",
+		})
+		if err == nil {
+			t.Errorf("%s: composed", c.name)
+			continue
+		}
+		text := err.Error()
+		first, _, _ := strings.Cut(text, "\n")
+		if n := len([]rune(first)); n > 100 || !strings.HasPrefix(first, "Remove the scope check") {
+			t.Errorf("%s: first line %q has %d characters", c.name, first, n)
+		}
+		for _, value := range []string{c.first, c.other, c.typ} {
+			if !strings.Contains(text, value) {
+				t.Errorf("%s: the refusal lacks %q:\n%s", c.name, value, text)
+			}
+		}
+	}
+}
+
 // checkoutScopeTree is a base stack with the write workflow fix, which names the plan type
 // change-plan, over module a, and a checkout that extends it with module app. The manifests
 // of the two modules are the arguments.

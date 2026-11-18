@@ -1070,7 +1070,9 @@ value that is not a list or is empty, a command that is not a list or is empty, 
 command that is not a string, and a program that is empty, absolute or has a `..` part fail
 the compose, each with the manifest's path. The compose also fails when two modules declare
 one type, `Remove the scope check for build-plan from module core or web.` with `A
-type has one scope check, and both modules declare one.` on the next line; when a program
+type has one scope check, and both modules declare one.` on the next line (when the first line
+would have more than 100 characters, it is `Remove the scope check for the type from one of the
+two modules.`, and the next line has the type and both module names, whole); when a program
 is not a file in the module, `Add checks/check.js to module core, or change its scope check
 for build-plan.` with `Module core has no file at checks/check.js.`; and when a program is
 in an entry an `exclude` or an `only` of its module leaves out, as for a push check. The

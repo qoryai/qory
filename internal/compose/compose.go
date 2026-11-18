@@ -660,7 +660,7 @@ func addScopeChecks(res *Result, dir string, root *os.Root, name string, checks 
 	}
 	for _, typ := range slices.Sorted(maps.Keys(checks)) {
 		if other, ok := res.ScopeChecks[typ]; ok {
-			return exports.Errorf("Remove the scope check for %s from module %s or %s.\n  A type has one scope check, and both modules declare one.", typ, shown(other.Module), shown(name))
+			return duplicateScopeCheck(typ, other.Module, name)
 		}
 		var commands [][]string
 		for _, c := range checks[typ] {
@@ -685,6 +685,17 @@ func addScopeChecks(res *Result, dir string, root *os.Root, name string, checks 
 		res.ScopeChecks[typ] = ScopeCheck{Module: name, Commands: commands}
 	}
 	return nil
+}
+
+// duplicateScopeCheck is the refusal for a type that the modules first and second both
+// declare a scope check for. The fix line names the type and the modules when it fits in
+// 100 characters. Otherwise the fix line is the same without the values, and the second
+// line has them, so no length of a name or a type moves the fix past 100 characters.
+func duplicateScopeCheck(typ, first, second string) error {
+	if fix := fmt.Sprintf("Remove the scope check for %s from module %s or %s.", typ, shown(first), shown(second)); fits(fix) {
+		return exports.Errorf("%s\n  A type has one scope check, and both modules declare one.", fix)
+	}
+	return exports.Errorf("Remove the scope check for the type from one of the two modules.\n  Modules %s and %s both declare one for %s, and a type has one scope check.", shown(first), shown(second), typ)
 }
 
 // checkPlans refuses a workflow of the stack whose plan type no module of the base stack
