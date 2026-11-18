@@ -21,10 +21,10 @@ release may change what an existing document does, and states it under Upgrading
 - A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
   the type whose launch version sets what the workflow's session may push. A module
   declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: one
-  command for each type. The compose refuses a workflow whose `plan` is not an
-  artifact type, a `plan` on a workflow whose access is not `write`, and a `plan` whose
-  type no module of the base stack declares a scope check for. A module that a checkout
-  adds to the base declares none that counts. `qory run` does not read `plan` or
+  command for each type. `qory harness compose` ends with an error when the `plan` of a
+  workflow is not an artifact type, when a workflow with a `plan` has an access other
+  than `write`, and when no module of the base stack declares a scope check for the type
+  of a `plan`. A module that a checkout adds to the base declares none that counts. `qory run` does not read `plan` or
   `scope_checks`.
 - A skill with the frontmatter keys `notes_for` (a role or a list of roles) and `paths` (one
   glob or more from the checkout root) is a note. The compose exits 2, with the fix as

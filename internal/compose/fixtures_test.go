@@ -229,7 +229,7 @@ func TestFixtures(t *testing.T) {
 }
 
 // fixVerbs are the verbs a refusal's fix line starts with.
-var fixVerbs = []string{"Add", "Bind", "Change", "Commit", "Complete", "Declare", "Fill", "Fix", "Keep", "Move", "Remove", "Rename", "Set", "Shorten", "Ship", "Write"}
+var fixVerbs = []string{"Add", "Bind", "Change", "Commit", "Complete", "Declare", "Fill", "Fix", "Give", "Keep", "Move", "Remove", "Rename", "Set", "Shorten", "Ship", "Write"}
 
 // printedLength is the length of line 1 of a refusal as qory prints it, after "✗ ".
 func printedLength(line string) int { return utf8.RuneCountInString("✗ " + line) }

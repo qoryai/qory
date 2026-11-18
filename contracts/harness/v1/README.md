@@ -1137,9 +1137,11 @@ thing that is no file, `Set the program of the push check to a file in its modul
 spec.`; and when the program is in an entry an `exclude` or an `only` of its module leaves
 out, `Keep the program of the push check in its module, or move it out of the left-out
 entry.` with `The program skills/running/checks.js of the push check for spec is in
-skills/running, and an exclude or only of module core leaves skills/running out.` In these
-errors the fix is line 1 and has no module name, type or path, except for the two modules
-with one type, so a long value never pushes line 1 past 98 characters. The home contains
+skills/running, and an exclude or only of module core leaves skills/running out.` In the
+errors for a program, line 1 has no module name, type or path. Line 1 of the `verdict`
+error has the module name, and line 1 of the error for two modules with one type has the
+type and both module names when it has at most 98 characters. So a long value never pushes
+line 1 past 98 characters. The home contains
 `push-checks.json` with each check, sorted by type, with its `reads` and its program's
 absolute path in the home; a harness whose modules declare no check has no such file.
 

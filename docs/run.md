@@ -5039,7 +5039,7 @@ sets what a session of the workflow may push. A module of the stack declares the
 check of the type in the `scope_checks` of its `qory-module.yaml`: one command for
 each plan type (see `scope_checks` in `contracts/harness/v1/README.md`).
 
-`qory harness compose` and `qory run` refuse the stack, before they start anything, in
+`qory harness compose` and `qory run` end with an error, before they start anything, in
 two cases:
 
 - The workflow has a `plan` and its access is `read`, `write-no-push` or left out:
