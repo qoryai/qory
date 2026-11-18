@@ -218,7 +218,7 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 		return in, nil
 	case rel.Open == nil:
 		in.Release()
-		return Installed{}, fmt.Errorf(textRelease+"The source of the runtime's releases returned no tarball of %s %s", o.Runtime, rel.Version)
+		return Installed{}, fmt.Errorf(textRelease+"The source of the runtime's releases returned no tarball\n  of %s %s", o.Runtime, rel.Version)
 	}
 	// A second run that needs the version waits here for the run that reads its tarball,
 	// and then finds the folder.

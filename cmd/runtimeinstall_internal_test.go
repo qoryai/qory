@@ -100,8 +100,9 @@ func TestEngineMountsFindsNoRunningContainerWithNoEngineProgram(t *testing.T) {
 // that is no URL, one with a path, and a source that returns a release with no tarball.
 // A dispatched run from a run code shows each cause alone, with "; the code is used" at
 // its end, as [causeOnly] makes it, and each says what is wrong without the fix line.
-// The first line of the address that is no URL, with "qory run: ", has at most 100
-// characters. A person's run shows the fix line, then the cause.
+// For the address that is no URL and the release with no tarball, of claude 2.1.320 and
+// of a version of 64 characters, each line, with "qory run: " before the first, has at
+// most 100 characters. A person's run shows the fix line, then the cause.
 func TestTheInstallCausesStandAlone(t *testing.T) {
 	registry := func(t *testing.T, challenge bool, path string) (string, string) {
 		var srv *httptest.Server
@@ -127,51 +128,61 @@ func TestTheInstallCausesStandAlone(t *testing.T) {
 		}
 		return err
 	}
-	noTarball := func(context.Context, string) (runtimeinstall.Release, error) {
-		integrity := rt.Integrity(rt.PlainTarball(t, "2.1.320"))
-		signed := "@anthropic-ai/claude-code-linux-x64@2.1.320"
-		return runtimeinstall.Release{Version: "2.1.320", Integrity: integrity, Signed: signed, Signatures: rt.Signatures(signed, integrity)}, nil
+	noTarballOf := func(version string) runtimeinstall.Fetch {
+		return func(context.Context, string) (runtimeinstall.Release, error) {
+			integrity := rt.Integrity(rt.PlainTarball(t, version))
+			signed := "@anthropic-ai/claude-code-linux-x64@" + version
+			return runtimeinstall.Release{Version: version, Integrity: integrity, Signed: signed, Signatures: rt.Signatures(signed, integrity)}, nil
+		}
 	}
+	noTarball := noTarballOf("2.1.320")
+	long := "2.1.320-" + strings.Repeat("a", 56)
 	for _, c := range []struct {
 		name string
 		err  func(t *testing.T) (string, error)
+		fits bool
 	}{
 		{"a 401 with no Bearer challenge", func(t *testing.T) (string, error) {
 			host, instance := registry(t, false, "")
 			return "the registry at " + host + " returned 401 with no Bearer challenge; the code is used",
 				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", instance))
-		}},
+		}, false},
 		{"a token response with no token", func(t *testing.T) (string, error) {
 			host, instance := registry(t, true, "")
 			return "the response of the token realm at " + host + " contains no token; the code is used",
 				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", instance))
-		}},
+		}, false},
 		{"an address of Qory Apiary that is no URL", func(t *testing.T) (string, error) {
 			host, _ := registry(t, true, "")
 			return "the run's address of Qory Apiary is not an http or https URL\n  with a host and no user; the code is used",
 				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", "ftp://apiary.example.com"))
-		}},
+		}, true},
 		{"an address of Qory Apiary with a path", func(t *testing.T) (string, error) {
 			host, instance := registry(t, true, "/base")
 			return "the address of Qory Apiary has a path:\n  \"" + instance + "\"; the code is used",
 				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", instance))
-		}},
+		}, false},
 		{"a release with no tarball", func(t *testing.T) (string, error) {
-			return "the source of the runtime's releases returned no tarball of claude 2.1.320; the code is used", install(t, noTarball)
-		}},
+			return "the source of the runtime's releases returned no tarball\n  of claude 2.1.320; the code is used", install(t, noTarball)
+		}, true},
+		{"a release with no tarball of a long version", func(t *testing.T) (string, error) {
+			return "the source of the runtime's releases returned no tarball\n  of claude " + long + "; the code is used", install(t, noTarballOf(long))
+		}, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			want, err := c.err(t)
 			if got := causeOnly(installFailed(err)).Error() + codeUsed; got != want {
 				t.Errorf("a dispatched run shows %q, want %q", got, want)
 			}
-			if first, _, _ := strings.Cut("qory run: "+want, "\n"); c.name == "an address of Qory Apiary that is no URL" && len(first) > 100 {
-				t.Errorf("the first line has %d characters: %s", len(first), first)
+			for _, line := range strings.Split("qory run: "+want, "\n") {
+				if c.fits && len(line) > 100 {
+					t.Errorf("the line has %d characters: %s", len(line), line)
+				}
 			}
 		})
 	}
 	person := installFailed(install(t, noTarball)).Error()
-	if want := "Check the source of the runtime's releases\nThe source of the runtime's releases returned no tarball of claude 2.1.320"; person != want {
+	if want := "Check the source of the runtime's releases\nThe source of the runtime's releases returned no tarball\n  of claude 2.1.320"; person != want {
 		t.Errorf("a person's run shows %q, want %q", person, want)
 	}
 }
