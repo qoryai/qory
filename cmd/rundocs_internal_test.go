@@ -828,6 +828,36 @@ func TestTheRuntimeRefusalsListTheSetTheCheckUses(t *testing.T) {
 	}
 }
 
+// TestTheRuntimeRefusalsFollowAChangedSet changes the set of [runRuntimes] to one
+// runtime and to three: the refusal of no runtime and of a runtime outside the set list
+// the changed set, and codeRunOf accepts exactly its runtimes.
+func TestTheRuntimeRefusalsFollowAChangedSet(t *testing.T) {
+	for _, c := range []struct {
+		set     []string
+		list    string
+		outside string
+	}{
+		{[]string{"codex"}, "codex", "claude"},
+		{[]string{"claude", "codex", "gemini"}, "claude, codex, and gemini", "cursor"},
+	} {
+		t.Run(c.list, func(t *testing.T) {
+			defer SetRunRuntimes(c.set...)()
+			if want := "\n  qory runs one of " + c.list + "."; !strings.HasSuffix(noRuntime().Error(), want) {
+				t.Errorf("the refusal of no runtime is %q, want it to end with %q", noRuntime(), want)
+			}
+			if want := "on one of " + c.list + ",\n  and not on " + c.outside + ";"; !strings.Contains(notRunRuntime(c.outside).Error(), want) {
+				t.Errorf("the refusal of %s is %q, want %q", c.outside, notRunRuntime(c.outside), want)
+			}
+			for _, name := range append([]string{c.outside}, c.set...) {
+				_, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: name}})
+				if accepted := slices.Contains(c.set, name); accepted != (err == nil) {
+					t.Errorf("%s: %v, want it accepted: %v", name, err, accepted)
+				}
+			}
+		})
+	}
+}
+
 // TestTheUnknownRuntimeTextFitsItsLines is the refusal of a runtime that a run code does
 // not run on, for a name of 64 characters, the longest a runtime's name has: with
 // "qory run: " before it, each line has at most 100 characters.

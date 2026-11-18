@@ -1186,6 +1186,14 @@ func SetNpmRegistry(url string) func() {
 	return func() { npmRegistry = before }
 }
 
+// SetRunRuntimes makes names the runtimes that a run from a run code runs on, and
+// returns what restores the default.
+func SetRunRuntimes(names ...string) func() {
+	before := runRuntimes
+	runRuntimes = func() []string { return names }
+	return func() { runRuntimes = before }
+}
+
 // SetRuntimeKeys makes qory run check npm's signatures with keys, and returns what
 // restores the default.
 func SetRuntimeKeys(keys []runtimeinstall.SigningKey) func() {

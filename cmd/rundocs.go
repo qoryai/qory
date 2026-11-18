@@ -738,8 +738,12 @@ func lacksRuntime(documents json.RawMessage) bool {
 // order: those that qory installs, see [runtimeinstall.Runtimes], that have a
 // descriptor in Forager's runtimes.json, see [foragerList], and that qory renders with
 // a headless start. The runtimes.json is embedded in the Forager module, and
-// TestForagerAndQoryListTheSameRuntimes reads it, so an error reading it gives none.
-func runRuntimes() []string {
+// TestForagerAndQoryListTheSameRuntimes reads it, so an error reading it gives none. A
+// test replaces the set with SetRunRuntimes.
+var runRuntimes = installedHeadlessRuntimes
+
+// installedHeadlessRuntimes is the set of [runRuntimes].
+func installedHeadlessRuntimes() []string {
 	described, _ := foragerList()
 	var names []string
 	for _, n := range runtimeinstall.Runtimes() {
