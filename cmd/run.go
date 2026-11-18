@@ -774,6 +774,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				rep, harness, workflows := c.rep, c.harness, c.workflows
 				extensions = rep.Extensions
 				planWorkflow, planType = planOf(fromCode, workflows)
+				if fromCode != nil {
+					if err := fullSuiteNoPlan(fromCode, workflows); err != nil {
+						return false, err
+					}
+				}
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
 					return false, err

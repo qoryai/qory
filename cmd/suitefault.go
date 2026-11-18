@@ -105,7 +105,9 @@ func noRunAPIFault() *suiteFault {
 }
 
 // noPlanFault is the fault of a session whose workflow names no plan type in the stack, and whose
-// HEAD moved: the agent cannot add a plan type to the stack.
+// HEAD moved: the agent cannot add a plan type to the stack. A workflow with write-no-push access
+// cannot reach it: [fullSuiteNoPlan] stops that run first. A workflow with write access and no
+// plan type does.
 func noPlanFault(workflow string) *suiteFault {
 	return &suiteFault{point: runapi.Point{Text: fmt.Sprintf(textFaultNoPlanIn, workflow), Action: "run_again"}}
 }

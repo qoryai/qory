@@ -648,3 +648,41 @@ func TestARunCodeReadsThePlanTypeOfItsWorkflowFromTheComposedStack(t *testing.T)
 		})
 	}
 }
+
+// TestARunWithFullSuiteAndAWorkflowThatCannotPlanStops: a run whose documents set full_suite true
+// and whose workflow has write-no-push access stops after the compose, before the image's fetch,
+// the setup and the join, exit 1, with the line that says the code is used, and closes failed with no reason.
+// A workflow with write access, a run with full_suite false, a workflow that has write-no-push
+// access and a run that only reads the checkout are not refused.
+func TestARunWithFullSuiteAndAWorkflowThatCannotPlanStops(t *testing.T) {
+	const line = "The run settings set full_suite for workflow hello, which has write-no-push access and no plan to read the full suite from, so the run did not start; the code is used."
+	suite := func(on bool) func(map[string]any) {
+		return func(d map[string]any) { d["full_suite"] = on }
+	}
+	for _, c := range []struct {
+		name     string
+		declared string
+		change   func(map[string]any)
+		stops    bool
+	}{
+		{"write-no-push, full_suite true", "write-no-push", suite(true), true},
+		{"write-no-push with documents write-no-push", "write-no-push", func(d map[string]any) { suite(true)(d); noPush(d) }, true},
+		{"write, full_suite true", "write", suite(true), false},
+		{"write, documents write-no-push", "write", func(d map[string]any) { suite(true)(d); noPush(d) }, false},
+		{"write-no-push, full_suite false", "write-no-push", suite(false), false},
+		{"read, full_suite true", "read", suite(true), false},
+		{"write-no-push, documents read", "write-no-push", func(d map[string]any) { suite(true)(d); lowered(d) }, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := runFromCodeWith(t, behindAWall(t), nil, declares(c.declared), c.change)
+			if c.stops {
+				checkStopped(t, r, "", "")
+				wants(t, r.out+r.err.Error(), line)
+				return
+			}
+			if strings.Contains(r.out, "full_suite") || r.err != nil && strings.Contains(r.err.Error(), "full_suite") {
+				t.Errorf("the run is refused: %v\n%s", r.err, r.out)
+			}
+		})
+	}
+}

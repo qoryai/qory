@@ -3532,7 +3532,12 @@ suite command, and a session of it that has `full_suite` true still gets a suite
 after step only tells whether HEAD moved. A session that left HEAD at the commit it started
 at is `skipped`, as above. For a session that moved HEAD, qory runs no suite, prints and posts
 `The full suite did not start: the workflow <name> names no plan in the stack.`, and posts
-`escalate`, since the agent cannot add a plan type to the stack.
+`escalate`, since the agent cannot add a plan type to the stack. A workflow with
+`write-no-push` access cannot name a plan type, so a run of it whose documents set `full_suite`
+true stops after the compose, before the join, exit 1, with `The run settings set full_suite for
+workflow <name>, which has write-no-push access and no plan to read the full suite from, so the
+run did not start; the code is used.` and closes `failed`. A run that only reads the checkout runs
+no suite and is not refused.
 
 **Where it runs.** After the agent's container is removed, Forager starts a new container of the run's
 image with the workspace mounted for writing, on the run's network, with the run's
