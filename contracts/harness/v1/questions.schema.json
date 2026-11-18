@@ -95,7 +95,7 @@
         "title": {"description": "The option's title.", "$ref": "#/$defs/option_title"},
         "explanation": {"description": "A short explanation of the option, plain text.", "$ref": "#/$defs/short_text"},
         "recommended": {"description": "true when the run recommends this option: absent or false otherwise.", "type": "boolean"},
-        "proposal": {"description": "The wording the run proposes for the answer if a member picks this option, plain text, 1 to 2000 characters. Only a question with criterion has an option with proposal.", "$ref": "#/$defs/short_text"}
+        "proposal": {"description": "The new wording of the question's criterion that the run proposes, for a member to edit before sending.", "$ref": "#/$defs/short_text"}
       }
     },
     "answer": {
