@@ -614,14 +614,22 @@ func TestALocalRunWithACommittedHandoffPushesNothing(t *testing.T) {
 func TestAGitAddAllOfTheAgentLeavesTheHandoffOut(t *testing.T) {
 	_, bare, started := localProgramCheckout(t)
 	passingCheck(t)
+	var excluded string
 	out := runLocal(t, func(spec session.SessionSpec) {
 		makeProgramRunnable(t)
 		writeFile(t, filepath.Join(spec.Dir, ".qory", "handoff", "submission.json"), `{"text":{"title":"Add a file","description":"A file."}}`)
+		// The copy's .qory is ignored as a whole already; the line for the hand-off folder is the
+		// one that qory adds for this file.
+		path := gitOutput(t, spec.Dir, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude")
+		excluded = readText(t, strings.TrimSpace(path))
 		writeFile(t, filepath.Join(spec.Dir, "committed.txt"), "committed\n")
 		gitOutput(t, spec.Dir, "add", "-A")
 		gitOutput(t, spec.Dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-a", "-m", "Add a file")
 	})
 	branch := runBranchOf(t, out)
+	if !slices.Contains(strings.Split(excluded, "\n"), "/.qory/handoff/") {
+		t.Errorf("the copy's info/exclude is %q, want the line /.qory/handoff/", excluded)
+	}
 	if files := gitOutput(t, bare, "ls-tree", "-r", "--name-only", branch); strings.Contains(files, ".qory") || !strings.Contains(files, "committed.txt") {
 		t.Errorf("the pushed branch has the files %q, want committed.txt and nothing under .qory", files)
 	}
