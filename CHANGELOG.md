@@ -575,6 +575,16 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A push that landed with no version stored, and a push that fails as a branch that moved,
+  give one way out in the line of `qory run`: `delete branch qory/<work item id> of <path>
+  on <system>`. Deleting it loses the commits on that branch that no version has. The next
+  run creates the branch at `target_version` when no version exists, and starts from the
+  last version otherwise.
+- The lines that stopped a run on a stored branch version with a fix for Qory Apiary
+  (a ref, a file, a format, a commit that is missing, is no commit, differs in `.qory` or
+  fails to check out) now state the fact first: `Version <n> of the artifact branch has a
+  ref other than <ref>, so the run did not start; the code is used`. They no longer name a
+  fix in Qory Apiary, because only a run stores a version.
 - The middle model tier is named `balanced` in place of `fast`. The tiers are `light`,
   `balanced` and `thinking`. `${qory:balanced}`, `--tier balanced=<model id>`,
   `--tier-effort balanced=<effort>`, `harness.tiers.balanced`, a workflow's `tier: balanced`
