@@ -149,16 +149,16 @@ type headCheck struct {
 // plain push only for a repository that [WorkBranch.fresh] says starts at the run
 // documents' checkout. A head that descends from the commit the run
 // started at, with each commit beyond that one an ancestor or an equal of a head that a
-// cancelled run pushed ([WorkBranch.Cancelled]) and that descends from the start commit, is a
+// cancelled run pushed ([WorkBranch.Cancelled]), is a
 // push that replaces the branch with a lease on the head, before the run's first push alone.
 // Any other head is a [*HeadChanged].
 //
 // An ancestor of a cancelled run's head counts as cancelled because that run's push sent the
 // head with every commit of its history: the commits from the start commit to the head are what
 // that push put on the branch, and the recorder lists one head for each push, so a push of 2
-// commits has one row. A head that the forge no longer serves, or that does not descend from the
-// start commit, covers nothing. A commit on top of a cancelled head, or beside it, is covered by
-// no row and refuses.
+// commits has one row. A head that the forge no longer serves covers nothing, and a head that
+// is unrelated to the start commit covers none of the commits past it. A commit on top of a
+// cancelled head, or beside it, is covered by no row and refuses.
 func checkHead(ctx context.Context, read gitRunner, dir string, b *WorkBranch, r WorkRepository) (headCheck, error) {
 	got, err := remoteHead(ctx, read, dir, b.system, r.Path, b.Ref)
 	if err != nil {
@@ -203,9 +203,8 @@ func checkHead(ctx context.Context, read gitRunner, dir string, b *WorkBranch, r
 }
 
 // cancelledHistory is the commits that the heads which cancelled runs pushed to r put on the
-// branch: for each recorded head that descends from the start commit, the commits from the start
-// commit, not included, to the head, included. A recorded head that the forge does not serve, or
-// that does not descend from the start commit, adds none.
+// branch: for each recorded head, the commits from the start commit, not included, to the head,
+// included, merges followed on every parent. A recorded head that the forge does not serve adds none.
 func (h *history) cancelledHistory(ctx context.Context, b *WorkBranch, r WorkRepository) (map[string]bool, error) {
 	var heads []string
 	for _, l := range b.Cancelled {
@@ -227,13 +226,11 @@ func (h *history) cancelledHistory(ctx context.Context, b *WorkBranch, r WorkRep
 		if !h.has(ctx, head) {
 			continue
 		}
-		above, err := h.descends(ctx, r.Start, head)
-		if err != nil {
-			return nil, err
-		}
-		if !above {
-			continue
-		}
+		// No check that head descends from the start commit: the commits that a head covers are
+		// those of start..head, and only commits of start..got are asked about, so a head that is
+		// unrelated to the start commit covers nothing of them. The range has no --first-parent:
+		// a merge in a cancelled push covers the commits it merged, and the push replaces the
+		// branch ref alone.
 		commits, err := h.between(ctx, r.Start, head)
 		if err != nil {
 			return nil, err

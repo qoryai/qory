@@ -557,14 +557,13 @@ release may change what an existing document does, and states it under Upgrading
 ### Changed
 
 - The push step stores a version of the artifact type `submission`, in place of `branch`.
-  The step checks the head of the branch on the forge before it pushes: a head that is not
+  The step checks the head of the branch on the forge before it pushes. A head that is not
   the commit the run expected ends the run `failed` with the code `push_head_changed`, after a
-  session that passed, failed or timed out, and
-  the push replaces commits of cancelled runs only, with a lease on the head it checked. The
-  work item's record lists one head for each push, so a commit counts as cancelled when it is
-  that head or an ancestor of it from the start commit on; a commit on top of a recorded head,
-  or beside it, refuses.
-  A run starts at the newest commit that an earlier run pushed and a person did not cancel.
+  session that passed, failed or timed out. The push replaces commits of cancelled runs only,
+  with a lease on the head it checked. The work item's record lists one head for each push, so a
+  commit counts as cancelled when it is that head or an ancestor of it from the start commit
+  on; a commit on top of a recorded head, or beside it, refuses. A run starts at the newest
+  commit that an earlier run pushed and a person did not cancel.
 - The submission has `base.branch` for each repository the run pushed: the name of the
   repository's default branch, read when the run fetched it. A name of more than 255
   characters is left out.
@@ -587,18 +586,18 @@ release may change what an existing document does, and states it under Upgrading
   forge's API: the push step pushes and stores the submission, with the draft `no-program`,
   and the forge's adapter opens the draft pull request from it. The `submit_program` of the
   composed harness is for a run with neither a run code nor a run key (a run with a run key and
-  no run code pushes nothing locally and runs no program): qory pushes the checked head of
-  `qory/run-<run id>` for each repository to the remote origin's one push address with the
-  person's git login, after the checks of every repository and before any program, then runs
-  the program on the person's machine, outside the wall, with the person's login of the forge's command line, once for each
-  repository. The program never pushes. A run whose session did not pass, or that wrote no
-  hand-off text, gets the draft `none`. For each repository whose program returned a draft,
-  `qory run` prints `Draft: <address>` as its last lines. qory pushes to `origin` by its name,
-  so git's `insteadOf` rules apply once. It pushes nothing, and runs no program, when the
-  remote has several push addresses or an address that is not a host and a repository path of
-  a forge. The program runs in a new session with no terminal, with the person's environment
-  without any `QORY_` variable, and with `GIT_TERMINAL_PROMPT=0` and `GH_PROMPT_DISABLED=1`.
-  The program gets the inputs `QORY_SUBMIT_*` and
+  no run code pushes nothing locally and runs no program). For each repository, qory pushes
+  the checked head of `qory/run-<run id>` to the remote origin's one push address with the
+  person's git login, after the checks of every repository and before any program. qory
+  pushes to `origin` by its name, so git's `insteadOf` rules apply once. It pushes nothing,
+  and runs no program, when the remote has several push addresses or an address that is not
+  a host and a repository path of a forge. Then it runs the program once for each repository,
+  on the person's machine, outside the wall, with the person's login of the forge's command
+  line, in a new session with no terminal, with the person's environment without any `QORY_`
+  variable, and with `GIT_TERMINAL_PROMPT=0` and `GH_PROMPT_DISABLED=1`. The program never
+  pushes. A run whose session did not pass, or that wrote no hand-off text, gets the draft
+  `none`. For each repository whose program returned a draft, `qory run` prints
+  `Draft: <address>` as its last lines. The program gets the inputs `QORY_SUBMIT_*` and
   prints plain lines: the five `draft_` lines and a `commit_url` line for each commit. qory
   stores them as the draft and the commit addresses, checks each value, and leaves out a line
   that it cannot use. A program that ends with status 3 means that the person has no login of
@@ -607,9 +606,9 @@ release may change what an existing document does, and states it under Upgrading
   branch stays pushed. A program that runs past 120 seconds is `program-timeout`. The
   submission format has the reason `login-needed`, the exit 0 for `program-failed`, and the
   draft states `closed` and `merged`. In this build no push check is registered, so a run with
-  no run code pushes nothing, runs no program and prints `qory run: The push checks are not
-  available yet, so qory pushed nothing and opened no draft.` See The submit program in
-  `docs/run.md`.
+  no run code and no run key pushes nothing, runs no program and prints `qory run: The push
+  checks are not available yet, so qory pushed nothing and opened no draft.` See The submit
+  program in `docs/run.md`.
 - The middle model tier is named `balanced` in place of `fast`. The tiers are `light`,
   `balanced` and `thinking`. `${qory:balanced}`, `--tier balanced=<model id>`,
   `--tier-effort balanced=<effort>`, `harness.tiers.balanced`, a workflow's `tier: balanced`
