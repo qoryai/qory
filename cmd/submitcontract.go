@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"github.com/qoryai/integrations/contracts"
 	"net/url"
 	"regexp"
 	"slices"
@@ -13,53 +14,15 @@ import (
 )
 
 // The submit program contract of the integrations module that go.mod pins: the README
-// contracts/run/v1/submit-program/README.md and the names in contracts/submit_program.go, in one
-// place here: the inputs that qory sets, the keys of the lines that the program prints, the exit
-// statuses, and the limits. A change of a name in the contract is a change here, and
-// TestTheSubmitContractNamesAreThePinnedOnes compares them with the pinned module.
-const (
-	qoryEnvPrefix            = "QORY_"
-	submitEnvSystem          = "QORY_SUBMIT_SYSTEM"
-	submitEnvPath            = "QORY_SUBMIT_PATH"
-	submitEnvBranch          = "QORY_SUBMIT_BRANCH"
-	submitEnvBaseBranch      = "QORY_SUBMIT_BASE_BRANCH"
-	submitEnvBaseCommit      = "QORY_SUBMIT_BASE_COMMIT"
-	submitEnvCommits         = "QORY_SUBMIT_COMMITS"
-	submitEnvDraft           = "QORY_SUBMIT_DRAFT"
-	submitEnvTitle           = "QORY_SUBMIT_TITLE"
-	submitEnvDescriptionFile = "QORY_SUBMIT_DESCRIPTION_FILE"
-)
+// contracts/run/v1/submit-program/README.md and the names in contracts/submit_program.go. The
+// inputs that qory sets, the keys of the lines that the program prints, the exit statuses and the
+// values of QORY_SUBMIT_DRAFT are the exported names of that package, such as
+// [contracts.SubmitEnvSystem]; this file has the names that the package does not export.
+const qoryEnvPrefix = "QORY_"
 
-// The values of QORY_SUBMIT_DRAFT.
-const (
-	submitDraftOpen = "open"
-	submitDraftNone = "none"
-)
-
-// The keys of the lines that the program prints on its standard output.
-const (
-	submitKeyNumber    = "draft_number"
-	submitKeyURL       = "draft_url"
-	submitKeyTitle     = "draft_title"
-	submitKeyState     = "draft_state"
-	submitKeyAction    = "draft_action"
-	submitKeyCommitURL = "commit_url"
-)
-
-// The exit statuses of the program that qory reads: 0 it finished, 1 a call to the forge
-// failed, 2 it could not use its inputs; qory reads its lines after these. 3 means the person has
-// no login of the forge's command line: the program prints the login command as the first line
-// of its standard error, and qory reads no line. After any other status, a signal, a time-out,
-// or when the program did not start, qory reads no line.
-const (
-	submitExitDone    = 0
-	submitExitForge   = 1
-	submitExitInput   = 2
-	submitExitNoLogin = 3
-)
-
-// The limits of the contract: commits in the one input, characters of a title, bytes of an
-// address, and characters of a description.
+// The limits of the contract: commits in the one input, characters of a title, and bytes of an
+// address. They are copies: the pinned package does not export them, so a pin that changes one is
+// read in the README's tables, and TestTheSubmitContractNamesAreThePinnedOnes checks their values against its numbers.
 const (
 	maxSubmitCommits = 100
 	maxSubmitTitle   = 256
@@ -74,8 +37,8 @@ type submitInput struct {
 	Branch, BaseBranch, BaseCommit string
 	// Commits is each commit of the run, oldest first, the head last.
 	Commits []string
-	// Draft is one of the submitDraft values. Title and DescriptionFile are set unless Draft is
-	// submitDraftNone.
+	// Draft is [contracts.DraftOpen] or [contracts.SubmitDraftNone]. Title and DescriptionFile are set unless Draft is
+	// contracts.SubmitDraftNone.
 	Draft           string
 	Title           string
 	DescriptionFile string
@@ -94,18 +57,18 @@ func (in submitInput) env(base []string) []string {
 	set := func(name, value string) { out = append(out, name+"="+value) }
 	set("GIT_TERMINAL_PROMPT", "0")
 	set("GH_PROMPT_DISABLED", "1")
-	set(submitEnvSystem, in.System)
-	set(submitEnvPath, in.Path)
-	set(submitEnvBranch, in.Branch)
+	set(contracts.SubmitEnvSystem, in.System)
+	set(contracts.SubmitEnvPath, in.Path)
+	set(contracts.SubmitEnvBranch, in.Branch)
 	if in.BaseBranch != "" {
-		set(submitEnvBaseBranch, in.BaseBranch)
+		set(contracts.SubmitEnvBaseBranch, in.BaseBranch)
 	}
-	set(submitEnvBaseCommit, in.BaseCommit)
-	set(submitEnvCommits, strings.Join(in.Commits, " "))
-	set(submitEnvDraft, in.Draft)
-	if in.Draft != submitDraftNone {
-		set(submitEnvTitle, in.Title)
-		set(submitEnvDescriptionFile, in.DescriptionFile)
+	set(contracts.SubmitEnvBaseCommit, in.BaseCommit)
+	set(contracts.SubmitEnvCommits, strings.Join(in.Commits, " "))
+	set(contracts.SubmitEnvDraft, in.Draft)
+	if in.Draft != contracts.SubmitDraftNone {
+		set(contracts.SubmitEnvTitle, in.Title)
+		set(contracts.SubmitEnvDescriptionFile, in.DescriptionFile)
 	}
 	return out
 }
@@ -131,11 +94,11 @@ var (
 )
 
 // submitDraftKeys are the keys of the five lines that make a draft.
-var submitDraftKeys = []string{submitKeyNumber, submitKeyURL, submitKeyTitle, submitKeyState, submitKeyAction}
+var submitDraftKeys = []string{contracts.SubmitKeyDraftNumber, contracts.SubmitKeyDraftURL, contracts.SubmitKeyDraftTitle, contracts.SubmitKeyDraftState, contracts.SubmitKeyDraftAction}
 
 // parseSubmitLines reads the standard output of the program for a repository on system, and the
 // commits that qory gave it, the base among them. draft is the value that qory gave the program
-// in QORY_SUBMIT_DRAFT: with submitDraftNone every draft line is left out. qory strips one
+// in QORY_SUBMIT_DRAFT: with contracts.SubmitDraftNone every draft line is left out. qory strips one
 // carriage return at the end of each line first. A line that is not valid is left out and the
 // lines around it count; a blank line is left out and is not listed. The draft is set only when
 // the five lines are there and valid.
@@ -163,7 +126,7 @@ func parseSubmitLines(output, system, draft string, commits []string) submitLine
 			bad(n, "the line is not a key and a value")
 			continue
 		}
-		if key == submitKeyCommitURL {
+		if key == contracts.SubmitKeyCommitURL {
 			commit, addr, ok := strings.Cut(value, " ")
 			switch {
 			case !ok:
@@ -181,8 +144,8 @@ func parseSubmitLines(output, system, draft string, commits []string) submitLine
 			}
 			continue
 		}
-		if draft == submitDraftNone && slices.Contains(submitDraftKeys, key) {
-			bad(n, submitEnvDraft+" is none, so qory records no draft")
+		if draft == contracts.SubmitDraftNone && slices.Contains(submitDraftKeys, key) {
+			bad(n, contracts.SubmitEnvDraft+" is none, so qory records no draft")
 			continue
 		}
 		if err := submitDraftValue(key, value, system); err != nil {
@@ -197,13 +160,13 @@ func parseSubmitLines(output, system, draft string, commits []string) submitLine
 	}
 	switch {
 	case len(values) == len(submitDraftKeys):
-		if (values[submitKeyState] == "closed" || values[submitKeyState] == "merged") && values[submitKeyAction] != "kept" {
-			bad(at[submitKeyAction], "a draft that is closed or merged has the action kept")
+		if (values[contracts.SubmitKeyDraftState] == "closed" || values[contracts.SubmitKeyDraftState] == "merged") && values[contracts.SubmitKeyDraftAction] != "kept" {
+			bad(at[contracts.SubmitKeyDraftAction], "a draft that is closed or merged has the action kept")
 			break
 		}
-		number, _ := strconv.Atoi(values[submitKeyNumber])
-		res.Draft = &pullRequest{Number: number, URL: values[submitKeyURL], Title: values[submitKeyTitle],
-			State: values[submitKeyState], Action: values[submitKeyAction]}
+		number, _ := strconv.Atoi(values[contracts.SubmitKeyDraftNumber])
+		res.Draft = &pullRequest{Number: number, URL: values[contracts.SubmitKeyDraftURL], Title: values[contracts.SubmitKeyDraftTitle],
+			State: values[contracts.SubmitKeyDraftState], Action: values[contracts.SubmitKeyDraftAction]}
 	case len(values) > 0:
 		var missing []string
 		for _, key := range submitDraftKeys {
@@ -222,13 +185,13 @@ func parseSubmitLines(output, system, draft string, commits []string) submitLine
 // submitDraftValue checks the value of one of the five draft keys.
 func submitDraftValue(key, value, system string) error {
 	switch key {
-	case submitKeyNumber:
+	case contracts.SubmitKeyDraftNumber:
 		if !submitNumberPattern.MatchString(value) {
 			return errors.New("the number is not a whole number of 1 to 9 digits, 1 or more")
 		}
-	case submitKeyURL:
+	case contracts.SubmitKeyDraftURL:
 		return submitAddress(value, system)
-	case submitKeyTitle:
+	case contracts.SubmitKeyDraftTitle:
 		if !utf8.ValidString(value) {
 			return errors.New("the title is not UTF-8")
 		}
@@ -238,11 +201,11 @@ func submitDraftValue(key, value, system string) error {
 		if !plainTitle(value) {
 			return errors.New("the title has a control, bidirectional or invisible character, or only spaces")
 		}
-	case submitKeyState:
+	case contracts.SubmitKeyDraftState:
 		if !slices.Contains([]string{"draft", "open", "closed", "merged"}, value) {
 			return errors.New("the state is none of draft, open, closed and merged")
 		}
-	case submitKeyAction:
+	case contracts.SubmitKeyDraftAction:
 		if value != "opened" && value != "updated" && value != "kept" {
 			return errors.New("the action is none of opened, updated and kept")
 		}

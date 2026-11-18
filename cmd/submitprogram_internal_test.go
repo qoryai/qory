@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qoryai/integrations/contracts"
 	"github.com/qoryai/qory/internal/submission"
 )
 
@@ -341,7 +342,7 @@ func TestParseSubmitLines(t *testing.T) {
 		{"number of 10 digits", "draft_number 1234567890\n", false, 0, []string{"the number is not a whole number of 1 to 9 digits, 1 or more"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			got := parseSubmitLines(c.out, "git.example.com", submitDraftOpen, commits)
+			got := parseSubmitLines(c.out, "git.example.com", contracts.DraftOpen, commits)
 			if (got.Draft != nil) != c.draft || len(got.CommitURLs) != c.urls {
 				t.Errorf("draft %v and %d addresses, want %v and %d", got.Draft, len(got.CommitURLs), c.draft, c.urls)
 			}

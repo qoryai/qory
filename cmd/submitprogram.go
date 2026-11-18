@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/qoryai/integrations/contracts"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/submission"
 )
@@ -107,18 +108,18 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 	}
 	if len(commits) > maxSubmitCommits {
 		fmt.Fprintf(w, textProgramTooMany+"\n", len(commits), maxSubmitCommits)
-		return fail(submission.NoneProgramFailed, submitExitInput), nil
+		return fail(submission.NoneProgramFailed, contracts.SubmitExitInput), nil
 	}
 	dir, err := os.MkdirTemp("", "qory-submit-")
 	if err != nil {
 		fmt.Fprintf(w, textProgramNoFolder+"\n", shownError(err))
-		return fail(submission.NoneProgramFailed, submitExitForge), nil
+		return fail(submission.NoneProgramFailed, contracts.SubmitExitForge), nil
 	}
 	defer os.RemoveAll(dir)
 	input, err := p.input(document, r, commits, dir)
 	if err != nil {
 		fmt.Fprintf(w, textProgramNoFolder+"\n", shownError(err))
-		return fail(submission.NoneProgramFailed, submitExitForge), nil
+		return fail(submission.NoneProgramFailed, contracts.SubmitExitForge), nil
 	}
 	end := p.run(ctx, input, dir)
 	if ctx.Err() != nil {
@@ -128,7 +129,7 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 	// The lines count after a finished program and after one that reports a failed call or a
 	// bad input; for any other end they record nothing.
 	var lines submitLines
-	if end.startErr == "" && !end.timedOut && (end.exit == submitExitDone || end.exit == submitExitForge || end.exit == submitExitInput) {
+	if end.startErr == "" && !end.timedOut && (end.exit == contracts.SubmitExitDone || end.exit == contracts.SubmitExitForge || end.exit == contracts.SubmitExitInput) {
 		lines = parseSubmitLines(end.stdout, r.System, input.Draft, append([]string{r.Base.Commit}, commits...))
 		for i, bad := range lines.Invalid {
 			if i == maxLeftOut {
@@ -152,23 +153,23 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 		r.Draft = submission.None(submission.NoneProgramTimeout, 0)
 	case end.startErr != "":
 		fmt.Fprintf(w, textProgramNoStart+"\n", shownText(end.startErr))
-		r.Draft = submission.None(submission.NoneProgramFailed, submitExitForge)
-	case end.exit == submitExitNoLogin:
+		r.Draft = submission.None(submission.NoneProgramFailed, contracts.SubmitExitForge)
+	case end.exit == contracts.SubmitExitLogin:
 		// The program printed the login command as the first line of its standard error, which
 		// the step has printed above. The branch stays pushed.
-		r.Draft = submission.None(submission.NoneLoginNeeded, submitExitNoLogin)
-	case end.exit < submitExitDone || end.exit > submitExitInput:
+		r.Draft = submission.None(submission.NoneLoginNeeded, contracts.SubmitExitLogin)
+	case end.exit < contracts.SubmitExitDone || end.exit > contracts.SubmitExitInput:
 		fmt.Fprintf(w, textProgramFailed+"\n", end.exit)
-		r.Draft = submission.None(submission.NoneProgramFailed, submitExitForge)
+		r.Draft = submission.None(submission.NoneProgramFailed, contracts.SubmitExitForge)
 	case lines.Draft != nil:
 		draft, err := json.Marshal(lines.Draft)
 		if err != nil {
 			return r, err
 		}
 		r.Draft = draft
-	case end.exit == submitExitDone:
+	case end.exit == contracts.SubmitExitDone:
 		fmt.Fprintf(w, textProgramNoDraft+"\n", end.exit)
-		r.Draft = submission.None(submission.NoneProgramFailed, submitExitDone)
+		r.Draft = submission.None(submission.NoneProgramFailed, contracts.SubmitExitDone)
 	default:
 		fmt.Fprintf(w, textProgramFailed+"\n", end.exit)
 		r.Draft = submission.None(submission.NoneProgramFailed, end.exit)
@@ -183,12 +184,12 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 func (p *submitProgram) input(document *submission.Submission, r submission.Repository, commits []string, dir string) (submitInput, error) {
 	in := submitInput{
 		System: r.System, Path: r.Path, Branch: document.Ref, BaseBranch: r.Base.Branch, BaseCommit: r.Base.Commit,
-		Commits: commits, Draft: submitDraftNone,
+		Commits: commits, Draft: contracts.SubmitDraftNone,
 	}
 	if !bytes.Equal(r.Draft, placeholder) || document.Text == nil {
 		return in, nil
 	}
-	in.Draft, in.Title = submitDraftOpen, document.Text.Title
+	in.Draft, in.Title = contracts.DraftOpen, document.Text.Title
 	file := filepath.Join(dir, "description.md")
 	if err := os.WriteFile(file, []byte(document.Text.Description), 0o600); err != nil {
 		return in, err
