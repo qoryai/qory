@@ -857,16 +857,22 @@ recorded. The session's events are not.
 
 ### The runtime's program
 
-Every run of Claude Code, the runtime `claude`, walled or not, installs the runtime's
-program on the machine before its session starts: after the compose, and before the
-image step. A run of another runtime installs nothing, and a session of Codex starts the
-program from the image.
+Every run of Claude Code, the runtime `claude`, and of Codex, the runtime `codex`,
+walled or not, installs the runtime's program on the machine before its session starts:
+after the compose, and before the image step. A run of another runtime installs nothing.
+The agent image contains no runtime.
 
-The session starts the installed program, `<runtimes>/claude/<version>/bin/claude`. Behind
-a wall, Forager mounts the version's folder read-only at `/qory/runtime/claude`, so the
-agent starts `/qory/runtime/claude/bin/claude` and cannot change it, and the session's
-`dev.qory.session.started` has the installed version as `runtime_version`. Forager sets
-`DISABLE_AUTOUPDATER=1` for Claude Code, so it does not update itself.
+The session starts the installed program, `<runtimes>/<runtime>/<version>/bin/<runtime>`,
+such as `<runtimes>/claude/2.1.320/bin/claude`. Behind a wall, Forager mounts the
+version's folder read-only at `/qory/runtime/<runtime>`, so the agent starts
+`/qory/runtime/claude/bin/claude` or `/qory/runtime/codex/bin/codex` and cannot change
+it, and the session's `dev.qory.session.started` has the installed version as
+`runtime_version`. Forager sets `DISABLE_AUTOUPDATER=1` for Claude Code, so it does not
+update itself, and its launch of Codex turns off Codex's update check.
+
+Codex runs as `bin/codex` alone, without the other files of its npm build. Behind a
+wall, `codex exec` runs with `--sandbox danger-full-access`, so it needs no `bwrap` of its
+build, and it runs `rg` from the image.
 
 The program comes from the runtime cache of the instance's registry when the machine has
 one, and from npm otherwise:
@@ -892,7 +898,7 @@ one, and from npm otherwise:
   ```
 
   `qory run` takes the same host from the run-code file only. The registry's host decides
-  which Claude Code program the agent runs, so the run-code file is as trusted as the
+  which program of the runtime the agent runs, so the run-code file is as trusted as the
   code that runs.
 - Any other run installs from the host of `pool.registry` in the run's `forager.yaml`.
 - Without either, the run installs from npm, `registry.npmjs.org`.
@@ -912,15 +918,16 @@ qory run: Run again
 The download of claude 2.1.320 stopped: the response sent no byte for 1m0s
 ```
 
-From the registry, with a token for `repository:shared/runtimes/claude:pull`, `qory run`
-reads, in this order:
+From the registry, with a token for `repository:shared/runtimes/<runtime>:pull`, `qory
+run` reads, in this order:
 
-1. `shared/runtimes/claude:newest`, and the manifest of the machine's platform by its
+1. `shared/runtimes/<runtime>:newest`, and the manifest of the machine's platform by its
    digest;
-2. `shared/runtimes/claude:<version>`, the version in the manifest, which must have the
-   same digest, and the manifest by its digest again;
-3. the manifest's one layer, npm's tarball, by its digest, when the version's folder does
-   not exist.
+2. `shared/runtimes/<runtime>:<version>`, the version in the manifest, which must have
+   the same digest, and the manifest by its digest again;
+3. the manifest's one layer, npm's tarball of the platform's build, by its digest, when
+   the version's folder does not exist. For Codex, that is the tarball of
+   `@openai/codex@<version>-linux-x64` or `-linux-arm64`.
 
 The layer must match its size, its sha256 digest, and npm's sha512 checksum in its
 annotation `dev.qory.runtime.integrity`. That checksum comes from the registry's
@@ -969,20 +976,25 @@ The realm is https://apiary.example.com/registry/token, and the run has no addre
 
 A run that starts from a run key has no `gateway.server` section in the `forager.yaml`
 it reads, so it stops there when its `pool.registry` or run code sets a registry. Any
-other status stops the run at once. A registry whose cache never held Claude Code
+other status stops the run at once. A registry whose cache never held the runtime
 stops the run with:
 
 ```text
 qory run: Check that the instance's registry reaches the publisher of claude, then run again
 ```
 
-From npm, `qory run` reads, in this order:
+From npm, `qory run` reads, in this order, for Claude Code:
 
 1. `/-/package/@anthropic-ai/claude-code/dist-tags`, whose `latest` is the version;
 2. `/@anthropic-ai/claude-code-linux-x64/<version>`, or `-arm64`, whose `dist.integrity`
    is the sha512 checksum and whose `dist.tarball` is the tarball, which must be on
    `registry.npmjs.org`;
 3. the tarball, when the version's folder does not exist.
+
+For Codex, npm publishes each platform's build as a version of the same package, so
+`qory run` reads `/-/package/@openai/codex/dist-tags`, then
+`/@openai/codex/<version>-linux-x64`, or `-linux-arm64`, then its tarball, with the
+same checks.
 
 `qory run` reads the registry's `newest`, or npm's `latest`, on every run, and keeps no
 other record of the newest version: once either moves, the next run installs the new
@@ -998,32 +1010,34 @@ qory run: Set up the instance's registry for this machine, or allow registry.npm
 The run's proxy returned 403 to the CONNECT to registry.npmjs.org:443.
 ```
 
-`qory run` keeps each version in `<runtimes>/claude/<version>/`. For a run that `qory run
+`qory run` keeps each version in `<runtimes>/<runtime>/<version>/`. For a run that `qory run
 pool` starts, `<runtimes>` is `runtimes` in the pool's folder, which every run of the pool
 shares. For any other run, `<runtimes>` is `<state>/runtimes`, where `<state>` is
 `$XDG_STATE_HOME/qory`, or `~/.local/state/qory` without `XDG_STATE_HOME`. The folder
-contains `bin/claude`, mode `0755`, and `integrity`, the checksum of the tarball it came
-from.
+contains `bin/<runtime>`, mode `0755`, and `integrity`, the checksum of the tarball it
+came from.
 
 1. When the version's folder exists, the run uses it and reads no tarball: a later run on
    the same machine with the same newest version downloads nothing.
-2. Otherwise qory reads the tarball into a temporary file in `<runtimes>/claude/`, at most
-   1 GiB, and checks it against the checksum before it extracts anything. It extracts
-   only the entry `package/claude`, a regular file of at most 1 GiB, into a temporary
-   folder; the tarball may unpack to at most 4 GiB. No other entry is written, and a link
-   at `package/claude` stops the run. qory then renames the temporary folder to the
+2. Otherwise qory reads the tarball into a temporary file in `<runtimes>/<runtime>/`, at
+   most 1 GiB, and checks it against the checksum before it extracts anything. It
+   extracts only the program's entry, a regular file of at most 1 GiB, to
+   `bin/<runtime>` in a temporary folder: `package/claude` for Claude Code, and
+   `package/vendor/<x86_64 or aarch64>-unknown-linux-musl/bin/codex` for Codex. The
+   tarball may unpack to at most 4 GiB. No other entry is written, and a link at the
+   program's entry stops the run. qory then renames the temporary folder to the
    version's folder, so a folder at that path is always a complete install.
 
 Every session of the run uses that one version, and the run holds the version's folder
-until it ends. Each install removes, in `<runtimes>/claude/`, the folders of versions
+until it ends. Each install removes, in `<runtimes>/<runtime>/`, the folders of versions
 older than the newest that no run holds, and the temporary entries `.download-*` and
 `.install-*` that no run is writing. It removes a version's folder only when the folder
-has the shape of an install: `bin/claude` and `integrity`, both regular files, in a real
+has the shape of an install: `bin/<runtime>` and `integrity`, both regular files, in a real
 `bin` folder. A folder with another content, such as one that a person made, stays. It
 follows no link, and removes no other entry. A run takes its hold, and an install looks
-for what to remove, only while it has the lock `<runtimes>/claude/.lock`, so a run that
+for what to remove, only while it has the lock `<runtimes>/<runtime>/.lock`, so a run that
 starts during an install keeps its version. Each run holds its version with a shared
-lock on `<runtimes>/claude/.hold-<version>`, which ends when the run ends.
+lock on `<runtimes>/<runtime>/.hold-<version>`, which ends when the run ends.
 
 A run that `qory run` killed may leave its container running without a hold. The install
 lists the mounts of the engine's running containers (`docker ps`, then `docker inspect`,
@@ -1033,16 +1047,16 @@ running container. When the program fails in another way, the install removes no
 version's folder.
 
 Two runs that need the same version do not both read its tarball. The run that finds no
-folder takes the lock `<runtimes>/claude/.lock-<version>` and reads the tarball; the other
+folder takes the lock `<runtimes>/<runtime>/.lock-<version>` and reads the tarball; the other
 waits for that lock, as long as its time limit allows, and then uses the folder. The
 lock `.lock` is not held during a download.
 
 Forager checks only the version's folder, so before an install, `qory run` checks the
-runtimes folder and `<runtimes>/claude` too. A link at either stops the run with
-`Replace <path> with a folder`. A `<runtimes>/claude` that existed and a runtimes folder
+runtimes folder and `<runtimes>/<runtime>` too. A link at either stops the run with
+`Replace <path> with a folder`. A `<runtimes>/<runtime>` that existed and a runtimes folder
 that its group or others can write stop the run with `Run chmod go-w <path>, then run
 again`, since they could replace a version's folder. A folder that `qory run` makes is set
-to mode 0755. A runtimes folder or `<runtimes>/claude` that neither root nor the user of
+to mode 0755. A runtimes folder or `<runtimes>/<runtime>` that neither root nor the user of
 `qory run` owns stops the run with `Give <path> to root or to the user that runs qory`. qory checks no folder above the runtimes folder, since a shared one such as
 `/tmp` is writable by others.
 

@@ -10,8 +10,9 @@
 // tarball with the same checksum made it, and opens no tarball then. Otherwise it takes
 // the version's install lock, so that a second run that needs the same version waits and
 // then uses the folder, reads the tarball into a temporary file, checks its checksum, and
-// extracts only package/<runtime> to bin/<runtime> in a temporary folder, which it then
-// renames to the version's folder: a folder at that path is always a complete install.
+// extracts only the program's entry, [Release.Program], to bin/<runtime> in a temporary
+// folder, which it then renames to the version's folder: a folder at that path is always
+// a complete install.
 package runtimeinstall
 
 import (
@@ -69,9 +70,26 @@ type Release struct {
 	// digest in base64.
 	Integrity string
 	// Open opens the tarball, npm's gzip tar archive of the package for the machine's
-	// platform, whose program is package/<runtime>. Install calls it at most once, and
+	// platform, whose program is the entry Program. Install calls it at most once, and
 	// only when the version's folder is not complete.
 	Open func(ctx context.Context) (io.ReadCloser, error)
+	// Program is the entry of the program in the tarball, see [programEntry]; ""
+	// stands for package/<runtime>.
+	Program string
+}
+
+// programEntry is the entry of runtime's program in the npm tarball of its build for
+// linux/arch: package/vendor/<x86_64 or aarch64>-unknown-linux-musl/bin/codex for Codex,
+// and package/<runtime> for any other runtime, such as package/claude for Claude Code.
+// Install extracts only this entry. Codex then runs without the other files of its
+// tarball: a walled run starts it with --sandbox danger-full-access, so it needs no bwrap
+// of its own, and takes rg from the image.
+func programEntry(runtime, arch string) string {
+	if runtime == "codex" {
+		triple := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[arch]
+		return "package/vendor/" + triple + "-unknown-linux-musl/bin/codex"
+	}
+	return "package/" + runtime
 }
 
 // Fetch returns the newest release of the runtime. Every error's text starts with what

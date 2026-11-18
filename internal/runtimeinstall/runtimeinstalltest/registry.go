@@ -20,13 +20,14 @@ const (
 )
 
 // Registry is a stub OCI registry on loopback with the repository
-// shared/runtimes/claude and a token realm at /registry/token, which gives [Token] for
-// the pull scope of that repository. It holds the runtime cache's layout: an image
-// index per version, with an image manifest for each platform, whose one layer is
-// npm's tarball.
+// shared/runtimes/claude, or shared/runtimes/codex for one from [StartCodexRegistry],
+// and a token realm at /registry/token, which gives [Token] for the pull scope of that
+// repository. It holds the runtime cache's layout: an image index per version, with an
+// image manifest for each platform, whose one layer is npm's tarball.
 type Registry struct {
 	t           *testing.T
 	srv         *httptest.Server
+	runtime     string
 	mu          sync.Mutex
 	manifests   map[string][]byte
 	blobs       map[string][]byte
@@ -39,7 +40,17 @@ type Registry struct {
 
 // StartRegistry starts a registry on loopback until the test ends.
 func StartRegistry(t *testing.T) *Registry {
-	r := &Registry{t: t, manifests: map[string][]byte{}, blobs: map[string][]byte{}}
+	return startRegistry(t, "claude")
+}
+
+// StartCodexRegistry starts a registry of Codex on loopback until the test ends.
+func StartCodexRegistry(t *testing.T) *Registry {
+	return startRegistry(t, "codex")
+}
+
+// startRegistry starts a registry with the repository of runtime.
+func startRegistry(t *testing.T, runtime string) *Registry {
+	r := &Registry{t: t, runtime: runtime, manifests: map[string][]byte{}, blobs: map[string][]byte{}}
 	r.srv = httptest.NewServer(http.HandlerFunc(r.serve))
 	t.Cleanup(r.srv.Close)
 	return r
@@ -81,7 +92,7 @@ func (r *Registry) serve(w http.ResponseWriter, req *http.Request) {
 	defer r.mu.Unlock()
 	r.paths = append(r.paths, req.URL.Path)
 	if req.URL.Path == "/registry/token" {
-		if req.URL.Query().Get("scope") != "repository:shared/runtimes/claude:pull" || req.URL.Query().Get("service") != "stub-registry" {
+		if req.URL.Query().Get("scope") != "repository:shared/runtimes/"+r.runtime+":pull" || req.URL.Query().Get("service") != "stub-registry" {
 			http.Error(w, "wrong scope", http.StatusBadRequest)
 			return
 		}
@@ -107,7 +118,7 @@ func (r *Registry) serve(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "the cache is filling", http.StatusServiceUnavailable)
 		return
 	}
-	rest, ok := strings.CutPrefix(req.URL.Path, "/v2/shared/runtimes/claude/")
+	rest, ok := strings.CutPrefix(req.URL.Path, "/v2/shared/runtimes/"+r.runtime+"/")
 	if !ok {
 		http.NotFound(w, req)
 		return
@@ -229,8 +240,15 @@ func (r *Registry) Publish(version string, newest bool, layers map[string]Layer)
 }
 
 // PublishPlain publishes version as newest, for both architectures, each with
-// [PlainTarball] whose program says the architecture.
+// [PlainTarball] whose program says the architecture, or for Codex [CodexTarball].
 func (r *Registry) PublishPlain(version string) {
+	if r.runtime == "codex" {
+		r.Publish(version, true, map[string]Layer{
+			"amd64": {Tarball: CodexTarball(r.t, version, "amd64")},
+			"arm64": {Tarball: CodexTarball(r.t, version, "arm64")},
+		})
+		return
+	}
 	r.Publish(version, true, map[string]Layer{
 		"amd64": {Tarball: PlainTarball(r.t, version+" amd64")},
 		"arm64": {Tarball: PlainTarball(r.t, version+" arm64")},

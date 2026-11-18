@@ -65,6 +65,25 @@ func Program(version string) string {
 	return "#!/bin/sh\necho claude " + version + "\n"
 }
 
+// CodexProgram is the program of version in [CodexTarball].
+func CodexProgram(version string) string {
+	return "#!/bin/sh\necho codex " + version + "\n"
+}
+
+// CodexTarball is a tarball of Codex's build of version for linux/arch, amd64 or arm64,
+// as npm publishes @openai/codex@<version>-linux-x64 and -linux-arm64: the program at
+// package/vendor/<x86_64 or aarch64>-unknown-linux-musl/bin/codex, with other files of
+// the build beside it, which the install leaves out.
+func CodexTarball(t *testing.T, version, arch string) []byte {
+	triple := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[arch] + "-unknown-linux-musl"
+	return Tarball(t,
+		Entry{Name: "package/package.json", Body: `{"name":"@openai/codex"}`},
+		Entry{Name: "package/vendor/" + triple + "/bin/codex", Body: CodexProgram(version + " " + arch)},
+		Entry{Name: "package/vendor/" + triple + "/codex-path/rg", Body: "#!/bin/sh\n"},
+		Entry{Name: "package/codex", Body: "not the program\n"},
+	)
+}
+
 // PlainTarball is a tarball of the claude package of version.
 func PlainTarball(t *testing.T, version string) []byte {
 	return Tarball(t,

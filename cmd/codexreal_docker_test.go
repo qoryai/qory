@@ -74,38 +74,31 @@ case $found in 0) echo "scan: a file has the key";; 1) echo "scan: no file has t
 exit $status
 `
 
-// agentBuildArg is the default of the build argument name in images/agent/Dockerfile.
-func agentBuildArg(t *testing.T, name string) string {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "images", "agent", "Dockerfile"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for line := range strings.Lines(string(b)) {
-		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "ARG "+name+"="); ok {
-			return v
-		}
-	}
-	t.Fatalf("images/agent/Dockerfile has no ARG %s", name)
-	return ""
+// realCodexVersion is the Codex the test builds into its image: 0.167.2, the version the
+// walled run's settings, refused keys and hook hashes were checked on. realCodexSums are
+// npm's dist.integrity of its native build for each engine architecture, sha512 in hex.
+const realCodexVersion = "0.167.2"
+
+var realCodexSums = map[string]string{
+	"amd64": "d91c375645a89ccc7009280ec3e36488a2ceb8ecf2a103569b153bc7c1a789eb1d31f84a7386ac36a3b34e043024b282ad294f738ffa7d84da1fb7d872e19619",
+	"arm64": "c7f3e13d1ab45fe841643a97284d18226e0d6684b2085f7d29c2495919f407658d766624dde043b6334ee7ec25ef358c081c234ce7afe53cf6659ebe635e1840",
 }
 
 // realCodexImage builds an image on alpine with git, Codex, and [codexScan] with mark at
 // /usr/local/bin/codex-scan. Codex is npm's native build of @openai/codex for this
-// engine's machines, at the version and checked against the sum of the build arguments
-// of images/agent/Dockerfile, the standard agent image. As in that image, the native
-// build's folder stays whole, here at /opt/codex, and the codex command links to its
-// bin/codex, so Codex finds its helpers beside it. The test removes the image at its
+// engine's machines, at [realCodexVersion] and checked against [realCodexSums]. The
+// native build's folder stays whole, here at /opt/codex, and the codex command links to
+// its bin/codex, so Codex finds its helpers beside it. The test removes the image at its
 // end.
 func realCodexImage(t *testing.T, mark string) string {
 	t.Helper()
-	version := agentBuildArg(t, "CODEX_VERSION")
+	version := realCodexVersion
 	_, arch, _ := strings.Cut(dockerOut(t, "", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"), "/")
 	npmArch := map[string]string{"amd64": "x64", "arm64": "arm64"}[arch]
 	if npmArch == "" {
 		t.Fatalf("Codex has no native build for the engine's machines, %s", arch)
 	}
-	sum := agentBuildArg(t, "CODEX_SHA512_"+strings.ToUpper(arch))
+	sum := realCodexSums[arch]
 	var id [4]byte
 	_, _ = rand.Read(id[:])
 	dir := t.TempDir()
@@ -450,7 +443,7 @@ func runRealCodexChild(t *testing.T) {
 
 // TestARealWalledCodexRunReachesTheModelThroughTheGateway is a walled Codex run from a run
 // code that only reads, behind a real wall on this machine's engine, with Codex itself in
-// the image, at the version images/agent/Dockerfile installs, at a gateway of Forager's
+// the image, at [realCodexVersion], at a gateway of Forager's
 // in this process whose control plane has a fake model key for a stub of the Responses
 // API in a container: an API key, and a subscription login's token. Codex starts on the
 // run's fresh home at /var/lib/qory-codex-home, with config.toml bound read-only, and

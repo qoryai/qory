@@ -96,7 +96,11 @@ func (f folder) install(ctx context.Context, rel Release, sum []byte) error {
 	if _, err := tarball.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf(textState+"%w", err)
 	}
-	if err := extract(tarball, tmp, f.runtime, what); err != nil {
+	entry := rel.Program
+	if entry == "" {
+		entry = "package/" + f.runtime
+	}
+	if err := extract(tarball, tmp, f.runtime, entry, what); err != nil {
 		return err
 	}
 	if err := writeFile(filepath.Join(tmp, checksumFile), []byte(rel.Integrity+"\n"), 0o644); err != nil {
@@ -161,12 +165,12 @@ func (c *countingReader) Read(b []byte) (int, error) {
 	return n, err
 }
 
-// extract writes the one entry package/<runtime> of the gzip tar archive in r to
+// extract writes the one entry want of the gzip tar archive in r, the program's, to
 // <dir>/bin/<runtime>, mode 0755, with bin mode 0755. No other entry is written. The
 // entry must be a regular file of at most [maxProgram] bytes, there must be exactly one,
 // and the archive must unpack to at most [maxUnpacked] bytes. what is the release as an
 // error shows it.
-func extract(r io.Reader, dir, runtime, what string) error {
+func extract(r io.Reader, dir, runtime, want, what string) error {
 	zr, err := gzip.NewReader(r)
 	if err != nil {
 		return fmt.Errorf(textRelease+"The tarball of %s is not gzip", what)
@@ -174,7 +178,6 @@ func extract(r io.Reader, dir, runtime, what string) error {
 	defer zr.Close()
 	unpacked := &countingReader{r: io.LimitReader(zr, maxUnpacked+1)}
 	tr := tar.NewReader(unpacked)
-	want := "package/" + runtime
 	found := false
 	for {
 		h, err := tr.Next()

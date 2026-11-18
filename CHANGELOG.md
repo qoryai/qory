@@ -79,6 +79,15 @@ release may change what an existing document does, and states it under Upgrading
   of the artifact `branch`. With no wall, it stops with `write_needs_wall`. The error
   for another workflow value now starts
   `Set workflows.<name>.access to a valid level.`
+- Every run of Codex installs Codex before its session, as a run of Claude Code installs
+  Claude Code: from `shared/runtimes/codex` in the runtime cache of the pool's registry,
+  or of `pool.registry`, or else from npm, where it reads the dist-tag `latest` of
+  `@openai/codex` and the version `<version>-linux-x64` or `-linux-arm64` of the same
+  package. qory extracts only `package/vendor/<x86_64 or aarch64>-unknown-linux-musl/bin/codex`
+  into `<runtimes>/codex/<version>/bin/codex` and prints `qory run: installed codex
+  <version>`. The session starts that program, and behind a wall Forager mounts the
+  version's folder read-only at `/qory/runtime/codex`. Before, a session of Codex started
+  the program from the image, which no agent image has.
 - Every run of Claude Code installs the runtime's program before its session: from the
   runtime cache of the pool's registry, or of `pool.registry`, or else from npm, through
   the run's host proxy when the run has one. qory reads the registry's `newest`, or npm's
@@ -662,14 +671,14 @@ release may change what an existing document does, and states it under Upgrading
   credential in `forager.yaml` has a path in `paths` that matches no request, such as a
   path with a `.` or `..` segment, and its line has the path. A run that the gateway
   closes because the model provider rejected a model key ends with the reason
-  `model_key_switch` or `model_key_unauthorized`, which Forager's contract now has.
+  `model_key_switch` or `model_key_unauthorized`, two reasons of Forager's contract.
 - qory builds with Forager f344b7a7.
   - A run keeps its wall only when a container of the run may still run; a network or
     folder of the wall that could not be removed no longer keeps it.
   - A session of Claude Code starts the program that qory installed, from
     `<runtimes>/claude/<version>`. Behind a wall, Forager mounts that folder read-only at
     `/qory/runtime/claude`, and `dev.qory.session.started` has the installed version as
-    `runtime_version`. A session of Codex starts from the image as before.
+    `runtime_version`.
   - Forager sets `DISABLE_AUTOUPDATER=1` in every launch of Claude Code, so it does not
     update itself. A value of it from the run, the machine or the harness no longer
     applies.

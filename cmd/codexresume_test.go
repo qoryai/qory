@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -17,9 +16,7 @@ import (
 	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/receiver"
 	"github.com/qoryai/forager/server"
-	"github.com/qoryai/forager/session"
 
-	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/render/codex"
 )
 
@@ -149,54 +146,4 @@ func checkResumedArgs(t *testing.T, args, want []string, mention string) []strin
 		t.Errorf("Codex started with %q from exec on, want %q", args[i:], want)
 	}
 	return args[i:]
-}
-
-// fixedValue is the value of the fixed variable name of spec, and "" for none.
-func fixedValue(spec session.SessionSpec, name string) string {
-	for _, kv := range spec.LaunchFixed {
-		if v, ok := strings.CutPrefix(kv, name+"="); ok {
-			return v
-		}
-	}
-	return ""
-}
-
-// TestAnUnwalledCodexContinuationResumesInItsCodexHome is the continuation of a paused
-// Codex run, from a run code, with no wall, at a gateway whose control plane has the
-// paused run's resume. The paused run was walled, so its transcript's path is below
-// /var/lib/qory-codex-home. Forager writes the transcript at the same names below this
-// run's CODEX_HOME, the runtime's directory of the composed home, before Codex starts,
-// and starts codex exec with resume and the session id right before the prompt.
-func TestAnUnwalledCodexContinuationResumesInItsCodexHome(t *testing.T) {
-	atGateway(t)
-	codeReal = true
-	t.Cleanup(func() { codeReal = false })
-	ctl := startResumeControl(t)
-	stub := filepath.Join(tempDir(t), "codex")
-	writeFile(t, stub, stubResumedCodex)
-	if err := os.Chmod(stub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	home := filepath.Join(tempDir(t), "home")
-	r := runFromCodeLinks(t, func(string) []string {
-		machineConfig(t, "harness:\n  launch:\n    codex:\n      command: "+stub+"\n")
-		return nil
-	}, []string{"--home", home}, writesHello, func(d map[string]any) {
-		d["run_settings"] = map[string]any{"runtime": "codex"}
-	}, helloSkill, nil)
-	if !r.joined || r.err != nil {
-		record, _ := os.ReadFile(filepath.Join(r.open.RunsDir, r.open.RunID, "session.jsonl"))
-		t.Fatalf("%v (exit %d), want the join and exit 0\n%s\n%s", r.err, cmd.ExitCode(r.err), r.out, record)
-	}
-	t.Logf("qory run:\n%s", r.out)
-	ctl.transcriptAsked(t)
-	codexHome := fixedValue(r.spec, codex.HomeVariable)
-	if filepath.Base(codexHome) != codex.Runtime || !strings.HasPrefix(codexHome, home+"/") {
-		t.Errorf("CODEX_HOME is %s, want the folder codex of the composed home below %s", codexHome, home)
-	}
-	wants(t, r.out, "stub: CODEX_HOME="+codexHome+"\n", "stub: file sessions/"+pausedRolloutRel+"\n", "stub: text "+strings.TrimSuffix(pausedTranscript, "\n")+"\n")
-	if r.inputDir == "" {
-		t.Fatalf("no --add-dir in %q", r.spec.Args)
-	}
-	checkResumedArgs(t, stubArgs(r.out), []string{"exec", "--json", "--add-dir", r.inputDir}, "$workflow-hello")
 }

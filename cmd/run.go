@@ -49,6 +49,7 @@ import (
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/render"
+	"github.com/qoryai/qory/internal/render/claude"
 	"github.com/qoryai/qory/internal/render/codex"
 	"github.com/qoryai/qory/internal/report"
 	"github.com/qoryai/qory/internal/runcopy"
@@ -979,7 +980,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if in != nil {
 					said(installedLine(*in))
 					useInstalledRuntime(&spec, in)
-				} else if installStandIn != nil && name == installedRuntime {
+				} else if installStandIn != nil && name == claude.Runtime {
 					stood, err := installStandIn(spec.Command)
 					if err != nil {
 						return &runLineError{codeLine(err)}

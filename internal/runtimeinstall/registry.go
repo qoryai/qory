@@ -25,8 +25,9 @@ import (
 // moves to each new version, and the tag <version>. Each is an OCI image index with one
 // image manifest for linux/amd64 and one for linux/arm64. Each manifest has the
 // artifactType application/vnd.qory.runtime.v1, the empty config, and one layer: npm's
-// tarball as it was published, with npm's checksum in its annotation
-// dev.qory.runtime.integrity.
+// tarball of the platform's build as it was published, with npm's checksum in its
+// annotation dev.qory.runtime.integrity. For Codex that is the tarball of
+// @openai/codex@<version>-linux-x64 or -linux-arm64, see [npmPackages].
 
 // The media types and annotations of the registry's runtime cache.
 const (
@@ -81,7 +82,12 @@ func RegistryFetch(client *http.Client, host, arch, instance string) Fetch {
 			return Release{}, fmt.Errorf("Run on an amd64 or arm64 machine\nThe registry has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
 		}
 		r := &registry{client: client, host: host, instance: instance, runtime: runtime, repository: "shared/runtimes/" + runtime}
-		return r.resolve(ctx, arch)
+		rel, err := r.resolve(ctx, arch)
+		if err != nil {
+			return Release{}, err
+		}
+		rel.Program = programEntry(runtime, arch)
+		return rel, nil
 	}
 }
 
@@ -456,8 +462,11 @@ func (r *registry) note(ctx context.Context, version, answer string) {
 
 // displayName is the runtime's name as a person reads it.
 func displayName(runtime string) string {
-	if runtime == "claude" {
+	switch runtime {
+	case "claude":
 		return "Claude Code"
+	case "codex":
+		return "Codex"
 	}
 	return runtime
 }

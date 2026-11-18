@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -48,8 +49,9 @@ type installSetup struct {
 	// noInstance leaves the run with no address of Qory Apiary; otherwise reg's
 	// instance is the run's.
 	noInstance bool
-	// runtime is the runtime of the run; empty means claude.
-	runtime string
+	// runtime is the runtime of the run; empty means claude. version is the version the
+	// image's fetch looks for in qory's state folder; empty means 2.1.320.
+	runtime, version string
 	// args are flags that follow the run key's.
 	args []string
 	// during, when set, runs in its own goroutine while the run goes on.
@@ -58,10 +60,10 @@ type installSetup struct {
 	before func()
 }
 
-// runInstalling runs qory run claude with a run key as s sets it up, with no
-// repositories. The image's
-// fetch, which only a walled run has, records whether the program of claude 2.1.320 was
-// in qory's state folder by then, mode 0755.
+// runInstalling runs qory run claude, or s.runtime, with a run key as s sets it up, with
+// no repositories. The image's fetch, which only a walled run has, records whether the
+// program of claude 2.1.320, or of s.runtime at s.version, was in qory's state folder by
+// then, mode 0755.
 func runInstalling(t *testing.T, s installSetup) installRun {
 	t.Helper()
 	defer cmd.SetInstallRuntimes(true)()
@@ -93,7 +95,7 @@ func runInstalling(t *testing.T, s installSetup) installRun {
 	args := []string{"run", runtime, "--home", t.TempDir(), "--run-key-fd", descriptor(t, mintRunKey(t, keyRunID, gw.url()))}
 	t.Setenv("QORY_RUN_KEY", "")
 	var r installRun
-	program := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "claude", "2.1.320", "bin", "claude")
+	program := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", runtime, cmp.Or(s.version, "2.1.320"), "bin", runtime)
 	defer cmd.SetJoinSession(func(s session.SessionSpec) { r.joins = append(r.joins, s) })()
 	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: proxygittest.Host, Proxy: s.proxy.URL(), Dir: h.runDir,
@@ -180,15 +182,60 @@ func startedProgram(s session.SessionSpec) string {
 	return s.Command
 }
 
-// TestACodexSessionStartsFromTheImage has a run of codex join with no RuntimeInstall
-// and with the Command of its launch: qory installs no program of codex.
-func TestACodexSessionStartsFromTheImage(t *testing.T) {
-	r := runInstalling(t, installSetup{proxy: rt.StartProxy(t), walled: true, runtime: "codex"})
+// TestADispatchedCodexRunInstallsCodexAndRunsItBehindTheWall runs codex exec with a run
+// key behind the fake wall, with no pool.registry: qory installs codex 0.169.1 from npm
+// through the run's host proxy before the image's fetch, prints "qory run: installed
+// codex 0.169.1" once, and the session joins with the version's folder as
+// RuntimeInstall and the installed program as the program it starts, behind the wall:
+// Forager binds the folder read-only at /qory/runtime/codex. Codex runs as a walled run
+// starts it: on the home at /var/lib/qory-codex-home, with --sandbox danger-full-access
+// after exec.
+func TestADispatchedCodexRunInstallsCodexAndRunsItBehindTheWall(t *testing.T) {
+	npm, proxy := rt.StartCodexNpm(t), rt.StartProxy(t)
+	npm.Publish("0.169.1")
+	r := runInstalling(t, installSetup{npm: npm, proxy: proxy, walled: true, runtime: "codex", version: "0.169.1", args: []string{"--", "exec", "hi"}})
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || len(r.joins) != 1 {
 		t.Fatalf("%d joins, %v\n%s", len(r.joins), r.err, r.out)
 	}
-	if r.joins[0].RuntimeInstall != nil || strings.Contains(startedProgram(r.joins[0]), "runtimes") {
-		t.Fatalf("the session has RuntimeInstall %+v and Command %q, want none of the installed program", r.joins[0].RuntimeInstall, startedProgram(r.joins[0]))
+	if n := strings.Count(r.out, "qory run: installed codex 0.169.1\n"); n != 1 {
+		t.Fatalf("the run prints the install line %d times:\n%s", n, r.out)
+	}
+	if !r.installFirst {
+		t.Fatal("the run fetched its image before the program was installed, mode 0755")
+	}
+	if npm.TarballGets() != 1 || proxy.Passed() != 3 || proxy.Refusals() != 0 {
+		t.Fatalf("npm requests %q; the proxy passed %d and refused %d", npm.Paths(), proxy.Passed(), proxy.Refusals())
+	}
+	program := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "codex", "0.169.1", "bin", "codex")
+	if b, err := os.ReadFile(program); err != nil || string(b) != rt.CodexProgram("0.169.1 "+goruntime.GOARCH) {
+		t.Fatalf("the installed program is %q (%v)", b, err)
+	}
+	join := r.joins[0]
+	if in := join.RuntimeInstall; in == nil || in.Version != "0.169.1" || in.Dir != filepath.Dir(filepath.Dir(program)) {
+		t.Fatalf("the session's RuntimeInstall is %+v, want the folder of codex 0.169.1", in)
+	}
+	if got := startedProgram(join); got != program {
+		t.Fatalf("the session starts %q, want the installed program", got)
+	}
+	wants(t, strings.Join(join.Args, " "), "exec --sandbox danger-full-access hi")
+	wants(t, strings.Join(join.LaunchFixed, " "), "CODEX_HOME=/var/lib/qory-codex-home")
+	lacks(t, r.out, rt.ProxyPassword)
+}
+
+// TestADispatchedCodexRunInstallsCodexFromTheRegistry runs codex with a run key behind
+// the fake wall on a machine whose forager.yaml sets pool.registry: qory reads codex
+// 0.169.1 from shared/runtimes/codex of the registry through the run's host proxy, and
+// npm gets no request.
+func TestADispatchedCodexRunInstallsCodexFromTheRegistry(t *testing.T) {
+	reg, npm, proxy := rt.StartCodexRegistry(t), rt.StartCodexNpm(t), rt.StartProxy(t)
+	reg.PublishPlain("0.169.1")
+	r := runInstalling(t, installSetup{reg: reg, npm: npm, proxy: proxy, walled: true, runtime: "codex", version: "0.169.1"})
+	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || len(r.joins) != 1 {
+		t.Fatalf("%d joins, %v\n%s", len(r.joins), r.err, r.out)
+	}
+	wants(t, r.out, "qory run: installed codex 0.169.1\n")
+	if reg.BlobGets() != 1 || len(npm.Paths()) != 0 || !r.installFirst {
+		t.Fatalf("%d blobs, %d npm requests, installed first %v", reg.BlobGets(), len(npm.Paths()), r.installFirst)
 	}
 }
 
