@@ -16,7 +16,7 @@ import (
 // contract: the branch, the repository, and the three commits that the person compares. A
 // head that is not there reads "none".
 const (
-	textHeadChanged  = "qory run: Check branch %[1]s: its head is not the commit this run expected, so qory did not push.\n  Repository %[2]s/%[3]s. Head: %[4]s. Expected: %[5]s, %[6]s."
+	textHeadChanged  = "qory run: Set the branch to the expected commit or delete it; its head is not that commit.\n  Branch %[1]s. Repository %[2]s/%[3]s. Head: %[4]s. Expected: %[5]s, %[6]s. qory did not push."
 	textHeadStart    = "the start commit"
 	textHeadLastPush = "this run's last push"
 	textHeadNone     = "none"

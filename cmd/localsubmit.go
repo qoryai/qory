@@ -20,16 +20,16 @@ import (
 	"github.com/qoryai/qory/internal/submission"
 )
 
-// The words of the local submit step. Line 1 of a text with a fix is the fix, and the cause and
-// the values follow on indented lines.
+// The words of the local submit step. Line 1 is the fix, and the cause and the values follow on
+// indented lines.
 const (
-	textPushChecksMissing = "qory run: The push checks are not available yet, so qory pushed nothing and opened no draft."
-	textPushRefused       = "qory run: A push check refused the push, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
+	textPushChecksMissing = "qory run: Push your commits and open the draft by hand: the push checks are not available yet.\n  qory pushed nothing and opened no draft."
+	textPushRefused       = "qory run: Fix the cause below, then run again: a push check refused the push.\n  qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalPushFailed   = "qory run: Fix the cause below, then run again: the push failed, so qory opened no draft.\n  Branch: %s.\n  Cause: %s"
-	textLocalNoHistory    = "qory run: qory could not read the branch or its origin, so it pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
+	textLocalNoHistory    = "qory run: Fix the cause below, then run again: qory could not read the branch or its origin.\n  qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textDraftLine         = "Draft: "
 	textLocalNoRemote     = "qory run: Set remote origin to a forge repository address, then run again; qory pushed nothing.\n  qory opened no draft.\n  Branch: %s.\n  Cause: %s"
-	textLocalPushURLs     = "qory run: The remote origin has %d push addresses, so qory pushed nothing and opened no draft.\n  Branch: %s.\n  Fix: keep one with git remote set-url --push origin <address>."
+	textLocalPushURLs     = "qory run: Keep one push address of remote origin with git remote set-url --push origin <address>.\n  The remote origin has %d push addresses, so qory pushed nothing and opened no draft.\n  Branch: %s."
 )
 
 // localPushCheck is a check of a push that a local run makes: it gets the repository and the

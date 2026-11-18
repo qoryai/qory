@@ -3,9 +3,11 @@ package preparation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/submission"
 )
@@ -51,8 +53,8 @@ func TestAMissingBranchTakesAFirstPushOnly(t *testing.T) {
 	leave(t, dir)
 	_, _, err := pushOf(dir, b)
 	changed := headError(t, err)
-	want := "qory run: Check branch qory/wi_1: its head is not the commit this run expected, so qory did not push.\n" +
-		"  Repository git.example.com/acme/shop. Head: none. Expected: " + start + ", the start commit."
+	want := "qory run: Set the branch to the expected commit or delete it; its head is not that commit.\n" +
+		"  Branch qory/wi_1. Repository git.example.com/acme/shop. Head: none. Expected: " + start + ", the start commit. qory did not push."
 	if err.Error() != want {
 		t.Errorf("the refusal is\n%s\nwant\n%s", err, want)
 	}
@@ -438,5 +440,25 @@ func TestSeveralRecordedHeadsOfCancelledRuns(t *testing.T) {
 				t.Fatalf("push: %v", err)
 			}
 		})
+	}
+}
+
+// TestTheTextsOfTheHeadCheckStartWithTheFix is line 1 of each refusal of the head check, with
+// the longest branch that the contract allows (qory/wi_ and 64 characters): at most 100
+// characters with the prefix "qory run: ", and the fix first, as an instruction.
+func TestTheTextsOfTheHeadCheckStartWithTheFix(t *testing.T) {
+	branch := "qory/wi_" + strings.Repeat("a", 64)
+	for name, c := range map[string]struct{ text, start string }{
+		"textHeadChanged":   {(&HeadChanged{Branch: branch, System: "git.example.com", Path: "acme/shop", Head: strings.Repeat("a", 40), Expected: strings.Repeat("b", 40)}).Error(), "qory run: Set "},
+		"textHeadNoRead":    {fmt.Sprintf(textHeadNoRead, "acme/shop", "git.example.com", "cause"), "qory run: Take "},
+		"textHandoffCommit": {fmt.Sprintf(textHandoffCommitted, "git.example.com/acme/shop", strings.Repeat("a", 40), ".qory/handoff/submission.json"), "qory run: Keep "},
+	} {
+		line, _, _ := strings.Cut(c.text, "\n")
+		if n := utf8.RuneCountInString(line); n > 100 {
+			t.Errorf("%s: line 1 has %d characters, want at most 100: %q", name, n, line)
+		}
+		if !strings.HasPrefix(line, c.start) {
+			t.Errorf("%s: line 1 is %q, want it to start with %q", name, line, c.start)
+		}
 	}
 }

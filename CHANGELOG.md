@@ -620,15 +620,14 @@ release may change what an existing document does, and states it under Upgrading
   branch stays pushed. A program that runs past 120 seconds is `program-timeout`. The
   submission format has the reason `login-needed`, the exit 0 for `program-failed`, and the
   draft states `closed` and `merged`. In this build no push check is registered, so a run with
-  no run code and no run key pushes nothing, runs no program and prints `qory run: The push
-  checks are not available yet, so qory pushed nothing and opened no draft.` See The submit
-  program in `docs/run.md`.
+  no run code and no run key pushes nothing, runs no program and prints `qory run: Push your
+  commits and open the draft by hand: the push checks are not available yet.` and a second
+  line. See The submit program in `docs/run.md`.
 - A push that landed with no version stored has one way out in the line of `qory run`:
   `delete branch qory/<work item id> of <path> on <system>`. A branch whose head is not the
-  commit the run expected is refused before any push, with the line `Check branch
-  qory/<work item id>` and the head and the expected commit on the next line. To go on,
-  delete that branch or move it back to the expected commit, then take the work item in
-  again. Both lose the commits on the branch that no version has. The next run creates a
+  commit the run expected is refused before any push, with the line `Set the branch to the
+  expected commit or delete it` and the branch, the head and the expected commit on the next
+  line. To go on, do one of the two, then take the work item in again. Both lose the commits on the branch that no version has. The next run creates a
   deleted branch at `target_version` when no version exists, and starts from the last
   version otherwise.
 - The lines that stopped a run on a stored branch version with a fix for Qory Apiary

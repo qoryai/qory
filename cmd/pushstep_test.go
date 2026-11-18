@@ -1031,8 +1031,8 @@ func TestAMovedBranchEndsTheRunWithPushHeadChanged(t *testing.T) {
 	if _, state := r.step(); state != event.StateFailed {
 		t.Errorf("the step ended %q, want failed", state)
 	}
-	wants(t, r.out, "qory run: Check branch qory/"+workItem+": its head is not the commit this run expected, so qory did not push.\n"+
-		"  Repository "+proxygittest.Host+"/acme/site. Head: "+moved+". Expected: "+p.first+", the start commit.")
+	wants(t, r.out, "qory run: Set the branch to the expected commit or delete it; its head is not that commit.\n"+
+		"  Branch qory/"+workItem+". Repository "+proxygittest.Host+"/acme/site. Head: "+moved+". Expected: "+p.first+", the start commit. qory did not push.")
 	lacks(t, r.out, proxygittest.Password)
 	if got := p.branchHead(t); got != moved {
 		t.Errorf("the branch moved to %s", got)
@@ -2105,7 +2105,7 @@ func TestASecondRepositoryWhoseHeadMovedEndsTheRunWithPushHeadChanged(t *testing
 	if got := r.closes[0].Reason; got != string(contracts.EndCodePushHeadChanged) {
 		t.Errorf("the run closed with the reason %q, want %q", got, contracts.EndCodePushHeadChanged)
 	}
-	wants(t, r.out, "qory run: "+deleteBranch+": qory pushed acme/site and stored no version, because the push of the next repository failed: Check branch qory/"+workItem)
+	wants(t, r.out, "qory run: "+deleteBranch+": qory pushed acme/site and stored no version, because the push of the next repository failed: Set the branch to the expected commit or delete it; its head is not that commit.")
 	if got := proxygittest.Git(t, lib, "rev-parse", "refs/heads/qory/"+workItem); got != moved {
 		t.Errorf("the second repository's branch is at %s, want %s", got, moved)
 	}
@@ -2605,7 +2605,7 @@ func TestAMovedBranchEndsTheRunWithPushHeadChangedAfterAnySession(t *testing.T) 
 			if len(r.closes) != 1 || r.closes[0].State != c.state || r.closes[0].Reason != c.code || r.closes[0].ExitCode != c.exit {
 				t.Errorf("the run closed with %+v, want %s with %q and exit code %d\n%s", r.closes, c.state, c.code, c.exit, r.out)
 			}
-			wants(t, r.out, "qory run: Check branch qory/"+workItem+": its head is not the commit this run expected, so qory did not push.")
+			wants(t, r.out, "qory run: Set the branch to the expected commit or delete it; its head is not that commit.")
 			if got := p.branchHead(t); got != moved {
 				t.Errorf("the branch moved to %s", got)
 			}

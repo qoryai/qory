@@ -2757,11 +2757,11 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   <commit>: HEAD of <path> is at <commit>, which does not descend from it, so a push would
   not be a fast-forward; the code is used`, when the agent replaced the commit the run
   started at
-- `Check branch qory/<work item id>: its head is not the commit this run expected, so qory
-  did not push.`, then a line indented by two spaces: `Repository <system>/<path>. Head:
-  <head>. Expected: <commit>, <the start commit or this run's last push>.` `<head>` is
-  `none` when the branch is not on the forge. Both commits are in full. The step pushes
-  nothing in any repository, and ends the run as
+- `Set the branch to the expected commit or delete it; its head is not that commit.`, then a
+  line indented by two spaces: `Branch qory/<work item id>. Repository <system>/<path>. Head:
+  <head>. Expected: <commit>, <the start commit or this run's last push>. qory did not push.`
+  `<head>` is `none` when the branch is not on the forge. Both commits are in full. The step
+  pushes nothing in any repository, and ends the run as
   [The head check](#the-head-check) describes. A push that the forge rejects with the status
   `[rejected]`, such as a lease that no longer matches, ends the step with the same text,
   with the head read again
@@ -2831,8 +2831,8 @@ credential alone. The result of each repository is one of these:
 - Any other head (an unrecorded head, a recorded head after the run's first push, or a
   recorded head that does not descend from the start commit) or the branch missing where the
   run did not start at the checkout: qory pushes nothing in any repository, and the step
-  fails with the refusal in the list above, which starts with `Check branch
-  qory/<work item id>`.
+  fails with the refusal in the list above, which starts with `Set the branch to the
+  expected commit or delete it`.
 
 A push that the forge rejects with the status `[rejected]`, such as a lease that no longer
 matches, also fails the step with that refusal, with the head read again. When the read of a
@@ -2965,9 +2965,10 @@ the push address of the remote `origin` (`git remote get-url --push origin`, aft
 `insteadOf` and `pushInsteadOf` rewrites), with your git login and configuration. qory pushes to
 `origin` by its name, so git applies its rewrites once, and the push goes to the address that the
 checks and the program got. The push has no force, no pre-push hook, no submodule push and no tag that follows the commit. The remote
-must have one push address: with two or more, qory pushes nothing and prints `qory run: The
-remote origin has <n> push addresses, so qory pushed nothing and opened no draft.` with the
-branch and the command `git remote set-url --push origin <address>`. The push address must be a
+must have one push address: with two or more, qory pushes nothing and prints `qory run: Keep
+one push address of remote origin with git remote set-url --push origin <address>.`, then
+`The remote origin has <n> push addresses, so qory pushed nothing and opened no draft.` and
+the branch on lines indented by two spaces. The push address must be a
 host and a repository path of a forge, over `https`, `http`, `ssh`, `git` or the form
 `git@host:owner/repo`, with a host name of dotted labels of letters, digits and hyphens, which qory writes in lower case, so `GitHub.com` is `github.com`. Any other address, such as
 `file://`, a path or a host with no dot, stops the run the same way with `qory run: Set remote
@@ -2983,12 +2984,12 @@ code. A session that did not pass, or that wrote no hand-off text, gets the draf
 
 Two push checks must be registered by name before qory pushes: `key` (a key or a secret value in
 the run's commits) and `scope` (a change to a file that the session may not change). If one
-refuses, qory pushes nothing and runs no program, and prints `qory run: A push check refused the
-push, so qory pushed nothing and opened no draft.` with `Branch: <branch>.` and `Cause: <cause>`
-indented by two spaces. A push that fails prints `qory run: Fix the cause below, then run
+refuses, qory pushes nothing and runs no program, and prints `qory run: Fix the cause below, then run
+again: a push check refused the push.`, then `qory pushed nothing and opened no draft.`,
+`Branch: <branch>.` and `Cause: <cause>` on lines indented by two spaces. A push that fails prints `qory run: Fix the cause below, then run
 again: the push failed, so qory opened no draft.` and leaves that repository out of the program. In this build neither check is
-registered, so a run with no run code and no run key pushes nothing, runs no program and prints one line:
-`qory run: The push checks are not available yet, so qory pushed nothing and opened no draft.`
+registered, so a run with no run code and no run key pushes nothing, runs no program and prints `qory run: Push your commits and open the draft by hand: the push checks are not
+available yet.` and the line `qory pushed nothing and opened no draft.` indented by two spaces.
 Until the checks exist, a run with no run code and no run key opens no draft.
 
 When the program returns a draft for a repository, qory prints `Draft: <address>` on standard

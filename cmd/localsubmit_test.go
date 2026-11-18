@@ -194,13 +194,14 @@ func TestALocalRunWithARefusingCheckPushesNothing(t *testing.T) {
 	if n := timesStarted(t, started); n != 0 {
 		t.Errorf("the program started %d times, want 0", n)
 	}
-	wants(t, out, "A push check refused the push, so qory pushed nothing and opened no draft.")
+	wants(t, out, "qory run: Fix the cause below, then run again: a push check refused the push.\n  qory pushed nothing and opened no draft.")
 	wants(t, out, "a key is in a commit")
 }
 
 // TestALocalRunWithNoCheckPushesNothing is a local run with no push check
-// registered and a hand-off file that is not usable: the step fails closed. The output has the one
-// line that says so, of at most 100 characters, and nothing else, and nothing is pushed or started.
+// registered and a hand-off file that is not usable: the step fails closed. The output has the
+// line that says so, of at most 100 characters, and one line after it, and nothing else, and
+// nothing is pushed or started.
 func TestALocalRunWithNoCheckPushesNothing(t *testing.T) {
 	_, bare, started := localProgramCheckout(t)
 	agentInCopy(t, func(spec session.SessionSpec) {
@@ -212,13 +213,14 @@ func TestALocalRunWithNoCheckPushesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	const line = "qory run: The push checks are not available yet, so qory pushed nothing and opened no draft."
+	const line = "qory run: Push your commits and open the draft by hand: the push checks are not available yet."
 	if len(line) > 100 {
 		t.Fatalf("the line has %d characters", len(line))
 	}
 	if n := strings.Count(out, line); n != 1 {
 		t.Errorf("the output has the line %d times, want 1:\n%s", n, out)
 	}
+	wants(t, out, line+"\n  qory pushed nothing and opened no draft.")
 	lacks(t, out, "hand-off")
 	if got := pushedBranches(t, bare); got != "" {
 		t.Errorf("the bare repository has %q, want none", got)
@@ -336,7 +338,7 @@ func TestALocalRunNeedsEveryPushCheck(t *testing.T) {
 		t.Fatalf("the required checks are %v, want key and scope", names)
 	}
 	pass := func(context.Context, string, string) error { return nil }
-	const line = "qory run: The push checks are not available yet, so qory pushed nothing and opened no draft."
+	const line = "qory run: Push your commits and open the draft by hand: the push checks are not available yet."
 	for _, c := range []struct {
 		name  string
 		given []string
@@ -432,7 +434,7 @@ func TestALocalRunWithTwoPushAddressesPushesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "qory run: The remote origin has 2 push addresses, so qory pushed nothing and opened no draft.", "git remote set-url --push origin <address>")
+	wants(t, out, "qory run: Keep one push address of remote origin with git remote set-url --push origin <address>.\n  The remote origin has 2 push addresses, so qory pushed nothing and opened no draft.")
 	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 {
 		t.Errorf("pushed %q and started %d programs, want none", got, timesStarted(t, started))
 	}
@@ -778,7 +780,7 @@ func TestARunWithARunKeyAndNoRunCodeNeverPushesLocally(t *testing.T) {
 	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 || *calls != 0 {
 		t.Errorf("pushed %q, started %d programs and ran %d checks, want none\n%s", got, timesStarted(t, started), *calls, out)
 	}
-	for _, line := range []string{"Draft: ", "qory pushed nothing", "the push failed, so qory opened no draft", "A push check refused"} {
+	for _, line := range []string{"Draft: ", "qory pushed nothing", "the push failed, so qory opened no draft", "a push check refused the push"} {
 		if strings.Contains(out, line) {
 			t.Errorf("the output has %q:\n%s", line, out)
 		}
