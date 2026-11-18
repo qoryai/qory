@@ -1,0 +1,28 @@
+{
+  "notes": [
+    {
+      "name": "app-naming",
+      "roles": [
+        "agents/developer",
+        "agents/reviewers"
+      ],
+      "paths": [
+        "src/**"
+      ],
+      "module": "app",
+      "layer": 0
+    },
+    {
+      "name": "python-naming",
+      "roles": [
+        "agents/developer"
+      ],
+      "paths": [
+        "**/*.py",
+        "pyproject.toml"
+      ],
+      "module": "python",
+      "layer": 1
+    }
+  ]
+}

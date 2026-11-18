@@ -18,6 +18,18 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A skill with the frontmatter keys `notes_for` (a role or a list of roles) and `paths` (one
+  glob or more from the checkout root) is a note. The compose exits 2, with the fix as
+  line 1, for a note with any of these:
+  - a `notes_for` that is no role or list of roles;
+  - a role that no agent fills;
+  - no `paths`, or `paths` with an empty glob;
+  - a `paths` value that is no string or list of strings.
+  Note `paths` use the glob form of agent `paths`. The home has `role-notes.json`, always
+  written, with one row per note: `name`, `roles`, `paths`, `module` and `layer` (0 for a
+  module of the checkout's `qory.yaml`, 1 for a module of its base stack). With no note it
+  is `{"notes": []}`. It is not the `notes.json` of a push check. See "Notes" in
+  `docs/harness.md`.
 - `qory run verdict` proposes a track for the work item: `--track <id>` is the id of a
   track that the gate of the run's stage offers, and `--track-reason <text>` is the
   reason, one sentence on one line of 1 to 300 characters. Pass both or neither. A track's
@@ -227,17 +239,29 @@ release may change what an existing document does, and states it under Upgrading
 - Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
   item's branch, `qory/<work item id>`, and the commit in each repository. A software
   factory can use it as the `json_schema` of a custom artifact type `branch`.
+- Version 1 of the acceptance criteria format,
+  `contracts/harness/v1/acceptance-criteria.schema.json`: a `summary` and `criteria`, each
+  with `id`, `text` and `check` (free text). A removed criterion has `removed` with its
+  `reason`. It names no kind of work, so a workspace that does not produce software uses it
+  as it is. Every criterion id has the form `ac-` and a number from 1 to 9999 with no
+  leading zero. See The acceptance criteria format in `contracts/harness/v1/README.md`.
+- Version 1 of the verification format, `contracts/harness/v1/verification.schema.json`:
+  the `target_version` that was checked, the `matrix` of rows (`criterion`, `state` of `met`
+  or `not_met`, `evidence`), `not_verified` with the criteria that were not checked and the
+  `reason` for each, and `model_families`. See The verification format in
+  `contracts/harness/v1/README.md`.
 - Version 1 of the questions format, `contracts/harness/v1/questions.schema.json`: every
   question of a work item and its answer or a run's decision, the file of the artifact
   type `questions`. A run adds, decides, withdraws or reopens questions with `qory artifact
   push`, and the control plane writes the answers. At most one option of a question has
   `recommended` set to `true`. A decided question has `state: decided` and `decision`
   (`option`, `reason`, `run`, `at`), and at least one option and none with `recommended`;
-  `decision` stays when the state changes. A question may have `criterion`, the id of
-  the acceptance criterion it is about, such as `ac-3`. An option may have `proposal`,
-  the new wording of the criterion that the run proposes, for a member to edit before
-  sending, 1 to 2000 characters, and only in a question with `criterion`. See The questions format in
-  `contracts/harness/v1/README.md`.
+  `decision` stays when the state changes. A question has `about`, what it is about:
+  `{"work_item": true}` for the work item itself, or an output given as `type` and `name`,
+  with `item` for one entry of it. `about` replaces `criterion`. An option may have
+  `proposal`, the new wording of the entry that `about.item` names, for a member to edit
+  before sending, 1 to 2000 characters, and only in a question whose `about` has `item`.
+  See The questions format in `contracts/harness/v1/README.md`.
 - Version 1 of the review comments format,
   `contracts/harness/v1/review-comments.schema.json`: the members' review comments on a
   work item's artifact versions and the replies to them, the file of the artifact type
@@ -596,8 +620,18 @@ release may change what an existing document does, and states it under Upgrading
   descriptor in Forager's `runtimes.json` and that qory installs. On any other runtime,
   such as `gemini`, `opencode` or `cursor`, it stops before anything is fetched, with `qory
   runs a run code's workflow on one of claude and codex,` and the next line `and not on
-  <runtime>; the code is used`. Until now, a run on `gemini`, `opencode` or `cursor` started, with no install of
-  the runtime.
+  <runtime>; the code is used`. Until now, a run on `gemini`, `opencode` or `cursor`
+  started, with no install of the runtime.
+- A push that landed with no version stored, and a push that fails as a branch that moved,
+  give one way out in the line of `qory run`: `delete branch qory/<work item id> of <path>
+  on <system>`. Deleting it loses the commits on that branch that no version has. The next
+  run creates the branch at `target_version` when no version exists, and starts from the
+  last version otherwise.
+- The lines that stopped a run on a stored branch version with a fix for Qory Apiary
+  (a ref, a file, a format, a commit that is missing, is no commit, differs in `.qory` or
+  fails to check out) now state the fact first: `Version <n> of the artifact branch has a
+  ref other than <ref>, so the run did not start; the code is used`. They no longer name a
+  fix in Qory Apiary, because only a run stores a version.
 - The middle model tier is named `balanced` in place of `fast`. The tiers are `light`,
   `balanced` and `thinking`. `${qory:balanced}`, `--tier balanced=<model id>`,
   `--tier-effort balanced=<effort>`, `harness.tiers.balanced`, a workflow's `tier: balanced`

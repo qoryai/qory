@@ -2,7 +2,7 @@
 
 What `qory harness compose` reads and what it writes.
 
-## Ten files
+## Twelve files
 
 | File | Lives in | Defines |
 |---|---|---|
@@ -12,6 +12,8 @@ What `qory harness compose` reads and what it writes.
 | a role contract | optional; a file of a module that declares an agents role, at the path that `roles.agents.<role>.contract` in the module's `qory-module.yaml` is set to | the parts an agent needs to fill the role: level-2 headings, front-matter keys, tools, a tier, and the form of its report (§The role contract). The compose checks every agent that fills the role against it; the harness's checks read the report's form |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for, the modules it appends and the workflow hooks it adds, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 | a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
+| an acceptance criteria document | the file of a version of a structured artifact type for a work item's acceptance criteria | a summary of what the work item must achieve and the criteria that say when it is achieved, each with its check (§The acceptance criteria format). No compose reads it |
+| a verification document | the file of a version of a structured artifact type for a work item's verification | the result of checking the criteria against one version of the work (§The verification format). No compose reads it |
 | a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
 | a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
 | a proposal sources document | the file `sources.json` of a version of the artifact type `proposal` | every source a run used to write the proposal, with the reason for each (§The proposal sources format). No compose reads it |
@@ -772,6 +774,65 @@ artifact_types:
     json_schema: {…}             # the content of branch.schema.json
 ```
 
+## The acceptance criteria format
+
+An acceptance criteria document records what a work item must achieve and the criteria that
+say when it is achieved. The format names no kind of work, so a workspace that does not
+produce software uses it as it is. This is version 1 of the format
+([acceptance-criteria.schema.json](acceptance-criteria.schema.json)):
+
+```json
+{"summary": "A customer sees the new price before they pay.",
+ "criteria": [{"id": "ac-1", "text": "The price page shows the new price.",
+               "check": "Open the price page as a customer. The price is 12.50."},
+              {"id": "ac-2", "text": "The old price is gone.",
+               "check": "Search the price page for 10.00.",
+               "removed": {"reason": "The old price stays for existing customers."}}]}
+```
+
+| Member | Meaning |
+|---|---|
+| `summary` | what the work item must achieve, plain text, 1 to 2000 characters |
+| `criteria` | every criterion, at least one, in the order they were written; a removed criterion stays in the list |
+| `id` | the criterion's id, unique in the document: `ac-` and a number from 1 to 9999 with no leading zero, such as `ac-3` |
+| `text` | the condition that the finished work item meets, plain text, 1 to 2000 characters |
+| `check` | how to check that the condition is met, free text, 1 to 2000 characters |
+| `removed` | present when the criterion is dropped, and only then: an object with `reason`, why it is dropped, 1 to 2000 characters |
+
+The id form `ac-` and a number from 1 to 9999 with no leading zero is the one form of every
+criterion id in the contract: `ac-0`, `ac-01` and `ac-10000` fail the schema, in this
+format, in the verification format and in the questions format. A document has no member
+other than those in the table. A JSON Schema cannot check that each `id` is unique.
+
+## The verification format
+
+A verification document records the result of checking a work item's acceptance criteria
+against one version of its target. The format names no kind of work. This is version 1 of the
+format ([verification.schema.json](verification.schema.json)):
+
+```json
+{"target_version": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
+ "matrix": [{"criterion": "ac-1", "state": "met", "evidence": "The price page shows 12.50."},
+            {"criterion": "ac-2", "state": "not_met", "evidence": "The page still shows 10.00 in the footer."}],
+ "not_verified": [{"criterion": "ac-3", "reason": "The payment sandbox was down."}],
+ "model_families": ["anthropic", "openai"]}
+```
+
+| Member | Meaning |
+|---|---|
+| `target_version` | the exact version of the target that the verification checked, never a name that can later point to another version; for a repository, a commit. 1 to 255 letters, digits and the characters `._/-`, such as `5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e` or `2026-11-18.3` |
+| `matrix` | one row for each criterion that was checked, empty when none was |
+| `criterion` | the id of the criterion, in the form of `id` in the acceptance criteria format |
+| `state` | `met`: the check shows that the criterion is met; `not_met`: the check shows that it is not |
+| `evidence` | what the check found: what was looked at or run, and the result, plain text, 1 to 2000 characters |
+| `not_verified` | each criterion that was not checked, empty when every criterion was checked; each has `criterion` and `reason`, why it was not checked, 1 to 2000 characters |
+| `model_families` | the families of the models that checked the criteria, at least one, each 1 to 64 characters on one line, none twice |
+
+A criterion is in `matrix` or in `not_verified`, never in both, so `state` has no value for
+a criterion that was not checked. A document has no member other than those in the table. A
+JSON Schema cannot check that each id is a criterion of the newest acceptance criteria, or
+that a criterion is in only one of the two lists.
+
 ## The questions format
 
 A questions document records every question of a work item and its answer or a run's
@@ -784,16 +845,33 @@ one option of a question. An answer has
 the chosen option, or the member's answer when `option` is `null`. `note` is optional when
 the member chose an option and required when `option` is `null`.
 
-A question has the optional member `criterion`, the id of the acceptance criterion the
-question is about: `ac-` and a number from 1 to 9999 with no leading zero, such as `ac-3`.
-A question about no acceptance criterion has no `criterion`. The criterion ids of the
-mockup schema of Qory Apiary, `mockup.schema.json`, have the same form. `qory` does not
-ship that file.
+A question has the required member `about`, what the question is about. It has one of two
+forms:
 
-An option has the optional member `proposal`, the new wording of the question's criterion
-that the run proposes, for a member to edit before sending: plain text, 1 to 2000
-characters. Only an option of a question with `criterion` has `proposal`. The schema
-refuses `proposal` on an option of a question with no `criterion`.
+```json
+{"work_item": true}
+{"type": "acceptance-criteria", "name": "main", "item": "ac-3"}
+```
+
+- `{"work_item": true}`: the work item itself, before any output, such as the ticket. It
+  has no other member.
+- An output of the work item: `type` is the artifact type's name, as in `artifact` of a
+  review comment, and `name` is the artifact's name, 1 to 64 characters on one line, such
+  as `main`. `item` is optional: the id of the entry of that artifact that the question
+  concerns, 1 to 32 characters on one line, such as `screen-2` for a screen of a mockup.
+  When `type` is `acceptance-criteria`, `item` is a criterion id: `ac-` and a number from
+  1 to 9999 with no leading zero, such as `ac-3`, so `screen-2`, `ac-0`, `ac-01` and
+  `ac-10000` fail the schema. With any other `type`, `ac-3` is an id like any other.
+
+No member of `about` is a work item id: the document is for one work item. A JSON Schema
+cannot check that the work item has the artifact or that the artifact has the entry.
+`about` replaces the member `criterion`, which a question no longer has.
+
+An option has the optional member `proposal`, the new wording of the entry that `about.item`
+names, which the run proposes for a member to edit before sending: plain text, 1 to 2000
+characters. Only an option of a question whose `about` has `item` has `proposal`. The schema
+refuses `proposal` on an option of a question about the work item, and on one about an
+output with no `item`.
 
 A run that chooses an option without asking a member records a decided question: its
 `state` is `decided`, so it is not open, and it has `decision`. A decided question has at
@@ -1180,8 +1258,8 @@ process.yaml                     a factory's process template, checked when expo
 `paths`, optional, lists the files of a change an agent reads, as globs from the checkout
 root: `paths: ["**/*.py", pyproject.toml]`, or one glob as a string. A glob matches a path
 from the checkout root with forward slashes: `**` matches any number of directories, `*`
-and `?` match within one directory, and a glob without a slash matches at any depth only
-through `**/`. An agent without `paths` reads every change. The home's `roles.json`
+and `?` match within one directory, every other character, `[`, `{` and `\` included, is
+literal, and a glob without a slash matches at any depth only through `**/`. An agent without `paths` reads every change. The home's `roles.json`
 contains the `paths` of each member of a group role (§References), for a script that
 starts the members a change needs. qory leaves the key and its whole value out of every
 agent file it writes for a runtime, since not every runtime accepts a key it does not
@@ -1189,6 +1267,40 @@ know. The compose checks the `paths` of every agent, and any other value fails i
 `Set paths to globs, such as ["**/*.py"], or remove it.` as line 1, then `The value is not
 a glob or a list of globs.` and `The agent is in agents/python-reviewer.md of module core.`
 on the lines after it.
+
+A skill is a note when its frontmatter has `notes_for`: a role, or a list of roles, each
+written as in `bind` without the kind, `developer` for `agents/developer`, a group role such
+as `reviewers` too. A note also sets `paths`, one glob or a list of globs from the checkout
+root, read as an agent's `paths` is read, with the grammar of that key above: `**` matches
+any number of directories, `*` and `?` match within one directory, and every other
+character, `[`, `{` and `\` included, is literal. A skill with `paths` and no `notes_for`
+is no note. Technology modules and the modules of a repository write notes; a script
+attaches the ones that match a change to the start of an agent that fills a role. The
+compose checks both keys of every note it composes. A skill that an `exclude` or an `only`
+leaves out is not checked. Each refusal has the fix as line 1, then the cause:
+
+- a role that no agent fills, a role with no row in `roles.json`: `Set notes_for in
+  python-naming of module python to a role the stack fills.` with `The stack fills no
+  tester role.` and `The stack fills developer and reviewers.` on the next lines;
+- a stack that fills no role: `Remove notes_for from python-naming of module python.` with
+  `The stack fills no role.` on the next line;
+- no `paths`, an empty list, an empty string, or a value that is no string or list of
+  strings: `Add paths to python-naming of module python.` with `A note needs one path or
+  more.`, or `A note needs one path or more, and the value is not a glob or a list of
+  globs.`, and `The skill is in skills/python-naming/SKILL.md of module python.` on the next
+  lines;
+- a `notes_for` that is no role or list of roles: `Set notes_for in python-naming of module
+  python to a role or roles.`
+
+The home contains `role-notes.json`, always written, and not the `notes.json` of a push
+check: `{"notes": [...]}`, one row per note in the order of the report's entries, each
+`{name, roles, paths, module, layer}`: `name` is the skill's name, so its body is
+`skills/<name>/SKILL.md` in the home; `roles` is `notes_for` as a list, each role as
+`roles.json` writes it, `agents/<role>`; `paths` is the globs as written; `module` is the
+module that ships the skill; `layer` is the number 0 for a module of the checkout's
+`qory.yaml`, or of the stack composed when it extends none, and 1 for a module of the base
+stack it extends. With no note the file is `{"notes": []}`. A home that an earlier qory
+composed has no `role-notes.json`, and `--check` reports it until the next compose.
 
 Below `skills`, a folder with `SKILL.md` is a skill, and everything below it is that skill's
 files, a nested `SKILL.md` included. A real folder with no `SKILL.md` and with a folder below

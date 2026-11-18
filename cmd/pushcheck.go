@@ -404,12 +404,12 @@ func checkNotes(raw json.RawMessage) ([]byte, error) {
 func checkBranchVersion(ctx context.Context, checks *runPushChecks, branch *preparation.WorkBranch, ref string, content []byte) error {
 	failed, err := checks.check(ctx, branchType, []pushcheck.File{{Name: branchFile, Content: content}})
 	if err != nil {
-		return fmt.Errorf(textNotStored, branch.VersionWays(), ref, shownError(err))
+		return fmt.Errorf(textNotStored, branch.DeleteBranch(), ref, shownError(err))
 	}
 	if failed == nil {
 		return nil
 	}
-	lines := []string{fmt.Sprintf(textNotStored, branch.VersionWays(), ref, fmt.Sprintf(textNotChecked, branchType)), failed.Step}
+	lines := []string{fmt.Sprintf(textNotStored, branch.DeleteBranch(), ref, fmt.Sprintf(textNotChecked, branchType)), failed.Step}
 	lines = append(lines, failed.Findings...)
 	return errors.New(strings.Join(lines, "\nqory run: "))
 }

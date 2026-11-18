@@ -190,6 +190,26 @@ type Entry struct {
 	// every change, and for every other kind. A renderer leaves the key out of the
 	// agent's file.
 	Paths []string
+	// Note is the note a skill is, read from its SKILL.md frontmatter keys notes_for and
+	// paths; nil for a skill without notes_for and for every other kind.
+	Note *Note
+}
+
+// Note is a skill that carries knowledge for the agents that fill some roles, a note that a
+// script attaches to the start of such an agent when a change touches one of its paths.
+type Note struct {
+	// Roles are the roles the frontmatter key notes_for lists, as written: developer, not
+	// agents/developer. A single value reads as a list of one. None is empty.
+	Roles []string
+	// Paths are the globs of the frontmatter key paths, from the checkout root, as
+	// written, at least one, none empty, in the grammar of an agent's paths.
+	Paths []string
+	// Err is the refusal of a note whose keys are wrong, with [exports.ModulePlace] for
+	// the module and the file filled in; nil for a note that reads. Reading a module
+	// refuses nothing: the compose returns Err only for a skill it includes, so a skill
+	// that an exclude or an only leaves out is never checked. Roles and Paths are empty
+	// with Err.
+	Err error
 }
 
 // Module is a module read from disk.
@@ -759,6 +779,7 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 		l.Entries[i].Front = refs.front
 		l.Entries[i].In = refs.in
 		l.Entries[i].Paths = refs.paths
+		l.Entries[i].Note = refs.note
 	}
 	sort.Slice(l.Entries, func(i, j int) bool {
 		if l.Entries[i].Kind != l.Entries[j].Kind {

@@ -133,6 +133,9 @@ type Entry struct {
 	// Paths are the globs an agent's frontmatter paths sets, the files of a change the
 	// agent reads; nil for an agent without the key, which reads every change.
 	Paths []string
+	// Note is the note a skill is, see [module.Note]; nil for a skill without the
+	// frontmatter key notes_for and for every other kind.
+	Note *module.Note
 }
 
 // Exclude is one entry a module left out.
@@ -514,7 +517,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	}
 	for key, ls := range owners {
 		kind, name, _ := strings.Cut(key, "/")
-		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]], For: fors[key+"@"+ls[0]], References: refs[key+"@"+ls[0]], Tier: tiers[key+"@"+ls[0]], Front: sites[key+"@"+ls[0]].Front, In: sites[key+"@"+ls[0]].In, Paths: sites[key+"@"+ls[0]].Paths})
+		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]], For: fors[key+"@"+ls[0]], References: refs[key+"@"+ls[0]], Tier: tiers[key+"@"+ls[0]], Front: sites[key+"@"+ls[0]].Front, In: sites[key+"@"+ls[0]].In, Paths: sites[key+"@"+ls[0]].Paths, Note: sites[key+"@"+ls[0]].Note})
 		if tier := tiers[key+"@"+ls[0]]; tier != "" {
 			if t, ok := opts.Tiers[tier]; ok {
 				if res.Tiers == nil {
@@ -562,6 +565,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		return nil, err
 	}
 	if err := checkContracts(res, opened); err != nil {
+		return nil, err
+	}
+	if err := checkNotes(res); err != nil {
 		return nil, err
 	}
 	if len(instructions) > 0 {
