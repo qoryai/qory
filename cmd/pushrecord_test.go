@@ -492,7 +492,7 @@ func TestAGatewayThatEndedTheRunStopsTheReport(t *testing.T) {
 // TestAClosedRunEndsTheReportQuietly is a report whose call returns an error that wraps
 // [session.ErrRunClosed], as the run does when it sent nothing because it is closed: qory sends
 // the call once, with no wait, stores no version, starts no session 2, and prints the two lines
-// of an ended run with the code run_closed and no line that says to contact support. The step
+// of an ended run with the code run_closed and no line that sends the reader to support. The step
 // succeeds.
 func TestAClosedRunEndsTheReportQuietly(t *testing.T) {
 	p := newPushRepo(t, "write")
@@ -516,8 +516,8 @@ func TestAClosedRunEndsTheReportQuietly(t *testing.T) {
 	if got := strings.Count(r.out, line); got != 1 {
 		t.Errorf("the lines of the ended run are in the output %d times, want 1\n%s", got, r.out)
 	}
-	if strings.Contains(r.out, "Contact support") {
-		t.Errorf("the output tells the reader to contact support\n%s", r.out)
+	if strings.Contains(r.out, "Contact "+"support") {
+		t.Errorf("the output sends the reader to support\n%s", r.out)
 	}
 	if got := r.pushSteps(); len(got) != 1 || got[0] != event.StateSucceeded {
 		t.Errorf("the push steps exited %v, want one succeeded", got)

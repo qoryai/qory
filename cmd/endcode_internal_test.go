@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"errors"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/forager/event"
@@ -59,6 +61,37 @@ func TestForagersCloseTakesTheEndCodes(t *testing.T) {
 			closed, err := at.run.Close(ctx, session.Outcome{State: event.StateFailed, Reason: string(code), ExitCode: 1})
 			if err != nil {
 				t.Fatalf("Close refused the outcome: %v", err)
+			}
+			if closed.State != event.StateFailed || closed.Reason != string(code) {
+				t.Errorf("Close returned %q %q, want failed %q", closed.State, closed.Reason, code)
+			}
+		})
+	}
+}
+
+// TestForagersCloseTakesTheEndCodesAfterAJoin is a run that Forager opens at a gateway in this
+// process, where a session joined and then the run closes failed with each end code of a push
+// failure as the reason, with exit code 1: the gateway takes the code after a join, as it does
+// before one, and Close returns the reason as given.
+func TestForagersCloseTakesTheEndCodesAfterAJoin(t *testing.T) {
+	for _, code := range []contracts.EndCode{
+		contracts.EndCodePushCredentialMissing, contracts.EndCodePushRefused,
+		contracts.EndCodePrebuiltImageTooLarge, contracts.EndCodePushNotRecorded,
+	} {
+		t.Run(string(code), func(t *testing.T) {
+			ctx := context.Background()
+			at, err := openAtGateway(ctx, session.OpenSpec{RunID: event.NewRunID(), RunsDir: t.TempDir(), Report: func(string) {}}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer at.g.Close(ctx)
+			spec := session.SessionSpec{Command: "/usr/bin/true", Dir: t.TempDir(), Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard}
+			if _, err := at.run.Join(ctx, spec); err != nil {
+				t.Fatal(err)
+			}
+			closed, err := at.run.Close(ctx, session.Outcome{State: event.StateFailed, Reason: string(code), ExitCode: 1})
+			if err != nil {
+				t.Fatalf("Close refused the outcome after a join: %v", err)
 			}
 			if closed.State != event.StateFailed || closed.Reason != string(code) {
 				t.Errorf("Close returned %q %q, want failed %q", closed.State, closed.Reason, code)
