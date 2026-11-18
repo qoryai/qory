@@ -233,9 +233,13 @@ func TestFixtures(t *testing.T) {
 // fixVerbs are the verbs a refusal's fix line starts with.
 var fixVerbs = []string{"Add", "Bind", "Change", "Commit", "Complete", "Declare", "Fill", "Fix", "Keep", "Move", "Remove", "Rename", "Set", "Shorten", "Ship", "Write"}
 
+// printedLength is the length of line 1 of a refusal as qory prints it, after "✗ ".
+func printedLength(line string) int { return utf8.RuneCountInString("✗ " + line) }
+
 // TestRefusalsStartWithTheFix is every refusal a fixture expects written fix first: each
 // line of expected/error.txt that is not indented starts a refusal, and is a fix line of
-// at most 100 characters that starts with a verb of fixVerbs. The lines after it,
+// at most 100 characters with the "✗ " that qory prints before it, and starts with a verb
+// of fixVerbs. The lines after it,
 // indented, are the cause and the values.
 func TestRefusalsStartWithTheFix(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join(fixtures, "*", "expected", "error.txt"))
@@ -252,8 +256,8 @@ func TestRefusalsStartWithTheFix(t *testing.T) {
 			if strings.HasPrefix(line, " ") {
 				continue
 			}
-			if n := utf8.RuneCountInString(line); n > 100 {
-				t.Errorf("%s: line %d is a fix line of %d characters; shorten it to 100 or fewer", name, i+1, n)
+			if n := printedLength(line); n > 100 {
+				t.Errorf("%s: line %d is a fix line of %d characters with the \"✗ \"; shorten it to 100 or fewer", name, i+1, n)
 			}
 			if word, _, _ := strings.Cut(line, " "); !slices.Contains(fixVerbs, word) {
 				t.Errorf("%s: line %d starts with %q; start the fix line with one of %s", name, i+1, word, strings.Join(fixVerbs, ", "))

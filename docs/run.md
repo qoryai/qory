@@ -5046,8 +5046,7 @@ two cases:
   `` Remove `plan` from <workflow>, or set its access to write. ``
 - No module of the base stack declares a scope check for the type: `Add a scope check for
   <type> to a module's scope_checks.` with `` You can also remove `plan: <type>` from
-  <workflow> in the stack. `` on the next line, or both on one line when they fit in 100
-  characters.
+  <workflow> in the stack. `` on the next line, or both on one line when the first line has at most 98 characters.
 
 Only a module of the base stack counts. A module that the checkout's `qory.yaml` adds to
 the base can declare `scope_checks`, and the compose uses none of it: the repository under

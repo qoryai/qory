@@ -21,7 +21,7 @@ const (
 )
 
 // Refusal is a refusal written fix first: the first line is the step the reader takes,
-// at most 100 characters, and each line after it, indented by two spaces, is the cause
+// at most [LineMax] characters, and each line after it, indented by two spaces, is the cause
 // or a value. The text names the file and the module it is about inside it, so a caller
 // that would put a path or a module in front of an error fills in [FilePlace] and
 // [ModulePlace] instead, see [Prefixed].
@@ -108,14 +108,14 @@ var longName = regexp.MustCompile(`"[^"\n]{0,24}"|"(?:[^"\\\n]|\\.){25,}"|[\p{L}
 var keyPath = regexp.MustCompile(`^(?:(?:gateway\.(?:credentials|tools|integrations|egress\.paths|server\.via)|wall\.images|harness\.(?:launch|tiers)|workflows|exports\.(?:stacks|modules)|extending\.target\.(?:runtime|model))\.)?(?:(?:bind|provides|roles)\.)?(?:(?:agents|commands|skills|output-styles|hooks|mcp|files)\.)?`)
 
 // Fit is text, one refusal or several, in which each refusal whose first line, an
-// unindented line, has more than 100 characters has the names in that line of more than
+// unindented line, has more than [LineMax] characters has the names in that line of more than
 // [NameMax] characters printed by [Short]. A name is a quoted value, or a run of letters,
 // digits, dots, hyphens and underscores after the keys of its path, such as "bind." and
 // "agents.". When two names would have one form, each keeps more characters, until the
 // forms differ. When no line after the first line has the whole name, a last line of the
-// refusal has it: "The full name of <short> is <name>." A first line of at most 100
-// characters stays as it is. Fit shortens names only: a first line that is still over 100
-// characters has more than names in it.
+// refusal has it: "The full name of <short> is <name>." A first line of at most [LineMax]
+// characters stays as it is. Fit shortens names only: a first line that is still over
+// [LineMax] characters has more than names in it.
 func Fit(text string) string {
 	var out []string
 	var full []string
@@ -145,7 +145,7 @@ func Fit(text string) string {
 	for i, line := range lines {
 		if !strings.HasPrefix(line, " ") {
 			block()
-			if utf8.RuneCountInString(line) <= 100 {
+			if utf8.RuneCountInString(line) <= LineMax {
 				out = append(out, line)
 				continue
 			}
@@ -171,7 +171,7 @@ func Fit(text string) string {
 			})
 			// A name that contains a secret is a phrase of 40 characters or more that no
 			// shortening cuts: when the line is still long, the phrase moves to a later line.
-			if utf8.RuneCountInString(line) > 100 {
+			if utf8.RuneCountInString(line) > LineMax {
 				var moved []string
 				line, moved = movePhrases(line, rest(i))
 				full = append(full, moved...)

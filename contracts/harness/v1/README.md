@@ -370,7 +370,8 @@ covers several repositories, may list workflow hooks; each program is then a fil
 inside the checkout being composed, so a hook of another repository under the folder
 fails the compose of this one.
 
-Each refusal is a line with the fix, of at most 100 characters, then a line with the
+Each refusal is a line with the fix, of at most 98 characters, so that it has at most 100
+under the `✗ ` that qory prints before it, then a line with the
 cause, indented by two spaces. A refusal of a rule that needs no base comes as the
 document is read, and its cause line has the path of `qory.yaml`, such as:
 
@@ -648,7 +649,7 @@ artifact_types:                  # optional; the artifact types the workspaces u
 Every key but `artifact_types` and `submit` is required, and the file has no other key. A key left out, a text over its
 limit, a `stack` that `exports.stacks` does not list, and a `process` that is not such an
 object are refused with the file and the fix in the message: the fix is the first line, and the file is on the
-last line, so a long path never pushes the fix past 100 characters. Each
+last line, so a long path never pushes the fix past 98 characters. Each
 workflow that the stack does not declare is refused with a fix line, which has the
 workflow, the stack and the stage, a cause line, which has the `process.yaml`, and a last
 line with the stack file:
