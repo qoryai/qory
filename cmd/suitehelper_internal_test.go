@@ -23,6 +23,7 @@ import (
 	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/suite"
 	"github.com/qoryai/qory/internal/verdictformat"
 )
@@ -1100,5 +1101,26 @@ func TestAWorkflowWithNoPlanGetsTheAfterStepThatTellsIfHeadMoved(t *testing.T) {
 	const text = "The full suite did not start: the workflow fix names no plan in the stack."
 	if r.noPlan.point.Text != text || r.noPlan.fixable || r.noPlan.point.Fix != "" || len(text) > 100 || !validPoint(r.noPlan.point) {
 		t.Errorf("fault %+v", r.noPlan)
+	}
+}
+
+// TestPlanOfReadsThePlanTypeOfTheRunsWorkflow: the run's workflow and its plan type come from the
+// stack's workflows; a workflow that names none, one the stack lacks, and a run with no run code give
+// no plan type.
+func TestPlanOfReadsThePlanTypeOfTheRunsWorkflow(t *testing.T) {
+	workflows := map[string]stack.Workflow{"fix": {Access: stack.AccessWrite, Plan: "change-plan"}, "docs": {Access: stack.AccessWrite}}
+	for _, c := range []struct {
+		name         string
+		code         *codeRun
+		workflow, pl string
+	}{
+		{"a plan", &codeRun{workflow: "fix"}, "fix", "change-plan"},
+		{"no plan", &codeRun{workflow: "docs"}, "docs", ""},
+		{"no such workflow", &codeRun{workflow: "other"}, "other", ""},
+		{"no run code", nil, "", ""},
+	} {
+		if w, p := planOf(c.code, workflows); w != c.workflow || p != c.pl {
+			t.Errorf("%s: planOf = %q, %q, want %q, %q", c.name, w, p, c.workflow, c.pl)
+		}
 	}
 }

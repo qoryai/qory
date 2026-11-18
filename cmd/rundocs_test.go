@@ -420,6 +420,7 @@ func TestARunCodeWithFullSuiteSetsTheAfterStep(t *testing.T) {
 		{"no full_suite", nil, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			t.Cleanup(cmd.SetPlan("fix", "build-plan"))
 			api := newSuiteAPI(t, http.StatusCreated)
 			codeRunAPI = api.srv.URL + "/v1/runs/r1"
 			t.Cleanup(func() { codeRunAPI = "" })
