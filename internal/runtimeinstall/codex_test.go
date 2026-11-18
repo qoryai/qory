@@ -188,3 +188,36 @@ func TestACodexFolderQoryCannotKeepWholeIsRefused(t *testing.T) {
 		})
 	}
 }
+
+// TestACodexFolderWithoutAHelperIsRefused publishes Codex tarballs whose vendor folder
+// lacks one of the files that bin/codex runs: codex-resources/bwrap, codex-path/rg or
+// bin/codex-code-mode-host. Each install fails with the fix first, names the missing
+// file, and leaves no version's folder.
+func TestACodexFolderWithoutAHelperIsRefused(t *testing.T) {
+	const vendor = "package/vendor/aarch64-unknown-linux-musl/"
+	for _, missing := range []string{"codex-resources/bwrap", "codex-path/rg", "bin/codex-code-mode-host"} {
+		t.Run(missing, func(t *testing.T) {
+			var entries []rt.Entry
+			for _, f := range rt.CodexFolder("0.170.0 arm64") {
+				if f.Name != missing {
+					entries = append(entries, rt.Entry{Name: vendor + f.Name, Body: f.Body, Mode: f.Mode})
+				}
+			}
+			npm := rt.StartCodexNpm(t)
+			b := rt.Tarball(t, entries...)
+			npm.PublishWith("arm64", "0.170.0", b, rt.Integrity(b), "")
+			npm.SetLatest("0.170.0")
+			folder := t.TempDir()
+			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+				Fetch: runtimeinstall.NpmFetch(http.DefaultClient, npm.URL(), "arm64"), Runtime: "codex", Folder: folder,
+			})
+			want := "Check the source of the runtime's releases\nThe tarball of codex 0.170.0 has no " + vendor + missing
+			if err == nil || err.Error() != want {
+				t.Fatalf("the error is %v, want %q", err, want)
+			}
+			if _, err := os.Lstat(filepath.Join(folder, "codex", "0.170.0")); !os.IsNotExist(err) {
+				t.Fatalf("the version's folder: %v", err)
+			}
+		})
+	}
+}

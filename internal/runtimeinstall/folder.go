@@ -269,8 +269,8 @@ func writeEntry(r io.Reader, size int64, path string, perm fs.FileMode) error {
 // entry is a folder, mode 0755, or a regular file of at most [maxProgram] bytes, mode
 // 0755 when its mode in the archive lets anyone run it and 0644 otherwise; its path is a
 // plain relative path, with no . or .. segment. The folder must have at most
-// [maxEntries] entries, no file named [checksumFile] at its top, and bin/<runtime>, a
-// file of at least 1 byte, which is made 0755. The archive must unpack to at most
+// [maxEntries] entries, no file named [checksumFile] at its top, bin/<runtime>, a file
+// of at least 1 byte, which is made 0755, and each file of [folderFiles] for runtime. The archive must unpack to at most
 // [maxUnpacked] bytes. what is the release as an error shows it.
 func extractFolder(r io.Reader, dir, runtime, prefix, what string) error {
 	zr, err := gzip.NewReader(r)
@@ -349,6 +349,11 @@ func extractFolder(r io.Reader, dir, runtime, prefix, what string) error {
 	}
 	if p, err := os.Lstat(filepath.Join(dir, "bin", runtime)); err != nil || !p.Mode().IsRegular() || p.Size() < 1 {
 		return fmt.Errorf(textRelease+"The tarball of %s has no %s", what, prefix+program)
+	}
+	for _, name := range folderFiles[runtime] {
+		if p, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(name))); err != nil || !p.Mode().IsRegular() {
+			return fmt.Errorf(textRelease+"The tarball of %s has no %s", what, prefix+name)
+		}
 	}
 	for name := range made {
 		if err := syncDir(filepath.Join(dir, filepath.FromSlash(name))); err != nil {

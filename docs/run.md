@@ -1031,7 +1031,9 @@ came from. For Codex, it also contains the other files of Codex's folder in the 
    `0755`, or a regular file of at most 1 GiB, mode `0755` when its mode in the tarball
    lets anyone run it and `0644` otherwise. A link, a hard link, a path with a `.` or
    `..` segment, an entry twice, a file `integrity` at the folder's top, more than 10,000
-   entries, or no `bin/codex` stops the run. The tarball may unpack to at most 4 GiB. qory
+   entries, or a missing `bin/codex`, `bin/codex-code-mode-host`, `codex-resources/bwrap`
+   or `codex-path/rg` stops the run, with `Check the source of the runtime's releases` and
+   the missing file. The tarball may unpack to at most 4 GiB. qory
    then renames the temporary folder to the version's folder, so a folder at that path is
    always a complete install.
 

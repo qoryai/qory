@@ -82,6 +82,13 @@ type Release struct {
 	Folder string
 }
 
+// folderFiles are the files beside bin/<runtime> that a runtime's folder, see [layout],
+// must contain, by their paths in the folder: the program runs them, so an install
+// without one would fail later, in the session.
+var folderFiles = map[string][]string{
+	"codex": {"codex-resources/bwrap", "codex-path/rg", "bin/codex-code-mode-host"},
+}
+
 // layout is where runtime's program is in the npm tarball of its build for linux/arch,
 // as a [Release] has it. Codex's build is the folder package/vendor/<x86_64 or
 // aarch64>-unknown-linux-musl/: its codex-package.json sets bin/codex as the entry point
