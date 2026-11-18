@@ -171,7 +171,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 		}
 		if err := pushTo(ctx, stepGit(&p, ""), readGit, folders[i], b, r, heads[i], leases[i], report); err != nil {
 			if len(b.pushed) > 0 {
-				return nil, fmt.Errorf(textPushedNoVersion, b.VersionWays(), b.PushedPaths(), strings.TrimPrefix(err.Error(), "qory run: "))
+				return nil, &pushedNoVersion{text: fmt.Sprintf(textPushedNoVersion, b.VersionWays(), b.PushedPaths(), strings.TrimPrefix(err.Error(), "qory run: ")), err: err}
 			}
 			return nil, err
 		}
@@ -192,6 +192,18 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 	}
 	return slices.Clone(b.Version), nil
 }
+
+// pushedNoVersion is the error of a push that failed after an earlier repository landed: its
+// text is [textPushedNoVersion], and it unwraps to the push's error, so a [*HeadChanged] of
+// the later repository is still found.
+type pushedNoVersion struct {
+	text string
+	err  error
+}
+
+func (e *pushedNoVersion) Error() string { return e.text }
+
+func (e *pushedNoVersion) Unwrap() error { return e.err }
 
 // runCommits lists the commits from start, not included, to head, included, of the
 // repository at dir, oldest first, as the commits of a submission with no step: the

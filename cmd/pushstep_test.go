@@ -1915,6 +1915,40 @@ func TestASecondRepositoryThatFailsGivesTheWays(t *testing.T) {
 	}
 }
 
+// TestASecondRepositoryWhoseHeadMovedEndsTheRunWithPushHeadChanged is a run of two
+// repositories whose first push landed and whose second repository got its branch from
+// another push meanwhile: the second push is rejected as a moved head, no version is stored,
+// and the run closes failed with the code push_head_changed, not as a plain failure.
+func TestASecondRepositoryWhoseHeadMovedEndsTheRunWithPushHeadChanged(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
+	lib := filepath.Join(p.h.server.Root, "acme", "lib.git")
+	proxygittest.Git(t, lib, "config", "http.receivepack", "true")
+	tree := proxygittest.Git(t, lib, "rev-parse", "main^{tree}")
+	moved := proxygittest.Git(t, lib, "commit-tree", tree, "-m", "Another push")
+	hook := filepath.Join(p.bare, "hooks", "post-receive")
+	writeFile(t, hook, "#!/bin/sh\ngit --git-dir="+lib+" update-ref refs/heads/qory/"+workItem+" "+moved+"\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p.repositories = "acme/site,acme/lib"
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
+	}, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if got := r.closes[0].Reason; got != string(contracts.EndCodePushHeadChanged) {
+		t.Errorf("the run closed with the reason %q, want %q", got, contracts.EndCodePushHeadChanged)
+	}
+	wants(t, r.out, "qory run: "+versionWays+": qory pushed acme/site and stored no version, because the push of the next repository failed: Check branch qory/"+workItem)
+	if got := proxygittest.Git(t, lib, "rev-parse", "refs/heads/qory/"+workItem); got != moved {
+		t.Errorf("the second repository's branch is at %s, want %s", got, moved)
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST went out", posts)
+	}
+}
+
 // hangingPost makes each POST of a version stay open with no response, as a run API that
 // stopped does, and calls then, which sends the signals of the test.
 func hangingPost(t *testing.T, p *pushRepo, then func()) {
