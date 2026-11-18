@@ -1419,8 +1419,9 @@ release may change what an existing document does, and states it under Upgrading
   surrogate or repeats a member.
 - Every qory command that describes an integration checks the description against the
   integration contract of the `github.com/qoryai/integrations` commit qory is built with.
-  A description with a field of that contract such as `egress_hosts` or `vendor` is read,
-  and a data description, which has no `program_version`, is read with no version.
+  A description with a field of that contract such as `egress_hosts` or `vendor` is read.
+  A data description, which has no `program_version`, is refused because it plays no role
+  qory expands, where the schema refused it before.
 - `qory run` given a run key starts Claude Code with `--setting-sources user`,
   `--strict-mcp-config`, and the harness's MCP list or an empty one. Behind a wall,
   Claude Code's `CLAUDE_CONFIG_DIR` is an empty folder qory makes after the commands the
