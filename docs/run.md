@@ -2820,15 +2820,16 @@ credential alone. The result of each repository is one of these:
   pushed before) and has not pushed yet: qory pushes with no lease and creates the branch.
 - The head is past the start commit, the run has not pushed yet, and the head is one that a
   run which a person cancelled pushed, as the work item's record lists it (one head for each
-  push), and it descends from the start commit. qory checks that one head and walks no
-  commits between it and the start commit: a head below, above or beside a recorded head, or
-  one that the record does not list, is any other head and is refused with no fetch of its
-  history. qory pushes with
+  push), and it descends from the start commit. qory fetches the history of the branch head
+  only when a cancelled run recorded that head, and then checks that it descends from the
+  start commit. A head below, above or beside a recorded head, or one that the record does
+  not list, is any other head and is refused with no fetch. qory pushes with
   `--force-with-lease=refs/heads/qory/<work item id>:<head>`, so the push replaces
   those commits only while the branch is still at the head qory read.
-- Any other head, the branch missing where the run did not start at the checkout, or a head
-  that does not descend from the expected commit: qory pushes nothing in any repository,
-  and the step fails with the refusal in the list above, which starts with `Check branch
+- Any other head (an unrecorded head, a recorded head after the run's first push, and a
+  recorded head that does not descend from the start commit) or the branch missing where the
+  run did not start at the checkout: qory pushes nothing in any repository, and the step
+  fails with the refusal in the list above, which starts with `Check branch
   qory/<work item id>`.
 
 A push that the forge rejects with the status `[rejected]`, such as a lease that no longer

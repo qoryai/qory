@@ -122,8 +122,9 @@ type headCheck struct {
 // Equality with a recorded head is enough: the record lists one head for each push of a
 // cancelled run, and the push replaces the position of the branch that this run set, with every
 // commit below it. A branch head that is below a recorded head, above it or beside it is not a
-// position that a cancelled run set, so qory checks the one head and walks no commits between
-// it and the start commit. A head that no record lists, or any head after the run's first push,
+// position that a cancelled run set. qory fetches the history of the head only when a cancelled
+// run recorded that head and the run has not pushed yet, and then checks that the head descends
+// from the start commit. A head that no record lists, or any head after the run's first push,
 // is refused before any fetch: the refusal is the same text for every such head, so the check
 // downloads no history for a head that someone else pushed.
 func checkHead(ctx context.Context, read gitRunner, dir string, b *WorkBranch, r WorkRepository) (headCheck, error) {

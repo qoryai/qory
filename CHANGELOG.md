@@ -573,10 +573,11 @@ release may change what an existing document does, and states it under Upgrading
   the commit the run expected ends the run `failed` with the code `push_head_changed`, after a
   session that passed, failed or timed out. The push replaces the branch only when its head
   is a head that the work item's record lists for a cancelled run (one head for each push)
-  and that descends from the start commit, with a lease on that head. qory checks that
-  one head and walks no commits between it and the start commit: a head below, above or
-  beside a recorded head refuses, with no fetch of its history. A run starts at the newest
-  commit that an earlier run pushed and a person did not cancel.
+  and that descends from the start commit, with a lease on that head. qory fetches
+  the history of the branch head only when a cancelled run recorded that head, and then
+  checks that it descends from the start commit. A head below, above or beside a recorded
+  head refuses, with no fetch. A run starts at the newest commit that an earlier run pushed
+  and a person did not cancel.
 - The submission has `base.branch` for each repository the run pushed: the name of the
   repository's default branch, read when the run fetched it. A name of more than 255
   characters is left out.
