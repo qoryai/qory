@@ -2792,6 +2792,11 @@ gateway, and its 410 arrives as 502 `control_plane_unavailable`: both are sent a
   the run closes with the end that was recorded, as for a run that
   Qory Apiary closed during its session. When a later repository's push failed too, qory
   prints that line as well, and the step fails with the push's error.
+- The run is already closed, so Forager sends nothing (`session.ErrRunClosed`: `Run.Close`
+  began or the gateway closed the run): qory sends the call once, with no wait, and prints
+  the same two lines as for a 410 with the code `run_closed`. No `Contact support` line
+  follows, and qory sends no end code. An error of an open run that has no control plane is
+  not this case, and fails the step as any other error with no status does.
 - Any other 4xx status, the gateway's 413 `payload_too_large` among them, or the retries used
   up: the step fails, the run closes `failed` before the next session, and qory prints
   `qory run: Contact support: Qory Apiary did not record the last push.`, then
