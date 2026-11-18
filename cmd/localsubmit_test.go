@@ -699,6 +699,18 @@ func rewriteTarget(t *testing.T) (bare, base string) {
 	return bare, base
 }
 
+// failFast makes a git push to an address where nothing listens fail at once: no proxy, whatever
+// the person's environment has, and a stop after 2 seconds of no data.
+func failFast(t *testing.T, root string) {
+	t.Helper()
+	runGit(t, root, "config", "http.proxy", "")
+	t.Setenv("GIT_HTTP_LOW_SPEED_LIMIT", "1")
+	t.Setenv("GIT_HTTP_LOW_SPEED_TIME", "2")
+	for _, name := range []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"} {
+		t.Setenv(name, "")
+	}
+}
+
 // TestAPushIsNotRewrittenAgainByInsteadOf is a remote origin written as gh:acme/app, with the rule
 // gh: to http://127.0.0.1:1/ that the checks and the program see, and a second rule from that
 // address to a repository on disk. git applies a rule once to the address of a remote, so the
@@ -707,6 +719,7 @@ func rewriteTarget(t *testing.T) (bare, base string) {
 func TestAPushIsNotRewrittenAgainByInsteadOf(t *testing.T) {
 	root, _, started := localProgramCheckout(t)
 	elsewhere, base := rewriteTarget(t)
+	failFast(t, root)
 	runGit(t, root, "remote", "set-url", "origin", "gh:acme/app")
 	runGit(t, root, "config", "url.http://127.0.0.1:1/.insteadOf", "gh:")
 	runGit(t, root, "config", "url."+base+".insteadOf", "http://127.0.0.1:1/")
@@ -727,6 +740,7 @@ func TestAPushIsNotRewrittenAgainByInsteadOf(t *testing.T) {
 func TestAPushIsNotRewrittenAgainByPushInsteadOf(t *testing.T) {
 	root, _, started := localProgramCheckout(t)
 	elsewhere, base := rewriteTarget(t)
+	failFast(t, root)
 	runGit(t, root, "remote", "set-url", "--push", "origin", "http://127.0.0.1:2/acme/app")
 	runGit(t, root, "config", "url."+base+".pushInsteadOf", "http://127.0.0.1:2/")
 	var seen []string

@@ -2881,7 +2881,7 @@ of this form, and it reads it inside the checkout: a link at any part of the pat
 of the checkout, such as `.qory/handoff` linked to a folder of this machine, ends the read, so the
 agent cannot make qory read a file outside the checkout. A link inside the checkout, such as
 `.qory/handoff` linked to another folder of the checkout, is followed, and the file at the end
-must itself be a regular file, not a link. With no file, the submission has no `text`, and each commit is
+must itself be a regular file: a link as the file ends the read as well. With no file, the submission has no `text`, and each commit is
 `unreviewed`. With a link, any other file that is not a regular file, a larger file, or a file
 that is not this JSON, qory ignores the file, stores the submission the same way, and prints
 `qory run: The hand-off file is not usable, so the submission has no text and no steps.`,
@@ -2895,7 +2895,7 @@ kind of the file first and opens it without blocking.
 
 qory also checks the file against the limits of the submission format, and drops the part
 that is over a limit and keeps the rest: a `text` whose `title` has more than 256 characters or
-whose `description` has more than 20000, has a NUL character or has a marker line of the draft's block (`<!-- qory:start -->` or `<!-- qory:end -->`, alone on a line, or followed by spaces, tabs or a carriage return) is dropped whole, and a step with a control character is dropped, and a step of more than 128
+whose `description` has more than 20000, has a NUL character or has a marker line of the draft's block (`<!-- qory:start -->` or `<!-- qory:end -->`, alone on a line, or followed by spaces, tabs or a carriage return) is dropped whole, and a step with a control, invisible or direction character is dropped, and a step of more than 128
 characters is dropped, so its commit is `unreviewed`. A `text` whose `title` has a control
 character, such as a tab or a line end, a bidirectional control or an invisible format character
 (Unicode classes Cc and Cf), or a line or paragraph separator, is dropped whole, and so is a step whose key is not a
@@ -2903,7 +2903,7 @@ full commit id of 40 or 64 lower-case hexadecimal digits. qory prints `qory run:
 file has a part the submission format does not allow, so qory dropped it.`, then one line
 indented by two spaces for each part: `Title: <n> characters, over the limit of 256. qory
 dropped the text.`, `Description: <n> characters, over the limit of 20000. qory dropped the
-text.`, `Title: has a control character at character <n>. qory dropped the text.`, `Description: has a NUL character at character <n>. qory dropped the text.`, `Description: line <n> is a marker line of the draft's block. qory dropped the text.`, `Step of commit <commit>: has a control character. qory dropped the step.`, `<n> further steps have a control character. qory dropped them.`, `Title: has no character that is not a space. qory dropped the text.`, `<n> step
+text.`, `Title: has a control character at character <n>. qory dropped the text.`, `Description: has a NUL character at character <n>. qory dropped the text.`, `Description: line <n> is a marker line of the draft's block. qory dropped the text.`, `Step of commit <commit>: has a control, invisible or direction character. qory dropped the step.`, `<n> further steps have a control, invisible or direction character. qory dropped them.`, `Title: has no character that is not a space. qory dropped the text.`, `<n> step
 keys are not a full commit id of 40 or 64 lower-case hexadecimal digits. qory dropped them.`, and `Step of commit <commit>: <n> characters, over the limit of 128. qory dropped the
 step.`, for at most 5 steps, then `<n> further steps are over the limit of 128 characters.
 qory dropped them.` It prints no content of the file. A step for a commit that this run did not make is not used. The run
