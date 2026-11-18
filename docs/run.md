@@ -2955,12 +2955,16 @@ so it has no control character. A repository whose draft is `none`, whose progra
 timed out with no whole draft, or whose lines qory could not use, prints no line. A program that
 printed all five lines and then exited with 1 or 2 has a draft, so its line is printed.
 
-qory runs the command once for each repository that it pushed, in a new empty folder, with no
-argument and with standard input closed. The program
-gets the environment of the person who runs `qory`, so the login of the forge's command line
-(`gh auth login`, or `GH_TOKEN`) is the person's, without the variables of `qory` that start with
-`QORY_SUBMIT_`, and these variables, as the submit program contract of the integrations
-repository lists them (`contracts/run/v1/submit-program/README.md`):
+qory runs the command once for each repository that it pushed, in a new empty folder, with the
+arguments that the manifest's `submit_program.command` lists after the program's path, and with
+standard input closed. The program runs in a new session, with no controlling terminal, so it
+cannot ask a question; at its end qory kills what it left running. It gets the environment of
+the person who runs `qory`, so the login of the forge's command line (`gh auth login`, or
+`GH_TOKEN`), `HOME`, `SSH_AUTH_SOCK` and the proxy variables are the person's. It gets no variable
+whose name starts with `QORY_`, such as an access key, a server secret or a run key of `qory`,
+also none that the person's shell has for the inputs, and gets `GIT_TERMINAL_PROMPT=0` and
+`GH_PROMPT_DISABLED=1`. It gets these variables, as the submit program contract of the
+integrations repository lists them (`contracts/run/v1/submit-program/README.md`):
 
 | Variable | Value |
 |---|---|

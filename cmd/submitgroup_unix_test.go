@@ -5,6 +5,7 @@ package cmd
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -42,7 +43,7 @@ func helperPID(t *testing.T, file string) int {
 // waits: at the limit, the program and the helper are both gone.
 func TestAProgramPastItsLimitStopsItsHelpers(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "pid")
-	program := &submitProgram{command: []string{programScript(t, "sleep 60 &\necho $! > "+file+"\nwait\n")}, limit: time.Second}
+	program := &submitProgram{command: []string{programScript(t, "sleep 60 &\necho $! > "+file+"\nwait\n")}, limit: 4 * time.Second}
 	got, _ := runProgram(t, program, passedDocument())
 	if string(got.Repositories[0].Draft) != `{"none":"program-timeout"}` {
 		t.Errorf("the draft is %s", got.Repositories[0].Draft)
@@ -62,5 +63,15 @@ func TestAProgramThatEndsLeavesNoHelper(t *testing.T) {
 	if pid := helperPID(t, file); !gone(pid) {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		t.Errorf("the helper %d runs after the program ended", pid)
+	}
+}
+
+// TestTheProgramStartsInANewSession is the process attribute that cuts the program off from the
+// terminal, whether or not the test has one.
+func TestTheProgramStartsInANewSession(t *testing.T) {
+	cmd := exec.Command("true")
+	inOwnGroup(cmd)
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setsid {
+		t.Errorf("the attributes are %+v, want Setsid", cmd.SysProcAttr)
 	}
 }

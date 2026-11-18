@@ -17,7 +17,7 @@ import (
 // the program prints, the exit statuses, and the limits. A change of a name in the contract is
 // a change here.
 const (
-	submitEnvPrefix          = "QORY_SUBMIT_"
+	qoryEnvPrefix            = "QORY_"
 	submitEnvSystem          = "QORY_SUBMIT_SYSTEM"
 	submitEnvPath            = "QORY_SUBMIT_PATH"
 	submitEnvBranch          = "QORY_SUBMIT_BRANCH"
@@ -81,11 +81,18 @@ type submitInput struct {
 }
 
 // env is the inputs as the environment of the program, over the person's environment base:
-// every variable of base with the prefix of the contract's inputs is dropped first, so a value
-// set in the person's shell never reaches the program.
+// every variable of base that starts with QORY_ is dropped first, so no access key, server
+// secret, run key or status descriptor of qory, and no value of the contract's inputs that the
+// person's shell has, reaches the program. The person's other variables stay: the forge login
+// (GH_TOKEN, HOME), SSH_AUTH_SOCK and the proxy variables. The program never prompts: git and gh
+// get GIT_TERMINAL_PROMPT=0 and GH_PROMPT_DISABLED=1.
 func (in submitInput) env(base []string) []string {
-	out := slices.DeleteFunc(slices.Clone(base), func(kv string) bool { return strings.HasPrefix(kv, submitEnvPrefix) })
+	out := slices.DeleteFunc(slices.Clone(base), func(kv string) bool {
+		return strings.HasPrefix(kv, qoryEnvPrefix) || strings.HasPrefix(kv, "GIT_TERMINAL_PROMPT=") || strings.HasPrefix(kv, "GH_PROMPT_DISABLED=")
+	})
 	set := func(name, value string) { out = append(out, name+"="+value) }
+	set("GIT_TERMINAL_PROMPT", "0")
+	set("GH_PROMPT_DISABLED", "1")
 	set(submitEnvSystem, in.System)
 	set(submitEnvPath, in.Path)
 	set(submitEnvBranch, in.Branch)

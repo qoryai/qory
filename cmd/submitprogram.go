@@ -224,6 +224,9 @@ func (p *submitProgram) run(ctx context.Context, in submitInput, dir string) pro
 	var exit *exec.ExitError
 	switch {
 	case err == nil:
+	case errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == 0:
+		// The program ended with 0 and a helper kept its output open for [exec.Cmd.WaitDelay]: the
+		// output that it wrote is whole, so the end is normal.
 	case ctx.Err() != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
 		end.timedOut = true
 	case errors.As(err, &exit):

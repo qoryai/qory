@@ -355,3 +355,71 @@ func TestParseSubmitLines(t *testing.T) {
 		})
 	}
 }
+
+// TestTheProgramGetsNoVariableOfQoryAndNoPrompt is a person's environment with the variables that
+// qory runs with (an access key, a server secret, a run key, a status descriptor, a value of the
+// contract's inputs) and the person's own login and network variables: the program gets none
+// whose name starts with QORY_ except the contract's inputs, gets the login and network variables,
+// and cannot prompt.
+func TestTheProgramGetsNoVariableOfQoryAndNoPrompt(t *testing.T) {
+	for name, value := range map[string]string{
+		"QORY_ACCESS_KEY_SECRET": "secret-a", "QORY_SERVER_SECRET": "secret-b", "QORY_RUN_KEY": "secret-c",
+		"QORY_STATUS_FD": "9", "QORY_SUBMIT_TITLE": "from the shell", "QORY_ANYTHING": "x",
+		"GH_TOKEN": "person-login", "SSH_AUTH_SOCK": "/tmp/agent", "HTTPS_PROXY": "http://proxy.test:3128",
+		"GIT_TERMINAL_PROMPT": "1", "GH_PROMPT_DISABLED": "0",
+	} {
+		t.Setenv(name, value)
+	}
+	seen := filepath.Join(t.TempDir(), "seen")
+	program := &submitProgram{command: []string{programScript(t, "env | sort > "+seen+"\n"+fillScript)}}
+	runProgram(t, program, passedDocument())
+	data, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for line := range strings.Lines(string(data)) {
+		name, value, _ := strings.Cut(strings.TrimSuffix(line, "\n"), "=")
+		got[name] = value
+	}
+	for name := range got {
+		if strings.HasPrefix(name, "QORY_") && !strings.HasPrefix(name, "QORY_SUBMIT_") {
+			t.Errorf("the program has %s", name)
+		}
+	}
+	if got["QORY_SUBMIT_TITLE"] != "Add a page" {
+		t.Errorf("QORY_SUBMIT_TITLE is %q, want the contract's value and not the shell's", got["QORY_SUBMIT_TITLE"])
+	}
+	for name, want := range map[string]string{"GH_TOKEN": "person-login", "SSH_AUTH_SOCK": "/tmp/agent", "HTTPS_PROXY": "http://proxy.test:3128",
+		"GIT_TERMINAL_PROMPT": "0", "GH_PROMPT_DISABLED": "1"} {
+		if got[name] != want {
+			t.Errorf("%s is %q, want %q", name, got[name], want)
+		}
+	}
+}
+
+// TestAProgramThatEndsWithAHelperHoldingItsOutputHasItsDraft is a program that prints a whole draft,
+// starts a helper that keeps the output open, and exits with 0: the wait for the output ends after
+// the delay with exec.ErrWaitDelay, which is a normal end, so the draft is stored, not program-failed.
+func TestAProgramThatEndsWithAHelperHoldingItsOutputHasItsDraft(t *testing.T) {
+	program := &submitProgram{command: []string{programScript(t, fillScript+"sleep 60 &\nexit 0\n")}}
+	got, printed := runProgram(t, program, passedDocument())
+	if r := got.Repositories[0]; !strings.Contains(string(r.Draft), `"number":7`) {
+		t.Errorf("the draft is %s, want the draft of the lines; the step printed %q", r.Draft, printed)
+	}
+	if strings.Contains(printed, "did not start") || strings.Contains(printed, "failed") {
+		t.Errorf("the step printed %q, want no failure", printed)
+	}
+}
+
+// TestTheProgramHasNoControllingTerminal is a program that tries to open the terminal: it cannot,
+// so it can never ask the person a question.
+func TestTheProgramHasNoControllingTerminal(t *testing.T) {
+	seen := filepath.Join(t.TempDir(), "seen")
+	program := &submitProgram{command: []string{programScript(t, "if : </dev/tty 2>/dev/null; then echo tty; else echo no-tty; fi > "+seen+"\n"+fillScript)}}
+	runProgram(t, program, passedDocument())
+	data, _ := os.ReadFile(seen)
+	if strings.TrimSpace(string(data)) != "no-tty" {
+		t.Errorf("the program saw %q", data)
+	}
+}
