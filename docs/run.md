@@ -2302,9 +2302,10 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   response to the run code has no workflow; the code is used`
 - ``Set `runtime` in the run settings to one of claude, codex, cursor, gemini, and
   opencode.`` and the next line ``The document names no runtime.``, when the documents
-  contain no `run_settings`, before anything is installed or fetched. Qory Apiary sends
-  the runtime of the workspace, or of the workflow's settings when they set one; qory
-  picks none
+  contain no `run_settings`, or `run_settings` with no `runtime` or an empty one, before
+  anything is installed or fetched. qory checks for a runtime in `run_settings` before
+  the schema check, which requires one. Qory Apiary sends the runtime of the workspace,
+  or of the workflow's settings when they set one; qory sets no default runtime
 - `set another runtime for the workspace in Qory Apiary, then take the work item in
   again: qory starts a run code's workflow with a runtime's headless start, and has none
   for <runtime>; the code is used`, before anything is fetched
@@ -2357,8 +2358,8 @@ The documents contain the harness, a harness document like a checkout's `harness
 when the workspace in Qory Apiary sets one. The harness extends a stack, under
 `extends`, or defines one: with no `extends`, it lists at least one module and may list
 `workflows`, as a `qory-stack.yaml` does. It has no `target`: qory composes a stack it
-defines for the run's runtime, `run_settings.runtime`. Its `extends` and the source of each of its modules are git
-sources, which `documents.schema.json` requires. A source with no `git` address, a
+defines for the run's runtime, `run_settings.runtime`. Its `extends` and the source of
+each of its modules are git sources, which `documents.schema.json` requires. A source with no `git` address, a
 harness with no `extends` and no module, or `workflows` beside `extends` fails that
 schema, and the run stops after the redemption with exit 1 and the line `update qory, or
 ask Qory Apiary's instance admin: …`.

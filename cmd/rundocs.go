@@ -146,8 +146,13 @@ const harnessFile = "harness.yaml"
 
 // codeDocumentsOf reads documents, the documents of the answer to a run code, for a
 // step qory runs: explore, which [codeRunOf] reads further, or prebuild, which
-// [runCodePrebuild] runs. Each error is exit 1 and ends with [codeUsed].
+// [runCodePrebuild] runs. Each error is exit 1. Each ends with [codeUsed], except
+// [textNoRuntime] for explore documents whose run settings set no runtime: that check
+// runs before the schema's, which requires a runtime in run settings.
 func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
+	if lacksRuntime(documents) {
+		return contracts.Documents{}, noRuntime()
+	}
 	doc, err := provisioner.ReadDocuments(documents)
 	switch {
 	case err != nil:
@@ -159,8 +164,9 @@ func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
 }
 
 // codeRunOf reads doc, the documents of the answer to a run code for the step explore.
-// Each error ends with [codeUsed]: a source of the harness document that qory does not
-// fetch is an input error, see [harnessChecked], and every other error is exit 1.
+// Each error but [textNoRuntime] ends with [codeUsed]: a source of the harness document
+// that qory does not fetch is an input error, see [harnessChecked], and every other error
+// is exit 1.
 func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Workflow == "" {
 		return nil, errors.New("set a workflow for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no workflow" + codeUsed)
@@ -173,7 +179,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	// A workflow runs on the runtime of the workspace or of its workflow settings, which
 	// Qory Apiary sends in run_settings: qory picks none.
 	if runtime == "" {
-		return nil, fmt.Errorf(textNoRuntime, headlessList())
+		return nil, noRuntime()
 	}
 	// A runtime this qory does not render has no headless start either.
 	if rt, err := render.Lookup(runtime); err != nil {
@@ -693,11 +699,30 @@ func (r *codeRun) harnessAt(system string) string {
 	return checkoutHarness + " for the target " + path
 }
 
-// noHeadless is the error of a run from a run code on the runtime name, which has no
-// headless start, see [render.Headless]. It is exit 1 and ends with [codeUsed].
 // textNoRuntime is the refusal of documents whose run settings name no runtime, with the
 // runtimes that qory starts headless, see [headlessList].
 const textNoRuntime = "Set `runtime` in the run settings to one of %s.\n  The document names no runtime."
+
+// noRuntime is the error of explore documents with no run settings, or with run
+// settings that set no runtime. It is exit 1.
+func noRuntime() error {
+	return fmt.Errorf(textNoRuntime, headlessList())
+}
+
+// lacksRuntime reports whether documents are for the step explore and have run settings
+// with no runtime or an empty one. Any other form, such as run settings that are no
+// object, is left to the schema check.
+func lacksRuntime(documents json.RawMessage) bool {
+	var d struct {
+		Step        string                     `json:"step"`
+		RunSettings map[string]json.RawMessage `json:"run_settings"`
+	}
+	if json.Unmarshal(documents, &d) != nil || d.Step != provisioner.StepExplore || d.RunSettings == nil {
+		return false
+	}
+	runtime, ok := d.RunSettings["runtime"]
+	return !ok || string(runtime) == `""`
+}
 
 // headlessList is the runtimes that qory renders with a headless start, in alphabetical
 // order, as a list for a message: "claude, codex, and gemini".
@@ -719,6 +744,8 @@ func headlessList() string {
 	return strings.Join(names[:len(names)-1], ", ") + ", and " + names[len(names)-1]
 }
 
+// noHeadless is the error of a run from a run code on the runtime name, which has no
+// headless start, see [render.Headless]. It is exit 1 and ends with [codeUsed].
 func noHeadless(name string) error {
 	return fmt.Errorf("set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for %s%s", accesskey.ShownName(name, false), codeUsed)
 }

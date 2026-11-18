@@ -15,6 +15,7 @@ import (
 	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
 )
 
@@ -675,6 +676,50 @@ func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 		if want := noHeadless(runtime); err == nil || err.Error() != want.Error() {
 			t.Errorf("%s: codeRunOf got %v, want %v", runtime, err, want)
 		}
+	}
+}
+
+// TestDocumentsWithNoRuntimeAreRefused is codeRunOf for documents with no run settings
+// and with run settings that set no runtime: each is refused with the runtimes that have
+// a headless start, exit 1. codeDocumentsOf refuses explore documents whose run settings
+// set no runtime or an empty one before the schema check, and leaves a prebuild's
+// documents to that check.
+func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
+	var headless []string
+	for _, n := range render.Names() {
+		if rt, err := render.Lookup(n); err == nil {
+			if _, ok := rt.(render.Headless); ok {
+				headless = append(headless, n)
+			}
+		}
+	}
+	if len(headless) < 3 || headlessList() != strings.Join(headless[:len(headless)-1], ", ")+", and "+headless[len(headless)-1] {
+		t.Errorf("the list is %q, the headless runtimes %q", headlessList(), headless)
+	}
+	want := "Set `runtime` in the run settings to one of " + headlessList() + ".\n  The document names no runtime."
+	for name, settings := range map[string]*contracts.RunSettings{"no run settings": nil, "no runtime": {Model: "opus"}} {
+		_, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: settings})
+		if err == nil || err.Error() != want || ExitCode(err) != 1 {
+			t.Errorf("%s: %v (exit %d), want %q", name, err, ExitCode(err), want)
+		}
+	}
+	for _, c := range []struct {
+		documents string
+		lacks     bool
+	}{
+		{`{"step":"explore","run_settings":{}}`, true},
+		{`{"step":"explore","run_settings":{"runtime":""}}`, true},
+		{`{"step":"explore","run_settings":{"runtime":"codex"}}`, false},
+		{`{"step":"explore"}`, false},
+		{`{"step":"explore","run_settings":"claude"}`, false},
+		{`{"step":"prebuild","run_settings":{}}`, false},
+	} {
+		if got := lacksRuntime(json.RawMessage(c.documents)); got != c.lacks {
+			t.Errorf("%s: lacksRuntime is %v", c.documents, got)
+		}
+	}
+	if _, err := codeDocumentsOf(json.RawMessage(`{"step":"prebuild","run_settings":{}}`)); err == nil || !strings.Contains(err.Error(), "documents.schema.json") {
+		t.Errorf("a prebuild with run settings and no runtime: %v", err)
 	}
 }
 
