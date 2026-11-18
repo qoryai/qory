@@ -534,8 +534,8 @@ release may change what an existing document does, and states it under Upgrading
   the push replaces commits of cancelled runs only, with a lease on the head it checked.
   A run starts at the newest commit that an earlier run pushed and a person did not cancel.
 - The submission has `base.branch` for each repository the run pushed: the name of the
-  repository's default branch, read when the run fetched it. The submit program may not
-  change it.
+  repository's default branch, read when the run fetched it. A name of more than 255
+  characters is left out.
 - A module manifest can declare `submit_program`, a command of the module that opens the
   draft pull request. A composed harness has one; a second declaration stops the compose.
 - A run adds the module that Qory Apiary sends as `submit_module` by its manifest name, in
@@ -550,15 +550,17 @@ release may change what an existing document does, and states it under Upgrading
   item's branch, so `git add -A` and `git commit -a` leave the hand-off file out of a commit.
   A commit of the run that has a path under `.qory/handoff/`, as `git add -f` makes one,
   stops the push step before any push, and the run closes `failed`.
-- The push step runs the `submit_program` of the composed harness after the push of a run at
-  the access `write` and before it stores the version. The program runs in a container of the
-  wall's default image with no network, as the run's user, for at most 120 seconds, and
-  reaches the forge only through a unix socket that qory forwards to the run's push proxy. It
-  writes the commit links and the draft pull request into the submission; anything else it
-  changes is discarded, and so is a link that is not `https` on the repository's system at the
-  path of its commit or pull request, a number that is not a plain whole number, and a title
-  with a control character. A repository whose draft the program did not finish gets
-  `program-failed` or `program-timeout`. See The submit program in `docs/run.md`.
+- A run from a run code starts no submit program, relay, container or write token for the
+  forge's API: the push step pushes and stores the submission, with the draft `no-program`,
+  and the forge's adapter opens the draft pull request from it. The `submit_program` of the
+  composed harness is for a run with no run code: qory runs it on the person's machine, outside
+  the wall, with the person's login of the forge's command line, after the push and before it
+  stores the version, once for each repository. The program gets the inputs `QORY_SUBMIT_*` and
+  prints plain lines: the five `draft_` lines and a `commit_url` line for each commit. qory
+  stores them as the draft and the commit addresses, checks each value, and leaves out a line
+  that it cannot use. Exit 3 means that the forge's command line has no login: qory prints
+  ``Run `gh auth login`, then `qory run` again.`` and the branch stays pushed. This build has
+  no push step for a run with no run code yet. See The submit program in `docs/run.md`.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
   qory stops a run whose documents have one. A run whose documents set no

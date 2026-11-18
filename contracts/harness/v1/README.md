@@ -770,10 +770,10 @@ writes it, after the push. This is version 1 of the format
 | `system` | the host the repository is on, a lower-case host name of at most 253 characters |
 | `path` | the repository's path on the host: at most 200 characters of segments joined by slashes, with no `.`, `..` or `.git` segment |
 | `commit` | the head of the branch: a full commit id, 40 or 64 lower-case hexadecimal digits. Each commit id of the format has this form |
-| `base` | the commit the run started at (`commit`), and the name of the repository's default branch when the run started (`branch`, optional, at most 255 characters, a name that git accepts after `refs/heads/`): the branch that a pull request of the run is based on. The submit program may not change it |
+| `base` | the commit the run started at (`commit`), and the name of the repository's default branch when the run started (`branch`, optional, at most 255 characters, a name that git accepts after `refs/heads/`): the branch that a pull request of the run is based on |
 | `commits` | each commit from the base to the head, oldest first, with the ledger step that made it, at most 128 characters: the id of a ledger row, such as `deliverable:d-1`, `fix:f1`, `plan`, `checks`, `small-change` or `script:scenario-2#3`. A commit that a step made gets that step. Any commit with no step gets `unreviewed` |
 | `draft` | the draft pull request (`number`, `url`, `title`, `state`, `action`), or `{"none": <reason>}` with the reason `not-passed`, `no-text`, `escalated`, `no-program`, `program-failed` (with `exit`, 1 or 2) or `program-timeout` |
-| `commit_url` | the forge's address of a commit, written by the submit program |
+| `commit_url` | the forge's address of a commit, from the submit program of a run with no run code |
 
 A document has no other member. A software factory can use the format as the JSON Schema
 of a custom artifact type in its `process.yaml`:
@@ -1070,13 +1070,13 @@ composed harness has one submit program, and both modules declare one.` on the n
 An empty command, a word that is not a string, and a program that is not a file in the
 module, or is in an entry an `exclude` or an `only` of the module leaves out, fail the
 compose as they do for a push check, with `submit_program` in place of the push check.
-qory runs the program once in the push step of a run at the access `write`, after the push
-and before it stores the version, in a new container of the wall's default image with no
-network. The program reads and rewrites the file at `QORY_SUBMISSION_FILE`, reaches the forge
-only through the unix socket at `QORY_PROXY_SOCKET` with the password in
-`QORY_PROXY_PASSWORD`, and may change only the `commit_url` members and the `draft` of a
-repository. Exit 0 is done, exit 1 a failed call to the forge, and exit 2 an input the program
-cannot use. See docs/run.md, §The submit program.
+A run from a run code runs no submit program: the forge's adapter opens the draft from the
+stored submission. A run with no run code runs the program on the person's machine, outside the
+wall, once for each repository after the push, with the person's login of the forge's command
+line. The program gets the inputs `QORY_SUBMIT_*` and prints plain lines, as the submit program
+contract of the integrations repository states (`contracts/run/v1/submit-program/README.md`).
+Exit 0 is done, exit 1 a failed call to the forge, and exit 2 an input the program cannot use.
+See docs/run.md, §The submit program.
 
 **Push checks.** A push check runs in a run behind a wall, before a push of its type
 reaches Qory Apiary: for every push to the run API from inside the wall, through `qory
