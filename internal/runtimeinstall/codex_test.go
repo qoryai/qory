@@ -189,35 +189,114 @@ func TestACodexFolderQoryCannotKeepWholeIsRefused(t *testing.T) {
 	}
 }
 
-// TestACodexFolderWithoutAHelperIsRefused publishes Codex tarballs whose vendor folder
-// lacks one of the files that bin/codex runs: codex-resources/bwrap, codex-path/rg or
-// bin/codex-code-mode-host. Each install fails with the fix first, names the missing
-// file, and leaves no version's folder.
-func TestACodexFolderWithoutAHelperIsRefused(t *testing.T) {
+// codexHelpers are the files beside bin/codex that Codex's program runs.
+var codexHelpers = []string{"codex-resources/bwrap", "codex-path/rg", "bin/codex-code-mode-host"}
+
+// installCodexFolder publishes, as Codex 0.170.0 for arm64, a tarball whose vendor
+// folder is [rt.CodexFolder] with edit applied to each file, without the files for which
+// edit returns false, and installs it into folder.
+func installCodexFolder(t *testing.T, folder string, edit func(*rt.Entry) bool) (runtimeinstall.Installed, error) {
+	t.Helper()
 	const vendor = "package/vendor/aarch64-unknown-linux-musl/"
-	for _, missing := range []string{"codex-resources/bwrap", "codex-path/rg", "bin/codex-code-mode-host"} {
-		t.Run(missing, func(t *testing.T) {
-			var entries []rt.Entry
-			for _, f := range rt.CodexFolder("0.170.0 arm64") {
-				if f.Name != missing {
-					entries = append(entries, rt.Entry{Name: vendor + f.Name, Body: f.Body, Mode: f.Mode})
+	var entries []rt.Entry
+	for _, f := range rt.CodexFolder("0.170.0 arm64") {
+		if edit(&f) {
+			entries = append(entries, rt.Entry{Name: vendor + f.Name, Body: f.Body, Mode: f.Mode})
+		}
+	}
+	npm := rt.StartCodexNpm(t)
+	b := rt.Tarball(t, entries...)
+	npm.PublishWith("arm64", "0.170.0", b, rt.Integrity(b), "")
+	npm.SetLatest("0.170.0")
+	got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+		Fetch: runtimeinstall.NpmFetch(http.DefaultClient, npm.URL(), "arm64"), Runtime: "codex", Folder: folder,
+	})
+	if err == nil {
+		t.Cleanup(got.Release)
+	}
+	return got, err
+}
+
+// TestACodexFolderWithoutAHelperIsRefused publishes Codex tarballs whose vendor folder
+// lacks one of the files that bin/codex runs, or has it with 0 bytes:
+// codex-resources/bwrap, codex-path/rg or bin/codex-code-mode-host. Each install fails
+// with the fix, to update qory, names the file, and leaves no version's folder.
+func TestACodexFolderWithoutAHelperIsRefused(t *testing.T) {
+	for _, helper := range codexHelpers {
+		for kind, edit := range map[string]func(*rt.Entry) bool{
+			"missing": func(f *rt.Entry) bool { return f.Name != helper },
+			"empty": func(f *rt.Entry) bool {
+				if f.Name == helper {
+					f.Body = ""
 				}
-			}
-			npm := rt.StartCodexNpm(t)
-			b := rt.Tarball(t, entries...)
-			npm.PublishWith("arm64", "0.170.0", b, rt.Integrity(b), "")
-			npm.SetLatest("0.170.0")
-			folder := t.TempDir()
-			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
-				Fetch: runtimeinstall.NpmFetch(http.DefaultClient, npm.URL(), "arm64"), Runtime: "codex", Folder: folder,
+				return true
+			},
+		} {
+			t.Run(kind+" "+helper, func(t *testing.T) {
+				folder := t.TempDir()
+				_, err := installCodexFolder(t, folder, edit)
+				want := "Update qory.\nThe tarball of codex 0.170.0 has no package/vendor/aarch64-unknown-linux-musl/" + helper + "."
+				if err == nil || err.Error() != want {
+					t.Fatalf("the error is %v, want %q", err, want)
+				}
+				if _, err := os.Lstat(filepath.Join(folder, "codex", "0.170.0")); !os.IsNotExist(err) {
+					t.Fatalf("the version's folder: %v", err)
+				}
 			})
-			want := "Check the source of the runtime's releases\nThe tarball of codex 0.170.0 has no " + vendor + missing
-			if err == nil || err.Error() != want {
-				t.Fatalf("the error is %v, want %q", err, want)
-			}
-			if _, err := os.Lstat(filepath.Join(folder, "codex", "0.170.0")); !os.IsNotExist(err) {
-				t.Fatalf("the version's folder: %v", err)
-			}
-		})
+		}
+	}
+}
+
+// TestCodexHelpersAreInstalledRunnable publishes Codex's folder with each helper of
+// [codexHelpers] at mode 0644: the install makes each one 0755, as bin/codex, so everyone
+// can read and run it.
+func TestCodexHelpersAreInstalledRunnable(t *testing.T) {
+	got, err := installCodexFolder(t, t.TempDir(), func(f *rt.Entry) bool {
+		if slices.Contains(codexHelpers, f.Name) {
+			f.Mode = 0o644
+		}
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, helper := range codexHelpers {
+		info, err := os.Lstat(filepath.Join(got.Dir, filepath.FromSlash(helper)))
+		if err != nil || info.Mode() != 0o755 {
+			t.Errorf("%s: %v, %v, want mode 0755", helper, info, err)
+		}
+	}
+}
+
+// TestAPartialCodexFolderIsNotTakenAsComplete installs Codex, then removes one helper of
+// [codexHelpers], or makes it one nobody can run, as a partial earlier install left it:
+// the next install refuses the version's folder, with the fix to remove it, and leaves
+// it as it is.
+func TestAPartialCodexFolderIsNotTakenAsComplete(t *testing.T) {
+	for _, helper := range codexHelpers {
+		for kind, spoil := range map[string]func(string) error{
+			"removed":      os.Remove,
+			"not runnable": func(p string) error { return os.Chmod(p, 0o644) },
+		} {
+			t.Run(kind+" "+helper, func(t *testing.T) {
+				folder := t.TempDir()
+				keep := func(*rt.Entry) bool { return true }
+				got, err := installCodexFolder(t, folder, keep)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := spoil(filepath.Join(got.Dir, filepath.FromSlash(helper))); err != nil {
+					t.Fatal(err)
+				}
+				_, err = installCodexFolder(t, folder, keep)
+				want := "Remove the version's folder once no run uses it, then run again\n" + got.Dir + " has no " + helper + " that everyone can read and run."
+				if err == nil || err.Error() != want {
+					t.Fatalf("the error is %v, want %q", err, want)
+				}
+				if _, err := os.Lstat(filepath.Join(got.Dir, "bin", "codex")); err != nil {
+					t.Fatalf("the version's folder was changed: %v", err)
+				}
+			})
+		}
 	}
 }

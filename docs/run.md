@@ -1020,7 +1020,10 @@ contains `bin/<runtime>`, mode `0755`, and `integrity`, the checksum of the tarb
 came from. For Codex, it also contains the other files of Codex's folder in the tarball.
 
 1. When the version's folder exists, the run uses it and reads no tarball: a later run on
-   the same machine with the same newest version downloads nothing.
+   the same machine with the same newest version downloads nothing. A version's folder of
+   Codex without `bin/codex-code-mode-host`, `codex-resources/bwrap` or `codex-path/rg`,
+   each a file of at least 1 byte that everyone can read and run, stops the run with
+   `Remove the version's folder once no run uses it, then run again`.
 2. Otherwise qory reads the tarball into a temporary file in `<runtimes>/<runtime>/`, at
    most 1 GiB, and checks it against the checksum before it extracts anything. For
    Claude Code, it extracts only the program's entry `package/claude`, a regular file of
@@ -1029,11 +1032,14 @@ came from. For Codex, it also contains the other files of Codex's folder in the 
    folder `package/vendor/<x86_64 or aarch64>-unknown-linux-musl/` to the same path below
    a temporary folder, and no entry outside that folder. Each entry is a folder, mode
    `0755`, or a regular file of at most 1 GiB, mode `0755` when its mode in the tarball
-   lets anyone run it and `0644` otherwise. A link, a hard link, a path with a `.` or
-   `..` segment, an entry twice, a file `integrity` at the folder's top, more than 10,000
-   entries, or a missing `bin/codex`, `bin/codex-code-mode-host`, `codex-resources/bwrap`
-   or `codex-path/rg` stops the run, with `Check the source of the runtime's releases` and
-   the missing file. The tarball may unpack to at most 4 GiB. qory
+   lets anyone run it and `0644` otherwise; `bin/codex`, `bin/codex-code-mode-host`,
+   `codex-resources/bwrap` and `codex-path/rg` are always `0755`. A link, a hard link, a
+   path with a `.` or `..` segment, an entry twice, a file `integrity` at the folder's
+   top, more than 10,000 entries, or no `bin/codex` stops the run with `Check the source
+   of the runtime's releases`. A missing or empty `bin/codex-code-mode-host`,
+   `codex-resources/bwrap` or `codex-path/rg` means that Codex moved its files, and stops
+   the run with `Update qory.` and the missing file. The tarball may unpack to at most
+   4 GiB. qory
    then renames the temporary folder to the version's folder, so a folder at that path is
    always a complete install.
 

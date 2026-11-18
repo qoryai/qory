@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -30,8 +31,8 @@ type folder struct {
 // complete reports whether the folder of version is a complete install of the tarball
 // with npm's checksum integrity. A folder at that path is complete when it exists,
 // since [folder.install] renames only a finished folder there; it must contain
-// bin/<runtime>, a regular file everyone can read and run, and checksumFile with
-// integrity. A folder of another tarball, or a path that is not a folder, is an error:
+// bin/<runtime> and each file of [folderFiles] for the runtime, each a regular file of at
+// least 1 byte that everyone can read and run, and checksumFile with integrity. A folder of another tarball, or a path that is not a folder, is an error:
 // the version's folder is never replaced, since a run may still use it.
 func (f folder) complete(version, integrity string) (bool, error) {
 	dir := filepath.Join(f.base, version)
@@ -52,12 +53,25 @@ func (f folder) complete(version, integrity string) (bool, error) {
 		return false, fmt.Errorf("Remove the version's folder once no run uses it, then run again\n"+
 			"%s has no program bin/%s that everyone can read and run.", dir, f.runtime)
 	}
+	for _, name := range folderFiles[f.runtime] {
+		if !runnable(filepath.Join(dir, filepath.FromSlash(name))) {
+			return false, fmt.Errorf("Remove the version's folder once no run uses it, then run again\n"+
+				"%s has no %s that everyone can read and run.", dir, name)
+		}
+	}
 	held, err := readSmall(filepath.Join(dir, checksumFile))
 	if err != nil || strings.TrimSpace(held) != integrity {
 		return false, fmt.Errorf("Remove the version's folder once no run uses it, then run again\n"+
 			"%s was not installed from the tarball with the checksum %s", dir, integrity)
 	}
 	return true, nil
+}
+
+// runnable reports whether path is a regular file of at least 1 byte that everyone can
+// read and run, without following a link.
+func runnable(path string) bool {
+	p, err := os.Lstat(path)
+	return err == nil && p.Mode().IsRegular() && p.Mode().Perm()&0o555 == 0o555 && p.Size() > 0
 }
 
 // readSmall reads a file of at most 1 KiB, without following a link.
@@ -269,9 +283,10 @@ func writeEntry(r io.Reader, size int64, path string, perm fs.FileMode) error {
 // entry is a folder, mode 0755, or a regular file of at most [maxProgram] bytes, mode
 // 0755 when its mode in the archive lets anyone run it and 0644 otherwise; its path is a
 // plain relative path, with no . or .. segment. The folder must have at most
-// [maxEntries] entries, no file named [checksumFile] at its top, bin/<runtime>, a file
-// of at least 1 byte, which is made 0755, and each file of [folderFiles] for runtime. The archive must unpack to at most
-// [maxUnpacked] bytes. what is the release as an error shows it.
+// [maxEntries] entries, no file named [checksumFile] at its top, and bin/<runtime> and
+// each file of [folderFiles] for runtime, each a file of at least 1 byte, which is made
+// 0755. The archive must unpack to at most [maxUnpacked] bytes. what is the release as
+// an error shows it.
 func extractFolder(r io.Reader, dir, runtime, prefix, what string) error {
 	zr, err := gzip.NewReader(r)
 	if err != nil {
@@ -323,7 +338,7 @@ func extractFolder(r io.Reader, dir, runtime, prefix, what string) error {
 				return fmt.Errorf(textRelease+"The tarball of %s has %s of %d bytes, and a file has at most %d", what, h.Name, h.Size, maxProgram)
 			}
 			perm := fs.FileMode(0o644)
-			if h.Mode&0o111 == 0o111 || name == program {
+			if h.Mode&0o111 == 0o111 || name == program || slices.Contains(folderFiles[runtime], name) {
 				perm = 0o755
 			}
 			if err = makeDirs(dir, path.Dir(name), made); err == nil {
@@ -350,9 +365,11 @@ func extractFolder(r io.Reader, dir, runtime, prefix, what string) error {
 	if p, err := os.Lstat(filepath.Join(dir, "bin", runtime)); err != nil || !p.Mode().IsRegular() || p.Size() < 1 {
 		return fmt.Errorf(textRelease+"The tarball of %s has no %s", what, prefix+program)
 	}
+	// A file of folderFiles missing means the publisher moved the runtime's files, so
+	// this qory's [folderFiles] is out of date.
 	for _, name := range folderFiles[runtime] {
-		if p, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(name))); err != nil || !p.Mode().IsRegular() {
-			return fmt.Errorf(textRelease+"The tarball of %s has no %s", what, prefix+name)
+		if !runnable(filepath.Join(dir, filepath.FromSlash(name))) {
+			return fmt.Errorf("Update qory.\nThe tarball of %s has no %s.", what, prefix+name)
 		}
 	}
 	for name := range made {
