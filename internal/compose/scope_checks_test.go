@@ -2,6 +2,7 @@ package compose_test
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,11 +15,11 @@ import (
 // type change-plan.
 const planStack = "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source: {path: modules/core}\nworkflows:\n  fix:\n    access: write\n    plan: change-plan\n"
 
-const scopeManifest = "apiVersion: qory.dev/v1alpha1\nname: core\nscope_checks:\n  change-plan:\n    - [checks/check.js, scope, --plan]\n    - [checks/check.js, freeze, --plan]\n"
+const scopeManifest = "apiVersion: qory.dev/v1alpha1\nname: core\nscope_checks:\n  change-plan: [checks/check.js, scope, --plan]\n"
 
 // TestAPlanWithAScopeCheckComposes is a workflow that names a plan type and a module of the
 // stack that declares the scope check for it: the compose passes, and the result has the
-// commands in the order of the manifest, each program under $QORY_HARNESS_HOME.
+// command of the manifest, its program under $QORY_HARNESS_HOME.
 func TestAPlanWithAScopeCheckComposes(t *testing.T) {
 	res, err := composeTree(t, map[string]string{
 		stack.FileName:                     planStack,
@@ -30,10 +31,8 @@ func TestAPlanWithAScopeCheckComposes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer res.Close()
-	want := map[string]compose.ScopeCheck{"change-plan": {Module: "core", Commands: [][]string{
-		{"$QORY_HARNESS_HOME/modules/core/checks/check.js", "scope", "--plan"},
-		{"$QORY_HARNESS_HOME/modules/core/checks/check.js", "freeze", "--plan"},
-	}}}
+	want := map[string]compose.ScopeCheck{"change-plan": {Module: "core",
+		Command: []string{"$QORY_HARNESS_HOME/modules/core/checks/check.js", "scope", "--plan"}}}
 	if !reflect.DeepEqual(res.ScopeChecks, want) {
 		t.Errorf("scope checks %+v, want %+v", res.ScopeChecks, want)
 	}
@@ -123,7 +122,7 @@ func TestScopeCheckProblemsOfAModuleAreRefused(t *testing.T) {
 			stack.FileName:                     two,
 			"modules/core/qory-module.yaml":    scopeManifest,
 			"modules/core/checks/check.js":     "x\n",
-			"modules/web/qory-module.yaml":     "apiVersion: qory.dev/v1alpha1\nname: web\nscope_checks:\n  change-plan:\n    - [check.sh]\n",
+			"modules/web/qory-module.yaml":     "apiVersion: qory.dev/v1alpha1\nname: web\nscope_checks:\n  change-plan: [check.sh]\n",
 			"modules/web/check.sh":             "x\n",
 			"modules/core/skills/fix/SKILL.md": "text\n",
 		}, "Remove the scope check for change-plan from module core or web.\n  A type has one scope check, and both modules declare one."},
@@ -173,7 +172,7 @@ func TestTheDuplicateScopeCheckRefusalFixFitsInAHundredCharacters(t *testing.T) 
 		{"40 characters and a 64-character type", strings.Repeat("a", 40), strings.Repeat("b", 40), strings.Repeat("p", 64)},
 	} {
 		manifest := func(name string) string {
-			return "apiVersion: qory.dev/v1alpha1\nname: " + name + "\nscope_checks:\n  " + c.typ + ":\n    - [check.sh]\n"
+			return "apiVersion: qory.dev/v1alpha1\nname: " + name + "\nscope_checks:\n  " + c.typ + ": [check.sh]\n"
 		}
 		_, err := composeTree(t, map[string]string{
 			stack.FileName:                  "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: " + c.first + "\n    source: {path: modules/a}\n  - name: " + c.other + "\n    source: {path: modules/b}\nworkflows:\n  fix:\n    access: write\n    plan: " + c.typ + "\n",
@@ -240,8 +239,8 @@ func composeCheckout(t *testing.T, files map[string]string) (*compose.Result, er
 // scope check has no effect when a base module declares one for the type either: the
 // result has the base's, and the compose reports no second declaration.
 func TestACheckoutModulesScopeCheckDoesNotCount(t *testing.T) {
-	const checkoutDeclares = "apiVersion: qory.dev/v1alpha1\nname: app\nscope_checks:\n  change-plan:\n    - [checks/check.js, scope, --plan]\n"
-	const baseDeclares = "apiVersion: qory.dev/v1alpha1\nname: a\nscope_checks:\n  change-plan:\n    - [checks/check.js, scope, --plan]\n"
+	const checkoutDeclares = "apiVersion: qory.dev/v1alpha1\nname: app\nscope_checks:\n  change-plan: [checks/check.js, scope, --plan]\n"
+	const baseDeclares = "apiVersion: qory.dev/v1alpha1\nname: a\nscope_checks:\n  change-plan: [checks/check.js, scope, --plan]\n"
 	const baseSilent = "apiVersion: qory.dev/v1alpha1\nname: a\n"
 	t.Run("checkout only is refused", func(t *testing.T) {
 		_, err := composeCheckout(t, checkoutScopeTree(baseSilent, checkoutDeclares))
@@ -258,7 +257,7 @@ func TestACheckoutModulesScopeCheckDoesNotCount(t *testing.T) {
 		}
 		defer res.Close()
 		got := res.ScopeChecks["change-plan"]
-		if got.Module != "a" || len(got.Commands) != 1 || got.Commands[0][0] != "$QORY_HARNESS_HOME/modules/a/checks/check.js" {
+		if got.Module != "a" || !slices.Equal(got.Command, []string{"$QORY_HARNESS_HOME/modules/a/checks/check.js", "scope", "--plan"}) {
 			t.Errorf("scope check %+v, want the one of module a", got)
 		}
 	})

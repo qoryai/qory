@@ -1,3 +1,2 @@
 build-plan core $QORY_HARNESS_HOME/modules/core/checks/check.js scope --plan
-build-plan core $QORY_HARNESS_HOME/modules/core/checks/check.js freeze --plan
 change-plan web $QORY_HARNESS_HOME/modules/web/bin/check

@@ -178,14 +178,12 @@ func TestFixtures(t *testing.T) {
 			if _, err := os.Stat("expected/push-checks.txt"); err == nil || b.Len() > 0 {
 				expectText(t, "expected/push-checks.txt", b.String())
 			}
-			// expected/scope-checks.txt is each command of each scope check, sorted by type,
+			// expected/scope-checks.txt is the command of each scope check, sorted by type,
 			// with its module and its words, when any module of the base stack declares
 			// one. expected/plans.txt is each workflow that names a plan type, with it.
 			b.Reset()
 			for _, typ := range slices.Sorted(maps.Keys(res.ScopeChecks)) {
-				for _, c := range res.ScopeChecks[typ].Commands {
-					fmt.Fprintf(&b, "%s %s %s\n", typ, res.ScopeChecks[typ].Module, strings.Join(c, " "))
-				}
+				fmt.Fprintf(&b, "%s %s %s\n", typ, res.ScopeChecks[typ].Module, strings.Join(res.ScopeChecks[typ].Command, " "))
 			}
 			if _, err := os.Stat("expected/scope-checks.txt"); err == nil || b.Len() > 0 {
 				expectText(t, "expected/scope-checks.txt", b.String())

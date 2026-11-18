@@ -1,5 +1,4 @@
 apiVersion: qory.dev/v1alpha1
 name: web
 scope_checks:
-  change-plan:
-    - [./bin/check]
+  change-plan: [./bin/check]

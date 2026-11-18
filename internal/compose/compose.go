@@ -637,14 +637,14 @@ func excludedProgram(res *Result, dir, name, program string) (Exclude, bool) {
 }
 
 // ScopeCheck is the scope check the composed harness declares for the plan of one
-// artifact type: commands in order, each written to take --base <start commit> and
-// --artifacts <folder> as its last arguments and to exit 0 when the plan holds.
+// artifact type: one command, written to take --base <start commit> and --artifacts
+// <folder> as its last arguments and to exit 0 when the plan holds.
 type ScopeCheck struct {
 	// Module is the module of the base stack that declares the check.
 	Module string `json:"module"`
-	// Commands are the programs and their arguments, in the order of the manifest. Each
-	// program is $QORY_HARNESS_HOME/modules/<module>/<path>, before substitution.
-	Commands [][]string `json:"commands"`
+	// Command is the program and its arguments, as the manifest has them. The program is
+	// $QORY_HARNESS_HOME/modules/<module>/<path>, before substitution.
+	Command []string `json:"command"`
 }
 
 // addScopeChecks adds the scope checks of the module name at dir to the result. A type
@@ -652,7 +652,7 @@ type ScopeCheck struct {
 // a program that is not a file in the module, read through root when it is not nil, and
 // one in an entry the module's exclude or only leaves out, since the home can leave out
 // such an entry.
-func addScopeChecks(res *Result, dir string, root *os.Root, name string, checks map[string][][]string) error {
+func addScopeChecks(res *Result, dir string, root *os.Root, name string, checks map[string][]string) error {
 	if len(checks) == 0 {
 		return nil
 	}
@@ -668,27 +668,24 @@ func addScopeChecks(res *Result, dir string, root *os.Root, name string, checks 
 		if other, ok := res.ScopeChecks[typ]; ok {
 			return duplicateScopeCheck(typ, other.Module, name)
 		}
-		var commands [][]string
-		for _, c := range checks[typ] {
-			program := c[0]
-			shownProgram := exports.Value(filepath.ToSlash(program), false)
-			info, err := root.Stat(program)
-			if err != nil {
-				return exports.Errorf("Add %s to module %s, or change its scope check for %s.\n  Module %s has no file at %s.", shownProgram, shown(name), typ, shown(name), shownProgram)
-			}
-			if !info.Mode().IsRegular() {
-				return exports.Errorf("Set the scope check for %s of module %s to a program file.\n  %s is not a file.", typ, shown(name), shownProgram)
-			}
-			if e, ok := excludedProgram(res, dir, name, program); ok {
-				return exports.Errorf("%s\n  The program of the scope check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
-					altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), typ, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
-			}
-			commands = append(commands, append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(program)}, c[1:]...))
+		c := checks[typ]
+		program := c[0]
+		shownProgram := exports.Value(filepath.ToSlash(program), false)
+		info, err := root.Stat(program)
+		if err != nil {
+			return exports.Errorf("Add %s to module %s, or change its scope check for %s.\n  Module %s has no file at %s.", shownProgram, shown(name), typ, shown(name), shownProgram)
+		}
+		if !info.Mode().IsRegular() {
+			return exports.Errorf("Set the scope check for %s of module %s to a program file.\n  %s is not a file.", typ, shown(name), shownProgram)
+		}
+		if e, ok := excludedProgram(res, dir, name, program); ok {
+			return exports.Errorf("%s\n  The program of the scope check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
+				altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), typ, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
 		}
 		if res.ScopeChecks == nil {
 			res.ScopeChecks = map[string]ScopeCheck{}
 		}
-		res.ScopeChecks[typ] = ScopeCheck{Module: name, Commands: commands}
+		res.ScopeChecks[typ] = ScopeCheck{Module: name, Command: append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(program)}, c[1:]...)}
 	}
 	return nil
 }

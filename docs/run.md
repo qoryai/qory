@@ -5036,7 +5036,7 @@ start the run from a folder that does not contain your home folder, qory's state
 A workflow of a stack with `access: write` may name a plan type, `workflows.<name>.plan`,
 an artifact type such as `build-plan`. The plan is the launch version of that type, and it
 sets what a session of the workflow may push. A module of the stack declares the scope
-check of the type in the `scope_checks` of its `qory-module.yaml`: a list of commands for
+check of the type in the `scope_checks` of its `qory-module.yaml`: one command for
 each plan type (see `scope_checks` in `contracts/harness/v1/README.md`).
 
 `qory harness compose` and `qory run` refuse the stack, before they start anything, in

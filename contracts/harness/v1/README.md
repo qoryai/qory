@@ -1040,9 +1040,7 @@ push_checks:                     # optional: a check for the files of one artifa
     command: [scripts/checks.js, push, spec]  # a program in the module, then its arguments
     reads: [questions]           # optional: the other artifact types the check reads
 scope_checks:                    # optional: the checks of the plan of one artifact type
-  build-plan:                    # the type a workflow names in `plan`
-    - [scripts/checks.js, scope, --plan]    # a program in the module, then its arguments
-    - [scripts/checks.js, freeze, --plan]   # the commands run in this order
+  build-plan: [scripts/checks.js, scope, --plan]   # the type a workflow names in `plan`: one command, a program in the module, then its arguments
 ```
 
 `description`, optional, describes what the module is for; the report contains it and `qory harness
@@ -1139,19 +1137,17 @@ exclude or only of module core leaves skills/running out.` The home contains
 absolute path in the home; a harness whose modules declare no check has no such file.
 
 `scope_checks`, optional, declares the checks of the plan of an artifact type, the type that a
-workflow of the stack names in `plan`. It is a map from the type to a list of commands, and
-a command is a list: the program, a file in the module as for `push_checks`, then its
-arguments. The commands of a type are in order, each is written to take `--base <start
-commit>` and `--artifacts <folder>` as its last arguments, and each exits 0 when the plan
-holds. The compose declares and checks them, and `qory run` does not run them. Only a module of the run's base stack
+workflow of the stack names in `plan`. It is a map from the type to one command, a list:
+the program, a file in the module as for `push_checks`, then its arguments. The command is
+written to take `--base <start commit>` and `--artifacts <folder>` as its last arguments,
+and it exits 0 when the plan holds. The compose declares and checks them, and `qory run` does not run them. Only a module of the run's base stack
 counts: a module that the checkout's `qory.yaml` adds to the base declares none that counts, so the
 repository under work cannot supply the check of its plan. A `scope_checks` in such a module has no
 effect: the compose reads its form, as for any manifest, and uses nothing from it. When the `harness`
 section of a `qory.yaml` defines the stack and extends none, every module of the section is a module of
 the stack. A key that does not
 match `^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 64 bytes, one type twice in one module, a
-value that is not a list or is empty, a command that is not a list or is empty, a word of a
-command that is not a string, and a program that is empty, absolute or has a `..` part fail
+value that is not a list or is empty, a word of the command that is not a string, and a program that is empty, absolute or has a `..` part fail
 the compose, each with the manifest's path. The compose also fails when two modules declare
 one type, `Remove the scope check for build-plan from module core or web.` with `A
 type has one scope check, and both modules declare one.` on the next line (when the first line
@@ -1160,7 +1156,7 @@ two modules.`, and the next line has the type and both module names, whole); whe
 is not a file in the module, `Add checks/check.js to module core, or change its scope check
 for build-plan.` with `Module core has no file at checks/check.js.`; and when a program is
 in an entry an `exclude` or an `only` of its module leaves out, as for a push check. The
-compose result lists each type with its module and its commands, each program as
+compose result lists each type with its module and its command, the program as
 `$QORY_HARNESS_HOME/modules/<module>/<path>`.
 
 **Push checks.** A push check runs in a run behind a wall, before a push of its type
