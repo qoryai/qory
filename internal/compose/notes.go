@@ -71,16 +71,19 @@ func checkNotes(res *Result) error {
 			if len(filled) == 0 {
 				return exports.Errorf("Remove notes_for from %s of module %s.\n  The stack fills no role.", shown(e.Name), module)
 			}
-			const fix = "Set notes_for in %s of module %s to a role the stack fills."
+			format := "Set notes_for in %s of module %s to a role the stack fills.\n  %s is none.\n  The stack fills %s."
 			skill, mod := shown(e.Name), module
-			full := ""
+			var full []any
 			// Line 1 has at most 98 characters, so it has at most 100 under the "✗ " that
 			// qory prints before it, whatever the names are.
-			if utf8.RuneCountInString(fix)-4+utf8.RuneCountInString(skill)+utf8.RuneCountInString(mod) > 98 {
-				full = "\n  The full names are " + skill + " and " + mod + "."
+			if utf8.RuneCountInString("Set notes_for in  of module  to a role the stack fills.")+utf8.RuneCountInString(skill)+utf8.RuneCountInString(mod) > 98 {
+				format += "\n  The full names are %s and %s."
+				full = []any{skill, mod}
 				skill, mod = squeeze(skill), squeeze(mod)
 			}
-			return exports.Errorf(fix+"\n  %s is none.\n  The stack fills %s."+full, skill, mod, shown(role), andList(shownAll(filled)))
+			// The names are arguments of the format, never part of it, since a name may
+			// contain a %.
+			return exports.Errorf(format, append([]any{skill, mod, shown(role), andList(shownAll(filled))}, full...)...)
 		}
 	}
 	return nil

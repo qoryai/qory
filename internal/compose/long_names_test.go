@@ -162,3 +162,24 @@ func rename(t *testing.T, dir, old, new string) {
 		}
 	}
 }
+
+// TestAShortenedNameWithAPercentSignIsPrintedAsWritten is a note in a skill whose name has
+// 30 characters, two of them %d: line 1 has it shortened, and the line with the whole names
+// has it as written, not as a format verb that has no argument.
+func TestAShortenedNameWithAPercentSignIsPrintedAsWritten(t *testing.T) {
+	skill, mod := "python-%d-naming-rules-for-ruff", "technology-python-0001"
+	_, err := composeTree(t, map[string]string{
+		stack.FileName:                                      "apiVersion: qory.dev/v1alpha1\nbind:\n  agents:\n    developer: dev\nmodules:\n  - name: " + mod + "\n    source:\n      path: modules/" + mod + "\n",
+		"modules/" + mod + "/agents/dev.md":                 "---\nname: dev\ndescription: d\n---\n\nWrites.\n",
+		"modules/" + mod + "/skills/" + skill + "/SKILL.md": "---\nname: x\ndescription: s\nnotes_for: tester\npaths: [\"*.py\"]\n---\n\nNotes.\n",
+	})
+	if err == nil {
+		t.Fatal("composed without an error")
+	}
+	if strings.Contains(err.Error(), "%!") {
+		t.Errorf("the refusal has a format error:\n%s", err)
+	}
+	if want := "  The full names are " + skill + " and " + mod + "."; !strings.Contains(err.Error(), want) {
+		t.Errorf("the refusal has no line %q:\n%s", want, err)
+	}
+}
