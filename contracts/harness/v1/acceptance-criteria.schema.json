@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.dev/contracts/harness/v1/acceptance-criteria.schema.json",
+  "title": "The acceptance criteria format, version 1",
+  "description": "The acceptance criteria of a work item: a summary of what the work item must achieve, and the criteria that say when it is achieved, each with the check that shows it. A criterion that is dropped stays in the list, with removed and its reason. The file of a version of a structured artifact type. Each criterion's id is unique in the document, which a JSON Schema cannot check. The file's size limit is the artifact type's, which a JSON Schema cannot check either. No object has a member this schema does not define.",
+  "type": "object",
+  "required": ["summary", "criteria"],
+  "additionalProperties": false,
+  "properties": {
+    "summary": {"description": "What the work item must achieve, in plain text.", "$ref": "#/$defs/short_text"},
+    "criteria": {
+      "description": "Every criterion, in the order they were written, at least one. A removed criterion stays in the list.",
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/criterion"}
+    }
+  },
+  "$defs": {
+    "criterion": {
+      "description": "One criterion: a condition that the finished work item meets, and how to check that it does. removed is present exactly when the criterion is dropped.",
+      "type": "object",
+      "required": ["id", "text", "check"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"description": "The criterion's id, unique in the document: ac- and a number from 1 to 9999 with no leading zero, such as ac-3.", "$ref": "#/$defs/criterion_id"},
+        "text": {"description": "The condition that the finished work item meets, in plain text.", "$ref": "#/$defs/short_text"},
+        "check": {"description": "How to check that the condition is met, as free text: what to look at, run or ask, and what result counts as met.", "$ref": "#/$defs/short_text"},
+        "removed": {"description": "Present when the criterion is dropped from the work item: the reason. The criterion keeps its id and its text.", "$ref": "#/$defs/removed"}
+      }
+    },
+    "removed": {
+      "description": "The mark of a dropped criterion.",
+      "type": "object",
+      "required": ["reason"],
+      "additionalProperties": false,
+      "properties": {
+        "reason": {"description": "Why the criterion is dropped, in plain text.", "$ref": "#/$defs/short_text"}
+      }
+    },
+    "criterion_id": {
+      "description": "A criterion's id: ac- and a number from 1 to 9999 with no leading zero, such as ac-3.",
+      "type": "string",
+      "pattern": "^ac-[1-9][0-9]{0,3}$"
+    },
+    "text": {
+      "description": "Text that may span lines. Tab, line feed and carriage return are its only control characters: it has none of U+0000 to U+0008, U+000B, U+000C, U+000E to U+001F, U+007F and U+0080 to U+009F. It has none of the bidirectional controls, the marks U+061C, U+200E and U+200F, the embeddings and overrides U+202A to U+202E and the isolates U+2066 to U+2069; the separators U+2028 and U+2029; and the format characters U+00AD, U+180E, U+200B, U+2060 to U+2064, U+FEFF and U+FFF9 to U+FFFB.",
+      "type": "string",
+      "pattern": "^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0080-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]*$"
+    },
+    "line": {
+      "description": "Text on one line: text as $defs text defines it, with no control character at all, so no tab, line feed or carriage return.",
+      "type": "string",
+      "pattern": "^[^\u0000-\u001f\u007f\u0080-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]*$"
+    },
+    "short_text": {
+      "description": "A short text, 1 to 2000 characters.",
+      "$ref": "#/$defs/text",
+      "minLength": 1,
+      "maxLength": 2000
+    }
+  }
+}
