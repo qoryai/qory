@@ -164,7 +164,7 @@ func TestACodexFolderQoryCannotKeepWholeIsRefused(t *testing.T) {
 		{"the checksum file", []rt.Entry{program, {Name: vendor + "integrity", Body: "sha512-x"}}, "qory writes its checksum file there"},
 		{"a file twice", []rt.Entry{program, program}, "twice"},
 		{"a file and a folder", []rt.Entry{{Name: vendor + "bin", Body: "x"}, program}, "twice"},
-		{"an empty program", []rt.Entry{{Name: vendor + "bin/codex", Mode: 0o755}}, "has no " + vendor + "bin/codex"},
+		{"an empty program", []rt.Entry{{Name: vendor + "bin/codex", Mode: 0o755}}, "has no\n  " + vendor + "bin/codex"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			npm := rt.StartCodexNpm(t)

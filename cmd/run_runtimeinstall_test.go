@@ -58,6 +58,10 @@ type installSetup struct {
 	during func()
 	// before, when set, runs once the test's folders are made, before the run.
 	before func()
+	// caBundle is the host proxy's CA bundle; empty means none. proxyErr, when not nil,
+	// is the error of each opening of the host proxy.
+	caBundle string
+	proxyErr error
 }
 
 // runInstalling runs qory run claude, or s.runtime, with a run key as s sets it up, with
@@ -99,7 +103,7 @@ func runInstalling(t *testing.T, s installSetup) installRun {
 	program := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", runtime, cmp.Or(s.version, "2.1.320"), "bin", runtime)
 	defer cmd.SetJoinSession(func(s session.SessionSpec) { r.joins = append(r.joins, s) })()
 	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
-		System: proxygittest.Host, Proxy: s.proxy.URL(), Dir: h.runDir,
+		System: proxygittest.Host, Proxy: s.proxy.URL(), CABundle: s.caBundle, ProxyErr: s.proxyErr, Dir: h.runDir,
 		StackProxy: h.server.Stack.URL, StackCABundle: h.server.Stack.CABundle,
 		// A push proxy that takes no connection: the install reads through the host proxy.
 		PushProxy: "http://qory:nowhere@127.0.0.1:9",
@@ -270,10 +274,11 @@ func TestARuntimeTheRegistryNeverHeldEndsTheRunWithItsCause(t *testing.T) {
 	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
-	want := "qory run: the registry has never held claude and could not fetch it: shared/runtimes/claude:newest returned 404\n"
+	want := "qory run: the registry has never held claude and could not fetch it:\n  shared/runtimes/claude:newest returned 404\n"
 	if !strings.Contains(r.out, want) || strings.Contains(r.out, "then run again") {
 		t.Fatalf("the output has no cause line, or has the fix line:\n%s", r.out)
 	}
+	runLinesFit(t, r.out)
 	for _, c := range r.calls {
 		if c == "fetch image" {
 			t.Errorf("the calls: %v, want no image fetch", r.calls)
@@ -355,10 +360,11 @@ func TestATarballThatDoesNotMatchItsChecksumEndsTheRun(t *testing.T) {
 	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
-	want := "qory run: the tarball of claude 2.1.320 does not match the checksum " + rt.Integrity(other)
+	want := "qory run: the tarball of claude 2.1.320 does not match the checksum\n  " + rt.Integrity(other) + "\n"
 	if !strings.Contains(r.out, want) || strings.Contains(r.out, "Check the source") {
 		t.Fatalf("the output has no checksum line:\n%s", r.out)
 	}
+	runLinesFit(t, r.out)
 	if _, err := os.Lstat(filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "claude", "2.1.320")); err == nil {
 		t.Fatal("the version's folder was written")
 	}
@@ -517,8 +523,19 @@ func TestTheApiaryLineOfARunCodeFileWinsOverTheServersURL(t *testing.T) {
 	}
 	t.Chdir(pkg)
 	_, err = runCodeInstalling(t, lines("http://127.0.0.1:1"), proxy, reg.Instance())
-	if err == nil || err.Error() != "the registry's token realm is "+reg.Instance()+"/registry/token,\n  and the instance's token route is http://127.0.0.1:1/registry/token; the code is used" {
+	if err == nil || err.Error() != "the registry's token realm is\n  "+reg.Instance()+"/registry/token,\n  and the instance's token route is http://127.0.0.1:1/registry/token; the code is used" {
 		t.Fatalf("a wrong line: %v", err)
+	}
+}
+
+// runLinesFit fails the test when a line of out that starts with "qory run: " has more
+// than 100 characters.
+func runLinesFit(t *testing.T, out string) {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "qory run: ") && len(line) > 100 {
+			t.Errorf("the line has %d characters: %s", len(line), line)
+		}
 	}
 }
 
@@ -732,6 +749,58 @@ func TestADispatchedRunShowsOnlyTheCauseOfAFailedInstall(t *testing.T) {
 			cause := strings.TrimSuffix(c.cause, ".")
 			wants(t, r.out, "qory run: "+strings.ToLower(cause[:1])+cause[1:]+"\n")
 			lacks(t, r.out, c.fix)
+		})
+	}
+}
+
+// TestADispatchedRunShowsTheCauseOfAOneLineInstallError runs claude with a run key on
+// installs that stop on a state folder qory cannot write, a host proxy's CA bundle with
+// no certificate, and a host proxy that does not open. Each error has a fix line and a
+// cause line, so qory run prints the cause alone, with no fix line. The error of the
+// state folder has the folder's path on its line, which is long in a test's folder.
+func TestADispatchedRunShowsTheCauseOfAOneLineInstallError(t *testing.T) {
+	state := func() string { return filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes") }
+	bundle := filepath.Join(t.TempDir(), "ca.pem")
+	writeFile(t, bundle, "no certificate\n")
+	for _, c := range []struct {
+		name string
+		s    installSetup
+		want func() string
+		fix  string
+		fits bool
+	}{
+		{"a state folder qory cannot write", installSetup{before: func() {
+			if err := os.MkdirAll(state(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(state(), 0o555); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.Chmod(state(), 0o755) })
+		}}, func() string { return "qory run: mkdir " + filepath.Join(state(), "claude") + ": permission denied\n" }, "Check that qory can write", false},
+		{"a CA bundle with no certificate", installSetup{caBundle: bundle},
+			func() string { return "qory run: the run's CA bundle\n  " + bundle + "\n  has no certificate\n" }, "Run again", true},
+		{"a host proxy that does not open", installSetup{proxyErr: errors.New("the run's session is joining")},
+			func() string {
+				return "qory run: the run's host proxy, through which qory installs claude, did not open:\n  the run's session is joining\n"
+			}, "Run again", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if c.s.before != nil && os.Geteuid() == 0 {
+				t.Skip("root writes a folder of mode 0555")
+			}
+			npm := rt.StartNpm(t)
+			npm.Publish("2.1.320")
+			c.s.npm, c.s.proxy = npm, rt.StartProxy(t)
+			r := runInstalling(t, c.s)
+			if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
+				t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+			}
+			wants(t, r.out, c.want())
+			lacks(t, r.out, c.fix)
+			if c.fits {
+				runLinesFit(t, r.out)
+			}
 		})
 	}
 }

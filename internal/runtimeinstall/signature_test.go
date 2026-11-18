@@ -67,7 +67,7 @@ func TestNpmsSignatureIsCheckedBeforeTheInstall(t *testing.T) {
 		{"no signatures", func(string, string) any { return nil }, nil,
 			"Check the source of the runtime's releases\nnpm has no signature of claude 2.1.320"},
 		{"an empty list", func(string, string) any { return []any{} }, nil,
-			"Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: it has no signature"},
+			"Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: it has no signature"},
 		{"a key qory does not have", func(s, i string) any {
 			return []runtimeinstall.Signature{{KeyID: "SHA256:another", Sig: rt.Sign(s + ":" + i)}}
 		}, nil, "Update qory.\nnpm signed claude 2.1.320 with a key that this qory does not have.\nThe key is SHA256:another."},
@@ -81,30 +81,30 @@ func TestNpmsSignatureIsCheckedBeforeTheInstall(t *testing.T) {
 		{"a signature of another checksum", func(s, _ string) any { return sig(s + ":" + rt.Integrity([]byte("another tarball"))) }, nil,
 			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID},
 		{"more than 16 signatures", func(string, string) any { return many }, nil,
-			"Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: it has 17 signatures, and qory reads at most 16"},
+			"Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: it has 17 signatures, and qory reads at most 16"},
 		{"a keyid of more than 128 bytes", func(string, string) any {
 			return []map[string]string{{"keyid": strings.Repeat("k", 129), "sig": "x"}}
-		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 has a keyid of more than 128 bytes"},
+		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has a keyid of more than 128 bytes"},
 		{"a keyid with a line break", func(string, string) any {
 			return []map[string]string{{"keyid": "SHA256:a\nUpdate qory.", "sig": "x"}}
-		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 has a keyid with a control character"},
+		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has a keyid with a control character"},
 		{"a sig of more than 1 KiB", func(string, string) any {
 			return []map[string]string{{"keyid": rt.KeyID, "sig": strings.Repeat("s", 1025)}}
-		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 has a sig of more than 1024 bytes"},
+		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has a sig of more than 1024 bytes"},
 		{"upper-case names", func(s, i string) any {
 			return []map[string]string{{"KEYID": rt.KeyID, "SIG": rt.Sign(s + ":" + i)}}
-		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 has no keyid or no sig"},
+		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has no keyid or no sig"},
 		{"a member twice", func(s, i string) any {
 			return []json.RawMessage{json.RawMessage(`{"keyid":"SHA256:another","keyid":"` + rt.KeyID + `","sig":"` + rt.Sign(s+":"+i) + `"}`)}
-		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 is not an object of keyid and sig"},
+		}, nil, "Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 is not an object of keyid and sig"},
 		{"no sig", func(string, string) any { return []map[string]string{{"keyid": rt.KeyID}} }, nil,
-			"Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 has no keyid or no sig"},
+			"Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has no keyid or no sig"},
 		{"an empty keyid", func(string, string) any { return []map[string]string{{"keyid": "", "sig": "x"}} }, nil,
-			"Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 has no keyid or no sig"},
+			"Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has no keyid or no sig"},
 		{"a keyid that is no string", func(string, string) any { return []map[string]any{{"keyid": 1, "sig": "x"}} }, nil,
-			"Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: its signature 1 is not an object of keyid and sig"},
+			"Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 is not an object of keyid and sig"},
 		{"no list", func(string, string) any { return map[string]string{"keyid": rt.KeyID} }, nil,
-			"Check the source of the runtime's releases\nThe dist.signatures of " + what + " are not npm's signatures: it is not a JSON array"},
+			"Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: it is not a JSON array"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			npm := rt.StartNpm(t)
@@ -159,8 +159,8 @@ func TestNpmsSignatureVerifies(t *testing.T) {
 // fix for the cache; the signature, with the fix for the source of the releases.
 func TestTheRegistrysSignaturesAreReadStrictly(t *testing.T) {
 	const cache = "Ask Qory Apiary's instance admin to check the registry's runtime cache\n" +
-		"The manifest of claude 2.1.320 for linux/amd64 is not a runtime's: "
-	const bad = "its layer's dev.qory.runtime.signatures is not npm's signatures: "
+		"The manifest of claude 2.1.320 for linux/amd64 is not a runtime's:\n  "
+	const bad = "its layer's dev.qory.runtime.signatures is not npm's signatures:\n  "
 	text := func(v any) *string {
 		b, _ := json.Marshal(v)
 		s := string(b)

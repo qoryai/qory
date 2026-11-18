@@ -184,13 +184,13 @@ func TestInstallRefuses(t *testing.T) {
 	}{
 		{"wrong integrity", func(t *testing.T, s *rt.Source) {
 			s.PublishWith("2.1.320", rt.PlainTarball(t, "2.1.320"), rt.Integrity([]byte("another tarball")))
-		}, "Check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum sha512-"},
+		}, "Check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum\n  sha512-"},
 		{"tarball changed after its checksum", func(t *testing.T, s *rt.Source) {
 			good := rt.PlainTarball(t, "2.1.320")
 			bad := bytes.Clone(good)
 			bad[len(bad)/2] ^= 0xff
 			s.PublishWith("2.1.320", bad, rt.Integrity(good))
-		}, "The tarball of claude 2.1.320 does not match the checksum "},
+		}, "The tarball of claude 2.1.320 does not match the checksum\n  "},
 		{"checksum not sha512", func(t *testing.T, s *rt.Source) {
 			s.PublishWith("2.1.320", rt.PlainTarball(t, "2.1.320"), "sha1-AAAA")
 		}, "The checksum of claude 2.1.320 is not sha512- and 64 bytes in base64"},
@@ -202,10 +202,10 @@ func TestInstallRefuses(t *testing.T) {
 		}, "The newest claude has the version \"2/../../x\""},
 		{"program is a symbolic link", func(t *testing.T, s *rt.Source) {
 			s.Publish("2.1.320", rt.Tarball(t, rt.Entry{Name: "package/claude", Kind: tar.TypeSymlink, Link: "/bin/sh"}))
-		}, "has package/claude as another kind of entry than a regular file"},
+		}, "has package/claude\n  as another kind of entry than a regular file"},
 		{"program is a hard link", func(t *testing.T, s *rt.Source) {
 			s.Publish("2.1.320", rt.Tarball(t, rt.Entry{Name: "package/x", Body: "x"}, rt.Entry{Name: "package/claude", Kind: tar.TypeLink, Link: "package/x"}))
-		}, "has package/claude as another kind of entry than a regular file"},
+		}, "has package/claude\n  as another kind of entry than a regular file"},
 		{"program twice", func(t *testing.T, s *rt.Source) {
 			s.Publish("2.1.320", rt.Tarball(t, rt.Entry{Name: "package/claude", Body: "a"}, rt.Entry{Name: "package/claude", Body: "b"}))
 		}, "has package/claude twice"},

@@ -111,8 +111,12 @@ release may change what an existing document does, and states it under Upgrading
   advises a person who runs qory. A person's run prints the fix line, then the cause. The
   refusals of a registry's token realm state the cause in full: `The pool's forager.yaml
   sets no gateway.server.url, so qory cannot check the registry's token realm <realm>.`
-  and `The registry's token realm is <realm>, and the instance's token route is
-  <url>/registry/token.`
+  and `The registry's token realm is`, then `<realm>,` and `and the instance's token
+  route is <url>/registry/token.` on indented lines. A long value in a cause, such as a
+  URL, a checksum or a path in a tarball, is on an indented line of its own. An install
+  error that was one line, such as `Run again: the run's host proxy has no http URL`, has
+  a fix line and a cause line, so a run from a run key or a run code prints only `the run's
+  host proxy has no http URL`.
 - Every install of a runtime checks npm's signature of the version before it reads the
   tarball, with npm's public keys built into qory: from npm, `dist.signatures`; from a
   registry's runtime cache, the layer's annotation `dev.qory.runtime.signatures`. A

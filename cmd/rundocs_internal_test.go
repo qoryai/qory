@@ -853,17 +853,17 @@ func TestCauseOnlyDropsTheFixLine(t *testing.T) {
 }
 
 // TestCauseOnlySplitsALongRealmLine is causeOnly on the two refusals of a registry's
-// token realm, with an address of 56 characters: a dispatched run shows the cause, whose
-// first line, with "qory run: ", has at most 100 characters, the words after its first
-// comma on an indented line. A short cause stays on one line. The realm is on the first
-// line, so a realm of more than 59 characters makes that line longer than 100.
+// token realm, with an address of 200 characters: a dispatched run shows the cause, whose
+// first line, with "qory run: ", has at most 100 characters. The first refusal goes on
+// after its first comma, on an indented line; the second has the realm on an indented
+// line of its own. A short cause stays on one line.
 func TestCauseOnlySplitsALongRealmLine(t *testing.T) {
-	long := "https://apiary-" + strings.Repeat("a", 14) + ".example.com/registry/token"
+	long := "https://apiary-" + strings.Repeat("a", 158) + ".example.com/registry/token"
 	for _, c := range []struct{ err, want string }{
 		{"Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe pool's forager.yaml sets no gateway.server.url, so qory cannot check the registry's token realm " + long + ".",
 			"the pool's forager.yaml sets no gateway.server.url,\n  so qory cannot check the registry's token realm " + long},
-		{"Ask Qory Apiary's instance admin to put the registry's token realm at " + long + "\nThe registry's token realm is " + long + "x, and the instance's token route is " + long + ".",
-			"the registry's token realm is " + long + "x,\n  and the instance's token route is " + long},
+		{"Ask Qory Apiary's instance admin to put the registry's token realm at " + long + "\nThe registry's token realm is\n  " + long + "x,\n  and the instance's token route is " + long + ".",
+			"the registry's token realm is\n  " + long + "x,\n  and the instance's token route is " + long},
 		{"Run again\nA short cause, on one line.", "a short cause, on one line"},
 	} {
 		got := causeOnly(errors.New(c.err)).Error()

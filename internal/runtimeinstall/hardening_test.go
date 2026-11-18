@@ -104,7 +104,7 @@ func TestAWaitingInstallEndsWithTheRun(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Keys: rt.Keys(), Fetch: in.src.Fetch, Runtime: "claude", Folder: in.folder})
-	if err == nil || !strings.HasPrefix(err.Error(), "Run again with more time\nThe run ended while another run installed claude 2.1.320: ") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Run again with more time\nThe run ended while another run installed claude 2.1.320:\n  ") {
 		t.Fatalf("err = %v", err)
 	}
 	close(release)
@@ -260,7 +260,7 @@ func TestAResponseThatStopsSendingEndsTheInstall(t *testing.T) {
 		{"dist-tags", npm("tags"), func(u string) runtimeinstall.Fetch { return runtimeinstall.NpmFetch(http.DefaultClient, u, "amd64") },
 			"Run again\nThe read of the dist-tags of @anthropic-ai/claude-code from "},
 		{"tarball", npm(""), func(u string) runtimeinstall.Fetch { return runtimeinstall.NpmFetch(http.DefaultClient, u, "amd64") },
-			"Run again\nThe download of claude 2.1.320 stopped: the response sent no byte for 200ms"},
+			"Run again\nThe download of claude 2.1.320 stopped:\n  the response sent no byte for 200ms"},
 		{"manifest", func(w http.ResponseWriter, _ *http.Request, stall func()) bool {
 			_, _ = io.WriteString(w, `{"sche`)
 			stall()

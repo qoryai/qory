@@ -85,7 +85,7 @@ func RegistryFetch(client *http.Client, host, arch, instance string) Fetch {
 			return Release{}, fmt.Errorf("Run on an amd64 or arm64 machine\nThe registry has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
 		}
 		if _, ok := npmPackages[runtime]; !ok {
-			return Release{}, fmt.Errorf("Install %s some other way: qory installs only %s", runtime, strings.Join(Runtimes(), " and "))
+			return Release{}, fmt.Errorf("Install %s some other way\nqory installs only %s", runtime, strings.Join(Runtimes(), " and "))
 		}
 		r := &registry{client: client, host: host, instance: instance, runtime: runtime, repository: "shared/runtimes/" + runtime}
 		rel, err := r.resolve(ctx, arch)
@@ -163,14 +163,14 @@ func (r *registry) resolve(ctx context.Context, arch string) (Release, error) {
 	var status *statusError
 	if errors.As(err, &status) && status.status == http.StatusNotFound {
 		return Release{}, &notCachedError{text: fmt.Sprintf("Check that the instance's registry reaches the publisher of %s, then run again\n"+
-			"The registry has never held %s and could not fetch it: %s.", r.runtime, r.runtime, status)}
+			"The registry has never held %s and could not fetch it:\n  %s.", r.runtime, r.runtime, status)}
 	}
 	if err != nil {
 		return Release{}, err
 	}
 	index, err := decode(body, mediaIndex)
 	if err != nil {
-		return Release{}, fmt.Errorf(textCache+"%s:%s is not a runtime's image index: %w", r.repository, newestTag, err)
+		return Release{}, fmt.Errorf(textCache+"%s:%s is not a runtime's image index:\n  %w", r.repository, newestTag, err)
 	}
 	version := index.Annotations[annotVersion]
 	if !versionShape.MatchString(version) {
@@ -232,11 +232,11 @@ func (r *registry) platformLayer(ctx context.Context, entry descriptor, version,
 	}
 	m, err := decode(body, mediaManifest)
 	if err != nil {
-		return descriptor{}, nil, fmt.Errorf(textCache+"%s is not a runtime's: %w", upper(what), err)
+		return descriptor{}, nil, fmt.Errorf(textCache+"%s is not a runtime's:\n  %w", upper(what), err)
 	}
 	layer, sigs, err := runtimeLayer(m, version)
 	if err != nil {
-		return descriptor{}, nil, fmt.Errorf(textCache+"%s is not a runtime's: %w", upper(what), err)
+		return descriptor{}, nil, fmt.Errorf(textCache+"%s is not a runtime's:\n  %w", upper(what), err)
 	}
 	return layer, sigs, nil
 }
@@ -270,7 +270,7 @@ func runtimeLayer(m manifest, version string) (descriptor, []Signature, error) {
 	}
 	sigs, err := decodeSignatures([]byte(l.Annotations[annotSignatures]), true)
 	if err != nil {
-		return descriptor{}, nil, fmt.Errorf("its layer's %s is not npm's signatures: %w", annotSignatures, err)
+		return descriptor{}, nil, fmt.Errorf("its layer's %s is not npm's signatures:\n  %w", annotSignatures, err)
 	}
 	return l, sigs, nil
 }
@@ -516,9 +516,9 @@ func (r *registry) refused(what string, status int, location string) error {
 // failed is the error of the request what that got no response.
 func (r *registry) failed(what string, err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("Run again with more time\nThe run ended before the registry at %s returned %s: %w", r.host, what, err)
+		return fmt.Errorf("Run again with more time\nThe run ended before the registry at %s returned\n  %s: %w", r.host, what, err)
 	}
-	return fmt.Errorf("Check that the run's proxy reaches the registry at %s\n%s failed: %w", r.host, what, err)
+	return fmt.Errorf("Check that the run's proxy reaches the registry at %s\n%s failed:\n  %w", r.host, what, err)
 }
 
 // tokenFor gets a pull token for the repository from the realm of the first Bearer
@@ -545,7 +545,7 @@ func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, e
 		return "", err
 	}
 	if !sameRoute(realm, want) {
-		return "", fmt.Errorf("Ask Qory Apiary's instance admin to put the registry's token realm at %s\nThe registry's token realm is %s, and the instance's token route is %s.", want.Redacted(), realm.Redacted(), want.Redacted())
+		return "", fmt.Errorf("Ask Qory Apiary's instance admin to put the registry's token realm at %s\nThe registry's token realm is\n  %s,\n  and the instance's token route is %s.", want.Redacted(), realm.Redacted(), want.Redacted())
 	}
 	// The request is to the instance's token route, with the service and the scope alone:
 	// nothing else of the realm, such as its query or fragment, goes with it.
@@ -724,22 +724,22 @@ func refusedConnect(err error) bool { return connectRefusal(err) != nil }
 func ProxyClient(proxyURL, caBundle string) (*http.Client, error) {
 	u, err := url.Parse(proxyURL)
 	if err != nil || u.Scheme != "http" || u.Host == "" {
-		return nil, errors.New("Run again: the run's host proxy has no http URL")
+		return nil, errors.New("Run again\nThe run's host proxy has no http URL")
 	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if caBundle != "" {
 		f, err := os.Open(caBundle)
 		if err != nil {
-			return nil, fmt.Errorf("Run again: the run's CA bundle cannot be read: %w", err)
+			return nil, fmt.Errorf("Run again\nThe run's CA bundle cannot be read: %w", err)
 		}
 		pem, err := io.ReadAll(io.LimitReader(f, maxBundle))
 		f.Close()
 		if err != nil {
-			return nil, fmt.Errorf("Run again: the run's CA bundle cannot be read: %w", err)
+			return nil, fmt.Errorf("Run again\nThe run's CA bundle cannot be read: %w", err)
 		}
 		roots := x509.NewCertPool()
 		if !roots.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("Run again: the run's CA bundle %s has no certificate", caBundle)
+			return nil, fmt.Errorf("Run again\nThe run's CA bundle\n  %s\n  has no certificate", caBundle)
 		}
 		tlsConfig.RootCAs = roots
 	}

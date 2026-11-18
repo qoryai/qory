@@ -77,7 +77,7 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 	return func(ctx context.Context, runtime string) (Release, error) {
 		pkg, ok := npmPackages[runtime]
 		if !ok {
-			return Release{}, fmt.Errorf("Install %s some other way: qory installs only %s from npm", runtime, strings.Join(Runtimes(), " and "))
+			return Release{}, fmt.Errorf("Install %s some other way\nqory installs only %s from npm", runtime, strings.Join(Runtimes(), " and "))
 		}
 		cpu, ok := npmCPU[arch]
 		if !ok {
@@ -85,7 +85,7 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 		}
 		root, err := url.Parse(strings.TrimSuffix(base, "/"))
 		if err != nil || root.Host == "" || root.Scheme != "https" && !(root.Scheme == "http" && loopback(root.Hostname())) {
-			return Release{}, fmt.Errorf("Set the npm registry to an https URL: %q is not one", base)
+			return Release{}, fmt.Errorf("Set the npm registry to an https URL\n%q is not one", base)
 		}
 		n := &npm{client: sameHost(client, root), root: root, runtime: runtime}
 		var tags map[string]string
@@ -121,7 +121,7 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 		var sigs []Signature
 		if len(doc.Dist.Signatures) > 0 && string(doc.Dist.Signatures) != "null" {
 			if sigs, err = decodeSignatures(doc.Dist.Signatures, false); err != nil {
-				return Release{}, fmt.Errorf(textRelease+"The dist.signatures of %s are not npm's signatures: %v", what, err)
+				return Release{}, fmt.Errorf(textRelease+"The dist.signatures of %s\n  are not npm's signatures: %v", what, err)
 			}
 		}
 		rel := Release{
@@ -158,7 +158,7 @@ func (n *npm) document(ctx context.Context, path string, limit int64, what strin
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return fmt.Errorf("Run again\nThe read of %s from %s stopped: %w", what, n.root.Host, err)
+		return fmt.Errorf("Run again\nThe read of %s from %s stopped:\n  %w", what, n.root.Host, err)
 	}
 	if int64(len(body)) > limit {
 		return fmt.Errorf(textRelease+"%s has more than %d bytes", upper(what), limit)
@@ -175,7 +175,7 @@ func (n *npm) document(ctx context.Context, path string, limit int64, what strin
 func (n *npm) get(ctx context.Context, u, accept, what string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, fmt.Errorf(textRelease+"%s has no URL qory can request: %w", upper(what), err)
+		return nil, fmt.Errorf(textRelease+"%s has no URL qory can request:\n  %w", upper(what), err)
 	}
 	if accept != "" {
 		req.Header.Set("Accept", accept)
@@ -183,11 +183,11 @@ func (n *npm) get(ctx context.Context, u, accept, what string) (*http.Response, 
 	resp, err := send(n.client, req)
 	switch {
 	case err != nil && ctx.Err() != nil:
-		return nil, fmt.Errorf("Run again with more time\nThe run ended before %s returned %s: %w", n.root.Host, what, err)
+		return nil, fmt.Errorf("Run again with more time\nThe run ended before %s returned\n  %s: %w", n.root.Host, what, err)
 	case refusedConnect(err):
 		return nil, n.noRegistry(connectRefusal(err))
 	case err != nil:
-		return nil, fmt.Errorf("Check that this machine reaches %s\nThe request of %s failed: %w", n.root.Host, what, err)
+		return nil, fmt.Errorf("Check that this machine reaches %s\nThe request of %s failed:\n  %w", n.root.Host, what, err)
 	case resp.StatusCode == http.StatusOK:
 		return resp, nil
 	}

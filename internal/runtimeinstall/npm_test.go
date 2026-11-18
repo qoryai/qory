@@ -107,7 +107,7 @@ func TestTheNpmFetchRefuses(t *testing.T) {
 				n.PublishWith("x64", "2.1.320", rt.PlainTarball(t, "2.1.320"), rt.Integrity(other), "")
 				n.SetLatest("2.1.320")
 			},
-			want:     "Check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum " + rt.Integrity(other),
+			want:     "Check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum\n  " + rt.Integrity(other),
 			tarballs: 1,
 		},
 		{
@@ -132,7 +132,7 @@ func TestTheNpmFetchRefuses(t *testing.T) {
 		{
 			name: "registry over http off loopback",
 			base: "http://registry.example",
-			want: "Set the npm registry to an https URL: \"http://registry.example\" is not one",
+			want: "Set the npm registry to an https URL\n\"http://registry.example\" is not one",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {

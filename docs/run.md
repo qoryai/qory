@@ -917,7 +917,8 @@ for example:
 
 ```text
 qory run: Run again
-The download of claude 2.1.320 stopped: the response sent no byte for 1m0s
+The download of claude 2.1.320 stopped:
+  the response sent no byte for 1m0s
 ```
 
 From the registry, with a token for `repository:shared/runtimes/<runtime>:pull`, `qory
@@ -972,15 +973,16 @@ path stops the run with:
 
 ```text
 qory run: Ask Qory Apiary's instance admin to put the registry's token realm at https://apiary.example.com/registry/token
-The registry's token realm is https://registry.example.com/registry/token, and the instance's token route is https://apiary.example.com/registry/token.
+The registry's token realm is
+  https://registry.example.com/registry/token,
+  and the instance's token route is https://apiary.example.com/registry/token.
 ```
 
-A run from a run key or a run code prints the second line alone, and when that line is
-longer than 100 characters with `qory run: `, it goes on after its first comma on an
-indented line:
+A run from a run key or a run code prints the lines after the first alone:
 
 ```text
-qory run: the registry's token realm is https://registry.example.com/registry/token,
+qory run: the registry's token realm is
+  https://registry.example.com/registry/token,
   and the instance's token route is https://apiary.example.com/registry/token
 ```
 
@@ -991,6 +993,15 @@ qory run: Set gateway.server.url in forager.yaml to the address of Qory Apiary
 The pool's forager.yaml sets no gateway.server.url, so qory cannot check the registry's token realm https://apiary.example.com/registry/token.
 ```
 
+A run from a run key or a run code prints the second line alone, and when that line is
+longer than 100 characters with `qory run: `, it goes on after its first comma on an
+indented line:
+
+```text
+qory run: the pool's forager.yaml sets no gateway.server.url,
+  so qory cannot check the registry's token realm https://apiary.example.com/registry/token
+```
+
 A run that starts from a run key has no `gateway.server` section in the `forager.yaml`
 it reads, so it stops there when its `pool.registry` or run code sets a registry. Any
 other status stops the run at once. A registry whose cache never held the runtime
@@ -998,6 +1009,8 @@ stops the run with:
 
 ```text
 qory run: Check that the instance's registry reaches the publisher of claude, then run again
+The registry has never held claude and could not fetch it:
+  shared/runtimes/claude:newest returned 404.
 ```
 
 From npm, `qory run` reads, in this order, for Claude Code:
@@ -1132,13 +1145,20 @@ qory run: installed claude 2.1.320
 If the install fails, no session starts and `qory run` exits 1 with the error, whose first
 line is the fix; a run with a control plane closes `failed` with -1. A run from a run key
 or a run code, which Qory Apiary started, prints the cause alone, with no fix line, its
-first letter in lower case: `qory run: the tarball of claude 2.1.320 does not match the
-checksum sha512-<checksum>`. A tarball that does not match its sha512 checksum stops a
-person's run with:
+first letter in lower case. A long value in a cause, such as a URL, a checksum or a path
+in a tarball, is on an indented line of its own:
+
+```text
+qory run: the tarball of claude 2.1.320 does not match the checksum
+  sha512-<checksum>
+```
+
+A tarball that does not match its sha512 checksum stops a person's run with:
 
 ```text
 qory run: Check the source of the runtime's releases
-The tarball of claude 2.1.320 does not match the checksum sha512-<checksum>
+The tarball of claude 2.1.320 does not match the checksum
+  sha512-<checksum>
 ```
 
 A version's folder that was not installed from the tarball with the release's checksum
