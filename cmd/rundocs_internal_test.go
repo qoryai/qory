@@ -697,7 +697,7 @@ func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
 	if len(headless) < 3 || headlessList() != strings.Join(headless[:len(headless)-1], ", ")+", and "+headless[len(headless)-1] {
 		t.Errorf("the list is %q, the headless runtimes %q", headlessList(), headless)
 	}
-	want := "Set `runtime` in the run settings to one of " + headlessList() + ".\n  The document names no runtime."
+	want := "The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of " + headlessList() + "."
 	for name, settings := range map[string]*contracts.RunSettings{"no run settings": nil, "no runtime": {Model: "opus"}} {
 		_, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: settings})
 		if err == nil || err.Error() != want || ExitCode(err) != 1 {

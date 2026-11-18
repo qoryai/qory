@@ -566,8 +566,9 @@ release may change what an existing document does, and states it under Upgrading
 ### Changed
 
 - A run from a run code whose explore documents contain no `run_settings` stops before
-  anything is installed or fetched, with ``Set `runtime` in the run settings to one of
-  claude, codex, cursor, gemini, and opencode.`` Until now, such a run started on
+  anything is installed or fetched, with `The run settings set no runtime, so the run
+  did not start; the code is used.` and `qory runs one of claude, codex, cursor, gemini,
+  and opencode.` Until now, such a run started on
   `claude`. Explore documents start an agent session, so they require `run_settings`
   with a `runtime`. Documents whose `run_settings` are null, or have no `runtime` or an
   empty one, stop with the same line, where they stopped with `it breaks

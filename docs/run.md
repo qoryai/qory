@@ -2309,8 +2309,8 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   the code was redeemed
 - `set a workflow for the workspace in Qory Apiary, then take the work item in again: the
   response to the run code has no workflow; the code is used`
-- ``Set `runtime` in the run settings to one of claude, codex, cursor, gemini, and
-  opencode.`` and the next line ``The document names no runtime.``, when the documents
+- `The run settings set no runtime, so the run did not start; the code is used.` and the
+  next line `qory runs one of claude, codex, cursor, gemini, and opencode.`, when the documents
   contain no `run_settings`, a null one, or `run_settings` with no `runtime` or an empty
   one, before anything is installed or fetched. Documents of the step explore start an
   agent session, so they require `run_settings` with a `runtime`; qory checks for them

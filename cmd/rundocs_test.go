@@ -105,7 +105,7 @@ func TestARunCodeTakesNoStackRuntimeOrArguments(t *testing.T) {
 // run settings, run settings with no runtime, or an empty one), a runtime with no
 // headless start, and a runtime qory does not render.
 // Each stops the run after the one redemption, before it opens, with a line that starts
-// with its fix and, except for no runtime, ends "; the code is used": exit 2 for an
+// with its fix and ends "; the code is used", on line 1 for no runtime: exit 2 for an
 // answer with no documents, which Forager refuses, and exit 1 for the rest.
 func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 	const checks = "update qory, or ask Qory Apiary's instance admin: the response to the run code does not pass qory's checks: "
@@ -138,13 +138,13 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 			d["stack"], d["stack_reference"] = "core", "https://code.example.com/team/stacks#release-7:core"
 		}), broken},
 		{"no run settings", codeDocuments(t, func(d map[string]any) { delete(d, "run_settings") }),
-			"Set `runtime` in the run settings to one of " + headlessRuntimes + ".\n  The document names no runtime."},
+			"The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of " + headlessRuntimes + "."},
 		{"null run settings", codeDocuments(t, func(d map[string]any) { d["run_settings"] = nil }),
-			"Set `runtime` in the run settings to one of " + headlessRuntimes + ".\n  The document names no runtime."},
+			"The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of " + headlessRuntimes + "."},
 		{"run settings with no runtime", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"model": "opus"} }),
-			"Set `runtime` in the run settings to one of " + headlessRuntimes + ".\n  The document names no runtime."},
+			"The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of " + headlessRuntimes + "."},
 		{"run settings with an empty runtime", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": ""} }),
-			"Set `runtime` in the run settings to one of " + headlessRuntimes + ".\n  The document names no runtime."},
+			"The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of " + headlessRuntimes + "."},
 		{"a runtime with no headless start", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "goose"} }),
 			"set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for goose; the code is used"},
 		{"a runtime qory does not render", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "example"} }),

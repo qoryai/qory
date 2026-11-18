@@ -145,7 +145,7 @@ const harnessFile = "harness.yaml"
 // codeDocumentsOf reads documents, the documents of the answer to a run code, for a
 // step qory runs: explore, which [codeRunOf] reads further, or prebuild, which
 // [runCodePrebuild] runs. Each error is exit 1. Each ends with [codeUsed], except
-// [textNoRuntime]: explore documents start an agent session, so they require run
+// [textNoRuntime], whose first line ends with it: explore documents start an agent session, so they require run
 // settings with a runtime, and documents with no run settings, or run settings with no
 // runtime, get that refusal before the schema check, see [lacksRuntime].
 func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
@@ -163,9 +163,9 @@ func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
 }
 
 // codeRunOf reads doc, the documents of the answer to a run code for the step explore.
-// Each error but [textNoRuntime] ends with [codeUsed]: a source of the harness document
-// that qory does not fetch is an input error, see [harnessChecked], and every other error
-// is exit 1.
+// Each error ends with [codeUsed], [textNoRuntime] on its first line: a source of the
+// harness document that qory does not fetch is an input error, see [harnessChecked], and
+// every other error is exit 1.
 func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Workflow == "" {
 		return nil, errors.New("set a workflow for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no workflow" + codeUsed)
@@ -701,8 +701,9 @@ func (r *codeRun) harnessAt(system string) string {
 }
 
 // textNoRuntime is the refusal of documents whose run settings name no runtime, with the
-// runtimes that qory starts headless, see [headlessList].
-const textNoRuntime = "Set `runtime` in the run settings to one of %s.\n  The document names no runtime."
+// runtimes that qory starts headless, see [headlessList]. Its first line ends with
+// [codeUsed] and a full stop.
+const textNoRuntime = "The run settings set no runtime, so the run did not start" + codeUsed + ".\n  qory runs one of %s."
 
 // noRuntime is the error of explore documents with no run settings, or with run
 // settings that set no runtime. It is exit 1.
