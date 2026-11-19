@@ -231,7 +231,7 @@ func TestAReviewerWithNoValidReportIsABlockingFinding(t *testing.T) {
 			if len(got) != 1 || got[0].Severity != Blocking || got[0].ID != "f1" {
 				t.Fatalf("the findings are %+v", got)
 			}
-			if !strings.HasPrefix(got[0].Point, c.point) || got[0].Fix != "Change nothing for this finding: the next round runs reviewer code-reviewer again." {
+			if !strings.HasPrefix(got[0].Point, c.point) || got[0].Fix != "" {
 				t.Errorf("the finding is %+v, want a point that starts %q", got[0], c.point)
 			}
 			if len(d.Points) != 1 || d.Points[0].Text != got[0].Point {

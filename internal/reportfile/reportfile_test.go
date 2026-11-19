@@ -2,6 +2,7 @@ package reportfile
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,6 +125,10 @@ func TestErrorStartsWithItsFix(t *testing.T) {
 	unreadable := &Error{Path: "/r", Cause: Unreadable, Err: errors.New("permission denied\nmore")}
 	if unreadable.What() != "cannot be read: permission denied" {
 		t.Errorf("an unreadable file: %q", unreadable.What())
+	}
+	withPath := &Error{Path: "/r", Cause: Unreadable, Err: &fs.PathError{Op: "open", Path: "/home/person/reports/report.json", Err: fs.ErrPermission}}
+	if withPath.What() != "cannot be read: permission denied" {
+		t.Errorf("an unreadable file has the path in its cause: %q", withPath.What())
 	}
 }
 

@@ -61,7 +61,14 @@ func (e *Error) What() string {
 		return "is no absolute, clean path"
 	default:
 		if e.Err != nil {
-			return "cannot be read: " + firstLine(e.Err.Error())
+			// The cause alone: a *fs.PathError's text has the path, which a point that
+			// leaves this machine must not have.
+			cause := e.Err
+			var pathErr *fs.PathError
+			if errors.As(cause, &pathErr) {
+				cause = pathErr.Err
+			}
+			return "cannot be read: " + firstLine(cause.Error())
 		}
 		return "cannot be read"
 	}

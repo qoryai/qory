@@ -73,12 +73,11 @@ const (
 	textNoSuite     = "The full suite has no result for the reviewed commit."
 	textNoPoint     = "A finding of %s has a point with no readable text."
 	textMore        = "The review has %d more open findings than these points list."
-	fixReviewer     = "Change nothing for this finding: the next round runs reviewer %s again."
 )
 
 // Finding is one finding of a reviewer, as its report has it and open-findings.json carries
 // it: the id that qory gives it, its severity and its point, and the members the reviewer
-// wrote. A finding that qory writes has id, severity, point and fix.
+// wrote. A finding that qory writes has id, severity and point.
 type Finding struct {
 	ID       string `json:"id"`
 	Severity string `json:"severity"`
@@ -254,7 +253,7 @@ func suiteOutcome(s *Suite) (*Finding, bool) {
 // missing or invalid.
 func reviewerFindings(one Reviewer, ids *numbering) []Finding {
 	written := func(point string) []Finding {
-		return []Finding{{ID: ids.fresh(), Severity: Blocking, Point: point, Fix: fmt.Sprintf(fixReviewer, one.Name)}}
+		return []Finding{{ID: ids.fresh(), Severity: Blocking, Point: point}}
 	}
 	switch one.Ended {
 	case Failed:
