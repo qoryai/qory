@@ -575,6 +575,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- Three texts name what each key is. `qory run pool` with a key not enrolled for a pool
+  stops with `Enrol an access key with a code made for the pool: this machine's access key
+  was not enrolled for a pool.` A git source over ssh in a run from a control plane stops
+  with the cause `ssh would sign in with your private keys in ~/.ssh, outside the
+  gateway.` The help of `qory access-key enrol` says "this machine's access key".
 - A push that landed with no version stored, and a push that fails as a branch that moved,
   give one way out in the line of `qory run`: `delete branch qory/<work item id> of <path>
   on <system>`. Deleting it loses the commits on that branch that no version has. The next

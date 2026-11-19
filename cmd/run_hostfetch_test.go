@@ -234,7 +234,7 @@ func TestARunStopsOnAFailedHostFetch(t *testing.T) {
 			return "qory run: check that " + h.server.URL("acme/harness") + " has the branch, tag or commit gone and that gateway.stack_hosts in the gateway's forager.yaml or the run configuration's stack_hosts lists git.test, and, for a private repository, that the run configuration has a harness credential whose hosts and paths include the repository. The fetch through the run's stack proxy failed: " + h.server.URL("acme/harness") + " has no branch or tag gone\n"
 		}, 2, nil, true},
 		{"scheme", "acme/shop", "git@github.com:example-org/harness.git", "main", func(*hostFetch) string {
-			return "qory run: use an https URL for git@github.com:example-org/harness.git in qory.yaml, such as https://github.com/example-org/harness. A run from a control plane fetches git sources only over https, through the run's gateway; ssh would use this machine's keys.\n"
+			return "qory run: use an https URL for git@github.com:example-org/harness.git in qory.yaml, such as https://github.com/example-org/harness. A run from a control plane fetches git sources only over https, through the run's gateway; ssh would sign in with your private keys in ~/.ssh, outside the gateway.\n"
 		}, 2, nil, true},
 		{"proxy in the working folder", "acme/shop", "", "main", func(*hostFetch) string {
 			return "qory run: start the run in a new empty folder or a new empty git working tree: the working folder's repository has a remote already, and qory fetches the run's repository only into a repository with no remote\n"

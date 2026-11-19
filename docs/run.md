@@ -186,8 +186,8 @@ compose:
   exit 2. A URL with a user part or an `@` between `://` and the first `/` after it, a
   host with a character outside ASCII, or a URL that qory cannot read stops it too, exit
   2, before the source is fetched.
-- `qory run` reads no `git` or `env` key of the checkout's `qory.yaml`, and no machine key
-  under `harness` such as `model` or `launch`, as under `extends`.
+- `qory run` reads no `git` or `env` key of the checkout's `qory.yaml`, and no machine
+  harness setting, such as `model` or `launch`, as under `extends`.
 - The harness report of an earlier compose, such as `.qory/harness-report.json`, is not
   read: the compose pins no git source to a commit that the report lists, removes no link
   that it lists, and adds none of its replaced paths to the new report.
@@ -1716,8 +1716,8 @@ A run given a run key starts Claude Code with `--setting-sources user`,
 `--strict-mcp-config` and `--mcp-config` with the harness's MCP list, or an empty one when
 the harness has none: Claude Code reads no settings of the checkout's `.claude` and no
 `.mcp.json`, and loads no MCP server but those `--mcp-config` names. Other runtimes get
-none of these flags. For any runtime, a run given a run key reads no `git`, `env` or
-machine key under `harness`, such as `launch` or `home`, from the checkout's `qory.yaml`:
+none of these flags. For any runtime, a run given a run key reads no `git` or `env` key
+and no machine harness setting, such as `launch` or `home`, from the checkout's `qory.yaml`:
 your `qory.yaml` and the files above the checkout set those. Without a wall, Claude Code
 reads the settings, `CLAUDE.md`, plugins and memory of the user running qory, as
 `--setting-sources user` reads them. Behind a wall, `CLAUDE_CONFIG_DIR` is

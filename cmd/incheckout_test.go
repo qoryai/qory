@@ -215,8 +215,8 @@ func TestARunKeyFetchesGitSourcesOverHTTPSOnly(t *testing.T) {
 	for _, c := range []struct{ name, url, why string }{
 		{"a local path", local, cause + local + " is a folder of this machine."},
 		{"a file URL", "file://" + local, cause + "file://" + local + " is a folder of this machine."},
-		{"an ssh URL", "ssh://git@example.com/acme/h.git", ", such as https://example.com/acme/h" + cause + "ssh would use this machine's keys."},
-		{"the scp form", "git@example.com:acme/h.git", ", such as https://example.com/acme/h" + cause + "ssh would use this machine's keys."},
+		{"an ssh URL", "ssh://git@example.com/acme/h.git", ", such as https://example.com/acme/h" + cause + "ssh would sign in with your private keys in ~/.ssh, outside the gateway."},
+		{"the scp form", "git@example.com:acme/h.git", ", such as https://example.com/acme/h" + cause + "ssh would sign in with your private keys in ~/.ssh, outside the gateway."},
 		{"a git URL", "git://example.com/acme/h.git", ", such as https://example.com/acme/h" + cause + "git:// would reach the host past the gateway."},
 	} {
 		writeOwnStack(t, root, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: extra\n    source: {git: \""+c.url+"\", ref: main}\n")

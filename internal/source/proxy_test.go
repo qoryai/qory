@@ -80,8 +80,8 @@ func TestResolveGitThroughTheHostProxyFails(t *testing.T) {
 	}
 	before := s.Tunnels() + s.Denied()
 	for _, c := range []struct{ url, want string }{
-		{"git@github.com:example-org/harness.git", "use an https URL for git@github.com:example-org/harness.git, such as https://github.com/example-org/harness. A run from a control plane fetches git sources only over https, through the run's gateway; ssh would use this machine's keys."},
-		{"ssh://git@github.com:22/example-org/harness.git", "use an https URL for ssh://git@github.com:22/example-org/harness.git, such as https://github.com/example-org/harness. A run from a control plane fetches git sources only over https, through the run's gateway; ssh would use this machine's keys."},
+		{"git@github.com:example-org/harness.git", "use an https URL for git@github.com:example-org/harness.git, such as https://github.com/example-org/harness. A run from a control plane fetches git sources only over https, through the run's gateway; ssh would sign in with your private keys in ~/.ssh, outside the gateway."},
+		{"ssh://git@github.com:22/example-org/harness.git", "use an https URL for ssh://git@github.com:22/example-org/harness.git, such as https://github.com/example-org/harness. A run from a control plane fetches git sources only over https, through the run's gateway; ssh would sign in with your private keys in ~/.ssh, outside the gateway."},
 		{"git://example.com/acme/harness", "use an https URL for git://example.com/acme/harness, such as https://example.com/acme/harness. A run from a control plane fetches git sources only over https, through the run's gateway; git:// would reach the host past the gateway."},
 		{"file:///srv/harness", "use an https URL for file:///srv/harness. A run from a control plane fetches git sources only over https, through the run's gateway; file:///srv/harness is a folder of this machine."},
 		{"../harness", "use an https URL for ../harness. A run from a control plane fetches git sources only over https, through the run's gateway; ../harness is a folder of this machine."},

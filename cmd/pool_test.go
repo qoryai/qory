@@ -419,11 +419,11 @@ func TestRunPoolRefusesWhatItCannotRunBy(t *testing.T) {
 		}, func(m *poolMachine) string { return m.file + ": pool.run_config is " + m.runs + noCover }},
 		{"a machine's key", nil, func(_ *testing.T, m *poolMachine) { m.srv.node = testNode },
 			func(*poolMachine) string {
-				return "this machine's key is not a pool's key; enrol one with a code made for the pool"
+				return "Enrol an access key with a code made for the pool: this machine's access key was not enrolled for a pool."
 			}},
 		{"a gateway's key", nil, func(_ *testing.T, m *poolMachine) { m.srv.node = testGatewayNode },
 			func(*poolMachine) string {
-				return "this machine's key is not a pool's key; enrol one with a code made for the pool"
+				return "Enrol an access key with a code made for the pool: this machine's access key was not enrolled for a pool."
 			}},
 	} {
 		t.Run(c.name, func(t *testing.T) {

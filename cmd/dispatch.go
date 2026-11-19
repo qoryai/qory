@@ -144,10 +144,10 @@ func removeRunHome(home string, report func(string)) {
 }
 
 // locateRun is [locate] for qory run and qory run resend: given a run key or a run code,
-// keyed, the checkout's qory.yaml sets no machine key, harness.launch and env among
-// them, as under extends, so the repository a dispatched run works on does not configure
-// how it starts. composes is set for qory run, which composes the harness: the home is
-// outside the checkout unless --home or harness.home puts it inside, see
+// keyed, the checkout's qory.yaml sets no env key and no machine harness setting, such
+// as harness.launch, as under extends, so the repository a dispatched run works on does
+// not configure how it starts. composes is set for qory run, which composes the harness:
+// the home is outside the checkout unless --home or harness.home puts it inside, see
 // [withCacheHome], and a home inside the checkout or inside the working directory stops
 // the run with [homeInFolder] before any other check of the home, and before anything
 // is written. Without keyed, walled reports whether the configuration starts a wall: a run
