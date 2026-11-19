@@ -3123,8 +3123,11 @@ indented by two spaces:
   rewrites of git.`
 - `For each file that --show-origin shows (the path after file:), run git config --file <file>
   --unset-all remote.origin.pushurl in the top folder of the repository. Put a path with
-  spaces in quotes. Exit status 5 means that file has no pushurl value. The system file usually
-  needs administrator rights.`
+  spaces in quotes, and edit a file by hand when git prints its path in double quotes. Exit
+  status 5 means that file has no pushurl value. The system file usually needs administrator
+  rights.`
+- `If --show-origin shows command line: instead of a file, run unset GIT_CONFIG_COUNT
+  GIT_CONFIG_PARAMETERS in the shell that runs qory, then run qory again.`
 - `Then run git remote set-url --push origin <address> with the address to keep.`
 
 Git has one push address for each `pushurl` value, and with no `pushurl` it has one for each
@@ -3132,8 +3135,11 @@ Git has one push address for each `pushurl` value, and with no `pushurl` it has 
 several `pushurl` values in any file that `--show-origin` shows: the repository file,
 `config.worktree`, a file that `include.path` or `includeIf` pulls in, the global files
 (`~/.gitconfig` and `~/.config/git/config`, which git reads together) and the system file.
-`git config --global --unset-all` is not in the text: it writes only to `~/.gitconfig`, so it
-leaves the values of `~/.config/git/config`. `git remote set-url --push origin <address>` alone
+`git config --global --unset-all` is not in the text: it writes to `~/.gitconfig` when that file
+exists, and then leaves the values of `~/.config/git/config`. A value that the environment
+variables `GIT_CONFIG_COUNT` (with its `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_VALUE_<n>`) or
+`GIT_CONFIG_PARAMETERS` set shows as `command line:`, counts as a push address, and is in no file.
+`git remote set-url --push origin <address>` alone
 fails when the repository file has several `pushurl` values (`remote.origin.pushurl has
 multiple values`), and adds one more value when another file has them.
 `git remote set-url --delete --push origin <address>` is not in the text: it reads its address as

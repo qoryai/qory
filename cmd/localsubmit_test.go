@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -496,7 +495,8 @@ func pushURLsText(n int) string {
 // the branch.
 const pushURLsHow = ".\n  List the configured addresses and the file of each with git config --show-origin --get-all remote.origin.pushurl, or with git config --show-origin --get-all remote.origin.url when that prints none.\n" +
 	"  Do not use git remote get-url --push --all: it shows the addresses after the insteadOf rewrites of git.\n" +
-	"  For each file that --show-origin shows (the path after file:), run git config --file <file> --unset-all remote.origin.pushurl in the top folder of the repository. Put a path with spaces in quotes. Exit status 5 means that file has no pushurl value. The system file usually needs administrator rights.\n" +
+	"  For each file that --show-origin shows (the path after file:), run git config --file <file> --unset-all remote.origin.pushurl in the top folder of the repository. Put a path with spaces in quotes, and edit a file by hand when git prints its path in double quotes. Exit status 5 means that file has no pushurl value. The system file usually needs administrator rights.\n" +
+	"  If --show-origin shows command line: instead of a file, run unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS in the shell that runs qory, then run qory again.\n" +
 	"  Then run git remote set-url --push origin <address> with the address to keep.\n"
 
 // TestALocalRunWithTwoUrlValuesPushesNothing is a remote origin with two url values and no pushurl:
@@ -515,60 +515,6 @@ func TestALocalRunWithTwoUrlValuesPushesNothing(t *testing.T) {
 	wants(t, out, pushURLsHow)
 	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 {
 		t.Errorf("pushed %q and started %d programs, want none", got, timesStarted(t, started))
-	}
-}
-
-// TestThePrintedCommandsRemoveEveryPushURLValue runs the commands of the text of several push
-// addresses on a repository with pushurl values in the repository file and in
-// ~/.config/git/config beside an existing ~/.gitconfig: no value is left afterwards.
-func TestThePrintedCommandsRemoveEveryPushURLValue(t *testing.T) {
-	const list = "git config --show-origin --get-all remote.origin.pushurl"
-	const remove = "git config --file <file> --unset-all remote.origin.pushurl"
-	for _, command := range []string{list, remove} {
-		if !strings.Contains(pushURLsHow, command) {
-			t.Fatalf("the text has no command %q:\n%s", command, pushURLsHow)
-		}
-	}
-	home, repo := tempDir(t), tempDir(t)
-	writeFile(t, filepath.Join(home, ".gitconfig"), "[user]\n\tname = a\n")
-	writeFile(t, filepath.Join(home, ".config", "git", "config"), "[remote \"origin\"]\n\tpushurl = https://git.example.com/acme/xdg.git\n")
-	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
-		return strings.HasPrefix(kv, "GIT_CONFIG_") || strings.HasPrefix(kv, "XDG_CONFIG_HOME=")
-	})
-	// git returns the output and the error, because git config exits with 1 when no value is left.
-	git := func(args ...string) (string, error) {
-		c := exec.Command("git", args...)
-		c.Dir = repo
-		c.Env = append(slices.Clone(env), "HOME="+home, "GIT_CONFIG_NOSYSTEM=1")
-		out, err := c.CombinedOutput()
-		return string(out), err
-	}
-	for _, args := range [][]string{
-		{"init", "--quiet"},
-		{"config", "--add", "remote.origin.pushurl", "https://git.example.com/acme/one.git"},
-		{"config", "--add", "remote.origin.pushurl", "https://git.example.com/acme/two.git"},
-	} {
-		if out, err := git(args...); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
-	listed, err := git("config", "--show-origin", "--get-all", "remote.origin.pushurl")
-	if err != nil || strings.Count(listed, "\n") != 3 {
-		t.Fatalf("the list has the error %v and %q, want 3 values", err, listed)
-	}
-	var done []string
-	for line := range strings.Lines(listed) {
-		file, _, _ := strings.Cut(strings.TrimPrefix(line, "file:"), "\t")
-		if slices.Contains(done, file) {
-			continue
-		}
-		done = append(done, file)
-		if out, err := git("config", "--file", file, "--unset-all", "remote.origin.pushurl"); err != nil {
-			t.Fatalf("git config --file %s --unset-all: %v\n%s", file, err, out)
-		}
-	}
-	if left, _ := git("config", "--get-all", "remote.origin.pushurl"); left != "" {
-		t.Errorf("the values %q are left, want none", left)
 	}
 }
 

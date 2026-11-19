@@ -2,6 +2,10 @@ package cmd
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -76,5 +80,77 @@ func TestEveryGitOfTheLocalStepRunsWithNoPrompt(t *testing.T) {
 	}
 	if args := pushArgs(repo); slices.Contains(args, "-c") {
 		t.Errorf("the push has %q, want the person's git configuration, with no -c", args)
+	}
+}
+
+// TestThePrintedCommandsRemoveEveryPushURLValue takes the commands from [textLocalPushURLs]
+// and runs them in a repository with pushurl values in the repository file and in
+// ~/.config/git/config beside an existing ~/.gitconfig: no value is left afterwards.
+func TestThePrintedCommandsRemoveEveryPushURLValue(t *testing.T) {
+	list := regexp.MustCompile(`git config --show-origin --get-all remote\.origin\.pushurl`).FindString(textLocalPushURLs)
+	remove := regexp.MustCompile(`git config [^\n]*--unset-all remote\.origin\.pushurl`).FindString(textLocalPushURLs)
+	if list == "" || remove == "" {
+		t.Fatalf("the text has no list command %q or remove command %q:\n%s", list, remove, textLocalPushURLs)
+	}
+	home, repo := t.TempDir(), t.TempDir()
+	for file, content := range map[string]string{
+		".gitconfig":         "[user]\n\tname = a\n",
+		".config/git/config": "[remote \"origin\"]\n\tpushurl = https://git.example.com/acme/xdg.git\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(home, file)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, file), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, "GIT_CONFIG_") || strings.HasPrefix(kv, "XDG_CONFIG_HOME=")
+	})
+	// git returns the output and the error, because git config exits with 1 when no value is left.
+	git := func(args ...string) (string, error) {
+		c := exec.Command("git", args...)
+		c.Dir = repo
+		c.Env = append(slices.Clone(env), "HOME="+home, "GIT_CONFIG_NOSYSTEM=1")
+		out, err := c.CombinedOutput()
+		return string(out), err
+	}
+	for _, args := range [][]string{
+		{"init", "--quiet"},
+		{"config", "--add", "remote.origin.pushurl", "https://git.example.com/acme/one.git"},
+		{"config", "--add", "remote.origin.pushurl", "https://git.example.com/acme/two.git"},
+	} {
+		if out, err := git(args...); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	listed, err := git(strings.Fields(list)[1:]...)
+	if err != nil || strings.Count(listed, "\n") != 3 {
+		t.Fatalf("%q has the error %v and the output %q, want 3 values", list, err, listed)
+	}
+	// The paths of the test have no character that git quotes, so each is the text after file:.
+	files := []string{}
+	for line := range strings.Lines(listed) {
+		file, _, _ := strings.Cut(strings.TrimPrefix(line, "file:"), "\t")
+		if !slices.Contains(files, file) {
+			files = append(files, file)
+		}
+	}
+	if !strings.Contains(remove, "<file>") {
+		files = []string{""}
+	}
+	for _, file := range files {
+		args := strings.Fields(remove)[1:]
+		for i, arg := range args {
+			if arg == "<file>" {
+				args[i] = file
+			}
+		}
+		if out, err := git(args...); err != nil {
+			t.Fatalf("%q with the file %q: %v\n%s", remove, file, err, out)
+		}
+	}
+	if left, _ := git("config", "--get-all", "remote.origin.pushurl"); left != "" {
+		t.Errorf("%q leaves the values %q, want none", remove, left)
 	}
 }
