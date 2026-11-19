@@ -111,6 +111,46 @@ func TestARealWalledCodexReadRunHasItsHomeBound(t *testing.T) {
 	}
 }
 
+// TestARealWalledCodexReadRunStopsOnALinkAtEtcCodex is a walled Codex run from a run code
+// that only reads and lists no repositories, so it has no setup step, behind a real wall
+// on this machine's engine, on an image with a link from /etc/codex to the run's Codex
+// home. Forager reads the image's /etc/codex before it starts the agent's container, the
+// target of the bind of qory's folder of the harness's hooks, and stops the run on the
+// link with its line, the fix first: Codex does not start, and qory run exits 1. It runs
+// only with QORY_TEST_DOCKER=1 and docker on the PATH.
+func TestARealWalledCodexReadRunStopsOnALinkAtEtcCodex(t *testing.T) {
+	if os.Getenv("QORY_TEST_DOCKER") != "1" {
+		t.Skip("QORY_TEST_DOCKER=1 runs it")
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("no docker command")
+	}
+	helper, image := realWallImageWith(t, "codex", "#!/bin/sh\necho 'stub: Codex started'\n", "RUN ln -s "+codex.HomeInWall+" "+codex.SystemInWall+"\n")
+	atGateway(t)
+	codeReal = true
+	t.Cleanup(func() { codeReal = false })
+	r := runFromCodeLinks(t, func(string) []string {
+		machineConfig(t, "harness:\n  launch:\n    codex:\n      command: /usr/local/bin/codex\n")
+		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+			"wall:\n  adapter: docker\n  helper: "+helper+"\n  user: \"1000:1000\"\n  image: "+image+"\n")
+		return nil
+	}, []string{"--home", filepath.Join(tempDir(t), "home")}, declares("read"), func(d map[string]any) {
+		d["run_settings"] = map[string]any{"runtime": "codex"}
+	}, map[string]string{
+		"examples/hello/modules/hello/skills/workflow-hello/SKILL.md": "---\nname: workflow-hello\ndescription: Say hello.\n---\n\nSay hello.\n",
+	}, nil)
+	t.Logf("qory run:\n%s", r.out)
+	if !r.joined || cmd.ExitCode(r.err) != 1 {
+		record, _ := os.ReadFile(filepath.Join(r.open.RunsDir, r.open.RunID, "session.jsonl"))
+		t.Fatalf("%v (exit %d), want the join and exit 1\n%s\n%s", r.err, cmd.ExitCode(r.err), r.out, record)
+	}
+	if !r.spec.WorkspaceReadOnly || len(r.spec.Setup) != 0 {
+		t.Errorf("read-only %v, setup %q", r.spec.WorkspaceReadOnly, r.spec.Setup)
+	}
+	wants(t, r.out, `✗ wall docker: make "/etc/codex" a directory or file in the image, not a symbolic link: `)
+	lacks(t, r.out, "stub: Codex started")
+}
+
 // TestARealWalledCodexContinuationResumesInItsFreshHome is the continuation of a paused
 // Codex run, from a run code that only reads, behind a real wall on this machine's
 // engine, with the stub [stubResumedCodex] as Codex in the image, at a gateway whose

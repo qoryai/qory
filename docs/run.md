@@ -4647,9 +4647,10 @@ the compose does, and stops the run with ``Fix `hooks.<event>[<group>].hooks[<ho
 file or a folder that the image has at `/etc/codex`, such as one with a `config.toml` or a
 `requirements.toml`, so the image may have that folder. It does not hide a link: Docker binds the
 folder at the link's target, so a link to `/var/lib/qory-codex-home` shows the writable home at
-`/etc/codex` in place of qory's folder. A link there stops the run in the setup step `Check
-tools`, see [A run that may write works in a copy](#a-run-that-may-write-works-in-a-copy), except
-a walled read run that lists no repositories, which has no setup step. The folder has mode 0755
+`/etc/codex` in place of qory's folder. A link there stops the run before Codex starts: in the
+setup step `Check tools`, see [A run that may write works in a copy](#a-run-that-may-write-works-in-a-copy),
+or, on a walled read run that lists no repositories, which has no setup step, when Forager reads
+the image before it starts the agent's container. The folder has mode 0755
 and `hooks.json` mode 0644. qory writes both as your user, so the container can show them with
 an owner other than root. The bind is read-only, so a write, a rename or a replacement of
 `hooks.json` fails, and so does a new file in the folder.
@@ -4832,10 +4833,18 @@ qory run: Use an image with no link at /etc/codex: qory's bind of the Codex hook
 A walled Codex run that lists no repositories, such as a person's walled run, runs the test for
 the link in the agent's container, in a setup step named `Check tools`, before Codex starts. The
 step prints nothing. When the image has a link at `/etc/codex`, qory prints the same line, the
-run closes as failed, and qory run exits with 1. A walled read run that lists no repositories has
-no such step: its workspace is mounted read-only, and Forager runs no setup step beside a
-read-only workspace, so qory does not test such a run's image for the link. Claude Code runs and
-unwalled runs have no such step.
+run closes as failed, and qory run exits with 1. Claude Code runs and unwalled runs have no such
+step.
+
+A walled read run that lists no repositories has no setup step: its workspace is mounted
+read-only, and Forager runs no setup step beside a read-only workspace. Before Forager starts the
+agent's container, it reads the target of each bind in the image, `/etc/codex` among them. On a
+link there, the run closes as failed, qory run exits with 1, and Codex does not start. Forager
+prints:
+
+```text
+✗ wall docker: make "/etc/codex" a directory or file in the image, not a symbolic link: "/etc/codex" is a symbolic link in the image, which the engine follows, so the bind could resolve over another mount or over /qory
+```
 
 If the step exits 127 with no such line, which is what docker does for an image with no `/bin/sh`,
 qory prints:

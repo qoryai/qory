@@ -1398,6 +1398,9 @@ release may change what an existing document does, and states it under Upgrading
   `/etc/codex` in a `Check tools` setup step in the agent's container before Codex starts.
   When the image has a link there, qory prints the same line, the run closes as failed,
   and qory run exits with 1.
+  A walled read run that lists no repositories has no setup step: Forager stops it before
+  the agent's container starts, with ``wall docker: make "/etc/codex" a directory or file
+  in the image, not a symbolic link``, and qory run exits with 1.
 - The line for an image with no `sh` reads ``the setup of a walled run runs sh from these
   folders``, in place of ``the git session of a walled run``.
 - Compose accepts `settings/codex/read-access.rules`, Codex execpolicy rules for a run
