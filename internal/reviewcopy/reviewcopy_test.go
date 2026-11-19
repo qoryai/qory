@@ -439,6 +439,41 @@ func TestTheCopyChecksTheBaseSideOfTheDiff(t *testing.T) {
 	}
 }
 
+// TestTheCopyComparesTheBaseTree reaches the compare of the base's tree: git stops a
+// planted tree before it, so a git in front of the real one returns another id from
+// write-tree with the base's index, and passes every other call to the real git.
+func TestTheCopyComparesTheBaseTree(t *testing.T) {
+	sessionGit(t)
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not installed")
+	}
+	stub := t.TempDir()
+	write(t, stub, "git", `#!/bin/sh
+for a in "$@"; do
+	case $a in write-tree)
+		case ${GIT_INDEX_FILE:-} in */base-index)
+			printf '%s\n' `+strings.Repeat("1", 40)+`
+			exit 0 ;;
+		esac ;;
+	esac
+done
+exec '`+real+`' "$@"
+`, 0o755)
+	old := sessionPath
+	sessionPath = stub + ":" + sessionPath
+	t.Cleanup(func() { sessionPath = old })
+	c := newCheckout(t, "sha1")
+	f, out, err := copyOf(t, filepath.Join(c.dir, ".git"), c.head, c.base)
+	if err == nil {
+		t.Fatalf("the copy session ended with no error:\n%s", out)
+	}
+	want := "the file list of the base commit does not build its tree"
+	if _, err := f.Result(); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("the result is %v, want %q\n%s", err, want, out)
+	}
+}
+
 func TestTheCopyStopsOnACommitTheSourceLacks(t *testing.T) {
 	sessionGit(t)
 	c := newCheckout(t, "sha1")
