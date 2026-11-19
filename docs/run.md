@@ -2949,7 +2949,7 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `delete branch qory/<work item id> of <path> on <system>: qory pushed <path> and stored
   no version, because the push of the next repository failed: <line of that failure>`
 - `delete branch qory/<work item id> of <path> on <system>: qory pushed <path> and stored
-  no version, because the list of the run's commits failed: <line of that failure>`
+  no version, because the list of the run's commits failed: <line of git>; the code is used`
 
 #### The head check
 

@@ -1184,18 +1184,22 @@ func TestDeleteBranchIsTheOnlyWayOut(t *testing.T) {
 	}
 }
 
-// TestAListThatFailsAfterThePushSaysThePushLanded is the error of a listing of the run's commits
-// that failed after the push landed: line 1 is the fix, and the text says the push landed and
-// the listing failed, not that a check before the push failed.
+// TestAListThatFailsAfterThePushSaysThePushLanded is a listing of the run's commits that fails in
+// git after the push landed, a start commit that the repository lacks: line 1 is the fix, then the
+// text says the push landed and the listing failed, with git's line and no text of a check.
 func TestAListThatFailsAfterThePushSaysThePushLanded(t *testing.T) {
-	b := &WorkBranch{Ref: testRef, system: "git.example.com", pushed: []string{"acme/shop"}}
-	cause := gitFailed(errors.New("fatal: bad revision"))
+	dir, b := onBranch(t, "acme/shop")
+	b.pushed = []string{"acme/shop"}
+	_, cause := runCommits(context.Background(), stepGit(noRemote, ""), dir, strings.Repeat("1", 40), "HEAD")
+	if cause == nil {
+		t.Fatal("the listing did not fail")
+	}
 	err := listFailed(b, cause)
-	want := "qory run: delete branch qory/wi_1 of acme/shop on git.example.com: qory pushed acme/shop and stored no version, because the list of the run's commits failed: "
-	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.Contains(err.Error(), "fatal: bad revision") {
+	want := "qory run: delete branch qory/wi_1 of acme/shop on " + b.system + ": qory pushed acme/shop and stored no version, because the list of the run's commits failed: "
+	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), "; the code is used") {
 		t.Errorf("the error is %v, want the start %q", err, want)
 	}
-	if !errors.Is(err, cause) {
-		t.Errorf("the error does not unwrap to the listing's error: %v", err)
+	if strings.Contains(err.Error(), "the check that HEAD") || !errors.Is(err, cause) {
+		t.Errorf("the error has the text of a check, or does not unwrap to the listing's error: %v", err)
 	}
 }

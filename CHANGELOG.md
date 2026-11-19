@@ -741,8 +741,8 @@ release may change what an existing document does, and states it under Upgrading
   `Head: none`, and has the `git push` command that creates the branch. The next run creates
   a deleted branch at `target_version` when no version exists, and starts from the last
   version otherwise.
-- The lines that stopped a run on a stored branch version with a fix for Qory Apiary
-  (a ref, a file, a format, a commit that is missing, is no commit, differs in `.qory` or
+- The lines that stopped a run on a stored version of the artifact submission with a fix for
+  Qory Apiary (a ref, a file, a format, a commit that is missing, is no commit, differs in `.qory` or
   fails to check out) now state the fact first: `Version <n> of the artifact submission has a
   ref other than <ref>, so the run did not start; the code is used`. They no longer name a
   fix in Qory Apiary, because only a run stores a version.

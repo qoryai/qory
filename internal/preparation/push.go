@@ -45,7 +45,7 @@ const (
 	textNotFastForward   = "qory run: take the work item in again in Qory Apiary, and keep the run's commits on top of commit %[3]s: HEAD of %[1]s is at %[2]s, which does not descend from it, so a push would not be a fast-forward; the code is used"
 	textDeleteBranch     = "delete branch %[1]s of %[2]s on %[3]s"
 	textPushedNoVersion  = "qory run: %s: qory pushed %s and stored no version, because the push of the next repository failed: %s"
-	textPushedNoList     = "qory run: %s: qory pushed %s and stored no version, because the list of the run's commits failed: %s"
+	textPushedNoList     = "qory run: %s: qory pushed %s and stored no version, because the list of the run's commits failed: %s; the code is used"
 	textPushRefused      = "qory run: change the rule on %[3]s that stops a push to %[1]s of %[2]s, then take the work item in again: the push failed: %[4]s; the code is used"
 	textPushForbidden    = "qory run: Contact support: the push was refused (403).\n  One of these most likely stopped it:\n  1. The run's push proxy refuses a push that is not a plain push to the push_ref of the push credential (for example a signed push or a push with push options), and qory pushes to refs/heads/%[3]s (wall:push-ref).\n  2. The run's push credential has no item for /%[1]s.git/git-receive-pack on %[2]s, and the push proxy refuses every other host and path.\n  3. The forge stopped the push: its permission for the push credential, or a branch rule.\n  The push of %[1]s to %[2]s returned 403: %[4]s; the code is used"
 	textPushNoCredential = "qory run: give the run's credential for %[2]s write access to %[1]s, then take the work item in again: the push through the run's gateway failed: %[3]s; the code is used"
@@ -220,7 +220,7 @@ func (e *pushedNoVersion) Unwrap() error { return e.err }
 // repository landed: the line has the fix for a branch with no version, as the push of a later
 // repository that failed has, and unwraps to the listing's error.
 func listFailed(b *WorkBranch, err error) error {
-	return &pushedNoVersion{text: fmt.Sprintf(textPushedNoList, b.DeleteBranch(), b.PushedPaths(), strings.TrimPrefix(err.Error(), "qory run: ")), err: err}
+	return &pushedNoVersion{text: fmt.Sprintf(textPushedNoList, b.DeleteBranch(), b.PushedPaths(), integration.Printable(exports.HideURLError(err).Error())), err: err}
 }
 
 // runCommits lists the commits from start, not included, to head, included, of the
@@ -229,7 +229,7 @@ func listFailed(b *WorkBranch, err error) error {
 func runCommits(ctx context.Context, git gitRunner, dir, start, head string) ([]submission.Commit, error) {
 	out, err := git(ctx, dir, "rev-list", "--reverse", start+".."+head)
 	if err != nil {
-		return nil, fmt.Errorf(textNoHistory, shownPath(dir), shortCommit(start), integration.Printable(exports.HideURLError(err).Error()))
+		return nil, err
 	}
 	var commits []submission.Commit
 	for _, c := range strings.Fields(out) {
