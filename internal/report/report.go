@@ -122,6 +122,15 @@ type Tier struct {
 	From string `json:"from"`
 }
 
+// Session is one session of a run in [Report.Sessions]: the gateway's number of the session,
+// the runtime it ran on, and the tiers of its compose, as [Report.Tiers] has them, absent when
+// no tier has a map.
+type Session struct {
+	Session int             `json:"session"`
+	Runtime string          `json:"runtime"`
+	Tiers   map[string]Tier `json:"tiers,omitempty"`
+}
+
 // Exclude is one excluded entry.
 type Exclude struct {
 	// Module is the module the entry was dropped from.
@@ -242,6 +251,11 @@ type Report struct {
 	// Tiers is, for each tier an agent sets that has a map, the entry it maps to; a tier
 	// an agent sets that is absent here has no map. Absent when no such tier has one.
 	Tiers map[string]Tier `json:"tiers,omitempty"`
+	// Sessions are the sessions of a run whose documents set shared_run, one row for each
+	// session composed so far, in order, each with the runtime and the tier map of its
+	// compose; absent for any other compose. qory run writes them after each session's
+	// compose, so the report shows what each session ran.
+	Sessions []Session `json:"sessions,omitempty"`
 	// Egress is the union of the hosts the modules declared, sorted by host, each with
 	// the modules that declared it, the target runtime among them for the hosts its
 	// program reaches. Absent when no module declares egress, which leaves a run's policy
