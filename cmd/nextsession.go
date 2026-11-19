@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/qoryai/forager/accesskey"
@@ -17,18 +18,19 @@ import (
 )
 
 // The lines of the next-session request, which qory sends after each session of a run whose
-// documents set shared_run, see [askNextSession]. Each starts with "qory run: " and its fix.
+// documents set shared_run, see [askNextSession]. Each starts with its fix; qory run prints
+// it after "qory run: ".
 const (
-	textNextNoAnswer = "qory run: Check the gateway's connection to Qory Apiary, then take the work item in again.\n  The next-session request after session %d got no answer in %s.\n  %s"
-	textNextRefused  = "qory run: Contact support: the next-session request after session %d failed.\n  %s"
-	textNextUnread   = "qory run: Update qory: the answer to the next-session request after session %d does not pass qory's checks.\n  The answer %s."
-	textNextNoBody   = "qory run: Update qory: qory could not write the next-session request after session %d.\n  %s"
+	textNextNoAnswer = "Check the gateway's connection to Qory Apiary, then take the work item in again.\n  The next-session request after session %d had no successful response within %s.\n  %s"
+	textNextRefused  = "Contact support: the next-session request after session %d failed.\n  %s"
+	textNextUnread   = "Update qory: the answer to the next-session request after session %d does not pass qory's checks.\n  %s."
+	textNextNoBody   = "Update qory: qory could not write the next-session request after session %d.\n  %s"
 )
 
 // The retries of the next-session request: after a failure that leaves open whether Qory
 // Apiary has the request, qory waits nextFirstWait, doubles the wait up to nextMaxWait, and
-// sends the request again, for nextSessionLimit in all (C-1, settled point 4). Qory Apiary
-// answers a repeat for the same session with the same body. A test sets a shorter limit.
+// sends the request again, for nextSessionLimit in all. Qory Apiary returns the same body for
+// a repeat for the same session. A test sets a shorter limit.
 const (
 	nextFirstWait = time.Second
 	nextMaxWait   = time.Minute
@@ -75,15 +77,33 @@ func askNextSession(ctx context.Context, send nextSender, session int, out sessi
 		// shortcut: the link of the pinned Forager passes no Retry-After on, so every wait
 		// doubles; read Retry-After here once Forager's link error has it.
 		if ctx.Err() != nil || branchWait(ctx, wait) != nil {
-			return contracts.NextSessionAnswer{}, "", fmt.Errorf(textNextNoAnswer, session, nextSessionLimit, nextDetail(err))
+			return contracts.NextSessionAnswer{}, "", fmt.Errorf(textNextNoAnswer, session, inMinutes(nextSessionLimit), nextDetail(err))
 		}
 		wait = min(2*wait, nextMaxWait)
 	}
 	a, err := provisioner.ReadNextSessionAnswer(answer)
 	if err != nil {
-		return contracts.NextSessionAnswer{}, "", fmt.Errorf(textNextUnread, session, err)
+		return contracts.NextSessionAnswer{}, "", fmt.Errorf(textNextUnread, session, unreadAnswer(err))
 	}
 	return a, "", nil
+}
+
+// unreadAnswer is the line of an answer that err, an error of
+// [provisioner.ReadNextSessionAnswer], shows unread.
+func unreadAnswer(err error) string {
+	if strings.HasPrefix(err.Error(), "it breaks ") {
+		return "The answer does not match " + strings.TrimPrefix(err.Error(), "it breaks ")
+	}
+	return "The answer does not pass them: " + err.Error()
+}
+
+// inMinutes is d as a line shows a limit: "10 minutes", or d as Go writes it when it is not
+// a whole number of minutes, as a test's shorter limit is.
+func inMinutes(d time.Duration) string {
+	if d < time.Minute || d%time.Minute != 0 {
+		return d.String()
+	}
+	return fmt.Sprintf("%d minutes", d/time.Minute)
 }
 
 // nextRetried are the codes of Qory Apiary's refusals of the next-session request that
@@ -95,7 +115,8 @@ func askNextSession(ctx context.Context, send nextSender, session int, out sessi
 var nextRetried = []string{"rate_limited", "unavailable"}
 
 // retryNext reports whether the next-session request is sent again after err, the one place
-// that reads a refusal's code: a refusal of Qory Apiary's with a code of [nextRetried]; and,
+// that reads a refusal's code: a refusal of Qory Apiary's with a status of 500 or above,
+// whatever its code, or with a code of [nextRetried]; and,
 // as a transport error, every refusal of the gateway's and a request with no response. A
 // status with no coded refusal, a [*server.StatusError], is sent again as [retryPushed] has
 // it: a status of 500 or above, such as the gateway's 503 while it reopens the run, and
@@ -105,7 +126,7 @@ func retryNext(err error) bool {
 	var refusal *accesskey.Refusal
 	if errors.As(err, &refusal) && refusal.Status != 0 {
 		if refusal.From == accesskey.FromApiary {
-			return slices.Contains(nextRetried, refusal.Code)
+			return refusal.Status >= http.StatusInternalServerError || slices.Contains(nextRetried, refusal.Code)
 		}
 		return true
 	}

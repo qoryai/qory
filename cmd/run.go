@@ -1624,7 +1624,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				a, endLine, nextErr := askNextSession(ctx, run.NextSession, res.Session, asked)
 				switch {
 				case nextErr != nil:
-					laterErr = &runLineError{errors.New(strings.TrimPrefix(nextErr.Error(), "qory run: "))}
+					laterErr = &runLineError{nextErr}
 					break sessions
 				case endLine != "":
 					fmt.Fprintln(streams.errOut, endLine)

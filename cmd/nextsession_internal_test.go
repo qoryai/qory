@@ -127,11 +127,14 @@ func TestTheNextSessionRequestWaitsDoublingAndStopsAfterItsLimit(t *testing.T) {
 		t.Errorf("%d sends after %d waits", link.sends(), len(*waits))
 	}
 	first, _, _ := strings.Cut(err.Error(), "\n")
-	if first != "qory run: Check the gateway's connection to Qory Apiary, then take the work item in again." || len(first) > 100 {
+	if first != "Check the gateway's connection to Qory Apiary, then take the work item in again." || len(first) > 100 {
 		t.Errorf("the first line is %q", first)
 	}
-	if !strings.Contains(err.Error(), "after session 2 got no answer in 400ms") || !strings.Contains(err.Error(), "The gateway returned 503") {
+	if !strings.Contains(err.Error(), "after session 2 had no successful response within 400ms") || !strings.Contains(err.Error(), "The gateway returned 503") {
 		t.Errorf("the error is %q", err)
+	}
+	if got := inMinutes(10 * time.Minute); got != "10 minutes" {
+		t.Errorf("the limit of 10 minutes shows as %q", got)
 	}
 }
 
@@ -169,7 +172,8 @@ func TestAnEndedRunGetsOneNextSessionRequest(t *testing.T) {
 // TestEachRefusalCodeOfTheNextSessionRequest is a request whose first send gets each code of
 // next-session-refusal.schema.json from Qory Apiary, a refusal of the gateway's, a status with
 // no coded refusal, as the link returns it ([server.StatusError]), and a failure with no
-// response, and whose second send gets the end. rate_limited, unavailable, the gateway's
+// response, and whose second send gets the end. rate_limited, unavailable, a 500 of Qory
+// Apiary's with a code not in the schema, the gateway's
 // refusals, an uncoded 503 or 429 and no response are sent again after 1 s; run_ended is one
 // send and the end line; every other code of Qory Apiary's, and an uncoded 400, is one send
 // and an error with the fix first and the status and code.
@@ -193,6 +197,7 @@ func TestEachRefusalCodeOfTheNextSessionRequest(t *testing.T) {
 		"session_mismatch":             {err: apiary(http.StatusConflict, "session_mismatch")},
 		"rate_limited":                 {err: apiary(http.StatusTooManyRequests, "rate_limited"), retried: true},
 		"unavailable":                  {err: apiary(http.StatusServiceUnavailable, "unavailable"), retried: true},
+		"500 internal":                 {err: apiary(http.StatusInternalServerError, "internal"), retried: true},
 		"gateway refusal":              {err: &accesskey.Refusal{Status: http.StatusBadGateway, Code: "control_plane_unavailable", From: accesskey.FromGateway}, retried: true},
 		"gateway 413":                  {err: &accesskey.Refusal{Status: http.StatusRequestEntityTooLarge, Code: "payload_too_large", From: accesskey.FromGateway}, retried: true},
 		"uncoded 503":                  {err: GatewayBusyErr(), retried: true},
@@ -228,7 +233,7 @@ func TestEachRefusalCodeOfTheNextSessionRequest(t *testing.T) {
 				if errors.As(c.err, &r) {
 					detail = fmt.Sprintf("Qory Apiary returned %d: %s", r.Status, r.Code)
 				}
-				want := "qory run: Contact support: the next-session request after session 1 failed.\n  " + detail
+				want := "Contact support: the next-session request after session 1 failed.\n  " + detail
 				if ended != "" || err == nil || err.Error() != want {
 					t.Errorf("askNextSession: %q, %v, want the error %q", ended, err, want)
 				}
@@ -268,7 +273,7 @@ func TestAnAnswerOutsideItsSchemaEndsTheRun(t *testing.T) {
 	if ended != "" || err == nil {
 		t.Fatalf("askNextSession: %q, %v, want an error", ended, err)
 	}
-	if !strings.HasPrefix(err.Error(), "qory run: Update qory: the answer to the next-session request after session 1 does not pass qory's checks.\n") || strings.Contains(err.Error(), "secret-branch") {
+	if err.Error() != "Update qory: the answer to the next-session request after session 1 does not pass qory's checks.\n  The answer does not match next-session-answer.schema.json." {
 		t.Errorf("the error is %q", err)
 	}
 	if link.sends() != 1 {
