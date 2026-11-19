@@ -47,7 +47,10 @@ release may change what an existing document does, and states it under Upgrading
   reason, one sentence on one line of 1 to 300 characters. Pass both or neither. A track's
   id is lower-case words joined by hyphens, at most 40 characters. A track is the `id` and
   the `reason`. A mistake in the id, the reason or the pair exits 2, with the fix on line
-  1; nothing is sent or kept. Outside a run, the kept `verdict.json` has the track. `qory
+  1; nothing is sent or kept. Line 2 of the error for a wrong id shows the id quoted and
+  cut to 40 characters, or, for an id that contains a key or a code, such as `qrk_`, a
+  phrase in its place, as for `--decision`. Outside a run, the kept `verdict.json` has
+  the track. `qory
   run verdict` exits 4 for every 422 `invalid_artifact` from Qory Apiary, such as a track
   that the gate does not offer, a point about a question that is not open, or a verdict
   that breaks the schema. Line 1 of the error is the fix, with at most 98 characters, and

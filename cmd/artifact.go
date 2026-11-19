@@ -957,8 +957,15 @@ func readTrack(c *cobra.Command) (*runapi.Track, error) {
 	case !idGiven:
 		return nil, input(errors.New("Pass --track <id> with --track-reason: a reason needs the track it is for."))
 	case !verdictformat.ValidTrackID(id):
+		// A value with a key's or a code's prefix, such as qrk_, prints as a phrase; any
+		// other value prints quoted and cut to 40 characters.
+		shown := exports.Value(id, false)
+		if shown == id {
+			shown = shortValue(id)
+		}
+
 		return nil, input(fmt.Errorf("Set --track to lower-case words joined by hyphens, such as small-change, at most %d characters.\n"+
-			"  The value is %s.", verdictformat.MaxTrackID, shortValue(id)))
+			"  The value is %s.", verdictformat.MaxTrackID, shown))
 	}
 
 	if err := checkLine("--track-reason", "reason", "one sentence on one line", reason, verdictformat.MaxReason); err != nil {
