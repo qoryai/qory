@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.dev/contracts/harness/v1/review-report.schema.json",
+  "title": "The review report format, version 1",
+  "description": "The report.json of one reviewer of a review round: the reviewer's name and its findings. Each finding is blocking or non-blocking, and has the quote, the problem, the fix, the proof and a point: one line with at least one character that is not a space. A finding that repeats one of the round before may have its id. A blocking finding has a failing check or a failing input as its proof. qory decides the round from the reports and the full suite. No object has a member this schema does not define.",
+  "type": "object",
+  "required": [
+    "reviewer",
+    "findings"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "reviewer": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": [
+        "severity",
+        "quote",
+        "problem",
+        "fix",
+        "proof",
+        "point"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^f[1-9][0-9]{0,5}$"
+        },
+        "severity": {
+          "enum": [
+            "blocking",
+            "non-blocking"
+          ]
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "problem": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "fix": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "proof": {
+          "type": "string",
+          "maxLength": 1000,
+          "pattern": "^(failing check|failing input|broken rule): [^\\s]"
+        },
+        "point": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "^[^\\n\\r]*\\S[^\\n\\r]*$"
+        },
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "if": {
+        "required": [
+          "severity"
+        ],
+        "properties": {
+          "severity": {
+            "const": "blocking"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "proof": {
+            "not": {
+              "pattern": "^broken rule"
+            }
+          }
+        }
+      }
+    }
+  }
+}
