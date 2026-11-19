@@ -1880,7 +1880,7 @@ func readReport(at places) (report.Report, error) {
 		return rep, fmt.Errorf("no composed harness for %s; run qory harness compose", at.root)
 	}
 	if err != nil {
-		return rep, err
+		return rep, exports.HideValueError(err, at.report)
 	}
 	if rep.Version != report.Version {
 		return rep, input(fmt.Errorf("%s: report version %d is not one this qory reads; versions: %d", exports.Value(at.report, false), rep.Version, report.Version))

@@ -569,3 +569,29 @@ func TestMaskTheHomeAndFileOfARun(t *testing.T) {
 		}
 	})
 }
+
+// TestMaskTheReportOfAConfiguredHome is qory harness inspect with a key in harness.home
+// of the checkout's qory.yaml, whose report is not JSON.
+func TestMaskTheReportOfAConfiguredHome(t *testing.T) {
+	const line = "%s: invalid character 'b' looking for beginning of object key string"
+
+	for _, name := range []string{maskKey, "plain"} {
+		root := newCheckout(t)
+		writeOwnModule(t, root)
+		writeOwnStack(t, root, appStack)
+		homes := filepath.Join(tempDir(t), name)
+		configure(t, root, []string{"home: " + homes}, nil)
+		if out, err := run(t, "harness", "compose"); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+
+		report := filepath.Join(homes, checkout.Key(root)) + "-report.json"
+		writeFile(t, report, "{bad")
+
+		if name == maskKey {
+			wantMasked(t, 1, fmt.Sprintf(line, keyPhrase), "harness", "inspect")
+		} else {
+			wantPlain(t, 1, fmt.Sprintf(line, report), "harness", "inspect")
+		}
+	}
+}
