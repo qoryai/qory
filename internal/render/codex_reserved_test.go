@@ -108,7 +108,7 @@ func TestCodexRefusesABadHookNumber(t *testing.T) {
 // TestCodexRefusesAHookCodexCannotRead is a Codex config.toml or hooks.json fragment with a
 // hook that Codex 0.169.0 cannot decode, after a good one: the compose's build fails with the
 // line that names the event and the hook's place, the fix first, and writes no config.toml.
-func TestCodexRefusesAHookCodexCannotRead(t *testing.T) {
+func TestCodexStopsOnAHookCodexCannotRead(t *testing.T) {
 	for _, c := range []struct{ name, file, fragment, want string }{
 		{"config.toml", "config.toml", "[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\n[[hooks.Stop.hooks]]\ntype = \"mcp_tool\"\nserver = \"s\"\n",
 			"Fix `hooks.Stop[0].hooks[1]` in `settings/codex/config.toml`.\n  It has no `tool` text, and Codex reads no hook of a file with such a hook."},
@@ -122,7 +122,7 @@ func TestCodexRefusesAHookCodexCannotRead(t *testing.T) {
 				t.Fatalf("Build: %v, want %q", err, c.want)
 			}
 			if _, err := os.Stat(filepath.Join(home, "codex", "config.toml")); err == nil {
-				t.Error("the refused compose wrote config.toml")
+				t.Error("the failed compose wrote config.toml")
 			}
 		})
 	}

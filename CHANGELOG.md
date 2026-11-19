@@ -1421,7 +1421,7 @@ release may change what an existing document does, and states it under Upgrading
   otherwise.`` Codex 0.167.2 starts with its defaults when `config.toml` has such a
   number, and drops every hook of a `hooks.json` that has one. A float such as 2.0 counts
   as fractional.
-- Compose refuses a Codex `settings/codex/config.toml` or `settings/codex/hooks.json` with
+- Compose stops on a Codex `settings/codex/config.toml` or `settings/codex/hooks.json` with
   a hook group or a hook that Codex 0.169.0 cannot decode, such as a `command` hook with no
   `command` text, with ``Fix `hooks.<event>[<group>].hooks[<hook>]` in
   `settings/codex/<file>`.`` and the next line ``<cause>, and Codex reads no hook of a file

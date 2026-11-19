@@ -120,7 +120,7 @@ func (codex) Reserved() []render.Reserved {
 // file states that. Codex reads a project .codex only in a project the user has marked
 // trusted. A fragment that sets a key of [reservedKeys], a hook number Codex cannot read,
 // see [checkHookNumbers], or a hook group or hook Codex cannot read, see
-// [checkHookShapes], is refused before anything is written.
+// [checkHookShapes], fails the render before anything is written.
 func (codex) Render(res *compose.Result, dir, home string) error {
 	if err := checkReserved(res.SettingsFor(Runtime, "config.toml", home)); err != nil {
 		return err
@@ -345,14 +345,14 @@ var hookEvents = []string{
 	"SubagentStart", "SubagentStop", "Stop", "Interrupt",
 }
 
-// The refusals of a hook group and of a hook that Codex cannot read, see [checkHookShapes],
+// The errors of a hook group and of a hook that Codex cannot read, see [checkHookShapes],
 // with the group's or the hook's place, the settings file and the cause.
 const (
 	textGroupShape = "Fix `hooks.%s[%d]` in `settings/codex/%s`.\n  %s, and Codex reads no hook of a file with such a group."
 	textHookShape  = "Fix `hooks.%s[%d].hooks[%d]` in `settings/codex/%s`.\n  %s, and Codex reads no hook of a file with such a hook."
 )
 
-// checkHookShapes refuses hooks, the hooks table of the harness's config.toml or
+// checkHookShapes fails on hooks, the hooks table of the harness's config.toml or
 // hooks.json, file, when a group or a hook of one of [hookEvents] does not decode as Codex
 // 0.169.0 decodes it (codex-rs/protocol/src/hooks.rs, MatcherGroup and
 // HookHandlerConfig): Codex then reads no hook of the file
@@ -498,8 +498,8 @@ func unsigned(v any) bool {
 }
 
 // inTOML reports whether v, the input of an mcp_tool hook, has no null and no whole
-// number above 2^63-1 at any depth: Codex 0.169.0 refuses such an input, since TOML has
-// neither (codex-rs/protocol/src/hooks.rs, deserialize_mcp_tool_input).
+// number above 2^63-1 at any depth: Codex 0.169.0 fails to decode such an input, since
+// TOML has neither (codex-rs/protocol/src/hooks.rs, deserialize_mcp_tool_input).
 func inTOML(v any) bool {
 	switch x := v.(type) {
 	case nil:
