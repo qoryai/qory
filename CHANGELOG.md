@@ -18,6 +18,18 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A stack pins the version of a runtime that `qory run` installs:
+  `runtimes: {codex: {version: 0.167.2}}` in a `qory-stack.yaml` or in the harness
+  section of the checkout's `qory.yaml`, whose pin of a runtime wins over the base's. A
+  runtime that no layer pins installs its latest version, as before. The run reads the
+  pinned version from the registry's runtime cache, the tag `<version>`, or from npm, the
+  version's document, with the same signature and checksum checks. The compose refuses a
+  version that does not start with a digit, `latest` among them, and a runtime other than
+  `claude` and `codex`. `harness.runtimes` in the user's `qory.yaml` or an ancestor's is
+  refused. A pinned version that the registry does not have stops the run before its
+  session with `Set runtimes.<runtime>.version in <file> to a version the registry has.`
+  and the cause, `The registry has no <runtime> <version>.`; a dispatched run prints the
+  cause alone.
 - A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
   the type whose launch version sets what the workflow's session may push. A module
   declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: one
