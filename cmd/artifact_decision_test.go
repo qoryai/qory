@@ -114,8 +114,9 @@ func TestArtifactPushOfAnUnknownDecisionShowsTheValueShort(t *testing.T) {
 	const runKey = "qrk_value-for-the-test-only"
 
 	for name, c := range map[string]struct{ value, shown, hidden string }{
-		"long":    {"gd_" + strings.Repeat("a", 60), `"gd_` + strings.Repeat("a", 37) + `" and more`, strings.Repeat("a", 38)},
-		"run key": {runKey, "(a value that contains a run key)", "qrk_"},
+		"long":              {"gd_" + strings.Repeat("a", 60), `"gd_` + strings.Repeat("a", 37) + `" and more`, strings.Repeat("a", 38)},
+		"run key":           {runKey, "(a value that contains a run key)", "qrk_"},
+		"access key secret": {"qak_value-for-the-test-only", "(a value that contains an access key secret)", "qak_"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			inCheckout(t)

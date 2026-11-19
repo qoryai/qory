@@ -19,11 +19,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/wall"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/checkout"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/verdictformat"
@@ -744,7 +744,14 @@ func postVersion(ctx context.Context, client *runapi.Client, push runapi.Push) (
 	}
 
 	if errors.As(err, &apiError) && apiError.Code == runapi.CodeUnknownDecision {
-		return nil, decisionRefusedError{fmt.Sprintf(textDecisionRefused, shownDecision(push.Decision)), err}
+		// A value with a key's or a code's prefix, such as qrk_, prints as a phrase; any
+		// other value prints quoted and cut to 40 characters.
+		shown := exports.Value(push.Decision, false)
+		if shown == push.Decision {
+			shown = shortValue(push.Decision)
+		}
+
+		return nil, decisionRefusedError{fmt.Sprintf(textDecisionRefused, shown), err}
 	}
 
 	return pushed, err
@@ -756,19 +763,8 @@ func postVersion(ctx context.Context, client *runapi.Client, push runapi.Push) (
 const textDecisionRefused = "Set --decision to the id of a person's note on this work item, or drop the flag.\n" +
 	"  %s is not such an id. qory work-item show prints the open notes with their ids."
 
-// shownDecision returns the value of --decision as [textDecisionRefused] prints it: a
-// phrase in place of a value that contains a key's or a code's prefix, such as qrk_,
-// else the value quoted and cut by [shortValue].
-func shownDecision(value string) string {
-	if shown := accesskey.ShownValue(value, false); shown != value {
-		return shown
-	}
-
-	return shortValue(value)
-}
-
-// decisionRefusedError is a push for which the run API returns 422 unknown_decision. [ExitCode] gives it [ExitArtifactRefused]. It unwraps to the run API's
-// error.
+// decisionRefusedError is a push for which the run API returns 422 unknown_decision.
+// [ExitCode] gives it [ExitArtifactRefused]. It unwraps to the run API's error.
 type decisionRefusedError struct {
 	text string
 	err  error
