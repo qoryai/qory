@@ -56,6 +56,8 @@ type installSetup struct {
 	during func()
 	// before, when set, runs once the test's folders are made, before the run.
 	before func()
+	// fetchImage, when set, is the image's fetch, after the record of installFirst.
+	fetchImage func(context.Context) error
 }
 
 // runInstalling runs qory run claude with a run key as s sets it up, with no
@@ -100,9 +102,12 @@ func runInstalling(t *testing.T, s installSetup) installRun {
 		StackProxy: h.server.Stack.URL, StackCABundle: h.server.Stack.CABundle,
 		// A push proxy that takes no connection: the install reads through the host proxy.
 		PushProxy: "http://qory:nowhere@127.0.0.1:9",
-		FetchImage: func(context.Context) error {
+		FetchImage: func(ctx context.Context) error {
 			info, err := os.Lstat(program)
 			r.installFirst = err == nil && info.Mode() == 0o755
+			if s.fetchImage != nil {
+				return s.fetchImage(ctx)
+			}
 			return nil
 		},
 	})
@@ -484,17 +489,19 @@ func pollUntil(limit time.Duration, stop <-chan struct{}, ok func() bool) bool {
 	return true
 }
 
-// TestARegistryThatKeepsReturning503StopsAtTheTimeLimit has the registry return 503 to
-// every request, and a run with a time limit of 3 seconds: the run waits with the
-// registry's tries, tells so once on stderr, and ends at the limit with the line of a run
-// that ran out of time, exit 124, with no line that asks for more time. The run ends
-// within 4.5 seconds of the registry's first request. A run that ended at the limit took
-// 2.4 to 2.7 seconds from that request in 40 runs, 20 of them with 3 busy processes per
-// CPU. A run that kept its tries after the limit would finish the 4-second wait that
-// follows the second try, and end 6 seconds after the first request. The time from the
-// start of the test is no bound, because the setup of the run's folders and repositories
-// adds a time that varies with load.
-func TestARegistryThatKeepsReturning503StopsAtTheTimeLimit(t *testing.T) {
+// TestARegistryThatKeepsReturning503StopsAtTheSetupLimit has the registry return 503 to
+// every request, and a run whose setup has a limit of 3 seconds: the run waits with the
+// registry's tries, tells so once on stderr, and ends at the limit with the line of a
+// setup past its limit, which names the install, exit 124, with no line that asks for
+// more time. The run's --timeout of 1h, which counts from the agent's start, does not
+// end it. The run ends within 4.5 seconds of the registry's first request. A run that
+// ended at the limit took 2.4 to 2.7 seconds from that request in 40 runs, 20 of them
+// with 3 busy processes per CPU. A run that kept its tries after the limit would finish
+// the 4-second wait that follows the second try, and end 6 seconds after the first
+// request. The time from the start of the test is no bound, because the setup of the
+// run's folders and repositories adds a time that varies with load.
+func TestARegistryThatKeepsReturning503StopsAtTheSetupLimit(t *testing.T) {
+	defer cmd.SetSetupLimit(3 * time.Second)()
 	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
 	reg.PublishPlain("2.1.320")
 	reg.Unavailable(-1, "")
@@ -502,7 +509,7 @@ func TestARegistryThatKeepsReturning503StopsAtTheTimeLimit(t *testing.T) {
 	ended := make(chan struct{})
 	defer close(ended)
 	r := endsWithin(t, 30*time.Second, func() installRun {
-		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true, args: []string{"--timeout", "3s"}, during: func() {
+		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true, args: []string{"--timeout", "1h"}, during: func() {
 			if pollUntil(30*time.Second, ended, func() bool { return len(reg.Paths()) > 0 }) {
 				first <- time.Now()
 			}
@@ -512,7 +519,7 @@ func TestARegistryThatKeepsReturning503StopsAtTheTimeLimit(t *testing.T) {
 	select {
 	case at := <-first:
 		if took := endedAt.Sub(at); took > 4500*time.Millisecond {
-			t.Errorf("the run ended %s after the registry's first request, with a time limit of 3s", took)
+			t.Errorf("the run ended %s after the registry's first request, with a setup limit of 3s", took)
 		}
 	default:
 		t.Error("the registry got no request before the run ended")
@@ -520,11 +527,43 @@ func TestARegistryThatKeepsReturning503StopsAtTheTimeLimit(t *testing.T) {
 	if cmd.ExitCode(r.err) != 124 || len(r.joins) != 0 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.out, "the run was cancelled at its time limit of 3s, before claude started", "qory run: "+reg.Host()+" has not returned Claude Code (503); check pool.registry\n")
+	wants(t, r.out, "✗ the run was cancelled before claude started, during the install of the runtime:\n  the steps before the agent's start may take at most 3s\n", "qory run: "+reg.Host()+" has not returned Claude Code (503); check pool.registry\n")
+	if len(r.closes) != 1 || r.closes[0].State != event.StateCancelled || r.closes[0].Reason != event.ReasonTimeout || r.closes[0].ExitCode != 124 {
+		t.Errorf("the closes: %+v, want one cancelled with timeout and 124", r.closes)
+	}
 	if n := strings.Count(r.out, " has not returned Claude Code"); n != 1 {
 		t.Errorf("the run printed the waiting line %d times:\n%s", n, r.out)
 	}
 	lacks(t, r.out, "Run again with more time", "installed claude")
+}
+
+// TestAnImageFetchPastTheSetupLimitEndsTheRun is a dispatched walled run whose image's
+// fetch waits until its context ends, with a setup limit of 1 second and a --timeout of
+// 1h: the fetch ends at the setup's limit, the run closes cancelled with timeout and 124,
+// no session joins, and the line is the cause alone, which names the image's fetch.
+func TestAnImageFetchPastTheSetupLimitEndsTheRun(t *testing.T) {
+	defer cmd.SetSetupLimit(time.Second)()
+	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
+	reg.PublishPlain("2.1.320")
+	var cut error
+	r := endsWithin(t, 30*time.Second, func() installRun {
+		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true, args: []string{"--timeout", "1h"}, fetchImage: func(ctx context.Context) error {
+			<-ctx.Done()
+			cut = context.Cause(ctx)
+			return ctx.Err()
+		}})
+	})
+	if cmd.ExitCode(r.err) != 124 || len(r.joins) != 0 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if !errors.Is(cut, context.DeadlineExceeded) {
+		t.Errorf("the image's fetch ended with %v, want the setup's deadline", cut)
+	}
+	wants(t, r.out, "✗ the run was cancelled before claude started, during the fetch of the run's image:\n  the steps before the agent's start may take at most 1s\nqory run: the record is in ")
+	lacks(t, r.out, "pull the run's image", "Qory Apiary")
+	if len(r.closes) != 1 || r.closes[0].State != event.StateCancelled || r.closes[0].Reason != event.ReasonTimeout || r.closes[0].ExitCode != 124 {
+		t.Errorf("the closes: %+v, want one cancelled with timeout and 124", r.closes)
+	}
 }
 
 // TestARegistryThatKeepsReturning503StopsAtSIGTERM sends SIGTERM to qory run while the

@@ -1004,6 +1004,13 @@ func (n *nowhere) System() string       { return n.values.System }
 func (n *nowhere) Repositories() string { return n.values.Repositories }
 func (n *nowhere) Dir() string          { return n.dir }
 
+// SetSetupLimit makes d the limit of a run's setup in place of 30 minutes, and returns
+// what restores it.
+func SetSetupLimit(d time.Duration) func() {
+	setupBound = d
+	return func() { setupBound = setupLimit }
+}
+
 // SetBeforeJoin makes qory run call f once the harness is composed, before the run's
 // session joins, and returns what restores the default.
 func SetBeforeJoin(f func()) func() {

@@ -469,22 +469,11 @@ func (r *codeRun) fetchTarget() preparation.Target {
 	return r.target
 }
 
-// timedOutLine is the line of a run from a run code whose time limit, limit, came before
-// the runtime started: [timedOutBeforeJoin] for a run that cannot take --timeout. Line 1
-// is the fix, the same for every workflow, so it stays within 100 characters.
-func (r *codeRun) timedOutLine(limit time.Duration, runtime string) string {
-	return fmt.Sprintf(textTimedOutFromCode, r.workflow, limit, agentName(runtime))
-}
-
-// textTimedOutFromCode is the line of [codeRun.timedOutLine]: the workflow, the limit
-// and the runtime.
-const textTimedOutFromCode = "set a longer Time limit for the run's workflow on the Workflows page in Qory Apiary\n" +
-	"the run of the workflow %s was cancelled at its time limit of %s, before %s started"
-
 // sessionDeadline is the time at which a session whose clock starts at start reaches its
-// time limit, limit, and the zero time for a limit of 0 or below, no limit. Session 1's
-// clock starts at the run's open, so its compose counts: qory run passes the open as
-// start. A caller for a later session passes that session's start.
+// time limit, limit, and the zero time for a limit of 0 or below, no limit. Each session's
+// clock starts when its agent starts: qory run passes the time of session 1's join, so
+// the steps before it, which [setupLimit] bounds, do not count. A caller for a later
+// session passes that session's start.
 func sessionDeadline(start time.Time, limit time.Duration) time.Time {
 	if limit <= 0 {
 		return time.Time{}
@@ -498,7 +487,7 @@ var sessionMinute = time.Minute
 // sessionLimit is the time limit of session 1 of the run r: the documents'
 // time_limit_minutes, and 0, no limit, when the documents set none. qory sets no
 // default: Qory Apiary writes a limit for each workflow, 180 minutes when the workspace
-// stores none. The limit counts from the run's open, so the compose's time is in it.
+// stores none. The limit counts from the agent's start, see [sessionDeadline].
 func (r *codeRun) sessionLimit() time.Duration {
 	return time.Duration(r.minutes) * sessionMinute
 }

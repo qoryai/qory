@@ -18,25 +18,41 @@ import (
 	"github.com/qoryai/qory/internal/report"
 )
 
-// TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet is the line of a run from a run code
-// whose time limit came before the runtime started: its fix is a longer Time limit in Qory
-// Apiary, never --timeout, which such a run does not take, nor a workflow of the harness.
-// Line 1 is the same for every workflow and has at most 100 characters with "qory run: ".
-func TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet(t *testing.T) {
-	const want = "set a longer Time limit for the run's workflow on the Workflows page in Qory Apiary\n" +
-		"the run of the workflow example was cancelled at its time limit of 45m0s, before claude started"
-	for _, harness := range []string{"{}\n", ""} {
-		r := &codeRun{workflow: "example"}
-		if harness != "" {
-			r.harness = []byte(harness)
+// TestASetupPastItsLimitNamesItsStep is the line of a run whose setup passed its limit
+// of 30 minutes: for each step, line 1 is the fix, with at most 100 characters with "✗ "
+// or "qory run: ", and the cause names the step and the limit. A dispatched run shows the
+// cause alone, whose line 1 with "✗ " has at most 100 characters too, and no line names
+// Qory Apiary.
+func TestASetupPastItsLimitNamesItsStep(t *testing.T) {
+	if setupLimit != 30*time.Minute {
+		t.Errorf("the setup's limit is %s, want 30m0s", setupLimit)
+	}
+	for step := stepNone; step <= stepSetupRecord; step++ {
+		s, ok := setupSteps[step]
+		if !ok {
+			t.Fatalf("step %d has no name", step)
 		}
-		got := r.timedOutLine(45*time.Minute, "claude")
-		if got != want {
-			t.Errorf("got  %q\nwant %q", got, want)
+		cause := "the run was cancelled before claude started, during " + s.name + ":\nthe steps before the agent's start may take at most 30 minutes"
+		for _, dispatched := range []bool{false, true} {
+			got := setupPassed(step, "claude", 30*time.Minute, dispatched).Error()
+			want := s.fix + "\n" + cause
+			if dispatched {
+				want = cause
+			}
+			if got != want {
+				t.Errorf("step %d, dispatched %v:\ngot  %q\nwant %q", step, dispatched, got, want)
+			}
+			first, _, _ := strings.Cut(got, "\n")
+			if n := len("qory run: " + first); n > 100 {
+				t.Errorf("step %d, dispatched %v: line 1 has %d characters with qory run: %q", step, dispatched, n, first)
+			}
+			if strings.Contains(got, "Qory Apiary") || strings.HasSuffix(got, ".") {
+				t.Errorf("step %d, dispatched %v: %q", step, dispatched, got)
+			}
 		}
-		if first, _, _ := strings.Cut(got, "\n"); len("qory run: "+first) > 100 {
-			t.Errorf("line 1 has %d characters with qory run: %q", len("qory run: "+first), first)
-		}
+	}
+	if got := setupPassed(stepFetch, "", time.Second, true).Error(); !strings.HasPrefix(got, "the run was cancelled before the agent started, during the fetch of the run's repositories:\n") || !strings.HasSuffix(got, "at most 1s") {
+		t.Errorf("a setup past a limit of 1s before the runtime is known: %q", got)
 	}
 }
 
@@ -754,26 +770,26 @@ func TestFullSuiteOfTheDocumentsIsTheRunsFullSuite(t *testing.T) {
 }
 
 // TestALaterSessionStartGivesALaterDeadline is [sessionDeadline] for session 1, whose clock
-// starts at the run's open, and for a later session, whose clock starts when it starts:
-// each deadline is its start plus its limit, so a later start gives a later deadline. A
-// limit of 0 or below gives no deadline.
+// starts at its join, and for a later session, whose clock starts when it starts: each
+// deadline is its start plus its limit, so a later start gives a later deadline. A limit
+// of 0 or below gives no deadline.
 func TestALaterSessionStartGivesALaterDeadline(t *testing.T) {
-	opened := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
-	first := sessionDeadline(opened, 30*time.Minute)
-	if want := opened.Add(30 * time.Minute); !first.Equal(want) {
+	joined := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
+	first := sessionDeadline(joined, 30*time.Minute)
+	if want := joined.Add(30 * time.Minute); !first.Equal(want) {
 		t.Errorf("session 1 ends at %v, want %v", first, want)
 	}
 	second := sessionDeadline(first.Add(5*time.Minute), 60*time.Minute)
-	if want := opened.Add(95 * time.Minute); !second.Equal(want) {
+	if want := joined.Add(95 * time.Minute); !second.Equal(want) {
 		t.Errorf("session 2 ends at %v, want %v", second, want)
 	}
 	if !second.After(first) {
 		t.Errorf("session 2 ends at %v, not after session 1 at %v", second, first)
 	}
-	if got := sessionDeadline(opened, 0); !got.IsZero() {
+	if got := sessionDeadline(joined, 0); !got.IsZero() {
 		t.Errorf("a session with no limit ends at %v, want no deadline", got)
 	}
-	if got := sessionDeadline(opened, -time.Minute); !got.IsZero() {
+	if got := sessionDeadline(joined, -time.Minute); !got.IsZero() {
 		t.Errorf("a session with a negative limit ends at %v, want no deadline", got)
 	}
 }
