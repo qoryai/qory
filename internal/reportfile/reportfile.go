@@ -1,8 +1,9 @@
 // Package reportfile reads a file that a session wrote for qory, such as a reviewer's
 // report, after that session ended: as a regular file with one hard link, at most a given
-// size, and without following a link at the file's path or at any folder above it. A link,
-// a second hard link, a FIFO, a folder, a device and an oversize file are each an [Error]
-// with its [Cause], so the caller can state why it read nothing.
+// size, below a folder that qory made, and without following a link at the file's path or
+// at a folder between it and that folder. A link, a second hard link, a FIFO, a folder, a
+// device and an oversize file are each an [Error] with its [Cause], so the caller can state
+// why it read nothing.
 package reportfile
 
 import (
@@ -13,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // MaxBytes is the most bytes of a reviewer's report that qory reads: 1 MiB.
@@ -25,7 +27,7 @@ type Cause int
 const (
 	// Missing is a path with no file.
 	Missing Cause = iota + 1
-	// Link is a symbolic link at the path, or at a folder above it.
+	// Link is a symbolic link at the path, or at a folder from the root down to it.
 	Link
 	// NotRegular is a FIFO, a folder, a socket or a device at the path.
 	NotRegular
@@ -33,7 +35,8 @@ const (
 	TooLarge
 	// Unreadable is a file that the open or the read failed on.
 	Unreadable
-	// BadPath is a path that is not absolute and clean.
+	// BadPath is a root that is not absolute and clean, or a path that is not a clean path
+	// below it.
 	BadPath
 	// HardLink is a regular file with more than one hard link.
 	HardLink
@@ -60,7 +63,7 @@ func (e *Error) What() string {
 	case TooLarge:
 		return "has more than " + strconv.FormatInt(e.Limit, 10) + " bytes"
 	case BadPath:
-		return "is no absolute, clean path"
+		return "is no clean path below an absolute, clean folder"
 	case HardLink:
 		return "has another hard link"
 	default:
@@ -87,28 +90,41 @@ func (e *Error) Error() string {
 // Unwrap is the error of the open or the read, nil for any other cause.
 func (e *Error) Unwrap() error { return e.Err }
 
-// Read reads the file at path, an absolute and clean path, of at most limit bytes. It
-// follows no link: a link at path, or at any folder from path's folder up to the root, is
-// an [Error] with [Link], so the caller gives a path with no link in it, such as one that
-// filepath.EvalSymlinks returns. A file with a second hard link is [HardLink]. A file that
-// is not regular is [NotRegular], also when it turns into one between the check and the
-// open, and the open does not wait on a FIFO.
-func Read(path string, limit int64) ([]byte, error) {
+// Read reads the file at rel below root, of at most limit bytes. root is the folder that
+// qory made for the file, an absolute and clean path that the caller resolved when it made
+// the folder; rel is a clean path below it, with no "..". Read checks root and each folder
+// from root down to the file for a link, never resolves rel, and opens the file through
+// os.Root with no link followed: a link there is an [Error] with [Link]. A folder above root
+// may be a link, such as /var on macOS. A file with a second hard link is [HardLink]. A
+// file that is not regular is [NotRegular], also when it turns into one between the check
+// and the open, and the open does not wait on a FIFO.
+func Read(root, rel string, limit int64) ([]byte, error) {
 	fail := func(c Cause, err error) ([]byte, error) {
-		return nil, &Error{Path: path, Cause: c, Limit: limit, Err: err}
+		return nil, &Error{Path: root + string(filepath.Separator) + rel, Cause: c, Limit: limit, Err: err}
 	}
-	if path == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+	if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root ||
+		!filepath.IsLocal(rel) || filepath.Clean(rel) != rel || rel == "." {
 		return fail(BadPath, nil)
 	}
-	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
-		if info, err := os.Lstat(dir); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+	if info, err := os.Lstat(root); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		return fail(Link, nil)
+	}
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fail(Missing, nil)
+		}
+		return fail(Unreadable, err)
+	}
+	defer r.Close()
+	parts := strings.Split(rel, string(filepath.Separator))
+	for i := 1; i < len(parts); i++ {
+		dir := filepath.Join(parts[:i]...)
+		if info, err := r.Lstat(dir); err == nil && info.Mode()&fs.ModeSymlink != 0 {
 			return fail(Link, nil)
 		}
-		if dir == filepath.Dir(dir) {
-			break
-		}
 	}
-	info, err := os.Lstat(path)
+	info, err := r.Lstat(rel)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return fail(Missing, nil)
@@ -123,9 +139,9 @@ func Read(path string, limit int64) ([]byte, error) {
 	case info.Size() > limit:
 		return fail(TooLarge, nil)
 	}
-	f, err := os.OpenFile(path, os.O_RDONLY|openFlags, 0)
+	f, err := r.OpenFile(rel, os.O_RDONLY|openFlags, 0)
 	if err != nil {
-		if isLink(err) {
+		if isLink(err) || strings.Contains(err.Error(), "escapes from parent") {
 			return fail(Link, nil)
 		}
 		if errors.Is(err, fs.ErrNotExist) {

@@ -55,8 +55,9 @@ var commitID = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 type Folder struct{ root string }
 
 // New makes the folder of a reviewer copy at root, an absolute and clean path whose folder
-// does not exist yet, and returns it. [Folder.Result] reads the script's files with
-// reportfile.Read, so root has no link in it.
+// does not exist yet, and returns it. The caller resolves root once, as it makes the
+// folder: [Folder.Result] reads the script's files below root with reportfile.Read, which
+// follows no link from root down.
 func New(root string) (Folder, error) {
 	if !filepath.IsAbs(root) || filepath.Clean(root) != root || strings.ContainsAny(root, "\n\r\x00") {
 		return Folder{}, fmt.Errorf("Give the reviewer copy an absolute, clean path on one line.\nThe path is %s.", strconv.Quote(root))
@@ -141,10 +142,10 @@ type Entry struct {
 // leaves out. The error starts with the fix: the session stopped, ended before its end, or
 // left no copy or no diff.
 func (f Folder) Result() ([]Entry, error) {
-	if data, err := reportfile.Read(filepath.Join(f.state(), "failed"), maxStateFile); err == nil {
+	if data, err := reportfile.Read(f.root, filepath.Join(stateName, "failed"), maxStateFile); err == nil {
 		return nil, fmt.Errorf("Escalate the round: the reviewer copy stopped at a check.\n%s", strings.TrimSpace(string(data)))
 	}
-	if _, err := reportfile.Read(filepath.Join(f.state(), "done"), maxStateFile); err != nil {
+	if _, err := reportfile.Read(f.root, filepath.Join(stateName, "done"), maxStateFile); err != nil {
 		return nil, errors.New("Run the copy session again: it ended before the reviewer copy was complete.")
 	}
 	if info, err := os.Lstat(f.Commit()); err != nil || !info.IsDir() {
@@ -153,7 +154,7 @@ func (f Folder) Result() ([]Entry, error) {
 	if info, err := os.Lstat(f.Diff()); err != nil || !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("Run the copy session again: the reviewer copy has no file %s.", diffName)
 	}
-	data, err := reportfile.Read(filepath.Join(f.state(), "left-out"), maxStateFile)
+	data, err := reportfile.Read(f.root, filepath.Join(stateName, "left-out"), maxStateFile)
 	if err != nil {
 		return nil, fmt.Errorf("Run the copy session again: its list of the paths it left out cannot be read.\n%w", err)
 	}

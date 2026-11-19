@@ -128,11 +128,14 @@ const (
 	TimedOut
 )
 
-// Reviewer is one reviewer of the round: its agent name, how its session ended, and the
-// absolute path of its report file.
+// Reviewer is one reviewer of the round: its agent name, how its session ended, the folder
+// that qory made for its report, and the path of its report file below that folder. qory
+// resolves Root once, as it makes the folder; Decide reads Report below it with
+// reportfile.Read, which follows no link from Root down.
 type Reviewer struct {
 	Name   string
 	Ended  Ending
+	Root   string
 	Report string
 }
 
@@ -376,7 +379,7 @@ func reviewerFindings(one Reviewer, ids *numbering) []Finding {
 	case TimedOut:
 		return written(fmt.Sprintf(textTimedOut, one.Name))
 	}
-	data, err := reportfile.Read(one.Report, reportfile.MaxBytes)
+	data, err := reportfile.Read(one.Root, one.Report, reportfile.MaxBytes)
 	if err != nil {
 		var bad *reportfile.Error
 		if errors.As(err, &bad) && bad.Cause == reportfile.Missing {

@@ -25,12 +25,11 @@ func causeOf(t *testing.T, err error) Cause {
 }
 
 func TestReadReadsARegularFile(t *testing.T) {
-	dir := realTempDir(t)
-	path := filepath.Join(dir, "report.json")
-	if err := os.WriteFile(path, []byte(`{"reviewer":"code-reviewer","findings":[]}`), 0o600); err != nil {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "report.json"), []byte(`{"reviewer":"code-reviewer","findings":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	data, err := Read(path, MaxBytes)
+	data, err := Read(root, "report.json", MaxBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,42 +37,77 @@ func TestReadReadsARegularFile(t *testing.T) {
 		t.Errorf("read %q", data)
 	}
 	// A file of exactly the limit is read.
-	if _, err := Read(path, int64(len(data))); err != nil {
+	if _, err := Read(root, "report.json", int64(len(data))); err != nil {
 		t.Errorf("a file of the limit's size: %v", err)
 	}
 }
 
-func TestReadReadsNoLink(t *testing.T) {
-	dir := realTempDir(t)
-	target := filepath.Join(dir, "target.json")
-	if err := os.WriteFile(target, []byte("{}"), 0o600); err != nil {
+func TestReadReadsBelowARootUnderALink(t *testing.T) {
+	// The root is below a link, as t.TempDir() is below /var on macOS: Read checks no folder
+	// above the root.
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "real", "root", "round"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(dir, "report.json")
-	if err := os.Symlink(target, link); err != nil {
+	if err := os.Symlink(filepath.Join(dir, "real"), filepath.Join(dir, "linked")); err != nil {
 		t.Fatal(err)
 	}
-	data, err := Read(link, MaxBytes)
-	if got := causeOf(t, err); got != Link || data != nil {
-		t.Errorf("a link: cause %d, data %q", got, data)
-	}
-	// A link to a folder that has the report is a link too.
-	reports := filepath.Join(dir, "reports")
-	if err := os.Symlink(dir, reports); err != nil {
+	root := filepath.Join(dir, "linked", "root")
+	if err := os.WriteFile(filepath.Join(root, "round", "report.json"), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := causeOf(t, second(Read(filepath.Join(reports, "target.json"), MaxBytes))); got != Link {
-		t.Errorf("a file in a linked folder: cause %d", got)
+	if data, err := Read(root, filepath.Join("round", "report.json"), MaxBytes); err != nil || string(data) != "{}" {
+		t.Errorf("a file below a root under a link: %q, %v", data, err)
+	}
+}
+
+func TestReadReadsNoLinkBelowTheRoot(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "target.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "inside"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "inside", "target.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for link, target := range map[string]string{
+		"report.json": filepath.Join(outside, "target.json"),
+		"near.json":   filepath.Join("inside", "target.json"),
+		"round":       outside,
+		"inner-round": "inside",
+	} {
+		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A link at the file, to a file outside the root or inside it, and a link at a folder
+	// between the root and the file, are each refused as a link.
+	for _, rel := range []string{"report.json", "near.json", filepath.Join("round", "target.json"), filepath.Join("inner-round", "target.json")} {
+		data, err := Read(root, rel, MaxBytes)
+		if got := causeOf(t, err); got != Link || data != nil {
+			t.Errorf("%s: cause %d, data %q", rel, got, data)
+		}
+	}
+	// The root itself as a link is a link too.
+	linkedRoot := filepath.Join(t.TempDir(), "root")
+	if err := os.Symlink(root, linkedRoot); err != nil {
+		t.Fatal(err)
+	}
+	if got := causeOf(t, second(Read(linkedRoot, filepath.Join("inside", "target.json"), MaxBytes))); got != Link {
+		t.Errorf("a root that is a link: cause %d", got)
 	}
 }
 
 func TestReadDoesNotWaitOnAFIFO(t *testing.T) {
-	path := filepath.Join(realTempDir(t), "report.json")
-	if err := syscall.Mkfifo(path, 0o600); err != nil {
+	root := t.TempDir()
+	if err := syscall.Mkfifo(filepath.Join(root, "report.json"), 0o600); err != nil {
 		t.Skipf("mkfifo: %v", err)
 	}
 	done := make(chan error, 1)
-	go func() { done <- second(Read(path, MaxBytes)) }()
+	go func() { done <- second(Read(root, "report.json", MaxBytes)) }()
 	select {
 	case err := <-done:
 		if got := causeOf(t, err); got != NotRegular {
@@ -85,11 +119,11 @@ func TestReadDoesNotWaitOnAFIFO(t *testing.T) {
 }
 
 func TestReadReadsNoOversizeFile(t *testing.T) {
-	path := filepath.Join(realTempDir(t), "report.json")
-	if err := os.WriteFile(path, []byte(strings.Repeat("x", 11)), 0o600); err != nil {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "report.json"), []byte(strings.Repeat("x", 11)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := second(Read(path, 10))
+	err := second(Read(root, "report.json", 10))
 	if got := causeOf(t, err); got != TooLarge {
 		t.Fatalf("an oversize file: cause %d", got)
 	}
@@ -98,17 +132,27 @@ func TestReadReadsNoOversizeFile(t *testing.T) {
 	}
 }
 
-func TestReadNamesAMissingFile(t *testing.T) {
-	dir := realTempDir(t)
-	if got := causeOf(t, second(Read(filepath.Join(dir, "report.json"), MaxBytes))); got != Missing {
+func TestReadNamesAMissingFileAndABadPath(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "folder"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := causeOf(t, second(Read(root, "report.json", MaxBytes))); got != Missing {
 		t.Errorf("a missing file: cause %d", got)
 	}
-	if got := causeOf(t, second(Read(dir, MaxBytes))); got != NotRegular {
+	if got := causeOf(t, second(Read(filepath.Join(root, "none"), "report.json", MaxBytes))); got != Missing {
+		t.Errorf("a missing root: cause %d", got)
+	}
+	if got := causeOf(t, second(Read(root, "folder", MaxBytes))); got != NotRegular {
 		t.Errorf("a folder: cause %d", got)
 	}
-	for _, bad := range []string{"", "report.json", dir + "/./report.json", dir + "/x/../report.json", dir + "/"} {
-		if got := causeOf(t, second(Read(bad, MaxBytes))); got != BadPath {
-			t.Errorf("the path %q: cause %d", bad, got)
+	for _, c := range [][2]string{
+		{root, filepath.Join("..", filepath.Base(root), "report.json")}, {root, ".."}, {root, "../x/report.json"},
+		{root, "folder/../report.json"}, {root, "./report.json"}, {root, "/etc/passwd"}, {root, ""}, {root, "."},
+		{"", "report.json"}, {"reports", "report.json"}, {root + "/", "report.json"},
+	} {
+		if got := causeOf(t, second(Read(c[0], c[1], MaxBytes))); got != BadPath {
+			t.Errorf("the root %q and the path %q: cause %d", c[0], c[1], got)
 		}
 	}
 }
@@ -132,53 +176,21 @@ func TestErrorStartsWithItsFix(t *testing.T) {
 	}
 }
 
-func TestReadReadsNoFileBelowALinkedFolder(t *testing.T) {
-	dir := realTempDir(t)
-	if err := os.MkdirAll(filepath.Join(dir, "real", "round"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "real", "round", "report.json"), []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(dir, "real"), filepath.Join(dir, "linked")); err != nil {
-		t.Fatal(err)
-	}
-	// The report's folder is no link, but the folder above it is.
-	if got := causeOf(t, second(Read(filepath.Join(dir, "linked", "round", "report.json"), MaxBytes))); got != Link {
-		t.Errorf("a file below a linked folder: cause %d", got)
-	}
-	if _, err := Read(filepath.Join(dir, "real", "round", "report.json"), MaxBytes); err != nil {
-		t.Errorf("the file at its path with no link: %v", err)
-	}
-}
-
 func TestReadReadsNoFileWithASecondHardLink(t *testing.T) {
-	dir := realTempDir(t)
-	path := filepath.Join(dir, "report.json")
-	if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "report.json"), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Link(path, filepath.Join(dir, "other.json")); err != nil {
+	if err := os.Link(filepath.Join(root, "report.json"), filepath.Join(root, "other.json")); err != nil {
 		t.Skipf("link: %v", err)
 	}
-	err := second(Read(path, MaxBytes))
+	err := second(Read(root, "report.json", MaxBytes))
 	if got := causeOf(t, err); got != HardLink {
 		t.Fatalf("a file with a second hard link: cause %d", got)
 	}
 	if !strings.HasSuffix(err.Error(), "has another hard link.") {
 		t.Errorf("the error is %q", err)
 	}
-}
-
-// realTempDir is a new folder at a path with no link, as Read needs: on macOS the default
-// temporary folder is below /var, a link to /private/var.
-func realTempDir(t *testing.T) string {
-	t.Helper()
-	dir, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return dir
 }
 
 // second is the error of a call that returns data and an error.

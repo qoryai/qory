@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -34,25 +35,43 @@ func fixture(t *testing.T, name string) string {
 	return path
 }
 
-// reportAt writes text as a report file in a new folder and returns its path.
-func reportAt(t *testing.T, text string) string {
+// roots is the folder of each test's reports, by the test.
+var roots sync.Map
+
+// reportsRoot is the folder of t's reports, as qory makes one for a round.
+func reportsRoot(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(realTempDir(t), "report.json")
-	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
-		t.Fatal(err)
+	if dir, ok := roots.Load(t); ok {
+		return dir.(string)
 	}
-	return path
+	dir := t.TempDir()
+	roots.Store(t, dir)
+	t.Cleanup(func() { roots.Delete(t) })
+	return dir
 }
 
-// realTempDir is a new folder at a path with no link, as reportfile.Read needs: on macOS
-// the default temporary folder is below /var, a link to /private/var.
-func realTempDir(t *testing.T) string {
+// reportCount numbers the report files of the tests.
+var reportCount atomic.Int64
+
+// reportAt writes text as a report file below t's [reportsRoot] and returns its path
+// relative to that folder.
+func reportAt(t *testing.T, text string) string {
 	t.Helper()
-	dir, err := filepath.EvalSymlinks(t.TempDir())
+	rel := fmt.Sprintf("report-%d.json", reportCount.Add(1))
+	if err := os.WriteFile(filepath.Join(reportsRoot(t), rel), []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return rel
+}
+
+// fixtureReport is the report of testdata that name has, copied below t's [reportsRoot].
+func fixtureReport(t *testing.T, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return dir
+	return reportAt(t, string(data))
 }
 
 // previous is the open findings of testdata/previous.json.
@@ -155,8 +174,8 @@ func ids(open OpenFindings) map[string][]string {
 
 func TestABlockingFindingRequestsChangesWithEveryOpenFinding(t *testing.T) {
 	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{
-		{Name: "code-reviewer", Ended: Finished, Report: fixture(t, codeReport)},
-		{Name: "security-reviewer", Ended: Finished, Report: fixture(t, securityReport)},
+		{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: fixtureReport(t, codeReport)},
+		{Name: "security-reviewer", Ended: Finished, Root: reportsRoot(t), Report: fixtureReport(t, securityReport)},
 	}})
 	if d.Verdict != ChangesRequested {
 		t.Fatalf("the verdict is %s", d.Verdict)
@@ -195,8 +214,8 @@ func TestABlockingFindingRequestsChangesWithEveryOpenFinding(t *testing.T) {
 
 func TestOnlyNonBlockingFindingsPass(t *testing.T) {
 	d := decide(t, Round{Number: 2, Suite: green, Reviewers: []Reviewer{
-		{Name: "code-reviewer", Ended: Finished, Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]}`)},
-		{Name: "security-reviewer", Ended: Finished, Report: fixture(t, securityReport)},
+		{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]}`)},
+		{Name: "security-reviewer", Ended: Finished, Root: reportsRoot(t), Report: fixtureReport(t, securityReport)},
 	}})
 	if d.Verdict != Passed || d.Points != nil {
 		t.Fatalf("the verdict is %s with points %v", d.Verdict, d.Points)
@@ -210,9 +229,11 @@ func TestOnlyNonBlockingFindingsPass(t *testing.T) {
 }
 
 func TestAReviewerWithNoValidReportIsABlockingFinding(t *testing.T) {
-	dir := realTempDir(t)
-	link := filepath.Join(dir, "report.json")
-	if err := os.Symlink(fixture(t, codeReport), link); err != nil {
+	dir := reportsRoot(t)
+	if err := os.Symlink(fixture(t, codeReport), filepath.Join(dir, "link.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "folder"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	finding := `{"severity":"blocking","quote":"q","problem":"p","fix":"f","proof":"failing input: x","point":"p"}`
@@ -221,18 +242,18 @@ func TestAReviewerWithNoValidReportIsABlockingFinding(t *testing.T) {
 		r     Reviewer
 		point string
 	}{
-		{"failed", Reviewer{Ended: Failed, Report: fixture(t, codeReport)}, "Reviewer code-reviewer wrote no report: its session failed."},
+		{"failed", Reviewer{Ended: Failed, Root: reportsRoot(t), Report: fixtureReport(t, codeReport)}, "Reviewer code-reviewer wrote no report: its session failed."},
 		{"timed out", Reviewer{Ended: TimedOut}, "Reviewer code-reviewer wrote no report: its session reached its time limit."},
-		{"missing", Reviewer{Report: filepath.Join(dir, "none.json")}, "Reviewer code-reviewer wrote no report."},
-		{"link", Reviewer{Report: link}, "Reviewer code-reviewer wrote no valid report: the report file is a link, or is below a folder that is a link."},
-		{"folder", Reviewer{Report: dir}, "Reviewer code-reviewer wrote no valid report: the report file is no regular file."},
-		{"not JSON", Reviewer{Report: reportAt(t, `{"reviewer":`)}, "Reviewer code-reviewer wrote a report that is not one JSON object: unexpected EOF."},
-		{"two values", Reviewer{Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]} {}`)}, "Reviewer code-reviewer wrote a report that is not one JSON object: the file continues after the JSON value."},
-		{"not UTF-8", Reviewer{Report: reportAt(t, "{\"reviewer\":\"\xff\"}")}, "Reviewer code-reviewer wrote a report that is not UTF-8 text."},
-		{"result word", Reviewer{Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[],"result":"clean"}`)}, "Reviewer code-reviewer wrote a report that does not match the report format: "},
-		{"bad severity", Reviewer{Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[`+strings.Replace(finding, `"blocking"`, `"minor"`, 1)+`]}`)}, "Reviewer code-reviewer wrote a report that does not match the report format: at '/findings/0/severity'"},
-		{"blocking on a broken rule", Reviewer{Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[`+strings.Replace(finding, "failing input", "broken rule", 1)+`]}`)}, "Reviewer code-reviewer wrote a report that does not match the report format: "},
-		{"other reviewer", Reviewer{Report: fixture(t, securityReport)}, "Reviewer code-reviewer wrote a report for the reviewer security-reviewer."},
+		{"missing", Reviewer{Root: reportsRoot(t), Report: "none.json"}, "Reviewer code-reviewer wrote no report."},
+		{"link", Reviewer{Root: reportsRoot(t), Report: "link.json"}, "Reviewer code-reviewer wrote no valid report: the report file is a link, or is below a folder that is a link."},
+		{"folder", Reviewer{Root: reportsRoot(t), Report: "folder"}, "Reviewer code-reviewer wrote no valid report: the report file is no regular file."},
+		{"not JSON", Reviewer{Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":`)}, "Reviewer code-reviewer wrote a report that is not one JSON object: unexpected EOF."},
+		{"two values", Reviewer{Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]} {}`)}, "Reviewer code-reviewer wrote a report that is not one JSON object: the file continues after the JSON value."},
+		{"not UTF-8", Reviewer{Root: reportsRoot(t), Report: reportAt(t, "{\"reviewer\":\"\xff\"}")}, "Reviewer code-reviewer wrote a report that is not UTF-8 text."},
+		{"result word", Reviewer{Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[],"result":"clean"}`)}, "Reviewer code-reviewer wrote a report that does not match the report format: "},
+		{"bad severity", Reviewer{Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[`+strings.Replace(finding, `"blocking"`, `"minor"`, 1)+`]}`)}, "Reviewer code-reviewer wrote a report that does not match the report format: at '/findings/0/severity'"},
+		{"blocking on a broken rule", Reviewer{Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[`+strings.Replace(finding, "failing input", "broken rule", 1)+`]}`)}, "Reviewer code-reviewer wrote a report that does not match the report format: "},
+		{"other reviewer", Reviewer{Root: reportsRoot(t), Report: fixtureReport(t, securityReport)}, "Reviewer code-reviewer wrote a report for the reviewer security-reviewer."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -260,7 +281,7 @@ func TestAReviewerWithNoValidReportIsABlockingFinding(t *testing.T) {
 
 func TestTheSuiteDecidesBesideTheReports(t *testing.T) {
 	clean := func(t *testing.T) []Reviewer {
-		return []Reviewer{{Name: "code-reviewer", Ended: Finished, Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]}`)}}
+		return []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]}`)}}
 	}
 	cases := []struct {
 		name    string
@@ -295,7 +316,7 @@ func TestTheSuiteDecidesBesideTheReports(t *testing.T) {
 	// A cause the agent cannot fix escalates over a reviewer's blocking finding too, with
 	// the suite's point first.
 	d := decide(t, Round{Number: 1, Suite: &Suite{State: SuiteNotRun, AgentCannotFix: true},
-		Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Report: fixture(t, codeReport)}}})
+		Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: fixtureReport(t, codeReport)}}})
 	if d.Verdict != Escalate || len(d.Points) != 3 || d.Points[0].Text != "The full suite did not run." {
 		t.Errorf("the verdict is %s with %+v", d.Verdict, d.Points)
 	}
@@ -308,8 +329,8 @@ func TestIDsCountAcrossTheRun(t *testing.T) {
 	code := reportAt(t, `{"reviewer":"code-reviewer","findings":[`+again("f1")+`,`+again("f9")+`,`+again("f1")+`]}`)
 	security := reportAt(t, `{"reviewer":"security-reviewer","findings":[`+again("f2")+`,`+again("f1")+`]}`)
 	d := decide(t, Round{Number: 2, NextID: 5, Suite: green, Previous: previous(t), Reviewers: []Reviewer{
-		{Name: "code-reviewer", Ended: Finished, Report: code},
-		{Name: "security-reviewer", Ended: Finished, Report: security},
+		{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: code},
+		{Name: "security-reviewer", Ended: Finished, Root: reportsRoot(t), Report: security},
 	}})
 	// f1 and f2 repeat; f9 is no id of the round before, and the second f1 repeats one this
 	// round has, so each gets a new id from NextID on.
@@ -325,7 +346,7 @@ func TestIDsCountAcrossTheRun(t *testing.T) {
 	}
 	// With no NextID, the ids start after the highest of the round before.
 	d = decide(t, Round{Number: 2, Suite: green, Previous: previous(t), Reviewers: []Reviewer{
-		{Name: "code-reviewer", Ended: Finished, Report: fixture(t, codeReport)},
+		{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: fixtureReport(t, codeReport)},
 	}})
 	if got := ids(d.Open)["code-reviewer"]; !slices.Equal(got, []string{"f3 blocking", "f4 non-blocking"}) {
 		t.Errorf("the ids are %v", got)
@@ -342,7 +363,7 @@ func TestMoreThanTwentyFindingsKeepTheVerdictValid(t *testing.T) {
 		findings = append(findings, fmt.Sprintf(`{"severity":%q,"quote":"q","problem":"p","fix":"f","proof":"failing input: x","point":"point %d\twith a tab"}`, severity, i+1))
 	}
 	report := reportAt(t, `{"reviewer":"code-reviewer","findings":[`+strings.Join(findings, ",")+`]}`)
-	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Report: report}}})
+	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: report}}})
 	if len(d.Points) != 20 {
 		t.Fatalf("the verdict has %d points", len(d.Points))
 	}
@@ -361,7 +382,7 @@ func TestMoreThanTwentyFindingsKeepTheVerdictValid(t *testing.T) {
 func TestDecideStopsOnARoundMadeWrong(t *testing.T) {
 	// A name of 64 characters, the most, so that line 1 of each error stays within 100.
 	long := strings.Repeat("r", 64)
-	good := Reviewer{Name: long, Ended: Finished, Report: "/r/report.json"}
+	good := Reviewer{Name: long, Ended: Finished, Root: "/r", Report: "report.json"}
 	for name, r := range map[string]Round{
 		"round 0":       {Number: 0, Suite: green},
 		"no reviewer":   {Number: 1, Suite: green},
@@ -398,7 +419,7 @@ func TestAPointOfSpacesIsNoValidReport(t *testing.T) {
 				t.Fatal(err)
 			}
 			report := reportAt(t, `{"reviewer":"code-reviewer","findings":[`+string(finding)+`]}`)
-			d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Report: report}}})
+			d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: report}}})
 			got := d.Open.Reviewers[0].Findings
 			want := "Reviewer code-reviewer wrote a report that does not match the report format: at '/findings/0/point'"
 			if d.Verdict != ChangesRequested || len(got) != 1 || got[0].Severity != Blocking ||
@@ -410,7 +431,7 @@ func TestAPointOfSpacesIsNoValidReport(t *testing.T) {
 	// The spaces around a point's text go.
 	finding := `{"severity":"non-blocking","quote":"q","problem":"p","fix":"f","proof":"broken rule: r","point":"\u00a0 one point\t"}`
 	report := reportAt(t, `{"reviewer":"code-reviewer","findings":[`+finding+`]}`)
-	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Report: report}}})
+	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: report}}})
 	if got := d.Open.Reviewers[0].Findings; len(got) != 1 || got[0].Point != "one point" {
 		t.Errorf("the findings are %+v", got)
 	}
@@ -445,8 +466,8 @@ func TestOpenFindingsFitTheHarnessRead(t *testing.T) {
 		security = append(security, bigFinding(t, Blocking, 61+i))
 	}
 	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{
-		{Name: "code-reviewer", Ended: Finished, Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[`+strings.Join(code, ",")+`]}`)},
-		{Name: "security-reviewer", Ended: Finished, Report: reportAt(t, `{"reviewer":"security-reviewer","findings":[`+strings.Join(security, ",")+`]}`)},
+		{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[`+strings.Join(code, ",")+`]}`)},
+		{Name: "security-reviewer", Ended: Finished, Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"security-reviewer","findings":[`+strings.Join(security, ",")+`]}`)},
 	}})
 	// The verdict's points count every finding: 42 blocking, then 58 non-blocking.
 	if d.Verdict != ChangesRequested || len(d.Points) != 20 ||
@@ -533,7 +554,7 @@ func TestAHiddenPointHasQorysTextInTheVerdict(t *testing.T) {
 	}
 	// A suite's point of hidden characters alone gets qory's text.
 	d := decide(t, Round{Number: 1, Suite: &Suite{State: SuiteFailed, Point: "\u200b\u3164"},
-		Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]}`)}}})
+		Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]}`)}}})
 	if p := d.Open.Reviewers[0].Findings[0].Point; p != "The full suite failed." {
 		t.Errorf("the suite's point is %q", p)
 	}
