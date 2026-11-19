@@ -1228,7 +1228,9 @@ its files take on disk, at most 60 minutes.
 `--timeout 0` lifts the limit `forager.yaml` sets.
 
 A run from a run code takes the time limit of its session only from `time_limit_minutes`
-in the run's documents, counted from the agent's start as for any run. Qory Apiary writes it
+in the run's documents, counted from the agent's start as for any run. A later session of
+a run of several sessions takes it from its next-session answer (see [A run of several
+sessions](#a-run-of-several-sessions)). Qory Apiary writes it
 from the Time limit of the run's workflow on the Workflows page, and writes 180 minutes for
 a workflow with no Time limit. Documents with no `time_limit_minutes` give the session no
 time limit: qory sets none, and a stack sets none. At the limit the session stops as
@@ -2018,7 +2020,8 @@ settings, the time limit, the harness, the workflow and `harness_hidden`; for th
 and the places of its images at a registry. qory runs the steps explore and prebuild.
 The documents of an explore can also contain `shared_run` and `full_suite`. With `full_suite`
 true, the session runs the full test suite when it ends, see [The full suite](#the-full-suite).
-qory reads `shared_run` and changes nothing for it.
+With `shared_run` true, the run has more than one session, see [A run of several
+sessions](#a-run-of-several-sessions).
 qory checks the documents as the run contract's `documents.schema.json`, and, for the
 step explore, checks that `inputs.domain` and `inputs.work_item.id` match the domain and
 the work item. Then a run of the step explore:
@@ -2735,6 +2738,60 @@ limits. Each error starts with its fix:
 - more than 16 MiB (16,777,216 bytes) in all, not counting the files that contain a
   zero byte: `make the harness files at most 16777216 bytes in all: with <path> they
   have <size>`.
+
+#### A run of several sessions
+
+A run whose documents set `shared_run` to `true` runs one session after another on its
+checkout and its branch, until Qory Apiary ends it. After each session, once the session's
+full suite and its push step passed, qory sends the next-session request over the gateway's
+link: the session's number, the state the session ended in, and its reason. qory sends no
+request after a session that paused, that a stop ended, that did not join, or whose push step
+failed or found the run ended; the run closes as that session ended.
+
+Qory Apiary answers with the end of the run or with the next session: its workflow, its
+runtime and model settings, its model key (`model_credential`), its time limit, `full_suite`
+and its inputs. For the end, qory prints `qory run: Qory Apiary starts no session after
+session <n>, so the run ends` and closes the run as the last session ended. For a session,
+qory prints `qory run: session <n> starts the workflow <workflow> on <runtime>`, and then:
+
+1. composes the workspace's harness for the session's runtime and model settings in a
+   compose step, from the run's sources at the commits of session 1's compose: qory fetches
+   nothing, and opens no stack proxy;
+2. installs the session's runtime, if no session of the run ran it yet (see [The runtime's
+   program](#the-runtimes-program));
+3. writes the session's inputs, and, for Codex, gives the session a new Codex home and
+   removes the home of the session before, with its files;
+4. joins the session with the answer's model key and time limit, counted from the agent's
+   start. The route to qory serves the session that runs (see [The route to
+   qory](#the-route-to-qory)).
+
+The steps before a later session have the setup's limit of 30 minutes from their start.
+The report beside the home, `<home>-report.json`, lists each session's number, runtime and
+tier map in `sessions`.
+
+qory pushes between two sessions only with proof that the session's processes stopped: the
+run has a wall, and no container of the run is kept. Without that proof the push step fails
+with `take the work item in again in Qory Apiary: a container of the session may still run
+and write the working folder, so qory pushed nothing`.
+
+qory sends the next-session request again after no response, a refusal of the gateway's, a
+status with no refusal of Qory Apiary's, and Qory Apiary's `rate_limited` (429) and
+`unavailable` (503). The first wait is 1 s, and each wait doubles up to 1 minute, for 10
+minutes in all. The link has no `Retry-After`, so every wait doubles. Then:
+
+- Qory Apiary's `run_ended`, or a run that is already closed: qory prints `qory run: Qory
+  Apiary ended this run, so qory pushes nothing more and no later session starts.`, or the
+  line of the gateway's end (see [The push step of a write
+  run](#the-push-step-of-a-write-run)), and closes the run as the session ended.
+- Every other refusal of Qory Apiary's, no answer after 10 minutes, or an answer outside
+  `next-session-answer.schema.json`: the run closes `failed`, exit 1, with a line that starts
+  with its fix.
+- A runtime qory does not run, a workflow whose access differs from session 1's, a harness
+  that is the checkout's file, which the branch may have changed, or a step before the
+  session that fails, such as the runtime's install: the run closes `failed`, exit 1, with
+  the step's line, and the session does not join.
+
+The commits that earlier sessions pushed stay on the branch.
 
 ### The push step of a write run
 
@@ -3674,6 +3731,11 @@ qory serves no path on the route. Each answer is JSON, `{"error": <code>, "messa
 |---|---|---|
 | `404` | `not_found` | a request of the session that runs |
 | `503` | `session_not_running` | a request of another session of the run, or one with no valid session number |
+
+In a run of several sessions, the route serves each session while it joins, by the number
+the gateway gives it: one more than the session before. A session that the gateway numbers
+otherwise ends the run `failed`, with `qory run: update qory or Forager: the gateway
+numbered the session <n>, and qory served session <m> on its route`.
 
 The run's proxy answers some requests itself, in the same form, such as `503` for a request
 outside a session's launch, `413` for a body over 1 MiB, and `429` for more than 10 requests

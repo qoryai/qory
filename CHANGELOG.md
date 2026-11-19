@@ -18,6 +18,16 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- `qory run` from a run code whose documents set `shared_run` runs one session after another,
+  until Qory Apiary ends the run. After each session that passed its full suite and its push
+  step, qory sends the next-session request, and joins the next session with its workflow,
+  runtime, model settings, model key and time limit. Each session's harness is composed from
+  the run's sources at session 1's commits; a runtime is installed once per run; a Codex
+  session gets a new Codex home. The route to qory serves the session that runs, and the
+  harness report lists each session's runtime and tiers in `sessions`. qory sends the request
+  again for 10 minutes after no response, a refusal of the gateway's, and Qory Apiary's
+  `rate_limited` and `unavailable`; any other refusal of Qory Apiary's closes the run
+  `failed`. A push between two sessions needs a wall and no container of the run kept.
 - A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
   the type whose launch version sets what the workflow's session may push. A module
   declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: one
