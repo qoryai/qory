@@ -482,9 +482,9 @@ const textTimedOutFromCode = "set a longer Time limit for the run's workflow on 
 	"the run of the workflow %s was cancelled at its time limit of %s, before %s started"
 
 // sessionDeadline is the time at which a session whose clock starts at start reaches its
-// time limit, limit, and the zero time for a limit of 0, no limit. Session 1's clock
-// starts at the run's open, so its compose counts: qory run passes the open as start. A
-// later session passes its start.
+// time limit, limit, and the zero time for a limit of 0 or below, no limit. Session 1's
+// clock starts at the run's open, so its compose counts: qory run passes the open as
+// start. A caller for a later session passes that session's start.
 func sessionDeadline(start time.Time, limit time.Duration) time.Time {
 	if limit <= 0 {
 		return time.Time{}
