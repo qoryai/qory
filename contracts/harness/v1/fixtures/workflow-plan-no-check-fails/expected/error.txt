@@ -1,2 +1,4 @@
 Add a scope check for change-plan to a module's scope_checks.
   You can also remove `plan: change-plan` from fix in the stack.
+  No module of the stack declares a scope check for change-plan.
+  workflows.fix is in the qory-stack.yaml of the base stack core@working-tree.

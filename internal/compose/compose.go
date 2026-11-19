@@ -133,6 +133,9 @@ type Entry struct {
 	// Paths are the globs an agent's frontmatter paths sets, the files of a change the
 	// agent reads; nil for an agent without the key, which reads every change.
 	Paths []string
+	// Note is the note a skill is, see [module.Note]; nil for a skill without the
+	// frontmatter key notes_for and for every other kind.
+	Note *module.Note
 }
 
 // Exclude is one entry a module left out.
@@ -488,7 +491,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	}
 	for key, ls := range owners {
 		kind, name, _ := strings.Cut(key, "/")
-		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]], For: fors[key+"@"+ls[0]], References: refs[key+"@"+ls[0]], Tier: tiers[key+"@"+ls[0]], Front: sites[key+"@"+ls[0]].Front, In: sites[key+"@"+ls[0]].In, Paths: sites[key+"@"+ls[0]].Paths})
+		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]], For: fors[key+"@"+ls[0]], References: refs[key+"@"+ls[0]], Tier: tiers[key+"@"+ls[0]], Front: sites[key+"@"+ls[0]].Front, In: sites[key+"@"+ls[0]].In, Paths: sites[key+"@"+ls[0]].Paths, Note: sites[key+"@"+ls[0]].Note})
 		if tier := tiers[key+"@"+ls[0]]; tier != "" {
 			if t, ok := opts.Tiers[tier]; ok {
 				if res.Tiers == nil {
@@ -532,13 +535,16 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	if err := workflowsShipped(p, declared, opts.Base, opts.StackAs); err != nil {
 		return nil, err
 	}
-	if err := checkPlans(res, p); err != nil {
+	if err := checkPlans(res, p, opts.Base, opts.StackAs); err != nil {
 		return nil, err
 	}
 	if err := checkHooks(res, p, opts); err != nil {
 		return nil, err
 	}
 	if err := checkContracts(res, opened); err != nil {
+		return nil, err
+	}
+	if err := checkNotes(res); err != nil {
 		return nil, err
 	}
 	if len(instructions) > 0 {
@@ -591,26 +597,37 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 			return exports.Errorf("Remove the push check for %s from module %s.\n  qory run verdict sends a verdict, and push checks do not cover it.", verdictType, shown(name))
 		}
 		if other, ok := checkers[c.Type]; ok {
-			return exports.Errorf("Remove the push check for %s from module %s or module %s.\n  A type has one push check, and both modules declare one.", c.Type, shown(other), shown(name))
+			return duplicatePushCheck(c.Type, other, name)
 		}
 		checkers[c.Type] = name
 		program := c.Command[0]
 		shownProgram := exports.Value(filepath.ToSlash(program), false)
 		info, err := root.Stat(program)
 		if err != nil {
-			return exports.Errorf("Add %s to module %s, or change its push check for %s.\n  Module %s has no file at %s.", shownProgram, shown(name), c.Type, shown(name), shownProgram)
+			return exports.Errorf("Add the program of the push check to its module, or change its path.\n  Module %s has no file at %s, the program of the push check for %s.", shown(name), shownProgram, c.Type)
 		}
 		if !info.Mode().IsRegular() {
-			return exports.Errorf("Set the push check for %s of module %s to a program file.\n  %s is not a file.", c.Type, shown(name), shownProgram)
+			return exports.Errorf("Set the program of the push check to a file in its module.\n  %s of module %s is not a file, and it is the program of the push check for %s.", shownProgram, shown(name), c.Type)
 		}
 		if e, ok := excludedProgram(res, dir, name, program); ok {
-			return exports.Errorf("%s\n  The program of the push check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
-				altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), c.Type, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
+			return exports.Errorf("Keep the program of the push check in its module, or move it out of the left-out entry.\n  The program %s of the push check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
+				shownProgram, c.Type, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
 		}
 		command := append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(program)}, c.Command[1:]...)
 		res.PushChecks = append(res.PushChecks, PushCheck{Type: c.Type, Module: name, Command: command, Reads: c.Reads})
 	}
 	return nil
+}
+
+// duplicatePushCheck is the refusal for a type that the modules first and second both
+// declare a push check for, shaped as [duplicateScopeCheck] is: the fix has the type and
+// the modules when it has at most [exports.LineMax] characters, and otherwise has none of
+// them, and the second line has them.
+func duplicatePushCheck(typ, first, second string) error {
+	if fix := fmt.Sprintf("Remove the push check for %s from module %s or module %s.", typ, shown(first), shown(second)); fits(fix) {
+		return exports.Errorf("%s\n  A type has one push check, and both modules declare one.", fix)
+	}
+	return exports.Errorf("Remove the push check for the type from one of the two modules.\n  Modules %s and %s both declare one for %s, and a type has one push check.", shown(first), shown(second), typ)
 }
 
 // excludedProgram is the entry that the exclude or only of module name at dir leaves out
@@ -631,14 +648,14 @@ func excludedProgram(res *Result, dir, name, program string) (Exclude, bool) {
 }
 
 // ScopeCheck is the scope check the composed harness declares for the plan of one
-// artifact type: commands in order, each written to take --base <start commit> and
-// --artifacts <folder> as its last arguments and to exit 0 when the plan holds.
+// artifact type: one command, written to take --base <start commit> and --artifacts
+// <folder> as its last arguments and to exit 0 when the plan holds.
 type ScopeCheck struct {
 	// Module is the module of the base stack that declares the check.
 	Module string `json:"module"`
-	// Commands are the programs and their arguments, in the order of the manifest. Each
-	// program is $QORY_HARNESS_HOME/modules/<module>/<path>, before substitution.
-	Commands [][]string `json:"commands"`
+	// Command is the program and its arguments, as the manifest has them. The program is
+	// $QORY_HARNESS_HOME/modules/<module>/<path>, before substitution.
+	Command []string `json:"command"`
 }
 
 // addScopeChecks adds the scope checks of the module name at dir to the result. A type
@@ -646,7 +663,7 @@ type ScopeCheck struct {
 // a program that is not a file in the module, read through root when it is not nil, and
 // one in an entry the module's exclude or only leaves out, since the home can leave out
 // such an entry.
-func addScopeChecks(res *Result, dir string, root *os.Root, name string, checks map[string][][]string) error {
+func addScopeChecks(res *Result, dir string, root *os.Root, name string, checks map[string][]string) error {
 	if len(checks) == 0 {
 		return nil
 	}
@@ -660,49 +677,72 @@ func addScopeChecks(res *Result, dir string, root *os.Root, name string, checks 
 	}
 	for _, typ := range slices.Sorted(maps.Keys(checks)) {
 		if other, ok := res.ScopeChecks[typ]; ok {
-			return exports.Errorf("Remove the scope check for %s from module %s or %s.\n  A type has one scope check, and both modules declare one.", typ, shown(other.Module), shown(name))
+			return duplicateScopeCheck(typ, other.Module, name)
 		}
-		var commands [][]string
-		for _, c := range checks[typ] {
-			program := c[0]
-			shownProgram := exports.Value(filepath.ToSlash(program), false)
-			info, err := root.Stat(program)
-			if err != nil {
-				return exports.Errorf("Add %s to module %s, or change its scope check for %s.\n  Module %s has no file at %s.", shownProgram, shown(name), typ, shown(name), shownProgram)
-			}
-			if !info.Mode().IsRegular() {
-				return exports.Errorf("Set the scope check for %s of module %s to a program file.\n  %s is not a file.", typ, shown(name), shownProgram)
-			}
-			if e, ok := excludedProgram(res, dir, name, program); ok {
-				return exports.Errorf("%s\n  The program of the scope check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
-					altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), typ, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
-			}
-			commands = append(commands, append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(program)}, c[1:]...))
+		c := checks[typ]
+		program := c[0]
+		shownProgram := exports.Value(filepath.ToSlash(program), false)
+		info, err := root.Stat(program)
+		if err != nil {
+			return exports.Errorf("Add the program of the scope check to its module, or change its path.\n  Module %s has no file at %s, the program of the scope check for %s.", shown(name), shownProgram, typ)
+		}
+		if !info.Mode().IsRegular() {
+			return exports.Errorf("Set the program of the scope check to a file in its module.\n  %s of module %s is not a file, and it is the program of the scope check for %s.", shownProgram, shown(name), typ)
+		}
+		if e, ok := excludedProgram(res, dir, name, program); ok {
+			return exports.Errorf("Keep the program of the scope check in its module, or move it out of the left-out entry.\n  The program %s of the scope check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
+				shownProgram, typ, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
 		}
 		if res.ScopeChecks == nil {
 			res.ScopeChecks = map[string]ScopeCheck{}
 		}
-		res.ScopeChecks[typ] = ScopeCheck{Module: name, Commands: commands}
+		res.ScopeChecks[typ] = ScopeCheck{Module: name, Command: append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(program)}, c[1:]...)}
 	}
 	return nil
 }
 
+// duplicateScopeCheck is the refusal for a type that the modules first and second both
+// declare a scope check for. The fix line names the type and the modules when it fits in
+// 98 characters. Otherwise the fix line is the same without the values, and the second
+// line has them, so no length of a name or a type moves the fix past 98 characters.
+func duplicateScopeCheck(typ, first, second string) error {
+	if fix := fmt.Sprintf("Remove the scope check for %s from module %s or %s.", typ, shown(first), shown(second)); fits(fix) {
+		return exports.Errorf("%s\n  A type has one scope check, and both modules declare one.", fix)
+	}
+	return exports.Errorf("Remove the scope check for the type from one of the two modules.\n  Modules %s and %s both declare one for %s, and a type has one scope check.", shown(first), shown(second), typ)
+}
+
 // checkPlans refuses a workflow of the stack whose plan type no module of the base stack
 // declares a scope check for, for the first such workflow in sorted order, so no plan
-// goes unchecked. The refusal is one line when it fits in 100 characters, and the
+// goes unchecked. The refusal is one line when it fits in 98 characters, and the
 // alternative moves to a second line otherwise, as [altFix] does. The check is the compose's, since the stack alone does not
 // know its modules.
-func checkPlans(res *Result, p *stack.Stack) error {
+func checkPlans(res *Result, p *stack.Stack, base *Base, as string) error {
 	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
 		plan := p.Workflows[name].Plan
 		if plan == "" {
 			continue
 		}
 		if _, ok := res.ScopeChecks[plan]; !ok {
-			return exports.Errorf("%s", altFix(fmt.Sprintf("Add a scope check for %s to a module's scope_checks", plan), fmt.Sprintf("remove `plan: %s` from %s in the stack", plan, name)))
+			return exports.Errorf("%s\n  No module of the stack declares a scope check for %s.\n  workflows.%s is in %s.", altFix(fmt.Sprintf("Add a scope check for %s to a module's scope_checks", plan), fmt.Sprintf("remove `plan: %s` from %s in the stack", plan, name)), plan, name, stackFile(p, base, as))
 		}
 	}
 	return nil
+}
+
+// stackFile is the file that defines the stack as a refusal prints it: the qory-stack.yaml
+// of the base stack a checkout extends, with the base's name and pin, the name the caller
+// gives a stack it did not read from a file, or the file of the stack.
+func stackFile(p *stack.Stack, base *Base, as string) string {
+	switch {
+	case base != nil:
+		return "the " + stack.FileName + " of the base stack " + base.String()
+	case as != "":
+		return as
+	case p.File != "":
+		return filepath.Base(p.File)
+	}
+	return "the stack"
 }
 
 // PushChecksFor is a copy of the push checks rendered for a home, with every

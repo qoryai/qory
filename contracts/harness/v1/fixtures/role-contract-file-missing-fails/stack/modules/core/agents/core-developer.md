@@ -2,7 +2,7 @@
 name: core-developer
 description: Writes code in any language.
 tools: Read, Edit, Write, Bash
-model: ${qory:fast}
+model: ${qory:balanced}
 ---
 
 ## Guardrails

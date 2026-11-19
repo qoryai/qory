@@ -2044,6 +2044,27 @@ A run stops before the agent starts when:
 - the target's commit has another `.qory` than `target_version`;
 - git does not check out a commit.
 
+Each of these lines stops the run, exit 1. `<c>` is a commit's first 12 characters, and
+`<git line>` is the line that git wrote:
+
+- `Version <n> of the artifact branch has a ref other than <ref>, so the run did not start;
+  the code is used`
+- `Version <n> of the artifact branch does not have exactly one file of at most 65536
+  bytes, so the run did not start; the code is used`
+- `Version <n> of the artifact branch does not match the branch format, so the run did not
+  start: <cause>; the code is used`
+- `The stored version of the artifact branch has commit <c>, which is not a commit on
+  <path> on <system>, so the run did not start; the code is used`, then a line indented by
+  two spaces: `The fetch through the run's gateway failed: <git line>`
+- `The stored version of the artifact branch has <value> for <path>, which is not a commit,
+  so the run did not start; the code is used`
+- `Commit <c> of <ref> has a .qory folder that differs from the one at target version <c>,
+  so the run did not start; the code is used`, then the line `qory keeps the files of the
+  run in .qory.` indented by two spaces
+- `git cannot check out commit <c> of <ref>, the stored version of the artifact branch, so
+  the run did not start; the code is used`, then a line indented by two spaces: `The
+  checkout in <path> failed: <git line>`
+
 An instance without the feature `workflow_model` returns 404 with no error code to the run
 API. The run then works on `target_version` with no branch.
 
@@ -2683,8 +2704,10 @@ its 15 seconds when the agent's runtime stops within the 10 seconds of the defau
 
 One repository can be pushed before another fails, and a push can succeed before its version
 is stored. The branch is then past every version of the artifact, and the next run's push
-fails as a branch that moved. Each line for that state gives both ways out: add a version
-with the head of the branch, or delete the branch.
+fails as a branch that moved. Each line for that state gives one way out: delete the branch.
+Deleting it loses the commits on that branch that no version has. When the work item has no
+version, the next run creates the branch at `target_version`, not at the commit that the
+deleted branch had; with a version, it starts from the last one.
 
 On a run that can push, each of these lines stops the run after the setup, before the
 agent starts, and closes it `failed` with `no_session`:
@@ -2712,9 +2735,9 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   <commit>: HEAD of <path> is at <commit>, which does not descend from it, so a push would
   not be a fast-forward; the code is used`, when the agent replaced the commit the run
   started at
-- `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
-  id> on <path>, or delete that branch on <system>, then take the work item in again: the
-  branch moved since the run fetched it, and the push failed: <error>; the code is used`
+- `delete branch qory/<work item id> of <path> on <system>, then take the work item in
+  again: the branch moved since the run fetched it, and the push failed: <error>; the code
+  is used`
 - `change the rule on <system> that stops a push to qory/<work item id> of <path>, then take
   the work item in again: the push failed: <error>; the code is used`, when a rule or a
   hook on the system stops the update
@@ -2736,22 +2759,18 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   pushes the run's commits, did not open: <error>; the code is used`
 - `take the work item in again in Qory Apiary: the run API, which stores the version of the
   artifact branch, is not reachable from this run: <error>; the code is used`
-- `Define the artifact type branch in the workspace's Artifact types, then add a new version
-  of the artifact branch in Qory Apiary with the head of qory/<work item id> on <path>, or
-  delete that branch on <system>, then run the round again`, when the workspace has no
-  artifact type `branch`
-- `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
-  id> on <path>, or delete that branch on <system>, then take the work item in again: qory
-  pushed <branch>, and the version of the artifact branch was not stored: <error>; the code
-  is used`
+- `Define the artifact type branch in the workspace's Artifact types, then delete branch
+  qory/<work item id> of <path> on <system>, then run the round again`, when the workspace
+  has no artifact type `branch`
+- `delete branch qory/<work item id> of <path> on <system>, then take the work item in
+  again: qory pushed <branch>, and the version of the artifact branch was not stored:
+  <error>; the code is used`
 - `check the artifact branch of the work item in Qory Apiary; with no version of this run,
-  add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
-  id> on <path>, or delete that branch on <system>; then take the work item in again: qory
-  pushed <branch>, and the request that stores its version ended with no response, so the
-  version may or may not be stored: <error>; the code is used`
-- `add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
-  id> on <path>, or delete that branch on <system>: qory pushed <path> and stored no version,
-  because the push of the next repository failed: <line of that failure>`
+  delete branch qory/<work item id> of <path> on <system>; then take the work item in
+  again: qory pushed <branch>, and the request that stores its version ended with no
+  response, so the version may or may not be stored: <error>; the code is used`
+- `delete branch qory/<work item id> of <path> on <system>: qory pushed <path> and stored
+  no version, because the push of the next repository failed: <line of that failure>`
 
 #### The report of a push
 
@@ -2822,9 +2841,9 @@ run got a second signal`, `qory run got <signal>, and the step reached its limit
 - `take the work item in again in Qory Apiary: <cause> during the push step, and the run's
   commits may not have reached the branch; the code is used`
 - `check the artifact branch of the work item in Qory Apiary; with no version of this run,
-  add a new version of the artifact branch in Qory Apiary with the head of qory/<work item
-  id> on <path>, or delete that branch on <system>; then take the work item in again: qory
-  pushed <branch>, and <cause>, so the version may or may not be stored; the code is used`
+  delete branch qory/<work item id> of <path> on <system>; then take the work item in
+  again: qory pushed <branch>, and <cause>, so the version may or may not be stored; the
+  code is used`
 
 ### Runs of a node pool
 
@@ -3536,8 +3555,8 @@ at is `skipped`, as above. For a session that moved HEAD, qory runs no suite, pr
 `write-no-push` access cannot name a plan type, so a run of it whose documents set `full_suite`
 true stops after the compose, before the join, exit 1, with `The run settings set full_suite for
 workflow <name>, which has write-no-push access and no plan to read the full suite from, so the
-run did not start; the code is used.` and closes `failed` with `no_session` (exit code -1). A run that only reads the checkout runs
-no suite and is not refused.
+run did not start; the code is used.` and closes `failed` with `no_session` (exit code -1). A
+run that only reads the checkout runs no suite and is not refused.
 
 **Where it runs.** After the agent's container is removed, Forager starts a new container of the run's
 image with the workspace mounted for writing, on the run's network, with the run's
@@ -5036,22 +5055,33 @@ start the run from a folder that does not contain your home folder, qory's state
 A workflow of a stack with `access: write` may name a plan type, `workflows.<name>.plan`,
 an artifact type such as `build-plan`. The plan is the launch version of that type, and it
 sets what a session of the workflow may push. A module of the stack declares the scope
-check of the type in the `scope_checks` of its `qory-module.yaml`: a list of commands for
+check of the type in the `scope_checks` of its `qory-module.yaml`: one command for
 each plan type (see `scope_checks` in `contracts/harness/v1/README.md`).
 
-`qory harness compose` and `qory run` refuse the stack, before they start anything, in
+`qory harness compose` and `qory run` end with an error, before they start anything, in
 two cases:
 
 - The workflow has a `plan` and its access is `read`, `write-no-push` or left out:
-  `` Remove `plan` from <workflow>, or set its access to write. ``
+  `` Remove `plan` from <workflow>, or set its access to write. ``, then `Only a workflow
+  with access write has a plan, and the access of <workflow> is <access>.` and
+  `workflows.<workflow> is in <file>.` on the next two lines.
 - No module of the base stack declares a scope check for the type: `Add a scope check for
-  <type> to a module's scope_checks.` with `` You can also remove `plan: <type>` from
-  <workflow> in the stack. `` on the next line, or both on one line when they fit in 100
-  characters.
+  <type> to a module's scope_checks.`, then `` You can also remove `plan: <type>` from
+  <workflow> in the stack. `` on the next line, or both on one line when the first line
+  has at most 98 characters. Two lines follow: `No module of the stack declares a scope
+  check for <type>.` and `workflows.<workflow> is in <file>.`
 
 Only a module of the base stack counts. A module that the checkout's `qory.yaml` adds to
 the base can declare `scope_checks`, and the compose uses none of it: the repository under
-work cannot supply the check of its plan. A stack with no `plan` composes as before.
+work cannot supply the check of its plan. `qory harness compose` and `qory run` end with
+an error when the program of a scope check is no file in the module, is a folder, or is in
+an entry that an `exclude` or an `only` of the module leaves out. Line 1 of each of these
+errors is the fix alone, and the module, the type and the path are on line 2. They also end
+with an error when two modules declare a scope check for one type: line 1 has the type
+and both modules when it has at most 98 characters, and otherwise line 2 has them.
+
+A stack in which no workflow has a `plan` needs no scope check: `qory harness compose`
+succeeds, and a `scope_checks` of a module is still read and checked.
 
 `qory run` reads `plan` for the full suite: the suite command is the `full` row of the plan
 type's launch version (see [The full suite](#the-full-suite)). It reads no `scope_checks`: a run

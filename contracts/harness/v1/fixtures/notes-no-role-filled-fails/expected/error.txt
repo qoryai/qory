@@ -1,0 +1,2 @@
+Remove notes_for from app-naming of module app.
+  The stack fills no role.

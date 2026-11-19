@@ -2,7 +2,7 @@
 
 What `qory harness compose` reads and what it writes.
 
-## Ten files
+## Twelve files
 
 | File | Lives in | Defines |
 |---|---|---|
@@ -12,6 +12,8 @@ What `qory harness compose` reads and what it writes.
 | a role contract | optional; a file of a module that declares an agents role, at the path that `roles.agents.<role>.contract` in the module's `qory-module.yaml` is set to | the parts an agent needs to fill the role: level-2 headings, front-matter keys, tools, a tier, and the form of its report (§The role contract). The compose checks every agent that fills the role against it; the harness's checks read the report's form |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for, the modules it appends and the workflow hooks it adds, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 | a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
+| an acceptance criteria document | the file of a version of a structured artifact type for a work item's acceptance criteria | a summary of what the work item must achieve and the criteria that say when it is achieved, each with its check (§The acceptance criteria format). No compose reads it |
+| a verification document | the file of a version of a structured artifact type for a work item's verification | the result of checking the criteria against one version of the work (§The verification format). No compose reads it |
 | a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
 | a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
 | a proposal sources document | the file `sources.json` of a version of the artifact type `proposal` | every source a run used to write the proposal, with the reason for each (§The proposal sources format). No compose reads it |
@@ -122,7 +124,7 @@ workflows:                       # optional; the settings of the workflows a dis
   example:
     time_limit: 45m              # optional; a duration, such as 45m or 7h
     access: write                # optional; read, write-no-push, or write, read when left out
-    tier: thinking               # optional; light, fast, or thinking, none when left out
+    tier: thinking               # optional; light, balanced, or thinking, none when left out
     plan: change-plan            # optional; an artifact type, only with access write, none when left out
     hook_points:                 # optional; where a checkout extending the stack may add workflow hooks
       after-review-round: {at: end, kinds: [check, review]}
@@ -209,8 +211,8 @@ schema is [config.schema.json](config.schema.json).
 | `workflows.<name>.time_limit` | no | how long a dispatched run of the workflow may run, counted from the run's open, as a Go duration above zero, such as `7h`, `45m` or `1h30m`; qory stops with an error on any other value: `Set workflows.<name>.time_limit to a duration above zero, such as 7h or 45m.` with `The value is <value>.` and `workflows.<name> is in <file>.` on the next two lines. The `time_limit_minutes` in the run's documents, when they set it, applies instead, and a workflow without it runs for at most 3 hours |
 | `workflows.<name>.hook_points` | no | the points of the workflow where a checkout extending the stack may add workflow hooks, by the point's name: `{at: end, kinds: [check, review]}`. `at` is where the point sits in the workflow's session, `end`, `start` or `inside`; `kinds` is one or more of `check`, `review` and `enrich`, each once. A point's name has the form of a workflow's name, and is unique in the stack, since a hook selects a point by its name alone. Only a `qory-stack.yaml` declares points: a `qory.yaml` that defines a stack, which nothing extends, is refused with `Remove hook_points from the workflows in qory.yaml.` (§Workflow hooks) |
 | `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on: `read`, `write-no-push`, or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access to a valid level.` with `The levels are read, write-no-push, and write.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. A run takes the lower of this access and `access` in the run's documents, in the order `read`, `write-no-push`, `write`; documents with no target have no `access`, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A `write-no-push` run has a writable checkout, no push step, no submit, and no version of the artifact `branch`. At `write` the checkout is writable and qory pushes what the agent left |
-| `workflows.<name>.tier` | no | the tier that names the main session's model and effort for a dispatched run of the workflow: `light`, `fast`, or `thinking`; none when left out. qory stops with an error on any other value: `Set workflows.<name>.tier to a valid tier.` with `The tiers are light, fast, and thinking.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. qory passes nothing new to the run: Qory Apiary resolves the session's model and effort from the tier, and sends them as it sends the session's model. `qory run` does not read it |
-| `workflows.<name>.plan` | no | the artifact type whose launch version sets what a dispatched run of the workflow may push, such as `build-plan`: lowercase letters and digits in groups joined by single hyphens, 64 bytes at most; none when left out. Only a workflow with `access: write` names one. qory stops with an error on a value that is no artifact type: `Set workflows.<name>.plan to an artifact type.` with `An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines; and on a `plan` in a workflow whose access is `read`, `write-no-push` or left out: `` Remove `plan` from <name>, or set its access to write. `` The compose stops when no module of the stack declares the scope check for the type in `scope_checks` (§The module manifest): `Add a scope check for <type> to a module's scope_checks.` with `` You can also remove `plan: <type>` from <name> in the stack. `` on the next line, or both on one line when they fit in 100 characters. `qory run` reads `plan` for the full suite only: the suite command is the `full` row of the launch version of the type (docs/run.md, §The full suite) |
+| `workflows.<name>.tier` | no | the tier that names the main session's model and effort for a dispatched run of the workflow: `light`, `balanced`, or `thinking`; none when left out. qory stops with an error on any other value: `Set workflows.<name>.tier to a valid tier.` with `The tiers are light, balanced, and thinking.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. qory passes nothing new to the run: Qory Apiary resolves the session's model and effort from the tier, and sends them as it sends the session's model. `qory run` does not read it |
+| `workflows.<name>.plan` | no | the artifact type whose launch version sets what a dispatched run of the workflow may push, such as `build-plan`: lowercase letters and digits in groups joined by single hyphens, 64 bytes at most; none when left out. Only a workflow with `access: write` names one. qory stops with an error on a value that is no artifact type: `Set workflows.<name>.plan to an artifact type.` with `An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines; and on a `plan` in a workflow whose access is `read`, `write-no-push` or left out: `` Remove `plan` from <name>, or set its access to write. `` with `Only a workflow with access write has a plan, and the access of <name> is <access>.` and `workflows.<name> is in <file>.` on the next two lines. The compose stops when no module of the stack declares the scope check for the type in `scope_checks` (§The module manifest): `Add a scope check for <type> to a module's scope_checks.` with `` You can also remove `plan: <type>` from <name> in the stack. `` on the next line, or both on one line when the first line has at most 98 characters, then `No module of the stack declares a scope check for <type>.` and `workflows.<name> is in <file>.` on the next lines. `qory run` reads `plan` for the full suite only: the suite command is the `full` row of the launch version of the type (docs/run.md, §The full suite) |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 | `extending.hooks` | no | lets a checkout extending the stack add workflow hooks at the points of its workflows: `per_point`, the most hooks one point takes, 3 when left out; `per_workflow`, the most the points of one workflow take together, 10 when left out; `timeout`, a duration in whole seconds, 1s or more, the longest a hook may run and the timeout of a hook that sets none, 10 minutes when left out. A count below 1 is refused. Without the block a checkout adds no workflow hook (§Workflow hooks) |
 | `extending.target` | no | the runtimes and the models the stack is written for, `runtime` and `model`, each one name or a list, one of the two at least. A checkout's resolved target outside either list fails the compose; listed models make the model required, since a target without one runs whatever the runtime defaults to, which is a model the stack did not list. Left out, every target is accepted, a model left out included (§Extending a stack) |
@@ -368,7 +370,8 @@ covers several repositories, may list workflow hooks; each program is then a fil
 inside the checkout being composed, so a hook of another repository under the folder
 fails the compose of this one.
 
-Each refusal is a line with the fix, of at most 100 characters, then a line with the
+Each refusal is a line with the fix, of at most 98 characters, so that it has at most 100
+under the `✗ ` that qory prints before it, then a line with the
 cause, indented by two spaces. A refusal of a rule that needs no base comes as the
 document is read, and its cause line has the path of `qory.yaml`, such as:
 
@@ -377,9 +380,16 @@ Set hooks[0].timeout to whole seconds, 1s or more, such as 90s or 5m.
   /work/app/qory.yaml sets "500ms".
 ```
 
-A role, module or entry name of more than 20 characters in a first line that passes 100
-characters is shortened to its first 9 and last 10 characters with `…` between them, and a
-last line of the refusal has the whole name: `The full name of <short> is <name>.`
+A name or a quoted value of more than 24 characters in a first line that has more than 98
+characters is shortened to 20 characters, its first 9 and last 10 with `…` between them;
+the keys in front of a dotted name, such as `bind.agents.`, stay whole, and a first line of
+at most 98 characters stays as it is. When two shortened names in the line would be equal,
+every shortened name in the line keeps one more character at each end, not only the two that
+are equal, and the round repeats until no two shortened names are equal: the first 9 and
+last 10 characters become the first 10 and last 11, then the first 11 and last 12, and so
+on. A name whose kept ends reach its whole length, such as one of two names that differ
+only in their middle, stays whole. A last line of the refusal has the whole name of each
+shortened name that no line after the first line has: `The full name of <short> is <name>.`
 
 Those rules are: both or neither of `run` and `agent`, a `review` hook with `run`, a
 kind other than the three, a missing `at` or `kind`, an empty value or null, a program path
@@ -646,7 +656,7 @@ artifact_types:                  # optional; the artifact types the workspaces u
 Every key but `artifact_types` and `submit` is required, and the file has no other key. A key left out, a text over its
 limit, a `stack` that `exports.stacks` does not list, and a `process` that is not such an
 object are refused with the file and the fix in the message: the fix is the first line, and the file is on the
-last line, so a long path never pushes the fix past 100 characters. Each
+last line, so a long path never pushes the fix past 98 characters. Each
 workflow that the stack does not declare is refused with a fix line, which has the
 workflow, the stack and the stage, a cause line, which has the `process.yaml`, and a last
 line with the stack file:
@@ -774,6 +784,65 @@ artifact_types:
     json_schema: {…}             # the content of branch.schema.json
 ```
 
+## The acceptance criteria format
+
+An acceptance criteria document records what a work item must achieve and the criteria that
+say when it is achieved. The format names no kind of work, so a workspace that does not
+produce software uses it as it is. This is version 1 of the format
+([acceptance-criteria.schema.json](acceptance-criteria.schema.json)):
+
+```json
+{"summary": "A customer sees the new price before they pay.",
+ "criteria": [{"id": "ac-1", "text": "The price page shows the new price.",
+               "check": "Open the price page as a customer. The price is 12.50."},
+              {"id": "ac-2", "text": "The old price is gone.",
+               "check": "Search the price page for 10.00.",
+               "removed": {"reason": "The old price stays for existing customers."}}]}
+```
+
+| Member | Meaning |
+|---|---|
+| `summary` | what the work item must achieve, plain text, 1 to 2000 characters |
+| `criteria` | every criterion, at least one, in the order they were written; a removed criterion stays in the list |
+| `id` | the criterion's id, unique in the document: `ac-` and a number from 1 to 9999 with no leading zero, such as `ac-3` |
+| `text` | the condition that the finished work item meets, plain text, 1 to 2000 characters |
+| `check` | how to check that the condition is met, free text, 1 to 2000 characters |
+| `removed` | present when the criterion is dropped, and only then: an object with `reason`, why it is dropped, 1 to 2000 characters |
+
+The id form `ac-` and a number from 1 to 9999 with no leading zero is the one form of every
+criterion id in the contract: `ac-0`, `ac-01` and `ac-10000` fail the schema, in this
+format, in the verification format and in the questions format. A document has no member
+other than those in the table. A JSON Schema cannot check that each `id` is unique.
+
+## The verification format
+
+A verification document records the result of checking a work item's acceptance criteria
+against one version of its target. The format names no kind of work. This is version 1 of the
+format ([verification.schema.json](verification.schema.json)):
+
+```json
+{"target_version": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
+ "matrix": [{"criterion": "ac-1", "state": "met", "evidence": "The price page shows 12.50."},
+            {"criterion": "ac-2", "state": "not_met", "evidence": "The page still shows 10.00 in the footer."}],
+ "not_verified": [{"criterion": "ac-3", "reason": "The payment sandbox was down."}],
+ "model_families": ["anthropic", "openai"]}
+```
+
+| Member | Meaning |
+|---|---|
+| `target_version` | the exact version of the target that the verification checked, never a name that can later point to another version; for a repository, a commit. 1 to 255 letters, digits and the characters `._/-`, such as `5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e` or `2026-11-18.3` |
+| `matrix` | one row for each criterion that was checked, empty when none was |
+| `criterion` | the id of the criterion, in the form of `id` in the acceptance criteria format |
+| `state` | `met`: the check shows that the criterion is met; `not_met`: the check shows that it is not |
+| `evidence` | what the check found: what was looked at or run, and the result, plain text, 1 to 2000 characters |
+| `not_verified` | each criterion that was not checked, empty when every criterion was checked; each has `criterion` and `reason`, why it was not checked, 1 to 2000 characters |
+| `model_families` | the families of the models that checked the criteria, at least one, each 1 to 64 characters on one line, none twice |
+
+A criterion is in `matrix` or in `not_verified`, never in both, so `state` has no value for
+a criterion that was not checked. A document has no member other than those in the table. A
+JSON Schema cannot check that each id is a criterion of the newest acceptance criteria, or
+that a criterion is in only one of the two lists.
+
 ## The questions format
 
 A questions document records every question of a work item and its answer or a run's
@@ -786,11 +855,33 @@ one option of a question. An answer has
 the chosen option, or the member's answer when `option` is `null`. `note` is optional when
 the member chose an option and required when `option` is `null`.
 
-A question has the optional member `criterion`, the id of the acceptance criterion the
-question is about: `ac-` and a number from 1 to 9999 with no leading zero, such as `ac-3`.
-A question about no acceptance criterion has no `criterion`. The criterion ids of the
-mockup schema of Qory Apiary, `mockup.schema.json`, have the same form. `qory` does not
-ship that file.
+A question has the required member `about`, what the question is about. It has one of two
+forms:
+
+```json
+{"work_item": true}
+{"type": "acceptance-criteria", "name": "main", "item": "ac-3"}
+```
+
+- `{"work_item": true}`: the work item itself, before any output, such as the ticket. It
+  has no other member.
+- An output of the work item: `type` is the artifact type's name, as in `artifact` of a
+  review comment, and `name` is the artifact's name, 1 to 64 characters on one line, such
+  as `main`. `item` is optional: the id of the entry of that artifact that the question
+  concerns, 1 to 32 characters on one line, such as `screen-2` for a screen of a mockup.
+  When `type` is `acceptance-criteria`, `item` is a criterion id: `ac-` and a number from
+  1 to 9999 with no leading zero, such as `ac-3`, so `screen-2`, `ac-0`, `ac-01` and
+  `ac-10000` fail the schema. With any other `type`, `ac-3` is an id like any other.
+
+No member of `about` is a work item id: the document is for one work item. A JSON Schema
+cannot check that the work item has the artifact or that the artifact has the entry.
+`about` replaces the member `criterion`, which a question no longer has.
+
+An option has the optional member `proposal`, the new wording of the entry that `about.item`
+names, which the run proposes for a member to edit before sending: plain text, 1 to 2000
+characters. Only an option of a question whose `about` has `item` has `proposal`. The schema
+refuses `proposal` on an option of a question about the work item, and on one about an
+output with no `item`.
 
 A run that chooses an option without asking a member records a decided question: its
 `state` is `decided`, so it is not open, and it has `decision`. A decided question has at
@@ -956,9 +1047,7 @@ push_checks:                     # optional: a check for the files of one artifa
     command: [scripts/checks.js, push, spec]  # a program in the module, then its arguments
     reads: [questions]           # optional: the other artifact types the check reads
 scope_checks:                    # optional: the checks of the plan of one artifact type
-  build-plan:                    # the type a workflow names in `plan`
-    - [scripts/checks.js, scope, --plan]    # a program in the module, then its arguments
-    - [scripts/checks.js, freeze, --plan]   # the commands run in this order
+  build-plan: [scripts/checks.js, scope, --plan]   # the type a workflow names in `plan`: one command, a program in the module, then its arguments
 ```
 
 `description`, optional, describes what the module is for; the report contains it and `qory harness
@@ -1045,37 +1134,53 @@ also fails for a check of the type `verdict`, `Remove the push check for verdict
 module core.` with `qory run verdict sends a verdict, and push checks do not cover it.` on
 the next line; when two modules declare a check for one type, `Remove the push check for
 spec from module core or module web.` with `A type has one push check, and both modules
-declare one.`; when the program is not a file in the module, `Add checks/check.js to module
-core, or change its push check for spec.` with `Module core has no file at
-checks/check.js.`; and when the program is in an entry an `exclude` or an `only` of its
-module leaves out, `Keep skills/running in module core, or move skills/running/checks.js
-out of it.` with `The program of the push check for spec is in skills/running, and an
-exclude or only of module core leaves skills/running out.` The home contains
+declare one.` (when the first line would have more than 98 characters, it is `Remove the
+push check for the type from one of the two modules.`, and the next line has the type and
+both module names, whole); when the program is not a file in the module, `Add the program
+of the push check to its module, or change its path.` with `Module core has no file at
+checks/check.js, the program of the push check for spec.`; when it is a folder or another
+thing that is no file, `Set the program of the push check to a file in its module.` with
+`checks/check.js of module core is not a file, and it is the program of the push check for
+spec.`; and when the program is in an entry an `exclude` or an `only` of its module leaves
+out, `Keep the program of the push check in its module, or move it out of the left-out
+entry.` with `The program skills/running/checks.js of the push check for spec is in
+skills/running, and an exclude or only of module core leaves skills/running out.` In the
+errors for a program, line 1 has no module name, type or path. Line 1 of the `verdict`
+error has the module name, and line 1 of the error for two modules with one type has the
+type and both module names when it has at most 98 characters. So a long value never pushes
+line 1 past 98 characters. The home contains
 `push-checks.json` with each check, sorted by type, with its `reads` and its program's
 absolute path in the home; a harness whose modules declare no check has no such file.
 
 `scope_checks`, optional, declares the checks of the plan of an artifact type, the type that a
-workflow of the stack names in `plan`. It is a map from the type to a list of commands, and
-a command is a list: the program, a file in the module as for `push_checks`, then its
-arguments. The commands of a type are in order, each is written to take `--base <start
-commit>` and `--artifacts <folder>` as its last arguments, and each exits 0 when the plan
-holds. The compose declares and checks them, and `qory run` does not run them. Only a module of the run's base stack
+workflow of the stack names in `plan`. It is a map from the type to one command, a list:
+the program, a file in the module as for `push_checks`, then its arguments. The command is
+written to take `--base <start commit>` and `--artifacts <folder>` as its last arguments,
+and it exits 0 when the plan holds. The compose declares and checks them, and `qory run` does not run them. Only a module of the run's base stack
 counts: a module that the checkout's `qory.yaml` adds to the base declares none that counts, so the
 repository under work cannot supply the check of its plan. A `scope_checks` in such a module has no
 effect: the compose reads its form, as for any manifest, and uses nothing from it. When the `harness`
 section of a `qory.yaml` defines the stack and extends none, every module of the section is a module of
 the stack. A key that does not
 match `^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 64 bytes, one type twice in one module, a
-value that is not a list or is empty, a command that is not a list or is empty, a word of a
-command that is not a string, and a program that is empty, absolute or has a `..` part fail
-the compose, each with the manifest's path. The compose also fails when two modules declare
+value that is not a list or is empty, a word of the command that is not a string, a list of lists
+(`Give each plan type of scope_checks one command, a list of strings, not a list of lists.`
+with `scope_checks.<type>[<n>] is a list.` on the next line), and a program that is empty,
+absolute or has a `..` part fail the compose, each with the manifest's path. The compose also fails when two modules declare
 one type, `Remove the scope check for build-plan from module core or web.` with `A
-type has one scope check, and both modules declare one.` on the next line; when a program
-is not a file in the module, `Add checks/check.js to module core, or change its scope check
-for build-plan.` with `Module core has no file at checks/check.js.`; and when a program is
-in an entry an `exclude` or an `only` of its module leaves out, as for a push check. The
-compose result lists each type with its module and its commands, each program as
-`$QORY_HARNESS_HOME/modules/<module>/<path>`.
+type has one scope check, and both modules declare one.` on the next line (when the first line
+would have more than 98 characters, it is `Remove the scope check for the type from one of the
+two modules.`, and the next line has the type and both module names, whole); when a program
+is no file in the module, `Add the program of the scope check to its module, or change its
+path.` with `Module core has no file at checks/check.js, the program of the scope check for
+build-plan.`; when it is a folder or another thing that is no file, `Set the program of the
+scope check to a file in its module.` with `checks/check.js of module core is not a file, and
+it is the program of the scope check for build-plan.`; and when the program is in an entry
+an `exclude` or an `only` of its module leaves out, `Keep the program of the scope check in
+its module, or move it out of the left-out entry.` with `The program skills/tools/check.js
+of the scope check for build-plan is in skills/tools, and an exclude or only of module core
+leaves skills/tools out.` In the last three errors, line 1 has no module name, type or path,
+so a long value never pushes it past 98 characters; the values are on line 2.
 
 **Push checks.** A push check runs in a run behind a wall, before a push of its type
 reaches Qory Apiary: for every push to the run API from inside the wall, through `qory
@@ -1199,13 +1304,13 @@ process.yaml                     a factory's process template, checked when expo
 <anything else>                  the module's other files, reached as $QORY_HARNESS_HOME/modules/<name>/<path>
 ```
 
-`model` may be a tier, `${qory:light}`, `${qory:fast}` or `${qory:thinking}`, which the compose replaces with the model id the tier maps to (§ The configuration). A tier with no map leaves the agent without a model, so it runs on the main model, and the compose prints a row.
+`model` may be a tier, `${qory:light}`, `${qory:balanced}` or `${qory:thinking}`, which the compose replaces with the model id the tier maps to (§ The configuration). A tier with no map leaves the agent without a model, so it runs on the main model, and the compose prints a row.
 
 `paths`, optional, lists the files of a change an agent reads, as globs from the checkout
 root: `paths: ["**/*.py", pyproject.toml]`, or one glob as a string. A glob matches a path
 from the checkout root with forward slashes: `**` matches any number of directories, `*`
-and `?` match within one directory, and a glob without a slash matches at any depth only
-through `**/`. An agent without `paths` reads every change. The home's `roles.json`
+and `?` match within one directory, every other character, `[`, `{` and `\` included, is
+literal, and a glob without a slash matches at any depth only through `**/`. An agent without `paths` reads every change. The home's `roles.json`
 contains the `paths` of each member of a group role (§References), for a script that
 starts the members a change needs. qory leaves the key and its whole value out of every
 agent file it writes for a runtime, since not every runtime accepts a key it does not
@@ -1213,6 +1318,40 @@ know. The compose checks the `paths` of every agent, and any other value fails i
 `Set paths to globs, such as ["**/*.py"], or remove it.` as line 1, then `The value is not
 a glob or a list of globs.` and `The agent is in agents/python-reviewer.md of module core.`
 on the lines after it.
+
+A skill is a note when its frontmatter has `notes_for`: a role, or a list of roles, each
+written as in `bind` without the kind, `developer` for `agents/developer`, a group role such
+as `reviewers` too. A note also sets `paths`, one glob or a list of globs from the checkout
+root, read as an agent's `paths` is read, with the grammar of that key above: `**` matches
+any number of directories, `*` and `?` match within one directory, and every other
+character, `[`, `{` and `\` included, is literal. A skill with `paths` and no `notes_for`
+is no note. Technology modules and the modules of a repository write notes; a script
+attaches the ones that match a change to the start of an agent that fills a role. The
+compose checks both keys of every note it composes. A skill that an `exclude` or an `only`
+leaves out is not checked. Each refusal has the fix as line 1, then the cause:
+
+- a role that no agent fills, a role with no row in `roles.json`: `Set notes_for in
+  python-naming of module python to a role the stack fills.` with `The stack fills no
+  tester role.` and `The stack fills developer and reviewers.` on the next lines;
+- a stack that fills no role: `Remove notes_for from python-naming of module python.` with
+  `The stack fills no role.` on the next line;
+- no `paths`, an empty list, an empty string, or a value that is no string or list of
+  strings: `Add paths to python-naming of module python.` with `A note needs one path or
+  more.`, or `A note needs one path or more, and the value is not a glob or a list of
+  globs.`, and `The skill is in skills/python-naming/SKILL.md of module python.` on the next
+  lines;
+- a `notes_for` that is no role or list of roles: `Set notes_for in python-naming of module
+  python to a role or roles.`
+
+The home contains `role-notes.json`, always written, and not the `notes.json` of a push
+check: `{"notes": [...]}`, one row per note in the order of the report's entries, each
+`{name, roles, paths, module, layer}`: `name` is the skill's name, so its body is
+`skills/<name>/SKILL.md` in the home; `roles` is `notes_for` as a list, each role as
+`roles.json` writes it, `agents/<role>`; `paths` is the globs as written; `module` is the
+module that ships the skill; `layer` is the number 0 for a module of the checkout's
+`qory.yaml`, or of the stack composed when it extends none, and 1 for a module of the base
+stack it extends. With no note the file is `{"notes": []}`. A home that an earlier qory
+composed has no `role-notes.json`, and `--check` reports it until the next compose.
 
 Below `skills`, a folder with `SKILL.md` is a skill, and everything below it is that skill's
 files, a nested `SKILL.md` included. A real folder with no `SKILL.md` and with a folder below
@@ -1310,7 +1449,7 @@ report: {}
 - `tools` are the tools the agent's `tools` key lists, as a comma-separated string or a
   list, each matched exactly: `Bash(git:*)` is not `Bash`. An agent without a `tools` key
   lacks every tool listed.
-- `tier: true` requires the agent's model to be a tier, such as `${qory:fast}`.
+- `tier: true` requires the agent's model to be a tier, such as `${qory:balanced}`.
 - `report` is the form of the agent's report, which the harness's checks read. The compose
   checks only that it is a map.
 
@@ -1330,14 +1469,14 @@ Complete agent python-developer of module python, or bind agents.developer to an
   - the heading "## Stop conditions"
   - the front-matter key model
   - the tool Bash
-  - a tier in model, such as ${qory:fast}
+  - a tier in model, such as ${qory:balanced}
 ```
 
 For a member of a group role, the fix line is `Complete agent python-reviewer, or remove
 it from provides.agents.reviewers of module python.` The fix line ends with the list that
 added the member: `bind.agents.reviewers in qory-stack.yaml` for a bind in the stack you
 compose, and `bind.agents.reviewers in qory.yaml` (or `in harness.yaml`) for a bind in a
-checkout's file. When the fix line would pass 100 characters, it ends with `remove it
+checkout's file. When the fix line would pass 98 characters, it ends with `remove it
 from the list that adds it.`, and `This list adds it:` follows with the list on the next
 line. When two or more lists add the member, the fix line is `Complete agent
 python-reviewer, or remove it from the lists that add it.`, and `These lists add it:`
@@ -1358,7 +1497,7 @@ base module. When one such list alone adds the member and a module of the checko
 python.`, and the cause line names the list. When a base module ships the agent, the
 block offers an exclude in `qory.yaml`, or asks the base stack's maintainer, and the
 cause line names the list, the base stack, its pin and the contract. The fix line names
-the agent's module when the line stays within 100 characters, and the cause line names it
+the agent's module when the line has at most 98 characters, and the cause line names it
 otherwise:
 
 ```
@@ -1367,7 +1506,7 @@ Exclude agents/python-reviewer in qory.yaml, or ask the base stack's maintainer 
   - the tool Read
 ```
 
-When the line without the module still passes 100 characters, the fix line is `Exclude
+When the line without the module still passes 98 characters, the fix line is `Exclude
 the agent in qory.yaml, or ask the base stack's maintainer to complete it.`, and the
 cause line names `agents/python-reviewer` and its module. A base module is named as the
 checkout's `qory.yaml` lists it, by the name of the export when the base lists an export
@@ -1541,7 +1680,9 @@ runtime: the resolution happens in the composed tree, per path.
    the fix is `Remove commands/ship from the exclude of module core, or ship it in a
    module of the repository.`, then `The skill deploy of module core requires command
    ship.` and `The exclude of module core in qory.yaml leaves command ship out.` on the
-   next two lines; for a provided entry, the middle line ends `which module ts provides
+   next two lines, and the fix is `Remove <kind>/<name> from the exclude of module <m>.` with
+   `You can also ship it in a module of the repository.` on the next line when the first
+   line would pass 98 characters; for a provided entry, the middle line ends `which module ts provides
    as agent ts-developer.` A binding is checked first: one that selects an entry that is
    not composed fails with `Ship agent rails-coder in a module, or change bind
    agents.coder.` and `The bind agents.coder selects agent rails-coder, and no module
@@ -1562,13 +1703,13 @@ runtime: the resolution happens in the composed tree, per path.
    as in §The role contract. When two or more lists add it, the fix is `Ship agent
    python-reviewer, or remove it from the lists that add it.`, then `No module ships
    agent python-reviewer, and these lists add it:` and a line per list, and a single list
-   that would make the fix line pass 100 characters goes on the next line after `No
+   that would make the fix line pass 98 characters goes on the next line after `No
    module ships agent python-reviewer, and this list adds it:`. When the bind of the base
    stack a checkout extends or the `provides` of a base module adds the member, which the
    checkout does not edit, the fix is `Ship agent python-reviewer in a module of
    qory.yaml, or ask the base stack's maintainer to ship it.`, or `Ship the agent in a
    module of qory.yaml, or ask the base stack's maintainer to ship it.` when that line
-   would pass 100 characters, since an agent that a module of `qory.yaml` ships fills the
+   would pass 98 characters, since an agent that a module of `qory.yaml` ships fills the
    member, with the lists on the lines after `No module ships agent python-reviewer, and
    this list adds it:`. When the base's `extending.kinds` does not list `agents`, the fix
    is `Ask the base stack's maintainer to ship agent python-reviewer.` A member that only
@@ -2028,7 +2169,7 @@ exports:                         # in a repository delivering stacks or modules 
 | `harness.runtime` | the document's `target.runtime` | one runtime name or a list; `--runtime` wins over it |
 | `harness.model` | the document's `target.model` | `--model` wins over it |
 | `harness.effort` | none | the effort value the main agent runs at, one of the values the runtime's descriptor in Forager lists for a run, passed in the place the descriptor lists for the effort: for `claude`, the flag `--effort`, with `low`, `medium`, `high`, `xhigh` or `max`. A runtime whose descriptor has no place for it gets none, and the compose prints a row. An empty value is no effort. `--effort` wins over it |
-| `harness.tiers` | none | the model id each tier maps to, for the agents whose `model` is `${qory:<tier>}`: a model id, or `{model, effort}`, the effort one of the values the runtime takes for an agent. The tiers are `light`, `fast` and `thinking`. In the user's file and an ancestor's it is the machine's map, the nearest file per tier; in the checkout root's file it is the repository's map, read under `extends` too. Per tier, `--tier`, with the effort of `--tier-effort` for the same tier, wins over the machine's map, and the machine's map over the repository's; an entry comes whole from one of the three, so `--tier-effort` needs `--tier` for its tier. |
+| `harness.tiers` | none | the model id each tier maps to, for the agents whose `model` is `${qory:<tier>}`: a model id, or `{model, effort}`, the effort one of the values the runtime takes for an agent. The tiers are `light`, `balanced` and `thinking`. In the user's file and an ancestor's it is the machine's map, the nearest file per tier; in the checkout root's file it is the repository's map, read under `extends` too. Per tier, `--tier`, with the effort of `--tier-effort` for the same tier, wins over the machine's map, and the machine's map over the repository's; an entry comes whole from one of the three, so `--tier-effort` needs `--tier` for its tier. |
 | `harness.force` | `false` | what `--force` does on every compose; `--force=false` wins over it |
 | `harness.update` | `never` | `always` fetches every git source again on each compose; `--update` and `--update=false` win over it |
 | `harness.home` | `.qory/harness` | where the harness is composed: `.qory/harness` in the checkout, or a directory outside it, absolute or under `~`, containing one home per checkout as `<name>-<digest>` (§Rendering); `--home` wins over it |

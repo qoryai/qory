@@ -82,10 +82,10 @@ type Manifest struct {
 	// one per type, in the order of the file; nil when the manifest has none.
 	PushChecks []PushCheck
 	// ScopeChecks are the scope checks the module declares, by the artifact type of a
-	// plan: for each type, the commands in the order of the file, each the program, a
-	// path inside the module, cleaned, and its arguments. Nil when the manifest has none.
+	// plan: for each type, one command, the program, a path inside the module, cleaned,
+	// and its arguments. Nil when the manifest has none.
 	// Only a module of a run's base stack counts, see ScopeChecks of the compose result.
-	ScopeChecks map[string][][]string
+	ScopeChecks map[string][]string
 	// Contracts are the role contracts the module declares, each the path of the
 	// contract file inside the module, cleaned, keyed <kind>/<role>: the path in the
 	// role's map form, roles: {agents: {developer: {fill: one, contract: <path>}}}. Nil
@@ -196,6 +196,26 @@ type Entry struct {
 	// every change, and for every other kind. A renderer leaves the key out of the
 	// agent's file.
 	Paths []string
+	// Note is the note a skill is, read from its SKILL.md frontmatter keys notes_for and
+	// paths; nil for a skill without notes_for and for every other kind.
+	Note *Note
+}
+
+// Note is a skill that carries knowledge for the agents that fill some roles, a note that a
+// script attaches to the start of such an agent when a change touches one of its paths.
+type Note struct {
+	// Roles are the roles the frontmatter key notes_for lists, as written: developer, not
+	// agents/developer. A single value reads as a list of one. None is empty.
+	Roles []string
+	// Paths are the globs of the frontmatter key paths, from the checkout root, as
+	// written, at least one, none empty, in the grammar of an agent's paths.
+	Paths []string
+	// Err is the refusal of a note whose keys are wrong, with [exports.ModulePlace] for
+	// the module and the file filled in; nil for a note that reads. Reading a module
+	// refuses nothing: the compose returns Err only for a skill it includes, so a skill
+	// that an exclude or an only leaves out is never checked. Roles and Paths are empty
+	// with Err.
+	Err error
 }
 
 // Module is a module read from disk.
@@ -580,11 +600,11 @@ func readPushChecks(path string, items []rawPushCheck) ([]PushCheck, error) {
 }
 
 // readScopeChecks checks the scope_checks key of the manifest at path, a map from an
-// artifact type, in the form [runapi.ArtifactName] checks, each type once, to a list of
-// commands that is not empty. A command is a list of strings that is not empty, with a
-// first item that is a path inside the module with no .. part. It returns the map with
-// each program's path cleaned, nil for a manifest with no key.
-func readScopeChecks(path string, node *yaml.Node) (map[string][][]string, error) {
+// artifact type, in the form [runapi.ArtifactName] checks, each type once, to one command.
+// A command is a list of strings that is not empty, with a first item that is a path
+// inside the module with no .. part. It returns the map with each program's path cleaned,
+// nil for a manifest with no key.
+func readScopeChecks(path string, node *yaml.Node) (map[string][]string, error) {
 	if node.Kind == 0 {
 		return nil, nil
 	}
@@ -593,42 +613,38 @@ func readScopeChecks(path string, node *yaml.Node) (map[string][][]string, error
 	}
 	const typeRule = "An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes."
 	if node.Kind != yaml.MappingNode {
-		return nil, refuse("Set scope_checks to a map from an artifact type to a list of commands.", "The value is not a map.")
+		return nil, refuse("Set scope_checks to a map from an artifact type to a command.", "The value is not a map.")
 	}
-	out := map[string][][]string{}
+	out := map[string][]string{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		key, list := node.Content[i], node.Content[i+1]
+		key, command := node.Content[i], node.Content[i+1]
 		if key.Kind != yaml.ScalarNode || !runapi.ArtifactName(key.Value) {
 			return nil, refuse("Set each key of scope_checks to an artifact type.", typeRule, "The key is "+exports.Value(key.Value, true)+".")
 		}
 		typ := key.Value
 		if _, dup := out[typ]; dup {
-			return nil, refuse(fmt.Sprintf("Remove one of the two scope_checks keys for %s.", typ), "A manifest has one list of commands per type.")
+			return nil, refuse(fmt.Sprintf("Remove one of the two scope_checks keys for %s.", typ), "A manifest has one command per type.")
 		}
-		if list.Kind != yaml.SequenceNode || len(list.Content) == 0 {
-			return nil, refuse(fmt.Sprintf("Set scope_checks.%s to a list of commands.", typ), "The value is not a list, or the list is empty.")
+		at := "scope_checks." + typ
+		if command.Kind != yaml.SequenceNode || len(command.Content) == 0 {
+			return nil, refuse(fmt.Sprintf("Set %s to the program's path inside the module, then its arguments.", at), "The value is not a list, or the list is empty.")
 		}
-		var commands [][]string
-		for j, item := range list.Content {
-			at := fmt.Sprintf("scope_checks.%s[%d]", typ, j)
-			if item.Kind != yaml.SequenceNode || len(item.Content) == 0 {
-				return nil, refuse(fmt.Sprintf("Set %s to the program's path inside the module, then its arguments.", at), "The value is not a list, or the list is empty.")
+		words := make([]string, len(command.Content))
+		for k, word := range command.Content {
+			if word.Kind == yaml.SequenceNode {
+				return nil, refuse("Give each plan type of scope_checks one command, a list of strings, not a list of lists.", fmt.Sprintf("%s[%d] is a list.", at, k))
 			}
-			words := make([]string, len(item.Content))
-			for k, word := range item.Content {
-				if word.Kind != yaml.ScalarNode || word.Tag != "!!str" {
-					return nil, refuse(fmt.Sprintf("Set %s[%d] to a string, quoted when it reads as a number or a boolean.", at, k), "The item is not a string.")
-				}
-				words[k] = word.Value
+			if word.Kind != yaml.ScalarNode || word.Tag != "!!str" {
+				return nil, refuse(fmt.Sprintf("Set %s[%d] to a string, quoted when it reads as a number or a boolean.", at, k), "The item is not a string.")
 			}
-			// No .. part at all, as the schema has it, though a/../b would stay inside.
-			program, ok := InsideModule(words[0])
-			if !ok || slices.Contains(strings.Split(filepath.ToSlash(words[0]), "/"), "..") {
-				return nil, refuse(fmt.Sprintf("Set the first item of %s to a path inside the module.", at), exports.Value(words[0], true)+" is not one.")
-			}
-			commands = append(commands, append([]string{program}, words[1:]...))
+			words[k] = word.Value
 		}
-		out[typ] = commands
+		// No .. part at all, as the schema has it, though a/../b would stay inside.
+		program, ok := InsideModule(words[0])
+		if !ok || slices.Contains(strings.Split(filepath.ToSlash(words[0]), "/"), "..") {
+			return nil, refuse(fmt.Sprintf("Set the first item of %s to a path inside the module.", at), exports.Value(words[0], true)+" is not one.")
+		}
+		out[typ] = append([]string{program}, words[1:]...)
 	}
 	return out, nil
 }
@@ -822,6 +838,7 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 		l.Entries[i].Front = refs.front
 		l.Entries[i].In = refs.in
 		l.Entries[i].Paths = refs.paths
+		l.Entries[i].Note = refs.note
 	}
 	sort.Slice(l.Entries, func(i, j int) bool {
 		if l.Entries[i].Kind != l.Entries[j].Kind {
@@ -1212,17 +1229,18 @@ func (r *skillReader) add(at, name, path string) error {
 	return nil
 }
 
-// fits reports whether line, the first line of a refusal, has at most 100 characters, with
+// fits reports whether line, the first line of a refusal, has at most [exports.LineMax]
+// characters, so it has at most 100 under the "✗ " that qory prints before it, with
 // [exports.ModulePlace] in it a module as long as a refusal prints one: "module " and a
 // name of [exports.NameMax] characters.
 func fits(line string) bool {
 	line = strings.ReplaceAll(line, exports.ModulePlace, strings.Repeat("m", len("module ")+exports.NameMax))
-	return utf8.RuneCountInString(line) <= 100
+	return utf8.RuneCountInString(line) <= exports.LineMax
 }
 
 // jsonObjectRefusal is the refusal of the MCP server file, a path in the module as a
 // message prints it, whose content is no JSON object. The path moves to the second line
-// when it would push the first past 100 characters.
+// when it would push the first past 98 characters.
 func jsonObjectRefusal(file, cause string) error {
 	fix := fmt.Sprintf("Write %s in %s as one JSON object.", file, exports.ModulePlace)
 	if !fits(fix) {

@@ -298,6 +298,56 @@ reviewer that reads only some files lists them in its frontmatter, `paths: ["**/
 The home's `roles.json` contains each member with its `paths`, and the agent files that
 qory writes for a runtime leave the key out.
 
+### Notes
+
+A note is a skill that holds knowledge for the agents of some roles. Give the skill the
+frontmatter keys `notes_for`, a role or a list of roles, and `paths`, one glob or a list
+of globs from the checkout root:
+
+```yaml
+---
+name: python-naming
+description: Naming rules for Python code.
+notes_for: developer
+paths: ["**/*.py", pyproject.toml]
+---
+```
+
+Technology modules and the modules of a repository write notes. A skill with `paths`
+and no `notes_for` is no note. `paths` has the grammar of an agent's `paths`, which [the
+contract](../contracts/harness/v1/README.md#the-module-manifest) states: `**` matches any
+number of directories, `*` and `?` match within one directory, and every other character,
+`[`, `{` and `\` included, is literal. The compose checks both keys of each note it
+composes, and not a skill that an `exclude` or an `only` leaves out. It stops with exit 2
+when:
+
+- a role in `notes_for` is one that no agent fills: `Set notes_for in python-naming of
+  module python to a role the stack fills.`, then `The stack fills no tester
+  role.` and `The stack fills developer and reviewers.`;
+- the stack fills no role: `Remove notes_for from python-naming of module python.`, then
+  `The stack fills no role.`;
+- a note has no `paths`, or an empty one: `Add paths to python-naming of module python.`,
+  then `A note needs one path or more.`
+
+The home has `role-notes.json`, written for every harness, with `{"notes": []}` when there is
+no note. It is not the `notes.json` of a push check. A home that an earlier qory composed has
+no `role-notes.json`, and `qory harness compose --check` reports it as differing until you
+compose again. Each row is:
+
+```json
+{"name": "python-naming", "roles": ["agents/developer"], "paths": ["**/*.py", "pyproject.toml"], "module": "python", "layer": 1}
+```
+
+- `name` is the skill's name; its body is `skills/<name>/SKILL.md` in the home,
+- `roles` is `notes_for` as a list, each role written `agents/<role>`, as `roles.json`
+  writes a role,
+- `paths` is the globs as written,
+- `module` is the module that ships the skill,
+- `layer` is 0 for a module of your `qory.yaml`, or of the stack you compose when it extends
+  none, and 1 for a module of the base stack it extends.
+
+Rows come in the order of the compose report's entries.
+
 These stop the compose with exit 2:
 
 ```
@@ -482,6 +532,8 @@ Beside the links are generated copies. Each is joined from the modules' fragment
 - `AGENTS.md`, at the root of the home,
 - `roles.json`, at the root of the home, when the harness has a role: each role and each
   member of a group role, with the agent that fills it,
+- `role-notes.json`, at the root of the home, always: each note with its roles, paths,
+  module and layer, as [Notes](#notes) describes it,
 - the instruction file each runtime wants,
 - its settings,
 - its MCP file.
@@ -667,7 +719,7 @@ files.
 
 ## Tiers
 
-An agent in a module sets `model: ${qory:light}`, `${qory:fast}` or `${qory:thinking}` in place of a model id. You map each tier to a model id with `--tier`, `harness.tiers` in your `qory.yaml`, or `harness.tiers` in the repository's `qory.yaml`, in that order of precedence. A tier with no map leaves the agent on the main model.
+An agent in a module sets `model: ${qory:light}`, `${qory:balanced}` or `${qory:thinking}` in place of a model id. You map each tier to a model id with `--tier`, `harness.tiers` in your `qory.yaml`, or `harness.tiers` in the repository's `qory.yaml`, in that order of precedence. A tier with no map leaves the agent on the main model.
 
 A tier's entry may also set an effort value: `{model: claude-opus-5-5, effort: max}` in `harness.tiers`, or `--tier thinking=claude-opus-5-5 --tier-effort thinking=max` on the command line. The entry comes whole from one of the three places, so `--tier-effort` needs `--tier` for the same tier. In a claude agent, an entry with no effort leaves the effort the agent's file sets. For the other runtimes, qory writes no effort from the agent's file.
 

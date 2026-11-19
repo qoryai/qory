@@ -1,3 +1,0 @@
-Set scope_checks.build-plan to a list of commands.
-  The value is not a list, or the list is empty.
-  The manifest is modules/core/qory-module.yaml.

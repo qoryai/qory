@@ -103,7 +103,7 @@ type Contract struct {
 	FrontMatter []string
 	// Tools are the tools the agent's tools key lists; nil for none.
 	Tools []string
-	// Tier requires the agent's model to be a tier, such as ${qory:fast}.
+	// Tier requires the agent's model to be a tier, such as ${qory:balanced}.
 	Tier bool
 	// Report is the form of the agent's report, which the harness's checks read; the
 	// compose checks only that it is a map. Nil when the file has no report key.

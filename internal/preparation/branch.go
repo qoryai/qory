@@ -19,10 +19,10 @@ import (
 // The words of the checkout of a work item's branch. Each is one format string.
 const (
 	textOnBranch        = "qory run: on branch %s at %s"
-	textBranchNoCommit  = "qory run: add a new version of the artifact branch in Qory Apiary with a commit of %[2]s, then take the work item in again: the version has %[1]s, which is not a commit on %[2]s on %[3]s. The fetch through the run's gateway failed: %[4]s; the code is used"
-	textBranchNotCommit = "qory run: add a new version of the artifact branch in Qory Apiary with a commit of %[2]s, then take the work item in again: the version has %[1]s, which is not a commit; the code is used"
-	textQoryInBranch    = "qory run: add a new version of the artifact branch in Qory Apiary whose commit has .qory as the target version %[3]s has it, then take the work item in again: commit %[2]s of %[1]s has another .qory, where qory keeps the files of the run; the code is used"
-	textNoCheckout      = "qory run: add a new version of the artifact branch in Qory Apiary with a commit that git can check out, then take the work item in again. The checkout of %[1]s at %[2]s in %[3]s failed: %[4]s; the code is used"
+	textBranchNoCommit  = "qory run: The stored version of the artifact branch has commit %[1]s, which is not a commit on %[2]s on %[3]s, so the run did not start; the code is used\n  The fetch through the run's gateway failed: %[4]s"
+	textBranchNotCommit = "qory run: The stored version of the artifact branch has %[1]s for %[2]s, which is not a commit, so the run did not start; the code is used"
+	textQoryInBranch    = "qory run: Commit %[2]s of %[1]s has a .qory folder that differs from the one at target version %[3]s, so the run did not start; the code is used\n  qory keeps the files of the run in .qory."
+	textNoCheckout      = "qory run: git cannot check out commit %[2]s of %[1]s, the stored version of the artifact branch, so the run did not start; the code is used\n  The checkout in %[3]s failed: %[4]s"
 )
 
 // TargetRef is the ref that [Switch] leaves at the target version: [fromSeed] reads which
@@ -67,10 +67,12 @@ type Landed struct {
 // method alone.
 func (b *WorkBranch) Landed() []Landed { return slices.Clone(b.landed) }
 
-// VersionWays is the fix for a branch that [Push] pushed with no version stored: the next
-// run starts at the last version, so its push fails as a branch that moved.
-func (b *WorkBranch) VersionWays() string {
-	return fmt.Sprintf(textVersionWays, b.Ref, b.PushedPaths(), shownPath(b.system))
+// DeleteBranch is the fix for a branch that [Push] pushed with no version stored: the next
+// run starts at the last version, so its push fails as a branch that moved. Only a run stores
+// a version, so deleting the branch is the only fix. The next run then starts from the last
+// version, or from target_version when no version exists.
+func (b *WorkBranch) DeleteBranch() string {
+	return fmt.Sprintf(textDeleteBranch, b.Ref, b.PushedPaths(), shownPath(b.system))
 }
 
 // PushedPaths is each repository the last [Push] pushed, as one phrase of a line.

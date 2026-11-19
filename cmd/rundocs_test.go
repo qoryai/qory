@@ -354,6 +354,37 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 	}
 }
 
+// TestARunCodeMapsTheTierBalanced is a run from a run code whose run settings map the
+// tiers light, balanced and thinking: the run composes with each tier as a --tier flag,
+// and the agent whose model is ${qory:balanced} is written with the model that the
+// run settings give the tier balanced.
+func TestARunCodeMapsTheTierBalanced(t *testing.T) {
+	// The test reads the run's home once the run is over.
+	t.Cleanup(cmd.KeepRunHomes())
+	stackFile := func(s string) string {
+		return s + "  - name: tiers\n    source: {path: modules/tiers}\nworkflows:\n  hello:\n    access: write\n"
+	}
+	extra := map[string]string{
+		"examples/hello/modules/tiers/qory-module.yaml": "apiVersion: qory.dev/v1alpha1\nname: tiers\n",
+		"examples/hello/modules/tiers/agents/mid.md":    "---\nname: mid\ndescription: Works in the middle tier.\nmodel: ${qory:balanced}\n---\n\nWorks.\n",
+	}
+	r := runFromCodeLinks(t, behindAWall(t), nil, stackFile, func(d map[string]any) {
+		d["run_settings"] = map[string]any{
+			"runtime": "claude", "model": "example-large",
+			"provider_models": []any{map[string]any{"id": "example-large"}, map[string]any{"id": "example-small"}},
+			"tiers":           map[string]any{"light": "example-large", "balanced": "example-small", "thinking": "example-large"},
+		}
+	}, extra, nil)
+	if !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	data, err := os.ReadFile(filepath.Join(r.spec.HarnessHome, "claude", "agents", "mid.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants(t, string(data), "model: example-small")
+}
+
 // TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours is a run from a run code whose
 // base sets no time_limit for its workflow: the session's time limit is 3 hours.
 func TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours(t *testing.T) {
@@ -607,7 +638,7 @@ func TestARunCodeStartsTheWorkflowsPrefixedSkill(t *testing.T) {
 // row of the work item's change-plan. A workflow with access write and no plan gets the after step
 // that only tells whether HEAD moved, and a workflow that only reads gets no after step.
 func TestARunCodeReadsThePlanTypeOfItsWorkflowFromTheComposedStack(t *testing.T) {
-	const manifest = "apiVersion: qory.dev/v1alpha1\nname: hello\nscope_checks:\n  change-plan:\n    - [checks/check.js, scope, --plan]\n"
+	const manifest = "apiVersion: qory.dev/v1alpha1\nname: hello\nscope_checks:\n  change-plan: [checks/check.js, scope, --plan]\n"
 	fullSuite := func(d map[string]any) { d["full_suite"] = true }
 	for _, c := range []struct {
 		name      string

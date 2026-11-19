@@ -206,7 +206,7 @@ func listOf(res *Result, r Role) string {
 // addedBy is the fix and the items of a member of a group role that lists add, for a
 // fix line that starts with lead: for one list, "remove it from <list>" and no items; for
 // several, "remove it from the lists that add it" and one item line per list, each
-// "  - <list>". When lead and one list make a fix line over 100 characters, the list
+// "  - <list>". When lead and one list make a fix line over 98 characters, the list
 // moves to an item line, after "remove it from the list that adds it". many reports
 // whether the items are those of several lists.
 func addedBy(lead string, lists []string) (fix, items string, many bool) {
@@ -229,8 +229,9 @@ func itemLines(lists []string) string {
 	return out
 }
 
-// fits reports whether line, the first line of a refusal, has at most 100 characters.
-func fits(line string) bool { return utf8.RuneCountInString(line) <= 100 }
+// fits reports whether line, the first line of a refusal, has at most [exports.LineMax]
+// characters, so it has at most 100 under the "✗ " that qory prints before it.
+func fits(line string) bool { return utf8.RuneCountInString(line) <= exports.LineMax }
 
 // altFix is the fix line "<main>, or <alt>." when it fits, and otherwise the fix line
 // "<main>." with a second line that has the alternative: "  You can also <alt>."
@@ -460,7 +461,7 @@ func lacks(c module.Contract, doc module.Document, tier string) []string {
 		}
 	}
 	if c.Tier && tier == "" {
-		out = append(out, "a tier in model, such as ${qory:fast}")
+		out = append(out, "a tier in model, such as ${qory:balanced}")
 	}
 	return out
 }

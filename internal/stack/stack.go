@@ -480,14 +480,14 @@ type Workflow struct {
 
 // Tiers are the tier names: the names a tier placeholder, ${qory:<tier>}, may take in an
 // agent's model, and the values of a workflow's tier.
-var Tiers = []string{"light", "fast", "thinking"}
+var Tiers = []string{"light", "balanced", "thinking"}
 
 // IsTier reports whether name is one of [Tiers].
 func IsTier(name string) bool {
 	return slices.Contains(Tiers, name)
 }
 
-// TierList is the tiers for a message: "light, fast, and thinking".
+// TierList is the tiers for a message: "light, balanced, and thinking".
 func TierList() string {
 	return strings.Join(Tiers[:len(Tiers)-1], ", ") + ", and " + Tiers[len(Tiers)-1]
 }
@@ -809,7 +809,10 @@ func (p *Stack) validate(compose bool) error {
 					fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 			}
 			if p.AccessOf(name) != AccessWrite {
-				return exports.Refuse(fmt.Sprintf("Remove `plan` from %s, or set its access to write.", name))
+				return exports.Refuse(
+					fmt.Sprintf("Remove `plan` from %s, or set its access to write.", name),
+					fmt.Sprintf("Only a workflow with access write has a plan, and the access of %s is %s.", name, p.AccessOf(name)),
+					fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 			}
 		}
 		if w.TimeLimitText == "" {
