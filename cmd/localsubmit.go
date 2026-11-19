@@ -26,7 +26,7 @@ import (
 const (
 	textPushChecksMissing = "qory run: Push each branch by hand: the key and scope push checks of qory run are not registered.\n  qory pushed nothing and opened no draft; open each draft by hand if you want one."
 	textPushChecksBranch  = "\n  Branch: %s in %s."
-	textPushCheckStopped       = "qory run: Fix the cause below, then run again: a push check stopped the push.\n  qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
+	textPushCheckStopped  = "qory run: Fix the cause below, then run again: a push check stopped the push.\n  qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalPushFailed   = "qory run: Fix the cause below, then run again: the push failed, so qory opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalNoHistory    = "qory run: Fix the cause below, then run again: qory could not read the branch or its origin.\n  qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalNoCommits    = "qory run: Open a draft by hand if you want one: qory pushed the branch but could not list commits.\n  qory ran no program for that repository, so it opened no draft for it.\n  Branch: %s in %s.\n  Cause: %s"
