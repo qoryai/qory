@@ -495,7 +495,7 @@ type composeOptions struct {
 	// inCheckout is set for a run given a run key: every path source that a file inside
 	// the checkout lists resolves inside the checkout, every git source it lists is an
 	// https URL, the compose reads no git or env key of the checkout's qory.yaml and no
-	// machine key under harness, such as model or launch, and it starts as if there were
+	// machine harness setting, such as model or launch, and it starts as if there were
 	// no report.
 	inCheckout bool
 	// walled is set for a run behind a wall: the home contains copies of every module's
@@ -876,7 +876,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	// stands over the document.
 	// A run given a run key reads them from no checkout's qory.yaml either, as
 	// [locateRun] does, so the repository a dispatched run works on sets no git or env
-	// key and no machine key under harness, such as model or launch.
+	// key and no machine harness setting, such as model or launch.
 	var conf config.Config
 	loadConf := func(extends bool) (err error) {
 		if conf, err = config.Load(root, !extends && !o.inCheckout); err != nil {
@@ -1157,8 +1157,8 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	}
 	var baseErr error
 	rep.Worktree, baseErr = reportBase(at.root, conf)
-	// The machine keys of a qory.yaml at the checkout root are not read under
-	// extends, and a row says so, on a dry run as well, so the person who wrote
+	// The machine harness settings of a qory.yaml at the checkout root are not read
+	// under extends, and a row says so, on a dry run as well, so the person who wrote
 	// them learns that the base stack decides.
 	skippedConfig := moved
 	if base != nil {

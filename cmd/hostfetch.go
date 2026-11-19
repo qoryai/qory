@@ -181,7 +181,7 @@ func namedComposeError(err error, n *source.Named) error {
 			}
 			scheme = &source.SchemeError{URL: scheme.URL, Name: name}
 		}
-		return &runLineError{input(errors.New(n.Hide(fmt.Sprintf("use an https URL for %s, then take the work item in again in Qory Apiary: a run from a control plane fetches git sources only over https", scheme.Name)) + codeUsed))}
+		return &runLineError{input(errors.New(n.Hide(fmt.Sprintf("use an https URL for %s, then take the work item in again.\n  A run from a control plane fetches git sources only over https", scheme.Name)) + codeUsed))}
 	case errors.As(err, &gone):
 		return &runLineError{input(fmt.Errorf("set the ref of %s to a branch, tag or commit its repository has, then take the work item in again in Qory Apiary: %w%s", gone.Name, n.HideError(gone), codeUsed))}
 	case errors.As(err, &fetch):

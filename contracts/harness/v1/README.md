@@ -189,7 +189,8 @@ the runtime in the configuration or with --runtime.`, and on the next line
 `target.runtime is required, and the base stack <name>@<pin> defines no target.` A section that extends a stack may list no modules and
 contain its target or its extensions alone; a stack lists at least one module.
 `apiVersion` is optional in this file (§The configuration). A `harness` section containing
-only the machine's keys, `runtime`, `model`, `force` and `update`, is not a document. The
+only machine harness settings, `runtime`, `model`, `force` and `update`, is not a
+document. The
 schema is [config.schema.json](config.schema.json).
 
 | Field | Required | Meaning |
@@ -266,9 +267,10 @@ checkout appends:
   <name>@<pin> is written for.` and `Models: <list>.` A base without the block
   accepts every target. The check runs under `-f` and `extends` alike, and before
   `--dry-run` stops, since the target is resolved before the report is built.
-- The machine's keys of the checkout's `qory.yaml`, `harness.runtime`,
-  `harness.model`, `harness.effort`, `force`, `update`, `home`, `links`, `launch`, `git` and `env`, are not
-  read under `extends`, and the compose reports it; the document, `target`, `modules`,
+- The machine harness settings of the checkout's `qory.yaml`, `harness.runtime`,
+  `harness.model`, `harness.effort`, `force`, `update`, `home`, `links` and `launch`, and
+  its `git` and `env` keys, are not read under `extends`, and the compose reports it;
+  the document, `target`, `modules`,
   `bind`, `extensions` and `hooks`, the workflow hooks, is. The runner's configuration, in the user's directory or an
   ancestor the runner's user owns, is the only one. The `worktree` section is the
   repository's and is read.
@@ -2194,8 +2196,9 @@ exports:                         # in a repository delivering stacks or modules 
 Every key is optional; a file that sets none is read and changes nothing. A key the file
 does not read is refused, and the message has the file by its name. A list, such
 as `worktree.link`, is the nearest file's whole. `qory config` prints every effective
-value and the file it came from. Under `extends` the machine's keys of the checkout's
-file, `harness.runtime`, `harness.model` and the rest, `git` and `env` are not read;
+value and the file it came from. Under `extends` the machine harness settings of the
+checkout's file, `harness.runtime`, `harness.model` and the rest, and its `git` and
+`env` keys are not read;
 the document under `harness` is (§Extending a stack).
 
 **forager.yaml.** What `qory run` does on this machine is a second file,

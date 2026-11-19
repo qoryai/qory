@@ -62,8 +62,8 @@ func TestAWalledRunTakesAHomeWhereARunWithARunKeyComposes(t *testing.T) {
 
 // TestACheckoutsLaunchArgumentsApplyToAPersonsRun is the checkout's qory.yaml setting
 // harness.launch.claude.args: a person's run starts with them. A run given a run key
-// reads no machine key of the checkout's file, see
-// TestARunKeyReadsNoMachineKeyOfTheCheckout.
+// reads no machine harness setting of the checkout's file, see
+// TestARunKeyReadsNoMachineHarnessSettingOfTheCheckout.
 func TestACheckoutsLaunchArgumentsApplyToAPersonsRun(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)

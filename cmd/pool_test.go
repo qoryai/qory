@@ -417,13 +417,13 @@ func TestRunPoolRefusesWhatItCannotRunBy(t *testing.T) {
 		{"a wall.images_allow that covers another registry", nil, func(t *testing.T, m *poolMachine) {
 			writeFile(t, filepath.Join(m.runs, "qory", "forager.yaml"), "apiVersion: qory.dev/v1alpha1\nwall:\n  adapter: docker\n  image: "+agentImage+"\n  images_allow: [localhost:5001/qory-env-other/, localhost:5002/qory-env/]\n")
 		}, func(m *poolMachine) string { return m.file + ": pool.run_config is " + m.runs + noCover }},
-		{"a machine's key", nil, func(_ *testing.T, m *poolMachine) { m.srv.node = testNode },
+		{"a machine's access key", nil, func(_ *testing.T, m *poolMachine) { m.srv.node = testNode },
 			func(*poolMachine) string {
-				return "this machine's key is not a pool's key; enrol one with a code made for the pool"
+				return "Enrol an access key with a code made for the pool: this key was enrolled without one."
 			}},
 		{"a gateway's key", nil, func(_ *testing.T, m *poolMachine) { m.srv.node = testGatewayNode },
 			func(*poolMachine) string {
-				return "this machine's key is not a pool's key; enrol one with a code made for the pool"
+				return "Enrol an access key with a code made for the pool: this key was enrolled without one."
 			}},
 	} {
 		t.Run(c.name, func(t *testing.T) {

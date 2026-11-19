@@ -198,7 +198,7 @@ func TestOwnFileKeepsItsWorktreeSectionUnderExtends(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.Runtime != nil || c.Force || c.Git.Timeout != config.DefaultTimeout || len(c.Env) != 0 {
-		t.Errorf("machine keys were read: %+v", c)
+		t.Errorf("machine harness settings were read: %+v", c)
 	}
 	if c.Worktree.Base != "develop" || len(c.Worktree.Link) != 1 || c.Worktree.Link[0].String() != ".env" {
 		t.Errorf("worktree keys were not read: %+v", c.Worktree)

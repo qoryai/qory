@@ -125,10 +125,10 @@ func (l transcriptLink) args() []string {
 // declared and reserved variables and the variables it reads a model key
 // from, which Forager sets behind a wall to a placeholder or to a value passed for them,
 // or unsets them, the variable it reads its model endpoint from, which Forager sets to
-// the start key's endpoint or to a passed value its endpoint rule keeps, or unsets, the
-// fixed variables of the runtime's descriptor, which Forager sets in every launch, read
-// from runtimes.json, and the harness's fixed values; and ca, the names the wall sets
-// only when the run has an authority.
+// the default model provider credential's endpoint or to a passed value its endpoint
+// rule keeps, or unsets, the fixed variables of the runtime's descriptor, which Forager
+// sets in every launch, read from runtimes.json, and the harness's fixed values; and ca,
+// the names the wall sets only when the run has an authority.
 func keptNames(spec *runSpec, d *wall.Docker, runAPI bool) (always, ca []string, err error) {
 	ca = d.CAEnv
 	if ca == nil {
@@ -150,9 +150,9 @@ func keptNames(spec *runSpec, d *wall.Docker, runAPI bool) (always, ca []string,
 		always = append(always, session.EnvQoryHost)
 	}
 	always = append(always, credentialVariables(spec.Runtime)...)
-	// The start key's endpoint, which Forager sets and the resolved variables list no
-	// entry for when no source sets the name. Behind a wall, Forager unsets the image's
-	// value of it when nothing sets it, before the verb runs.
+	// The default model provider credential's endpoint, which Forager sets and the
+	// resolved variables list no entry for when no source sets the name. Behind a wall,
+	// Forager unsets the image's value of it when nothing sets it, before the verb runs.
 	if m, ok := spec.Runtime.(runtimes.Model); ok {
 		if model, ok := m.Model(); ok && model.Endpoint.Variable != "" {
 			always = append(always, model.Endpoint.Variable)

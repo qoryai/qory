@@ -186,8 +186,8 @@ compose:
   exit 2. A URL with a user part or an `@` between `://` and the first `/` after it, a
   host with a character outside ASCII, or a URL that qory cannot read stops it too, exit
   2, before the source is fetched.
-- `qory run` reads no `git` or `env` key of the checkout's `qory.yaml`, and no machine key
-  under `harness` such as `model` or `launch`, as under `extends`.
+- `qory run` reads no `git` or `env` key of the checkout's `qory.yaml`, and no machine
+  harness setting, such as `model` or `launch`, as under `extends`.
 - The harness report of an earlier compose, such as `.qory/harness-report.json`, is not
   read: the compose pins no git source to a commit that the report lists, removes no link
   that it lists, and adds none of its replaced paths to the new report.
@@ -1384,11 +1384,11 @@ Before it makes a key, qory checks the code against the pin `forager.yaml` has, 
 of another server is refused. When `forager.yaml` names another `gateway.server.url`,
 enrol refuses: enrol with that server, or change `gateway.server.url` first.
 
-When `access-key-secret` exists, enrol refuses, so it never replaces this machine's key
-unasked: use `--replace`, below, to move the machine to a new key, or `--print` for a
-key kept elsewhere. The one exception is a retry: the same command, with the same code, within
-the 15 minutes, while `access-key-secret` still holds the key made for it, retries with
-that key.
+When `access-key-secret` exists, enrol stops with an error, so it never replaces this
+machine's access key unasked: use `--replace`, below, to move the machine to a new key,
+or `--print` for a key kept elsewhere. The one exception is a retry: the same command,
+with the same code, within the 15 minutes, while `access-key-secret` still holds the key
+made for it, retries with that key.
 
 When the enrolment does not complete:
 
@@ -1411,7 +1411,7 @@ Enrol refuses while `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or
 contradict the variable. Unset it, or use `--print`. It also refuses while a run without
 a wall is running on this machine: it must end before a key is made.
 
-#### Replace the machine's key
+#### Replace the machine's access key
 
 ```sh
 qory access-key enrol --replace https://apiary.example qecn_…
@@ -1716,8 +1716,8 @@ A run given a run key starts Claude Code with `--setting-sources user`,
 `--strict-mcp-config` and `--mcp-config` with the harness's MCP list, or an empty one when
 the harness has none: Claude Code reads no settings of the checkout's `.claude` and no
 `.mcp.json`, and loads no MCP server but those `--mcp-config` names. Other runtimes get
-none of these flags. For any runtime, a run given a run key reads no `git`, `env` or
-machine key under `harness`, such as `launch` or `home`, from the checkout's `qory.yaml`:
+none of these flags. For any runtime, a run given a run key reads no `git` or `env` key
+and no machine harness setting, such as `launch` or `home`, from the checkout's `qory.yaml`:
 your `qory.yaml` and the files above the checkout set those. Without a wall, Claude Code
 reads the settings, `CLAUDE.md`, plugins and memory of the user running qory, as
 `--setting-sources user` reads them. Behind a wall, `CLAUDE_CONFIG_DIR` is
@@ -2507,8 +2507,9 @@ phrase:
 - `set the ref of <source> to a branch, tag or commit its repository has, then take the
   work item in again in Qory Apiary: the repository of <source> has no branch or tag by
   the ref it is set to; the code is used`, exit 2
-- `use an https URL for <source>, then take the work item in again in Qory Apiary: a run
-  from a control plane fetches git sources only over https; the code is used`, exit 2
+- `use an https URL for <source>, then take the work item in again.` on line 1, and
+  `A run from a control plane fetches git sources only over https; the code is used` on
+  line 2, exit 2
 - `correct exports.dir in the qory.yaml of <source>, or set <source> to a ref whose
   repository has the folder of <export>, then take the work item in again in Qory Apiary:
   <source> exports <export> at a folder that is not there; the code is used`, exit 2
@@ -3069,7 +3070,7 @@ wall:
 `qory config` lists each value; without `gateway.server.via` it shows
 `gateway.server.via.url  (none: the server is reached directly)  default`.
 
-Enrol the machine's key through the gateway with `--via`:
+Enrol the machine's access key through the gateway with `--via`:
 
 ```sh
 qory access-key enrol --via https://gateway.example:8443 https://apiary.example qecn_…
