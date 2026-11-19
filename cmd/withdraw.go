@@ -66,7 +66,7 @@ func withdrawArtifact(c *cobra.Command, push runapi.Push, files []string) error 
 	}
 
 	if len(files) > 0 {
-		return withdrawRefusedError{fmt.Sprintf(textWithdrawFiles, len(files), plural(len(files), "file"), strings.Join(files, ", "))}
+		return withdrawRefusedError{fmt.Sprintf(textWithdrawFiles, len(files), plural(len(files), "file"), strings.Join(exports.Values(files), ", "))}
 	}
 
 	if client == nil {

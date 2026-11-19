@@ -1667,6 +1667,25 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Security
 
+- These errors and lines print "(a value that contains a run key)", or the phrase for
+  the kind of key or code, in place of a value that contains `qak_`, `qrk_`, `qecr_` or
+  an enrolment code's prefix, in any letter case; line 1 is otherwise as before, and a
+  wrong value without one prints as before:
+  - `qory run verdict` with a wrong verdict, `qory artifact push` with a wrong type or
+    `--name`, and `qory artifact pull <type> --version N` with no version N;
+  - `unknown command`, for `qory <arg>` and for a stray argument of a command that
+    takes none, and `Unknown help topic` of `qory help <arg>`;
+  - a flag's value that is not an int, a bool or a duration, and an unknown flag, as
+    `--<value>`, `-<value>` or `---<value>`;
+  - the file errors of `qory artifact push <file>`, of `--withdraw` with files, and of
+    `qory run verdict escalate --points`;
+  - the errors of `qory harness compose -f`, `qory worktree add -f` and `qory run -f`
+    that printed the file's path or name, and the compose's `qory` and `retired` rows;
+  - an error reading the harness report of `--home`, also for `qory run`;
+  - `qory gateway --listen`, also in the cause of a failed lookup of its host;
+  - a read-write `--mount` that contains qory's state directory;
+  - the line of `qory run end` with a `--reason` that contains a key.
+
 - qory builds with Go 1.27.4, and go.mod requires Go 1.27.4. Go 1.27.4's `crypto/x509`
   returns an error for the intermediate certificates that Go no longer trusts
   (GO-2026-6809, CVE-2026-111943), a fix that came in Go 1.27.3. Go 1.27.4 adds security

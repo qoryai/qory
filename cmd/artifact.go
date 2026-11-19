@@ -339,7 +339,7 @@ func pullArtifacts(c *cobra.Command, client *runapi.Client, artifactType string,
 
 	if version != 0 && !found {
 		return input(fmt.Errorf("Choose a version that %s lists. %s has no version %d.",
-			store.shown(filepath.Join(store.dir, indexFile)), artifactType, version))
+			store.shown(filepath.Join(store.dir, indexFile)), exports.Value(artifactType, false), version))
 	}
 
 	_, err = fmt.Fprintln(c.OutOrStdout(), store.shown(store.dir)+string(filepath.Separator))
@@ -605,18 +605,18 @@ func readPushSources(c *cobra.Command, files []string) ([]pushSource, error) {
 		} else {
 			info, err := os.Stat(file)
 			if err != nil {
-				return nil, input(fmt.Errorf("Pass a file that exists. %w", err))
+				return nil, input(fmt.Errorf("Pass a file that exists. %w", exports.HideValueError(err, file)))
 			}
 
 			if !info.Mode().IsRegular() {
-				return nil, input(fmt.Errorf("Pass a file, not a directory or a device. %s is neither a file nor a link to one.", file))
+				return nil, input(fmt.Errorf("Pass a file, not a directory or a device. %s is neither a file nor a link to one.", exports.Value(file, false)))
 			}
 
 			source = pushSource{filename: filepath.Base(file), path: file, size: info.Size()}
 		}
 
 		if seen["name:"+source.filename] {
-			return nil, input(fmt.Errorf("Rename one of the files named %s. The files of one version have different names.", source.filename))
+			return nil, input(fmt.Errorf("Rename one of the files named %s. The files of one version have different names.", exports.Value(source.filename, false)))
 		}
 
 		seen["name:"+source.filename] = true
@@ -664,7 +664,7 @@ func (s pushSource) copyTo(w io.Writer) error {
 
 	file, err := os.Open(s.path)
 	if err != nil {
-		return fmt.Errorf("Check %s. Reading it failed: %w", s.path, err)
+		return fmt.Errorf("Check %s. Reading it failed: %w", exports.Value(s.path, false), exports.HideValueError(err, s.path))
 	}
 	defer file.Close()
 
@@ -681,7 +681,7 @@ func (s pushSource) bytesOf() ([]byte, error) {
 
 	content, err := os.ReadFile(s.path)
 	if err != nil {
-		return nil, fmt.Errorf("Check %s. Reading it failed: %w", s.path, err)
+		return nil, fmt.Errorf("Check %s. Reading it failed: %w", exports.Value(s.path, false), exports.HideValueError(err, s.path))
 	}
 
 	return content, nil
@@ -744,14 +744,7 @@ func postVersion(ctx context.Context, client *runapi.Client, push runapi.Push) (
 	}
 
 	if errors.As(err, &apiError) && apiError.Code == runapi.CodeUnknownDecision {
-		// A value with a key's or a code's prefix, such as qrk_, prints as a phrase; any
-		// other value prints quoted and cut to 40 characters.
-		shown := exports.Value(push.Decision, false)
-		if shown == push.Decision {
-			shown = shortValue(push.Decision)
-		}
-
-		return nil, decisionRefusedError{fmt.Sprintf(textDecisionRefused, shown), err}
+		return nil, decisionRefusedError{fmt.Sprintf(textDecisionRefused, shownOrShort(push.Decision)), err}
 	}
 
 	return pushed, err
@@ -846,7 +839,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 			}
 
 			if !slices.Contains([]string{runapi.VerdictPassed, runapi.VerdictChangesRequested, runapi.VerdictEscalate}, args[0]) {
-				return input(fmt.Errorf("Pass passed, changes-requested or escalate. The verdict is %q.", args[0]))
+				return input(fmt.Errorf("Pass passed, changes-requested or escalate. The verdict is %s.", exports.Value(args[0], true)))
 			}
 
 			return nil
@@ -957,15 +950,8 @@ func readTrack(c *cobra.Command) (*runapi.Track, error) {
 	case !idGiven:
 		return nil, input(errors.New("Pass --track <id> with --track-reason: a reason needs the track it is for."))
 	case !verdictformat.ValidTrackID(id):
-		// A value with a key's or a code's prefix, such as qrk_, prints as a phrase; any
-		// other value prints quoted and cut to 40 characters.
-		shown := exports.Value(id, false)
-		if shown == id {
-			shown = shortValue(id)
-		}
-
 		return nil, input(fmt.Errorf("Set --track to lower-case words joined by hyphens, such as small-change, at most %d characters.\n"+
-			"  The value is %s.", verdictformat.MaxTrackID, shown))
+			"  The value is %s.", verdictformat.MaxTrackID, shownOrShort(id)))
 	}
 
 	if err := checkLine("--track-reason", "reason", "one sentence on one line", reason, verdictformat.MaxReason); err != nil {
@@ -1015,6 +1001,16 @@ func shortValue(value string) string {
 	return strconv.Quote(value)
 }
 
+// shownOrShort is value as an error prints it: the phrase [exports.Value] prints for a
+// value that contains a key or a code, such as qrk_, and [shortValue] for any other.
+func shownOrShort(value string) string {
+	if shown := exports.Value(value, false); shown != value {
+		return shown
+	}
+
+	return shortValue(value)
+}
+
 // readPoints returns the points of verdict from path, the file of --points; given is true
 // when the command line has --points. escalate needs the file, and the other verdicts
 // take none.
@@ -1033,27 +1029,27 @@ func readPoints(verdict, path string, given bool) ([]runapi.Point, error) {
 
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, input(fmt.Errorf("Pass a file that exists to --points. %w", err))
+		return nil, input(fmt.Errorf("Pass a file that exists to --points. %w", exports.HideValueError(err, path)))
 	}
 	defer file.Close()
 
 	data, err := io.ReadAll(io.LimitReader(file, maxPointsFile+1))
 	if err != nil {
-		return nil, input(fmt.Errorf("Check the file of --points. Reading it failed: %w", err))
+		return nil, input(fmt.Errorf("Check the file of --points. Reading it failed: %w", exports.HideValueError(err, path)))
 	}
 
 	if len(data) > maxPointsFile {
-		return nil, input(fmt.Errorf("Shorten %s to at most %d bytes. The file is larger.", path, maxPointsFile))
+		return nil, input(fmt.Errorf("Shorten %s to at most %d bytes. The file is larger.", exports.Value(path, false), maxPointsFile))
 	}
 
 	points, err := verdictformat.Points(data)
 	switch {
 	case errors.Is(err, verdictformat.ErrByteOrderMark):
-		return nil, input(fmt.Errorf("Save %s without a byte order mark.", path))
+		return nil, input(fmt.Errorf("Save %s without a byte order mark.", exports.Value(path, false)))
 	case errors.Is(err, verdictformat.ErrNotUTF8):
-		return nil, input(fmt.Errorf("Save %s as UTF-8.", path))
+		return nil, input(fmt.Errorf("Save %s as UTF-8.", exports.Value(path, false)))
 	case errors.Is(err, verdictformat.ErrLoneSurrogate):
-		return nil, input(fmt.Errorf("Remove the escape of a lone surrogate, such as \\ud800, from %s.", path))
+		return nil, input(fmt.Errorf("Remove the escape of a lone surrogate, such as \\ud800, from %s.", exports.Value(path, false)))
 	case err != nil:
 		return nil, input(err)
 	}
@@ -1093,7 +1089,7 @@ func keepVerdict(c *cobra.Command, verdict string, points []runapi.Point, track 
 // has the run API's form. The form also makes value safe as a directory name.
 func artifactNameError(what, value string) error {
 	if !runapi.ArtifactName(value) {
-		return fmt.Errorf("Set the %s to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is %q.", what, value)
+		return fmt.Errorf("Set the %s to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is %s.", what, exports.Value(value, true))
 	}
 
 	return nil
