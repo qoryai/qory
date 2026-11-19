@@ -429,8 +429,8 @@ func TestMaskTheReportOfAHome(t *testing.T) {
 }
 
 // TestMaskTheComposedFile is qory harness compose with a key in the path of -f: the
-// error of a qory outside the file's range, and the rows of a range not checked and of
-// a retired apiVersion.
+// error of a qory outside the file's range, an error that prints the file's name, and
+// the rows of a range not checked and of a retired apiVersion.
 func TestMaskTheComposedFile(t *testing.T) {
 	root := newCheckout(t)
 
@@ -451,6 +451,31 @@ func TestMaskTheComposedFile(t *testing.T) {
 		wantMasked(t, cmd.ExitVersion, fmt.Sprintf(line, keyPhrase), "harness", "compose", "-f", stack(maskKey, "qory.dev/v1alpha1", ">=0.3.0"))
 		plain := stack("plain", "qory.dev/v1alpha1", ">=0.3.0")
 		wantPlain(t, cmd.ExitVersion, fmt.Sprintf(line, plain), "harness", "compose", "-f", plain)
+	})
+
+	t.Run("a key in the file's name", func(t *testing.T) {
+		// A part of a path that the compose builds from -f, such as the file's name, prints
+		// as exports.HidePath prints it.
+		const namePhrase = "(a name that contains a run key)"
+		dir := filepath.Join(root, "stacks")
+		writeManifest(t, filepath.Join(dir, "modules", "core"), "core")
+		writeFile(t, filepath.Join(dir, "modules", "core", "AGENTS.md"), "# core\n")
+
+		const lines = "Add skill or command workflow-x to a module%[2]s, or remove workflow x.\n" +
+			"  The stack in %[1]s declares the workflow x.\n" +
+			"  No module of the stack in %[1]s ships a skill or command workflow-x or x."
+
+		for _, name := range []string{maskKey, "plain"} {
+			file := filepath.Join(dir, name+".yaml")
+			writeFile(t, file, "apiVersion: qory.dev/v1alpha1\nmodules:\n  - name: core\n    source: {path: modules/core}\nworkflows:\n  x:\n    access: write\n")
+
+			args := []string{"harness", "compose", "--runtime", "claude", "-f", file}
+			if name == maskKey {
+				wantMasked(t, cmd.ExitInput, fmt.Sprintf(lines, namePhrase, ""), args...)
+			} else {
+				wantPlain(t, cmd.ExitInput, fmt.Sprintf(lines, "plain.yaml", " of the stack in plain.yaml"), args...)
+			}
+		}
 	})
 
 	for _, c := range []struct{ name, apiVersion, row string }{
