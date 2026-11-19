@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/qoryai/integrations/contracts"
 	"github.com/qoryai/qory/internal/integration"
@@ -191,7 +192,10 @@ func TestASecretIsAPropertyOfTheSettingsThemselves(t *testing.T) {
 // with or without an empty fragment, or no draft, and refuses one that names another,
 // quoting it as a terminal takes it. A $schema that is no URI fails the contract's
 // schema check before read sees it: the error writes every escape out and cuts the
-// rule at 200 runes.
+// rule at 200 runes. A pattern or a patternProperties key that is no regular
+// expression, and a $ref, $id or $dynamicRef that is no URI reference, fail the same
+// check; a $ref to a $defs entry that does not exist passes it, and read ends with
+// the error that the settings schema does not compile.
 func TestTheSettingsSchemaIsDraft2020(t *testing.T) {
 	for _, settings := range []string{`{"type": "object"}`, `{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object"}`, `{"$schema": "https://json-schema.org/draft/2020-12/schema#", "type": "object"}`} {
 		if _, err := integration.Describe(context.Background(), program(t, withSettings(t, settings))); err != nil {
@@ -226,6 +230,55 @@ func TestTheSettingsSchemaIsDraft2020(t *testing.T) {
 	cut, _, _ = strings.Cut(rule+cut, "; ")
 	if want := rule + strings.Repeat("x", 200-len(rule)) + "..."; cut != want {
 		t.Errorf("a $schema of 400 characters is %q, want %q", cut, want)
+	}
+	const checkFailed = " describe printed a description the integration contract refuses: at '/settings': 'allOf' failed; at '/settings': 'allOf' failed; "
+	for _, c := range []struct{ settings, want string }{
+		{`{"type": "object", "properties": {"a": {"type": "string", "pattern": "["}}}`, checkFailed + "at '/settings/properties/a': 'allOf' failed; at '/settings/properties/a/pattern': '[' is not valid regex: "},
+		// The location the library prints for a patternProperties key differs from run
+		// to run, /settings/patternProperties or another, so the case leaves it out.
+		{`{"type": "object", "patternProperties": {"[": {"type": "string"}}}`, "': invalid propertyName '['; at '': '[' is not valid regex: "},
+		{`{"type": "object", "properties": {"a": {"$ref": "#/$defs/a b%"}}}`, checkFailed + "at '/settings/properties/a': 'allOf' failed; at '/settings/properties/a/$ref': '#/$defs/a b%' is not valid uri-reference: "},
+		{`{"type": "object", "$id": "http://a b"}`, checkFailed + "at '/settings/$id': 'http://a b' is not valid uri-reference: "},
+		{`{"type": "object", "$dynamicRef": "http://a b"}`, checkFailed + "at '/settings/$dynamicRef': 'http://a b' is not valid uri-reference: "},
+		{`{"type": "object", "properties": {"a": {"$ref": "#/$defs/missing"}}}`, ` describe: the settings schema does not compile: json-pointer in "https://qory.dev/contracts/integration/v1/settings#/$defs/missing" not found`},
+	} {
+		prog := program(t, withSettings(t, c.settings))
+		_, err := integration.Describe(context.Background(), prog)
+		if err == nil || !strings.HasPrefix(err.Error(), prog+" describe") || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %q", c.settings, err, c.want)
+		}
+	}
+}
+
+// TestACredentialHostWithAWildcardFailsTheCheck describes the acme-tracker fixture with
+// *.tracker.acme.example as its credential host: the contract's schema check fails on
+// the host's pattern.
+func TestACredentialHostWithAWildcardFailsTheCheck(t *testing.T) {
+	doc := strings.Replace(string(fixture(t, "acme-tracker.json")), `"hosts": ["tracker.acme.example"]`, `"hosts": ["*.tracker.acme.example"]`, 1)
+	if !strings.Contains(doc, `"*.tracker.acme.example"`) {
+		t.Fatal("acme-tracker.json has no credential host tracker.acme.example")
+	}
+	prog := printing(t, []byte(doc))
+	_, err := integration.Describe(context.Background(), prog)
+	want := prog + ` describe printed a description the integration contract refuses: at '/roles/credential/hosts/0': '*.tracker.acme.example' does not match pattern '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'`
+	if err == nil || err.Error() != want {
+		t.Errorf("%v, want %q", err, want)
+	}
+}
+
+// TestACutRuleKeepsACharacterOfSeveralBytesWhole describes a $schema that is no URI
+// whose rule has é, two bytes of UTF-8, as its 200th rune: the cut keeps é whole and
+// puts ... after it.
+func TestACutRuleKeepsACharacterOfSeveralBytesWhole(t *testing.T) {
+	escape := string([]byte{0x5c}) + "u001b"
+	rule := `at '/settings/$schema': '\x1b[31mred`
+	settings := `{"$schema": "` + escape + `[31mred` + strings.Repeat("x", 199-len(rule)) + "é" + strings.Repeat("y", 50) + `", "type": "object"}`
+	_, err := integration.Describe(context.Background(), program(t, withSettings(t, settings)))
+	if err == nil || !utf8.ValidString(err.Error()) {
+		t.Fatalf("%q is no valid UTF-8", err)
+	}
+	if want := "; " + rule + strings.Repeat("x", 199-len(rule)) + "é..."; !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("%v, want it to end with %q", err, want)
 	}
 }
 

@@ -587,10 +587,10 @@ func pointerToken(name string) string {
 }
 
 // failures is a validation error on one line: each rule the document breaks, where.
-// With values false a rule is named by its keyword alone, since a settings document
-// may hold what is not to be printed; a description holds nothing of the kind, and the
-// library's words, which quote it, are kept, each rule with exported values hidden and
-// as [Printable] has it, cut at 200 runes.
+// With values false, for a settings document, each rule is named by its keyword alone,
+// because a setting's value can be a secret. With values true, for a description, each
+// rule is the library's words, which quote the value, with exported values hidden and
+// cut at 200 runes as [Printable] cuts.
 func failures(err error, values bool) string {
 	var ve *jsonschema.ValidationError
 	if !errors.As(err, &ve) {

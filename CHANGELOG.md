@@ -1433,9 +1433,9 @@ release may change what an existing document does, and states it under Upgrading
     then ends with an error, because it plays no role qory expands.
   - A settings `$schema` that is not a URI fails the check with `is not valid uri`, where
     qory printed `the settings schema is written in …`.
-  - A settings schema whose `$vocabulary` key, `$id`, `$ref`, `$dynamicRef` or `pattern`
-    is not valid fails the check, where qory printed `the settings schema does not
-    compile`.
+  - A settings schema whose `$vocabulary` key, `patternProperties` key, `$id`, `$ref`,
+    `$dynamicRef` or `pattern` is not valid fails the check, where qory printed `the
+    settings schema does not compile`.
   - Each rule of a failed check is cut at 200 characters, with `...` after it.
 - `qory run` given a run key starts Claude Code with `--setting-sources user`,
   `--strict-mcp-config`, and the harness's MCP list or an empty one. Behind a wall,
