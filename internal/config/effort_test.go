@@ -8,9 +8,10 @@ import (
 	"github.com/qoryai/qory/internal/config"
 )
 
-// TestEffortIsAMachineKey reads harness.effort like harness.model: the nearer file wins,
-// the value is kept exactly as written, and its row contains the file that set it.
-func TestEffortIsAMachineKey(t *testing.T) {
+// TestEffortIsAMachineHarnessSetting reads harness.effort like harness.model: the
+// nearer file wins, the value is kept exactly as written, and its row contains the file
+// that set it.
+func TestEffortIsAMachineHarnessSetting(t *testing.T) {
 	home := isolated(t)
 	write(t, filepath.Join(home, ".config", "qory", "qory.yaml"), "harness: {effort: low}\n")
 	root := t.TempDir()

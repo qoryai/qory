@@ -18,6 +18,14 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
+  the type whose launch version sets what the workflow's session may push. A module
+  declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: one
+  command for each type. `qory harness compose` ends with an error when the `plan` of a
+  workflow is not an artifact type, when a workflow with a `plan` has an access other
+  than `write`, and when no module of the base stack declares a scope check for the type
+  of a `plan`. A module that a checkout adds to the base declares none that counts.
+  `qory run` does not read `plan` or `scope_checks`.
 - A skill with the frontmatter keys `notes_for` (a role or a list of roles) and `paths` (one
   glob or more from the checkout root) is a note. The compose exits 2, with the fix as
   line 1, for a note with any of these:
@@ -30,17 +38,24 @@ release may change what an existing document does, and states it under Upgrading
   module of the checkout's `qory.yaml`, 1 for a module of its base stack). With no note it
   is `{"notes": []}`. It is not the `notes.json` of a push check. See "Notes" in
   `docs/harness.md`.
+- `qory artifact push --decision <note id>` sends the id of the person's note that asked
+  for the version, such as a request for changes, a move or an escalation, as `decision`
+  in `POST artifacts`. A withdrawal takes it too. `qory artifact push` exits 4 for a 422
+  `unknown_decision`, with the fix on line 1. Outside a run, the store keeps no decision.
 - `qory run verdict` proposes a track for the work item: `--track <id>` is the id of a
   track that the gate of the run's stage offers, and `--track-reason <text>` is the
   reason, one sentence on one line of 1 to 300 characters. Pass both or neither. A track's
   id is lower-case words joined by hyphens, at most 40 characters. A track is the `id` and
   the `reason`. A mistake in the id, the reason or the pair exits 2, with the fix on line
-  1; nothing is sent or kept. Outside a run, the kept `verdict.json` has the track. `qory
-  run verdict` exits 4 for every 422 `invalid_artifact` from Qory Apiary, such as a track
-  that the gate does not offer, a point about a question that is not open, or a verdict
-  that breaks the schema. Line 1 of the error is the fix, with at most 98 characters, and
-  Qory Apiary's text follows on line 2. `qory artifact push` still exits 1 for
-  `invalid_artifact`. See The verdict format in `contracts/harness/v1/README.md`.
+  1; nothing is sent or kept. Line 2 of the error for a wrong id shows the id quoted and
+  cut to 40 characters, or, for an id that contains a key or a code, such as `qrk_`, a
+  phrase in its place, as for `--decision`. Outside a run, the kept `verdict.json` has
+  the track. `qory run verdict` exits 4 for every 422 `invalid_artifact` from Qory
+  Apiary, such as a track that the gate does not offer, a point about a question that is
+  not open, or a verdict that breaks the schema. Line 1 of the error is the fix, with at
+  most 98 characters, and Qory Apiary's text follows on line 2. `qory artifact push`
+  still exits 1 for `invalid_artifact`. See The verdict format in
+  `contracts/harness/v1/README.md`.
 - After each push of its push step, qory reports the repositories the push moved to Qory
   Apiary, one entry for each repository with `system`, `path` and the full head commit, in
   push order, at most 64 in a call and at most 65536 bytes in a body. qory sends the report
@@ -608,6 +623,13 @@ release may change what an existing document does, and states it under Upgrading
   provider all rejected ends with `✗ the run failed: the model provider rejected every
   model key` after the runtime's line, exit 1, and qory closes it `failed` with the reason
   `model_key_unauthorized` and the runtime's exit status. See `docs/run.md`.
+- Version 1 of the review report format, `contracts/harness/v1/review-report.schema.json`:
+  the `report.json` that one reviewer of a review round writes and qory's review round
+  reads. It has `reviewer`, the reviewer's agent name, and `findings`, each `blocking` or
+  `non-blocking`, with `quote`, `problem`, `fix`, `proof` and `point`, a line with at
+  least one character that is not a space. A blocking finding has a `failing check` or a
+  `failing input` as its proof. See The review report format in
+  `contracts/harness/v1/README.md`.
 
 ### Changed
 
@@ -626,6 +648,17 @@ release may change what an existing document does, and states it under Upgrading
   runs a run code's workflow on one of claude and codex,` and the next line `and not on
   <runtime>; the code is used`. Until now, a run on `gemini`, `opencode` or `cursor`
   started, with no install of the runtime.
+- Three texts name what each key is. `qory run pool` with a key not enrolled for a pool
+  stops with `Enrol an access key with a code made for the pool: this key was enrolled
+  without one.` A git source that is not https in a run from a control plane stops with
+  the fix alone on line 1, `use an https URL for <source> in <file>.`; the example URL
+  and the cause follow on lines 2 and 3, and for ssh the cause is `ssh would sign in
+  with your private keys in ~/.ssh, outside the gateway.` With a hidden harness, line 1
+  is `use an https URL for <source>, then take the work item in again.` and line 2 the
+  cause. The help of `qory access-key
+  enrol` says "this machine's access key", and that enrol stops with an error when
+  `access-key-secret` exists. `docs/run.md`, `docs/harness.md` and the harness contract
+  README call the harness keys of a machine's `qory.yaml` "machine harness settings".
 - A push that landed with no version stored, and a push that fails as a branch that moved,
   give one way out in the line of `qory run`: `delete branch qory/<work item id> of <path>
   on <system>`. Deleting it loses the commits on that branch that no version has. The next
@@ -746,7 +779,7 @@ release may change what an existing document does, and states it under Upgrading
   cancelled gets no folder. The start commit of a run skips a cancelled version of the
   artifact `branch` too. Before, all three took the newest version, cancelled or not. An
   index without the field `cancelled` reads as no version cancelled.
-- qory builds with Forager c4e26183. The gateway does not start when a machine
+- qory builds with Forager 92ccf768. The gateway does not start when a machine
   credential in `forager.yaml` has a path in `paths` that matches no request, such as a
   path with a `.` or `..` segment, and its line has the path. A run that the gateway
   closes because the model provider rejected a model key ends with the reason
@@ -808,7 +841,12 @@ release may change what an existing document does, and states it under Upgrading
   an empty `.env`, `environments.toml` and `AGENTS.override.md`, the harness's
   `AGENTS.md`, and copies of `rules/`, `skills/` and `agents/` into `<user
   cache>/qory/runs/<run id>/codex-fixed`, and binds each read-only at its path in the
-  home. A walled Codex run copies the composed home's `skills/`, `rules/` and `agents/`
+  home. qory writes the harness's Codex hooks, those of `settings/codex/hooks.json` and
+  then those of `settings/codex/config.toml`, into `hooks.json` of the folder
+  `codex-fixed/etc-codex`, mode 0755, and binds that folder read-only at `/etc/codex`, in
+  place of anything the image has there. Codex 0.170.0 runs those hooks as managed: with
+  no stored hash, and also when a `hooks.state` setting turns them off. A walled Codex run
+  copies the composed home's `skills/`, `rules/` and `agents/`
   with every link replaced by the file or folder it leads to, since Codex 0.167.2 passes
   over a `SKILL.md` that is a link. A link whose target lies outside the composed home,
   the folders of the harness's modules and qory's module cache fails the run with ``Remove
@@ -1359,15 +1397,12 @@ release may change what an existing document does, and states it under Upgrading
   unwalled run passed every argument unchanged.
 - A refusal of a walled Codex run's arguments writes each control character of the key
   or feature it repeats as an escape, such as `\n`.
-- On a walled Codex run that lists repositories, the `Check tools` setup step fails when
-  the image has anything at `/etc/codex`, with ``Use an image without /etc/codex: Codex
-  reads its settings there before qory's.`` A write run in a copy runs this test in the
-  step it has; any other such run, such as a read run, gets the step with this test alone.
-  The step of a Claude Code run is unchanged.
-- A walled Codex run that lists no repositories, except a read run, tests `/etc/codex` in
-  a `Check tools` setup step in the agent's container before Codex starts. When the image
-  has anything there, qory prints the same line, the run closes as failed, and qory run
-  exits with 1.
+- A walled Codex run on an image with a link at `/etc/codex` stops before Codex starts.
+  Docker binds qory's folder at the link's target, so a link to `/var/lib/qory-codex-home`
+  would show the writable home there. Forager reads the target of each bind in the image
+  before it starts the agent's container and stops the run with ``wall docker: make
+  "/etc/codex" a directory or file in the image, not a symbolic link``; the run closes as
+  failed and qory run exits with 1. A file or a folder at `/etc/codex` passes.
 - The line for an image with no `sh` reads ``the setup of a walled run runs sh from these
   folders``, in place of ``the git session of a walled run``.
 - Compose accepts `settings/codex/read-access.rules`, Codex execpolicy rules for a run
@@ -1381,7 +1416,8 @@ release may change what an existing document does, and states it under Upgrading
   `settings/claude/settings.json` allows: each skill in the home and in the checkout's
   `.codex/skills` and `.agents/skills`, and every skill of the checkout by its path,
   whatever its name. `Skill(harness:*)` allows every skill of the harness. It turns off
-  the skills Codex ships and a cloud's skills. See the codex entry
+  the skills Codex ships with `skills.bundled.enabled = false`, so Codex 0.170.0 installs
+  no system skills into the writable home, and a cloud's skills. See the codex entry
   in `contracts/harness/v1/README.md`.
 - Compose refuses a Codex `settings/codex/config.toml` or `settings/codex/hooks.json` with
   a hook whose `timeout` or `additionalContextLimit` is negative or fractional, with ``Set
@@ -1390,6 +1426,15 @@ release may change what an existing document does, and states it under Upgrading
   otherwise.`` Codex 0.167.2 starts with its defaults when `config.toml` has such a
   number, and drops every hook of a `hooks.json` that has one. A float such as 2.0 counts
   as fractional.
+- Compose stops on a Codex `settings/codex/config.toml` or `settings/codex/hooks.json` with
+  a hook group or a hook that Codex 0.170.0 cannot decode, such as a `command` hook with no
+  `command` text, with ``Fix `hooks.<event>[<group>].hooks[<hook>]` in
+  `settings/codex/<file>` of module <name>.`` and the next line ``<cause>, and Codex reads
+  no hook of a file with such a hook.`` The group and the hook are numbered in that
+  module's file. For a module name too long for the first line, the second line starts
+  with ``The file is in module <name>.`` Codex reads no hook of a `hooks.json` with one
+  such hook. A walled Codex run makes the same check before it writes the hooks of
+  `/etc/codex`.
 - Compose refuses a module that ships `files/codex/auth.json`, Codex's login file, with
   ``Remove `files/codex/auth.json` from module <name>.`` and the next line ``A Codex run
   takes its model key from the run, not from a file.``
@@ -1524,6 +1569,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- A compose error that has a short form for a long first line switches to it when the
+  first line has more than 98 characters. The line that qory prints has the 2 characters
+  of `✗ ` before it, so a line of 99 or 100 characters printed at 101 or 102. This covers
+  the errors for a duplicate scope check, a plan with no scope check, and a member of a
+  role group that is not shipped, left out or lacks a part of its contract.
 - A push check's container runs under the `runtime` that `wall.images` sets for the
   wall's default image, such as `runsc` (gVisor). Until now, it ran under the engine's
   default runtime.

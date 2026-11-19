@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 
@@ -15,15 +16,6 @@ import (
 // endCheck is a Stop hook command with a quote, a variable, HTML characters and a letter
 // outside ASCII, which the hash takes as written.
 const endCheck = `/srv/harness/modules/core/hooks/end-check.sh --run "$QORY_RUN_ID" <a&b> é`
-
-// Both hashes come from the probe's trust-hook.py, which a Codex 0.167.2 run accepted
-// (probe 521, item 10g), for the same command and timeout:
-//
-//	python3 -I trust-hook.py config.toml "<command>" <timeout>
-const (
-	endCheckHash = "sha256:63c3f3b6340d10c653f0da3f6fb82f539ed270e6a4e24cfc4bab96de20d4ec3a" // endCheck, 30
-	trueHash     = "sha256:fef68b1a8a8090019e0421bcd64cfac1f7b7c21980e2f35d49b46427395a6dda" // /bin/true, 600
-)
 
 // composed is a config.toml as the compose renders it: the model, a server and the
 // harness's Stop hook, one with a timeout and one without.
@@ -49,13 +41,13 @@ const composed = `model = "gpt-6.1-sol"
 `
 
 // TestWalledConfigIsGolden is the config.toml a walled run binds, for a copy of the
-// checkout: the compose's keys as they were, the login kept in memory only, the login
-// shell, the shell snapshot, goals and memories off, each project path untrusted, a
-// trusted_hash for each Stop hook, keyed by config.toml in the home in the wall, the
-// skills Codex ships and a cloud's skills off, and a disabling entry for each skill name,
-// then for each skill path, after the compose's entry.
+// checkout: the compose's keys as they were, without the hooks, which the run binds in
+// /etc/codex, the login kept in memory only, the login shell, the shell snapshot, goals
+// and memories off, each project path untrusted, the skills Codex ships and a cloud's
+// skills off, and a disabling entry for each skill name, then for each skill path, after
+// the compose's entry.
 func TestWalledConfigIsGolden(t *testing.T) {
-	got, err := codex.WalledConfig([]byte(composed), codex.HomeInWall, []string{"/cache/qory/runs/r1/work", "/workspace"}, []string{"deploying", "plugin:review", "review"}, []string{"/workspace/.agents/skills/review/SKILL.md"})
+	got, err := codex.WalledConfig([]byte(composed), []string{"/cache/qory/runs/r1/work", "/workspace"}, []string{"deploying", "plugin:review", "review"}, []string{"/workspace/.agents/skills/review/SKILL.md"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,24 +63,6 @@ model = "gpt-6.1-sol"
   goals = false
   memories = false
   shell_snapshot = false
-
-[hooks]
-
-  [[hooks.Stop]]
-
-    [[hooks.Stop.hooks]]
-      command = "/srv/harness/modules/core/hooks/end-check.sh --run \"$QORY_RUN_ID\" <a&b> é"
-      timeout = 30
-      type = "command"
-
-    [[hooks.Stop.hooks]]
-      command = "/bin/true"
-      type = "command"
-  [hooks.state]
-    [hooks.state."/var/lib/qory-codex-home/config.toml:stop:0:0"]
-      trusted_hash = "` + endCheckHash + `"
-    [hooks.state."/var/lib/qory-codex-home/config.toml:stop:0:1"]
-      trusted_hash = "` + trueHash + `"
 
 [mcp_servers]
   [mcp_servers.db]
@@ -129,107 +103,12 @@ model = "gpt-6.1-sol"
 	}
 }
 
-// TestWalledConfigHashesAsTrustHook is a hook in each place of the key: the hash is the
-// one trust-hook.py computes for the same command, whatever the group, the handler, the
-// matcher of an event that takes none, or an async false written out. The hashes of
-// /bin/false and of the MCP tool hook come from the same JSON in Python, with no
-// matcher, since Stop takes none:
-//
-//	json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-func TestWalledConfigHashesAsTrustHook(t *testing.T) {
-	config := `[[hooks.Stop]]
-matcher = "ignored"
-[[hooks.Stop.hooks]]
-type = "command"
-command = "/bin/false"
-[[hooks.Stop]]
-[[hooks.Stop.hooks]]
-type = "mcp_tool"
-server = "s"
-tool = "t"
-[[hooks.Stop.hooks]]
-type = "command"
-command = '` + endCheck + `'
-timeout = 30
-async = false
-`
-	state := walledState(t, config, nil)
-	want := map[string]string{
-		"/var/lib/qory-codex-home/config.toml:stop:0:0": "sha256:5cde819ee8866303693164854d02d8bfc2d76a0b837bb47a63777a72243e20db",
-		"/var/lib/qory-codex-home/config.toml:stop:1:0": "sha256:a32fadf67dd9ba6b779757c3db73589e436c56976457f459c05f7e453a1f589f",
-		"/var/lib/qory-codex-home/config.toml:stop:1:1": endCheckHash,
-	}
-	if len(state) != len(want) {
-		t.Fatalf("hooks.state %v, want the keys of %v", state, want)
-	}
-	for key, hash := range want {
-		if got, ok := state[key]; !ok || got != hash {
-			t.Errorf("%s: %q, want %s", key, got, hash)
-		}
-	}
-}
-
-// TestWalledConfigNormalizesAsCodex is a hook of each rule Codex 0.167.2 normalizes before
-// it hashes (codex-rs/hooks/src/engine/discovery.rs, append_matcher_groups): a matcher
-// where the event takes one, statusMessage, additionalContextLimit only on the events
-// that keep it and not at its default 2500, a timeout raised to 1, a SessionEnd timeout
-// held at 3, an Interrupt timeout of 1 by default, and a command with a tab, a control
-// character and a backslash. A command of only white space gets no key. The control
-// characters' hash comes from trust-hook.py; the others from the same JSON in Python:
-//
-//	json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-func TestWalledConfigNormalizesAsCodex(t *testing.T) {
-	config := `[[hooks.PreToolUse]]
-matcher = "Bash"
-[[hooks.PreToolUse.hooks]]
-type = "command"
-command = "/bin/check"
-timeout = 0
-statusMessage = "checking"
-additionalContextLimit = 100
-[[hooks.SessionEnd]]
-[[hooks.SessionEnd.hooks]]
-type = "command"
-command = "/bin/end"
-timeout = 9
-async = true
-[[hooks.Interrupt]]
-[[hooks.Interrupt.hooks]]
-type = "command"
-command = "/bin/int"
-additionalContextLimit = 50
-[[hooks.PostToolUse]]
-[[hooks.PostToolUse.hooks]]
-type = "command"
-command = "/bin/post"
-additionalContextLimit = 2500
-[[hooks.Stop]]
-[[hooks.Stop.hooks]]
-type = "command"
-command = "  "
-[[hooks.Stop.hooks]]
-type = "command"
-command = "a\tb\u0001c\\d"
-timeout = 30
-`
-	key := codex.HomeInWall + "/config.toml:"
-	want := map[string]string{
-		key + "pre_tool_use:0:0":  "sha256:500e7100a547b86e63104adc7a4ed0ea1662017fc62f326050956607867b7f21",
-		key + "session_end:0:0":   "sha256:40705d49d9cd1a41fb51fba7346276ec5196e12b6a4c0204513c68e7adac7d30",
-		key + "interrupt:0:0":     "sha256:a7d100ff9d5d584786b571d0b65be0dc8b9b8b95c2a2ac755cd581ea196a4e39",
-		key + "post_tool_use:0:0": "sha256:7bd471240b678be053e62ae1ed64763490b210f38aeafd6d216b94728b72a9c9",
-		key + "stop:0:1":          "sha256:9db311ec503d58207150226ca9891ab7c8971e4a8b7f60713b2dba3303d816f2",
-	}
-	if got := walledState(t, config, nil); !reflect.DeepEqual(got, want) {
-		t.Errorf("hooks.state:\n%v\nwant:\n%v", got, want)
-	}
-}
-
-// TestWalledConfigTrustsNoProjectAndAddsNoState is a config.toml with no hooks, no
-// project path and no skill to disable: neither hooks.state nor projects is written, and
-// no skills.config entry, but the skills Codex ships and a cloud's skills are off.
+// TestWalledConfigTrustsNoProjectAndAddsNoState is a config.toml with a hooks.state
+// entry, no project path and no skill to disable: neither hooks nor projects is written,
+// and no skills.config entry, but the skills Codex ships and a cloud's skills are off.
 func TestWalledConfigTrustsNoProjectAndAddsNoState(t *testing.T) {
-	got, err := codex.WalledConfig([]byte("model = \"m\"\n"), codex.HomeInWall, nil, nil, nil)
+	config := "model = \"m\"\n[hooks.state.\"/x/config.toml:stop:0:0\"]\nenabled = false\n"
+	got, err := codex.WalledConfig([]byte(config), nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,116 +117,215 @@ func TestWalledConfigTrustsNoProjectAndAddsNoState(t *testing.T) {
 	}
 }
 
-// TestWalledConfigTrustsNoLineSeparator is a hook with U+2028 or U+2029 in its command,
-// statusMessage or matcher: encoding/json escapes them and serde_json does not, so the
-// hook gets no trust. A command with the text \u2028, a backslash and five letters, gets
-// its hash, from the same JSON in Python as TestWalledConfigNormalizesAsCodex.
-func TestWalledConfigTrustsNoLineSeparator(t *testing.T) {
-	config := `[[hooks.Stop]]
-[[hooks.Stop.hooks]]
-type = "command"
-command = "echo \u2028"
-[[hooks.Stop.hooks]]
-type = "command"
-command = "/bin/true"
-statusMessage = "a\u2029b"
-[[hooks.Stop.hooks]]
-type = "command"
-command = 'echo \u2028'
-[[hooks.PreToolUse]]
-matcher = "Bash\u2028"
-[[hooks.PreToolUse.hooks]]
-type = "command"
-command = "/bin/true"
-`
-	want := map[string]string{
-		codex.HomeInWall + "/config.toml:stop:0:2": "sha256:62952c1af1eb1d3c580409562f1776a3da6cc48eefdc6cb6a3b04528df5d043b",
-	}
-	if got := walledState(t, config, nil); !reflect.DeepEqual(got, want) {
-		t.Errorf("hooks.state:\n%v\nwant:\n%v", got, want)
+// TestWalledConfigTurnsOffTheSystemSkills is a composed config.toml that turns bundled
+// skills on, and one with no skills table: the walled config.toml sets
+// skills.bundled.enabled = false in both, the setting that keeps Codex from installing its
+// system skills into the run's writable home.
+func TestWalledConfigTurnsOffTheSystemSkills(t *testing.T) {
+	for _, config := range []string{"[skills.bundled]\nenabled = true\n", "model = \"m\"\n"} {
+		got, err := codex.WalledConfig([]byte(config), nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m struct {
+			Skills struct {
+				Bundled struct {
+					Enabled *bool `toml:"enabled"`
+				} `toml:"bundled"`
+			} `toml:"skills"`
+		}
+		if _, err := toml.Decode(string(got), &m); err != nil {
+			t.Fatal(err)
+		}
+		if e := m.Skills.Bundled.Enabled; e == nil || *e {
+			t.Errorf("from %q, skills.bundled.enabled is %v, want false:\n%s", config, e, got)
+		}
 	}
 }
 
-// TestWalledConfigHashesMCPToolHooks is an MCP tool hook with a matcher, a nested input,
-// a timeout and a statusMessage, and an Interrupt one with Codex's default timeout of 1:
-// each gets the hash that Codex 0.167.2's app-server listed for it with hooks/list, with
-// status trusted. The same JSON in Python gives both, with each integer of the input
-// written as {"$serde_json::private::Number": "<n>"}. A SessionEnd hook and one with an
-// empty server, which Codex skips, and one whose input contains a float, whose JSON qory
-// cannot write as Codex does, get none.
-func TestWalledConfigHashesMCPToolHooks(t *testing.T) {
-	config := `[[hooks.PostToolUse]]
-matcher = "Bash"
-[[hooks.PostToolUse.hooks]]
-type = "mcp_tool"
-server = "db"
-tool = "log"
-timeout = 30
-statusMessage = "checking"
-input = { path = "/x", depth = 2, flags = [true, "a"], nested = { b = 1, a = "z" } }
-[[hooks.Interrupt]]
-[[hooks.Interrupt.hooks]]
-type = "mcp_tool"
-server = "db"
-tool = "stop"
-[[hooks.SessionEnd]]
-[[hooks.SessionEnd.hooks]]
-type = "mcp_tool"
-server = "db"
-tool = "end"
-[[hooks.Stop]]
-[[hooks.Stop.hooks]]
-type = "mcp_tool"
-server = " "
-tool = "t"
-[[hooks.Stop.hooks]]
-type = "mcp_tool"
-server = "db"
-tool = "t"
-input = { ratio = 0.5 }
-`
-	key := codex.HomeInWall + "/config.toml:"
-	want := map[string]string{
-		key + "post_tool_use:0:0": "sha256:93c4a017141461f73ceaab7222ee5dcf8ae0918f3ab5a0bbf99e1c4cf192d00a",
-		key + "interrupt:0:0":     "sha256:88ed5e40feedce2304ca60f03d0d19e063250ed610c100d054e81510b9e2633c",
+// TestWalledHooksStopsAHookCodexCannotRead is a composed hooks.json or config.toml with one
+// group or hook that Codex 0.170.0 cannot decode, after a good group: WalledHooks fails with
+// the line that names the event, the group's index and the hook's index, the fix first, and
+// writes nothing.
+func TestWalledHooksStopsAHookCodexCannotRead(t *testing.T) {
+	good := `{"hooks": [{"type": "command", "command": "/bin/guard"}]}`
+	for _, c := range []struct{ name, file, hooks, place, cause string }{
+		{"no command", "hooks.json", `{"type": "command"}`, "PreToolUse[1].hooks[0]", "It has no `command` text"},
+		{"null command", "hooks.json", `{"type": "command", "command": null}`, "PreToolUse[1].hooks[0]", "It has no `command` text"},
+		{"command no text", "hooks.json", `{"type": "command", "command": ["/bin/x"]}`, "PreToolUse[1].hooks[0]", "Its `command` is no text"},
+		{"no type", "hooks.json", `{"command": "/bin/x"}`, "PreToolUse[1].hooks[0]", "Its `type` is none of command, mcp_tool, prompt and agent"},
+		{"other type", "hooks.json", `{"type": "script", "command": "/bin/x"}`, "PreToolUse[1].hooks[0]", "Its `type` is none of command, mcp_tool, prompt and agent"},
+		{"hook no table", "hooks.json", `"/bin/x"`, "PreToolUse[1].hooks[0]", "It is no table of keys"},
+		{"text timeout", "hooks.json", `{"type": "command", "command": "/bin/x", "timeout": "30"}`, "PreToolUse[1].hooks[0]", "Its `timeout` is no whole number of 0 or more"},
+		{"negative timeout", "hooks.json", `{"type": "command", "command": "/bin/x", "timeout": -1}`, "PreToolUse[1].hooks[0]", "Its `timeout` is no whole number of 0 or more"},
+		{"async text", "hooks.json", `{"type": "command", "command": "/bin/x", "async": "yes"}`, "PreToolUse[1].hooks[0]", "Its `async` is neither true nor false"},
+		{"async null", "hooks.json", `{"type": "command", "command": "/bin/x", "async": null}`, "PreToolUse[1].hooks[0]", "Its `async` is neither true nor false"},
+		{"status no text", "hooks.json", `{"type": "command", "command": "/bin/x", "statusMessage": 1}`, "PreToolUse[1].hooks[0]", "Its `statusMessage` is no text"},
+		{"both windows", "hooks.json", `{"type": "command", "command": "/bin/x", "commandWindows": "a", "command_windows": "b"}`, "PreToolUse[1].hooks[0]", "It sets both `commandWindows` and `command_windows`"},
+		{"no server", "hooks.json", `{"type": "mcp_tool", "tool": "t"}`, "PreToolUse[1].hooks[0]", "It has no `server` text"},
+		{"no tool", "hooks.json", `{"type": "mcp_tool", "server": "s"}`, "PreToolUse[1].hooks[0]", "It has no `tool` text"},
+		{"input list", "hooks.json", `{"type": "mcp_tool", "server": "s", "tool": "t", "input": [1]}`, "PreToolUse[1].hooks[0]", "Its `input` is no table of keys"},
+		{"input null", "hooks.json", `{"type": "mcp_tool", "server": "s", "tool": "t", "input": {"a": {"b": null}}}`, "PreToolUse[1].hooks[0]", "Its `input` contains a null or a whole number above 2^63-1"},
+		{"input large", "hooks.json", `{"type": "mcp_tool", "server": "s", "tool": "t", "input": {"a": 9223372036854775808}}`, "PreToolUse[1].hooks[0]", "Its `input` contains a null or a whole number above 2^63-1"},
+		{"second hook", "hooks.json", `{"type": "prompt"}, {"type": "command", "command": 7}`, "PreToolUse[1].hooks[1]", "Its `command` is no text"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			hooksJSON := `{"hooks": {"Stop": [` + good + `], "PreToolUse": [` + good + `, {"matcher": "*", "hooks": [` + c.hooks + `]}]}}`
+			got, err := codex.WalledHooks([]byte(hooksJSON), nil)
+			want := "Fix `hooks." + c.place + "` in `settings/codex/hooks.json`.\n  " + c.cause + ", and Codex reads no hook of a file with such a hook."
+			if err == nil || err.Error() != want || got != nil {
+				t.Errorf("%q, %v, want %q", got, err, want)
+			}
+		})
 	}
-	if got := walledState(t, config, nil); !reflect.DeepEqual(got, want) {
-		t.Errorf("hooks.state:\n%v\nwant:\n%v", got, want)
+	for _, c := range []struct{ name, hooksJSON, config, want string }{
+		{"group no table", `{"hooks": {"Stop": ["/bin/x"]}}`, "",
+			"Fix `hooks.Stop[0]` in `settings/codex/hooks.json`.\n  It is no table of keys, and Codex reads no hook of a file with such a group."},
+		{"matcher no text", `{"hooks": {"Stop": [{"matcher": 1, "hooks": []}]}}`, "",
+			"Fix `hooks.Stop[0]` in `settings/codex/hooks.json`.\n  Its `matcher` is no text, and Codex reads no hook of a file with such a group."},
+		{"hooks no list", `{"hooks": {"Stop": [{"hooks": null}]}}`, "",
+			"Fix `hooks.Stop[0]` in `settings/codex/hooks.json`.\n  Its `hooks` is no list, and Codex reads no hook of a file with such a group."},
+		{"config.toml", "", "[[hooks.SessionStart]]\n[[hooks.SessionStart.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\n[[hooks.SessionStart.hooks]]\ntype = \"command\"\n",
+			"Fix `hooks.SessionStart[0].hooks[1]` in `settings/codex/config.toml`.\n  It has no `command` text, and Codex reads no hook of a file with such a hook."},
+		{"config.toml timeout", "", "[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\ntimeout = \"5\"\n",
+			"Fix `hooks.Stop[0].hooks[0]` in `settings/codex/config.toml`.\n  Its `timeout` is no whole number of 0 or more, and Codex reads no hook of a file with such a hook."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := codex.WalledHooks([]byte(c.hooksJSON), []byte(c.config))
+			if err == nil || err.Error() != c.want || got != nil {
+				t.Errorf("%q, %v, want %q", got, err, c.want)
+			}
+		})
 	}
 }
 
-// walledState is the hooks.state table of [codex.WalledConfig] for config, key to hash.
-func walledState(t *testing.T, config string, projects []string) map[string]string {
-	t.Helper()
-	got, err := codex.WalledConfig([]byte(config), codex.HomeInWall, projects, nil, nil)
+// TestWalledHooksTakesWhatCodexReads is a composed hooks.json with each type of hook, keys
+// Codex does not know, optional keys set to null, a matcher of null, a group with no hooks
+// and an event Codex does not know, whose value is a list of anything: WalledHooks passes
+// it, as Codex 0.170.0 decodes it.
+func TestWalledHooksTakesWhatCodexReads(t *testing.T) {
+	hooksJSON := `{"hooks": {"PreToolUse": [{"matcher": null, "other": 1, "hooks": [
+		{"type": "command", "command": "/bin/x", "timeout": 0, "async": true, "statusMessage": null, "commandWindows": "x.cmd", "additionalContextLimit": 2500, "extra": [null]},
+		{"type": "mcp_tool", "server": "s", "tool": "t", "input": {"a": [1, 2.5, "x", {"b": true}], "c": -9223372036854775808}, "timeout": null},
+		{"type": "prompt", "prompt": "anything"},
+		{"type": "agent"}]}, {"matcher": "Bash"}],
+		"SomeLaterEvent": [1, null]}}`
+	if _, err := codex.WalledHooks([]byte(hooksJSON), nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestTheLineForABadHookFits is the line for a hook of the longest event name Codex reads,
+// with indexes of three digits, in the longer settings file: at most 100 characters after
+// "qory run: ".
+func TestTheLineForABadHookFits(t *testing.T) {
+	groups := strings.Repeat(`{"hooks": []}, `, 100) + `{"hooks": [` + strings.Repeat(`{"type": "agent"}, `, 100) + `{"type": "command"}]}`
+	_, err := codex.WalledHooks(nil, []byte("[hooks]\nPermissionRequest = ["+strings.NewReplacer(`"hooks": `, "hooks = ", `"type": `, "type = ").Replace(groups)+"]\n"))
+	if err == nil {
+		t.Fatal("no error")
+	}
+	line, _, _ := strings.Cut(err.Error(), "\n")
+	if want := "Fix `hooks.PermissionRequest[100].hooks[100]` in `settings/codex/config.toml`."; line != want {
+		t.Errorf("line 1 is %q, want %q", line, want)
+	}
+	if n := utf8.RuneCountInString("qory run: " + line); n > 100 {
+		t.Errorf("line 1 has %d characters after qory run:, want at most 100", n)
+	}
+}
+
+// TestWalledHooksIsGolden is the hooks.json a walled run binds in /etc/codex, from a
+// composed hooks.json with a description, a PreToolUse group and a Stop group, and the
+// config.toml [composed] with two Stop hooks and a hooks.state entry: the key hooks
+// alone, each event's groups of hooks.json first, then those of config.toml, numbers and
+// text as written, and no state.
+func TestWalledHooksIsGolden(t *testing.T) {
+	hooksJSON := `{"description": "d", "hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/bin/guard", "timeout": 120}]}], "Stop": [{"hooks": [{"type": "command", "command": "/bin/first"}]}]}}`
+	config := composed + "[hooks.state.\"/x/config.toml:stop:0:0\"]\nenabled = false\n"
+	got, err := codex.WalledHooks([]byte(hooksJSON), []byte(config))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m struct {
-		Hooks struct {
-			State map[string]struct {
-				TrustedHash string `toml:"trusted_hash"`
-			} `toml:"state"`
-		} `toml:"hooks"`
+	want := `{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "/bin/guard",
+            "timeout": 120,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "/bin/first",
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "` + strings.ReplaceAll(endCheck, `"`, `\"`) + `",
+            "timeout": 30,
+            "type": "command"
+          },
+          {
+            "command": "/bin/true",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}
+`
+	if string(got) != want {
+		t.Errorf("hooks.json:\n%s\nwant:\n%s", got, want)
 	}
-	if _, err := toml.Decode(string(got), &m); err != nil {
-		t.Fatalf("%v\n%s", err, got)
+}
+
+// TestWalledHooksWithNoneIsEmpty is a composed home with neither a hooks.json nor hooks
+// in config.toml: the hooks.json has an empty hooks table, which Codex reads as no hook.
+func TestWalledHooksWithNoneIsEmpty(t *testing.T) {
+	got, err := codex.WalledHooks(nil, []byte("model = \"m\"\n"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	out := map[string]string{}
-	for k, v := range m.Hooks.State {
-		out[k] = v.TrustedHash
+	if want := "{\n  \"hooks\": {}\n}\n"; string(got) != want {
+		t.Errorf("hooks.json %q, want %q", got, want)
 	}
-	return out
+}
+
+// TestWalledHooksRefusesAnEventThatIsNoList is an event of hooks.json, and one of
+// config.toml, whose value is no list of groups: Codex would read no hook of the file,
+// so WalledHooks fails with the fix first.
+func TestWalledHooksRefusesAnEventThatIsNoList(t *testing.T) {
+	for _, c := range []struct{ hooksJSON, config, file string }{
+		{`{"hooks": {"Stop": {"hooks": []}}}`, "", "hooks.json"},
+		{"", "[hooks]\nStop = 1\n", "config.toml"},
+	} {
+		_, err := codex.WalledHooks([]byte(c.hooksJSON), []byte(c.config))
+		if want := "Write each event of the hooks in `settings/codex/" + c.file + "` as a list of hook groups.\n  The event Stop is no list, and Codex reads no hook of such a file."; err == nil || err.Error() != want {
+			t.Errorf("%s: %v, want %q", c.file, err, want)
+		}
+	}
 }
 
 // TestWriteWalledHome is the read-only part of a walled run's home: config.toml with the
-// run's trust, a hooks.json with no hook, an empty .env, environments.toml and
+// run's trust and no hooks, a hooks.json with no hook, an empty .env, environments.toml and
 // AGENTS.override.md, which Codex passes over for AGENTS.md, the compose's AGENTS.md,
 // and a copy of the compose's skills beside an empty rules and agents, in a fixed order,
 // each at its path under the home in the wall, and no auth.json. Every source is in the
 // folder WriteWalledHome writes, none in the composed home. The copy keeps a script's
 // executable bit, and a relative link of the skills is a regular file with the text of
-// the file it led to.
+// the file it led to. Last is the folder etc-codex, at /etc/codex, mode 0755, with the
+// compose's hooks in hooks.json, mode 0644, and no other file.
 func TestWriteWalledHome(t *testing.T) {
 	dir, files := t.TempDir(), filepath.Join(t.TempDir(), "fixed")
 	write := func(name, content string) {
@@ -378,6 +356,7 @@ func TestWriteWalledHome(t *testing.T) {
 	for _, name := range []string{"config.toml", "hooks.json", ".env", "environments.toml", "AGENTS.override.md", "AGENTS.md", "rules", "skills", "agents"} {
 		want = append(want, codex.Bound{Path: name, Source: filepath.Join(files, name), Target: "/var/lib/qory-codex-home/" + name, Dir: !strings.Contains(name, ".")})
 	}
+	want = append(want, codex.Bound{Path: "etc-codex", Source: filepath.Join(files, "etc-codex"), Target: "/etc/codex", Dir: true})
 	if !reflect.DeepEqual(binds, want) {
 		t.Errorf("binds:\n%+v\nwant:\n%+v", binds, want)
 	}
@@ -414,8 +393,19 @@ func TestWriteWalledHome(t *testing.T) {
 			t.Errorf("%s: %v %v, want an empty folder", name, entries, err)
 		}
 	}
-	if got := read("config.toml"); !strings.Contains(got, `[projects."/workspace"]`) || !strings.Contains(got, endCheckHash) {
-		t.Errorf("config.toml lacks the trust or the hook's hash:\n%s", got)
+	if got := read("config.toml"); !strings.Contains(got, `[projects."/workspace"]`) || strings.Contains(got, "hooks") {
+		t.Errorf("config.toml lacks the trust or has hooks:\n%s", got)
+	}
+	if got := read("etc-codex/hooks.json"); !strings.Contains(got, `"command": "`+strings.ReplaceAll(endCheck, `"`, `\"`)+`"`) || strings.Contains(got, "trusted_hash") {
+		t.Errorf("etc-codex/hooks.json lacks the Stop hook:\n%s", got)
+	}
+	for name, mode := range map[string]os.FileMode{"etc-codex": 0o755 | os.ModeDir, "etc-codex/hooks.json": 0o644} {
+		if info, err := os.Lstat(filepath.Join(files, name)); err != nil || info.Mode() != mode {
+			t.Errorf("%s: %v, %v, want mode %v", name, info.Mode(), err, mode)
+		}
+	}
+	if entries, err := os.ReadDir(filepath.Join(files, "etc-codex")); err != nil || len(entries) != 1 {
+		t.Errorf("etc-codex: %v, %v, want hooks.json alone", entries, err)
 	}
 	for _, d := range []string{dir, files} {
 		if _, err := os.Lstat(filepath.Join(d, "auth.json")); err == nil {

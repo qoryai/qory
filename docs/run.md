@@ -186,8 +186,8 @@ compose:
   exit 2. A URL with a user part or an `@` between `://` and the first `/` after it, a
   host with a character outside ASCII, or a URL that qory cannot read stops it too, exit
   2, before the source is fetched.
-- `qory run` reads no `git` or `env` key of the checkout's `qory.yaml`, and no machine key
-  under `harness` such as `model` or `launch`, as under `extends`.
+- `qory run` reads no `git` or `env` key of the checkout's `qory.yaml`, and no machine
+  harness setting, such as `model` or `launch`, as under `extends`.
 - The harness report of an earlier compose, such as `.qory/harness-report.json`, is not
   read: the compose pins no git source to a commit that the report lists, removes no link
   that it lists, and adds none of its replaced paths to the new report.
@@ -1500,11 +1500,11 @@ Before it makes a key, qory checks the code against the pin `forager.yaml` has, 
 of another server is refused. When `forager.yaml` names another `gateway.server.url`,
 enrol refuses: enrol with that server, or change `gateway.server.url` first.
 
-When `access-key-secret` exists, enrol refuses, so it never replaces this machine's key
-unasked: use `--replace`, below, to move the machine to a new key, or `--print` for a
-key kept elsewhere. The one exception is a retry: the same command, with the same code, within
-the 15 minutes, while `access-key-secret` still holds the key made for it, retries with
-that key.
+When `access-key-secret` exists, enrol stops with an error, so it never replaces this
+machine's access key unasked: use `--replace`, below, to move the machine to a new key,
+or `--print` for a key kept elsewhere. The one exception is a retry: the same command,
+with the same code, within the 15 minutes, while `access-key-secret` still holds the key
+made for it, retries with that key.
 
 When the enrolment does not complete:
 
@@ -1527,7 +1527,7 @@ Enrol refuses while `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or
 contradict the variable. Unset it, or use `--print`. It also refuses while a run without
 a wall is running on this machine: it must end before a key is made.
 
-#### Replace the machine's key
+#### Replace the machine's access key
 
 ```sh
 qory access-key enrol --replace https://apiary.example qecn_…
@@ -1832,8 +1832,8 @@ A run given a run key starts Claude Code with `--setting-sources user`,
 `--strict-mcp-config` and `--mcp-config` with the harness's MCP list, or an empty one when
 the harness has none: Claude Code reads no settings of the checkout's `.claude` and no
 `.mcp.json`, and loads no MCP server but those `--mcp-config` names. Other runtimes get
-none of these flags. For any runtime, a run given a run key reads no `git`, `env` or
-machine key under `harness`, such as `launch` or `home`, from the checkout's `qory.yaml`:
+none of these flags. For any runtime, a run given a run key reads no `git` or `env` key
+and no machine harness setting, such as `launch` or `home`, from the checkout's `qory.yaml`:
 your `qory.yaml` and the files above the checkout set those. Without a wall, Claude Code
 reads the settings, `CLAUDE.md`, plugins and memory of the user running qory, as
 `--setting-sources user` reads them. Behind a wall, Claude Code starts on an empty
@@ -2623,8 +2623,9 @@ phrase:
 - `set the ref of <source> to a branch, tag or commit its repository has, then take the
   work item in again in Qory Apiary: the repository of <source> has no branch or tag by
   the ref it is set to; the code is used`, exit 2
-- `use an https URL for <source>, then take the work item in again in Qory Apiary: a run
-  from a control plane fetches git sources only over https; the code is used`, exit 2
+- `use an https URL for <source>, then take the work item in again.` on line 1, and
+  `A run from a control plane fetches git sources only over https; the code is used` on
+  line 2, exit 2
 - `correct exports.dir in the qory.yaml of <source>, or set <source> to a ref whose
   repository has the folder of <export>, then take the work item in again in Qory Apiary:
   <source> exports <export> at a folder that is not there; the code is used`, exit 2
@@ -3193,7 +3194,7 @@ wall:
 `qory config` lists each value; without `gateway.server.via` it shows
 `gateway.server.via.url  (none: the server is reached directly)  default`.
 
-Enrol the machine's key through the gateway with `--via`:
+Enrol the machine's access key through the gateway with `--via`:
 
 ```sh
 qory access-key enrol --via https://gateway.example:8443 https://apiary.example qecn_…
@@ -3492,7 +3493,7 @@ works in a run and on a laptop. A wall mounts `qory` at `/qory/qory` and does no
 | ------- | -------- | ------------- |
 | `qory work-item show` | Prints the work item as JSON. | Prints `.qory/work-item.json`. With no file, exits 3. |
 | `qory artifact pull [<type>] [--version <N>]` | Fetches artifacts into the store, under `<type>/<name>/v<N>/`, writes `index.json` there, and prints the store's directory. | Fetches nothing, and says so. |
-| `qory artifact push <type> [<file>...] [--name <name>] [--note <text>] [--withdraw]` | Stores the files as one new version, keeps a copy in the store, and prints the version. With `--withdraw` and no files, stores a version with no files that withdraws the name. | Keeps the files, or the record of a withdrawal, in `.qory/artifacts`, and sends nothing. |
+| `qory artifact push <type> [<file>...] [--name <name>] [--note <text>] [--decision <note id>] [--withdraw]` | Stores the files as one new version, keeps a copy in the store, and prints the version. With `--withdraw` and no files, stores a version with no files that withdraws the name. | Keeps the files, or the record of a withdrawal, in `.qory/artifacts`, and sends nothing. |
 | `qory run verdict passed\|changes-requested\|escalate [--points <file>] [--track <id> --track-reason <text>]` | Stores the verdict. Qory Apiary acts on it when the run ends. | Prints the verdict and keeps it in `.qory/artifacts/verdict/`. Nothing acts on it. |
 
 In a run, the types `questions` and `review-comments` take only the name `main`.
@@ -3582,6 +3583,11 @@ whose versions are all cancelled gets no directory. `<type>` limits the fetch to
 `qory artifact push` exits 4, with the type and the limit, for a type that the workspace
 does not have, for too many files, and for files over a limit. One version has at most 100
 files through the run API, whatever the type's maximum.
+
+`--decision <note id>` sends the id of the person's note that asked for the version, from
+the notes that `qory work-item show` prints, as `decision`. `qory artifact push` exits 4
+when the run API returns 422 `unknown_decision`: the id is not the id of a person's note
+on the run's work item. Outside a run, the store keeps no note and no decision.
 
 In a walled run whose modules declare a push check for the type, the check runs before the
 push reaches Qory Apiary (see Push checks in `contracts/harness/v1/README.md`). A check
@@ -4630,6 +4636,33 @@ run's copy, or, for a run with no copy, a new folder at that path:
   read-only at its path under `/var/lib/qory-codex-home`, so a write into it fails, and
   so does a move or a removal of one of them.
 
+The harness's Codex hooks are in neither folder's `config.toml` or `hooks.json`. qory writes
+them, the hooks of `settings/codex/hooks.json` and then those of `settings/codex/config.toml`,
+into `hooks.json` in a third folder, `codex-fixed/etc-codex`, and binds that folder read-only at
+`/etc/codex`. Codex 0.170.0 runs a hook from `/etc/codex` as a managed hook: it needs no stored
+hash, and a `hooks.state` setting with `enabled = false` does not turn it off. Codex reads no hook
+of a `hooks.json` with one hook it cannot decode. The compose checks each group and hook of
+each module's file and stops with ``Fix `hooks.<event>[<group>].hooks[<hook>]` in
+`settings/codex/<file>` of module <name>.`` for such a hook, numbered in that module's file.
+qory checks the composed files again before it writes the hooks, and stops the run with the same
+line for such a hook, without the module and numbered in the composed file. The bind hides a
+file or a folder that the image has at `/etc/codex`, such as one with a `config.toml` or a
+`requirements.toml`, so the image may have that folder. The folder has mode 0755 and
+`hooks.json` mode 0644. qory writes both as your user, so the container can show them with an
+owner other than root. The bind is read-only, so a write, a rename or a replacement of
+`hooks.json` fails, and so does a new file in the folder.
+
+A bind does not hide a link: Docker binds the folder at the link's target, so a link from
+`/etc/codex` to `/var/lib/qory-codex-home` would show the writable home there in place of qory's
+folder. Forager stops such a run before Codex starts. Before it starts the agent's container, it
+reads the target of each bind in the image, `/etc/codex` among them, and on a link there the run
+closes as failed and qory run exits with 1. This holds for every walled Codex run, with
+repositories or without. Forager prints:
+
+```text
+✗ wall docker: make "/etc/codex" a directory or file in the image, not a symbolic link: "/etc/codex" is a symbolic link in the image, which the engine follows, so the bind could resolve over another mount or over /qory
+```
+
 `config.toml` marks the checkout untrusted, at its path in the container and at
 `/workspace`, so Codex reads no hook, rule or setting of the repository's `.codex`. It
 marks the working folder untrusted at both paths too, with and without its links
@@ -4795,21 +4828,8 @@ program, such as:
 qory run: install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has
 ```
 
-A walled Codex run that lists repositories also has the step `Check tools`, with a test of
-`/etc/codex`, where Codex reads settings before the ones qory writes. A write run in a copy runs
-both tests in that one step; any other such run, such as a read run, runs the test of
-`/etc/codex` alone. When the image has anything at `/etc/codex`, the step fails with:
-
-```text
-qory run: Use an image without /etc/codex: Codex reads its settings there before qory's.
-```
-
-A walled Codex run that lists no repositories, such as a person's walled run, runs the test of
-`/etc/codex` in the agent's container, in a setup step named `Check tools`, before Codex starts.
-The step prints nothing. When the image has anything at `/etc/codex`, qory prints the same line,
-the run closes as failed, and qory run exits with 1. A walled read run that lists no repositories
-has no such step: its workspace is mounted read-only, and Forager runs no setup step beside a
-read-only workspace. Claude Code runs and unwalled runs have no such step.
+The step has no test for a link at `/etc/codex` on a walled Codex run: Forager stops an image
+with one before the agent's container starts, see [Codex behind a wall](#codex-behind-a-wall).
 
 If the step exits 127 with no such line, which is what docker does for an image with no `/bin/sh`,
 qory prints:
@@ -5319,6 +5339,42 @@ the copies of other runs:
 ```text
 start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder <folder> is your home folder, and a write run from a run code binds it into the agent's container; the code is used
 ```
+
+### The plan of a write workflow
+
+A workflow of a stack with `access: write` may name a plan type, `workflows.<name>.plan`,
+an artifact type such as `build-plan`. The plan is the launch version of that type, and it
+sets what a session of the workflow may push. A module of the stack declares the scope
+check of the type in the `scope_checks` of its `qory-module.yaml`: one command for
+each plan type (see `scope_checks` in `contracts/harness/v1/README.md`).
+
+`qory harness compose` and `qory run` end with an error, before they start anything, in
+two cases:
+
+- The workflow has a `plan` and its access is `read`, `write-no-push` or left out:
+  `` Remove `plan` from <workflow>, or set its access to write. ``, then `Only a workflow
+  with access write has a plan, and the access of <workflow> is <access>.` and
+  `workflows.<workflow> is in <file>.` on the next two lines.
+- No module of the base stack declares a scope check for the type: `Add a scope check for
+  <type> to a module's scope_checks.`, then `` You can also remove `plan: <type>` from
+  <workflow> in the stack. `` on the next line, or both on one line when the first line
+  has at most 98 characters. Two lines follow: `No module of the stack declares a scope
+  check for <type>.` and `workflows.<workflow> is in <file>.`
+
+Only a module of the base stack counts. A module that the checkout's `qory.yaml` adds to
+the base can declare `scope_checks`, and the compose uses none of it: the repository under
+work cannot supply the check of its plan. `qory harness compose` and `qory run` end with
+an error when the program of a scope check is no file in the module, is a folder, or is in
+an entry that an `exclude` or an `only` of the module leaves out. Line 1 of each of these
+errors is the fix alone, and the module, the type and the path are on line 2. They also end
+with an error when two modules declare a scope check for one type: line 1 has the type
+and both modules when it has at most 98 characters, and otherwise line 2 has them.
+
+A stack in which no workflow has a `plan` needs no scope check: `qory harness compose`
+succeeds, and a `scope_checks` of a module is still read and checked.
+
+`qory run` reads neither `plan` nor `scope_checks`: a run does not run a scope check, and
+the push step does not read the plan type.
 
 ### Qory's images
 

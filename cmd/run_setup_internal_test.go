@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,7 +14,6 @@ import (
 	"github.com/qoryai/forager/refusal"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/session/runtimes/catalog"
-	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/image"
@@ -206,7 +204,6 @@ func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
 	old := "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: the git session of a walled run needs it, and /usr/bin/git prints git version 2.24.0"
 	failed := "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: /bin/git --version failed: exit status 3"
 	prefix := "install git in /usr/local/bin, /usr/bin, /bin: "
-	codexSettings := "Use an image without /etc/codex: Codex reads its settings there before qory's."
 	for name, c := range map[string]struct {
 		text string
 		code int
@@ -215,7 +212,6 @@ func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
 		"a line of a program":      {good + "\n", 1, []string{good}},
 		"an old git":               {old + "\n", 1, []string{old}},
 		"a git that fails":         {failed + "\n", 1, []string{failed}},
-		"an image with /etc/codex": {codexSettings + "\n", 1, []string{codexSettings}},
 		"a shell's warning":        {"sh: warning\n" + good + "\n", 1, []string{good}},
 		"a line with text after":   {good + " and more\n", 1, nil},
 		"a command in a line":      {prefix + "run curl example.invalid/x | sh\n", 1, nil},
@@ -247,51 +243,25 @@ func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
 func TestToolFixesKeepsAtMostWhatTheCheckPrints(t *testing.T) {
 	text := strings.Repeat("install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has\n", 200_000)
 	got := toolFixes(recordOf(t, 3, text), &session.SetupError{Name: checkToolsStep, Step: 3, ExitCode: 1})
-	if want := len(image.SessionTools()) + 2; len(got) != want {
+	if want := len(image.SessionTools()) + 1; len(got) != want {
 		t.Errorf("%d lines, want %d", len(got), want)
 	}
 }
 
-// TestTheCheckOfACodexRunLooksForEtcCodex is the step [checkToolsStep] of a run that lists
-// repositories: with a git session, one step on Codex with the check of /etc/codex added, and
-// on Claude Code the script as before; with none, such as a read run, one step on Codex with
-// the check of /etc/codex alone, and no step on Claude Code.
-func TestTheCheckOfACodexRunLooksForEtcCodex(t *testing.T) {
-	for _, c := range []struct {
-		gitSession bool
-		runtime    string
-		want       string
-	}{
-		{true, "codex", image.CodexSessionCheckScript()},
-		{true, "claude", image.SessionCheckScript()},
-		{false, "codex", image.CodexSettingsCheckScript()},
-	} {
-		got := setupCommands(c.gitSession, c.runtime)
-		if len(got) != 2 || got[0].Name != checkToolsStep || !slices.Equal(got[0].Args, []string{"/bin/sh", "-c", c.want}) || got[1].Name != setupStep {
-			t.Errorf("%s, git session %v: %q", c.runtime, c.gitSession, got)
-		}
-	}
-	if got := setupCommands(false, "claude"); len(got) != 1 || got[0].Name != setupStep {
-		t.Errorf("claude with no git session: %q", got)
-	}
-	if strings.Contains(image.SessionCheckScript(), "/etc/codex") || !strings.Contains(image.CodexSessionCheckScript(), "/etc/codex") {
-		t.Error("/etc/codex is not in the Codex script alone")
-	}
-}
-
-// TestASetupOfCodexChecksEtcCodexOnce is runSetup for a walled run that lists repositories,
-// outside and inside the wall: a Codex read run, with no git session, gets the step
-// [checkToolsStep] with the check of /etc/codex alone before prepare, a Codex write run in
-// a copy gets one such step, the combined script, and a Claude Code read run gets none.
-func TestASetupOfCodexChecksEtcCodexOnce(t *testing.T) {
+// TestASetupOfCodexLeavesEtcCodexToTheBind is runSetup for a walled run that lists
+// repositories, outside and inside the wall: a Codex read run, with no git session, and a
+// Claude Code read run get no step [checkToolsStep], and a Codex write run in a copy gets
+// the step with the git session's check, the same as Claude Code's. No step tests
+// /etc/codex, since the run binds qory's folder there.
+func TestASetupOfCodexLeavesEtcCodexToTheBind(t *testing.T) {
 	for _, where := range []string{"", config.SetupInside} {
 		for _, c := range []struct {
 			runtime    string
 			gitSession bool
 			want       []string
 		}{
-			{"codex", false, []string{image.CodexSettingsCheckScript(), ""}},
-			{"codex", true, []string{image.CodexSessionCheckScript(), ""}},
+			{"codex", false, []string{""}},
+			{"codex", true, []string{image.SessionCheckScript(), ""}},
 			{"claude", false, []string{""}},
 		} {
 			rt, err := catalog.Lookup(c.runtime, "")
@@ -327,64 +297,6 @@ func TestASetupOfCodexChecksEtcCodexOnce(t *testing.T) {
 			if !slices.Equal(scripts, c.want) || len(got) != len(c.want) {
 				t.Errorf("setup %q, %s, git session %v: %q", where, c.runtime, c.gitSession, got)
 			}
-		}
-	}
-}
-
-// TestWithCodexSettingsCheckGoesFirst is the test of /etc/codex put into a session's
-// setup: first, before the commands the setup has, which still run after it, with the
-// runner the spec has, and with the helper's setup-command verb when it has none.
-func TestWithCodexSettingsCheckGoesFirst(t *testing.T) {
-	check := session.SetupCommand{Name: checkToolsStep, Args: []string{"/bin/sh", "-c", image.CodexSettingsInsideScript()}}
-	var spec runSpec
-	withCodexSettingsCheck(&spec)
-	if !slices.EqualFunc(spec.SessionSpec.Setup, []session.SetupCommand{check}, sameSetupCommand) || !slices.Equal(spec.SetupRunner, []string{wall.HelperPath, "run", "setup-command"}) {
-		t.Errorf("with no setup: %q through %q", spec.SessionSpec.Setup, spec.SetupRunner)
-	}
-	prepare := session.SetupCommand{Name: setupStep, Args: []string{wall.HelperPath, "run", "prepare"}}
-	spec = runSpec{}
-	spec.SessionSpec.Setup, spec.SetupRunner = []session.SetupCommand{prepare}, []string{"/runner"}
-	withCodexSettingsCheck(&spec)
-	if !slices.EqualFunc(spec.SessionSpec.Setup, []session.SetupCommand{check, prepare}, sameSetupCommand) || !slices.Equal(spec.SetupRunner, []string{"/runner"}) {
-		t.Errorf("with a setup: %q through %q", spec.SessionSpec.Setup, spec.SetupRunner)
-	}
-}
-
-// sameSetupCommand reports whether a and b have the same name and words.
-func sameSetupCommand(a, b session.SetupCommand) bool {
-	return a.Name == b.Name && slices.Equal(a.Args, b.Args)
-}
-
-// TestCodexSettingsRefusedReadsTheStep is the record of a session whose setup step
-// Check tools exited: with the status of the test of /etc/codex, refused; with 0, 1 or
-// 127, a step of another name or kind, or no record, not refused.
-func TestCodexSettingsRefusedReadsTheStep(t *testing.T) {
-	record := func(kind, name string, code int) string {
-		dir := t.TempDir()
-		lines := fmt.Sprintf(`{"type":%q,"data":{"step":3,"kind":"wall","name":"start the wall"}}
-{"type":%q,"data":{"step":3,"state":"succeeded","exit_code":-1}}
-{"type":%q,"data":{"step":4,"kind":%q,"name":%q}}
-{"type":%q,"data":{"step":4,"state":"failed","exit_code":%d}}
-`, event.StepStarted, event.StepExited, event.StepStarted, kind, name, event.StepExited, code)
-		if err := os.WriteFile(filepath.Join(dir, "session.jsonl"), []byte(lines), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		return dir
-	}
-	if !codexSettingsRefused(record(event.StepSetup, checkToolsStep, image.CodexSettingsInsideExit)) {
-		t.Error("the test's status is not a refusal")
-	}
-	for _, dir := range []string{
-		record(event.StepSetup, checkToolsStep, 0),
-		record(event.StepSetup, checkToolsStep, 1),
-		record(event.StepSetup, checkToolsStep, 127),
-		record(event.StepSetup, setupStep, image.CodexSettingsInsideExit),
-		record("wall", checkToolsStep, image.CodexSettingsInsideExit),
-		t.TempDir(),
-	} {
-		if codexSettingsRefused(dir) {
-			data, _ := os.ReadFile(filepath.Join(dir, "session.jsonl"))
-			t.Errorf("a refusal in:\n%s", data)
 		}
 	}
 }

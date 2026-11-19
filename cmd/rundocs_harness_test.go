@@ -567,7 +567,7 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 		{"a module's source does not parse", codeHarness{stack: thenMore("https://" + proxygittest.Host + "%40evil.example/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
 			[]string{"correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: Correct the URL in the source of the module more.\n  qory could not read it as a URL.\n  The source of the module more is in " + workspaceBase + "; the code is used\n"}},
 		{"a module's source is not https", codeHarness{stack: thenMore("http://" + proxygittest.Host + "/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
-			[]string{"qory run: use an https URL for the module more, then take the work item in again in Qory Apiary: a run from a control plane fetches git sources only over https; the code is used\n"}},
+			[]string{"qory run: use an https URL for the module more, then take the work item in again.\n  A run from a control plane fetches git sources only over https; the code is used\n"}},
 		{"two modules ship one skill", codeHarness{stack: withTools(tools, toolsRef), tools: map[string]string{
 			"modules/tools/qory-module.yaml":      "apiVersion: qory.dev/v1alpha1\nname: tools\n",
 			"modules/tools/skills/greet/SKILL.md": "---\nname: greet\ndescription: Greets.\n---\nHello.\n",
@@ -657,7 +657,7 @@ func TestARunCodeOfAHiddenCheckoutHarnessThatFailsShowsNoAddress(t *testing.T) {
 		{"a module's ref is gone", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": toolsURL, "ref": "tools-gone", "path": "modules/tools"}}}, tools: toolsModule()}, cmd.ExitInput,
 			"qory run: set the ref of the module tools to a branch, tag or commit its repository has, then take the work item in again in Qory Apiary: the repository of the module tools has no branch or tag by the ref it is set to; the code is used\n"},
 		{"a module's source is not https", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": "git@" + proxygittest.Host + ":example-org/tools.git", "ref": toolsRef}}}}, cmd.ExitInput,
-			"qory run: use an https URL for the module tools, then take the work item in again in Qory Apiary: a run from a control plane fetches git sources only over https; the code is used\n"},
+			"qory run: use an https URL for the module tools, then take the work item in again.\n  A run from a control plane fetches git sources only over https; the code is used\n"},
 		{"the stack proxy returns 403 for a module's host", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": "https://other.test/example-org/tools.git", "ref": toolsRef, "path": "modules/tools"}}}}, 1,
 			"qory run: add the host of the module tools to gateway.stack_hosts in the gateway's forager.yaml or to the stack_hosts of the run configuration that Qory Apiary sends, and, for a private repository, a harness credential for the module tools to that run configuration, then take the work item in again: the fetch of the module tools through the run's stack proxy failed: the stack proxy returned 403, as it does for a host that neither list of stack hosts contains, and for a host of the run configuration's stack_hosts that the gateway's policy denies or has path rules for; the code is used\n"},
 		{"the base's URL has a user part", codeHarness{document: func(s string) string { return strings.Replace(s, "https://", "https://reader:s3cret@", 1) }}, cmd.ExitInput,

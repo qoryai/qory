@@ -1,0 +1,23 @@
+{
+  "reviewer": "code-reviewer",
+  "findings": [
+    {
+      "severity": "blocking",
+      "quote": "if count >= limit {",
+      "problem": "A batch of exactly the limit is cut, so the last item of a full page is lost.",
+      "fix": "Cut only a batch of more than the limit, and test a batch of the limit.",
+      "proof": "failing check: TestBatchAtLimit in suite_result fails with 99 of 100 items.",
+      "point": "A batch of exactly the limit loses its last item.",
+      "file": "internal/batch/batch.go",
+      "line": 12
+    },
+    {
+      "severity": "non-blocking",
+      "quote": "// Batch returns the batch.",
+      "problem": "The comment restates the function's name.",
+      "fix": "State the limit that the batch keeps.",
+      "proof": "broken rule: a doc comment states what the code cannot show.",
+      "point": "The comment of Batch restates its name."
+    }
+  ]
+}

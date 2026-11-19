@@ -117,7 +117,7 @@ compose. The URL is https only, and the ref and the folder are required. A folde
 absolute, has a `..` segment or is not in the repository stops the compose with exit 2.
 
 Under `extends`, the compose reads the repository's file for its document and its
-`worktree` keys. Its `git` and `env` keys and its machine keys under `harness`, such as
+`worktree` keys. Its `git` and `env` keys and its machine harness settings, such as
 `model` or `force`, are left out: your `qory.yaml` and the files above the checkout
 set those. The compose prints a `read` row with what it took from the file, and an
 `ignored` row with the keys it left out, when the file sets any:

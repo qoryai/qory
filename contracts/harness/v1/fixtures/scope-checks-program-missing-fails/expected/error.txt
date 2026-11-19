@@ -1,0 +1,2 @@
+Add the program of the scope check to its module, or change its path.
+  Module core has no file at checks/check.js, the program of the scope check for build-plan.

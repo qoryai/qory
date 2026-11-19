@@ -156,7 +156,11 @@ func TestANamedHarnesssFailedFetchShowsNoAddress(t *testing.T) {
 	}
 	_, err = source.Resolve("", stack.Source{Git: "git@code.example.com:team/tools.git", Ref: "main"}, source.Options{Cache: t.TempDir(), Git: g, Name: n.Module("tools")})
 	var scheme *source.SchemeError
-	if !errors.As(err, &scheme) || err.Error() != "use an https URL for the module tools: a run from a control plane fetches git sources only over https" {
+	if !errors.As(err, &scheme) || err.Error() != "use an https URL for the module tools.\n  A run from a control plane fetches git sources only over https." {
 		t.Errorf("a source that is not https: %v", err)
+	}
+	// Line 1 is the fix, and qory run prints it after "qory run: " within 100 characters.
+	if first, _, _ := strings.Cut(err.Error(), "\n"); len("qory run: "+first) > 100 {
+		t.Errorf("line 1 has %d characters after qory run: is added, want at most 100", len("qory run: "+first))
 	}
 }

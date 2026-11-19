@@ -111,12 +111,13 @@ func TestTheAgentEnvRefusesWhatItCannotRead(t *testing.T) {
 	}
 }
 
-// TestTheAgentEnvKeepsTheStartKeysEndpoint is a dispatched walled run of Claude Code
-// whose start key sets ANTHROPIC_BASE_URL, the variable its descriptor's
-// model.endpoint.variable names, and whose sources set no value of it, so the resolved
-// variables list no entry for it: the verb keeps the endpoint Forager set and the key's
-// placeholder, and still drops another ANTHROPIC_ name.
-func TestTheAgentEnvKeepsTheStartKeysEndpoint(t *testing.T) {
+// TestTheAgentEnvKeepsTheDefaultModelProviderCredentialsEndpoint is a dispatched walled
+// run of Claude Code whose default model provider credential sets ANTHROPIC_BASE_URL,
+// the variable its descriptor's model.endpoint.variable names, and whose sources set no
+// value of it, so the resolved variables list no entry for it: the verb keeps the
+// endpoint Forager set and the key's placeholder, and still drops another ANTHROPIC_
+// name.
+func TestTheAgentEnvKeepsTheDefaultModelProviderCredentialsEndpoint(t *testing.T) {
 	rt, err := catalog.Lookup("claude", "")
 	if err != nil {
 		t.Fatal(err)

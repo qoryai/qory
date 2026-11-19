@@ -54,9 +54,9 @@ const (
 // mark of the test's fake keys. It prints whether OPENAI_API_KEY is set and whether a
 // variable of its environment has the mark, starts codex with its arguments, and then
 // prints CODEX_HOME, whether a write into config.toml passes, each transcript below
-// sessions/, each file of the home, and whether a file of the home has the mark. It
-// prints "scan: grep failed" with grep's status when a search fails. It exits with
-// codex's status.
+// sessions/, each file of the home, each line from the first hooks.state table of the
+// home's config.toml on, and whether a file of the home has the mark. It prints "scan: grep
+// failed" with grep's status when a search fails. It exits with codex's status.
 const codexScan = `#!/bin/sh
 mark=MARK
 if [ -n "$OPENAI_API_KEY" ]; then echo "scan: OPENAI_API_KEY is set"; fi
@@ -68,6 +68,7 @@ echo "scan: CODEX_HOME=$CODEX_HOME"
 if { echo x >> "$CODEX_HOME/config.toml"; } 2>/dev/null; then echo "scan: wrote config.toml"; else echo "scan: cannot write config.toml"; fi
 for f in "$CODEX_HOME"/sessions/*/*/*/rollout-*.jsonl; do [ -f "$f" ] && echo "scan: rollout $f"; done
 find "$CODEX_HOME" -type f | while read -r f; do echo "scan: file $f"; done
+sed -n '/^\[hooks\.state\./,$p' "$CODEX_HOME/config.toml" | while read -r l; do echo "scan: config $l"; done
 grep -rlF -- "$mark" "$CODEX_HOME"
 found=$?
 case $found in 0) echo "scan: a file has the key";; 1) echo "scan: no file has the key";; *) echo "scan: grep failed with status $found";; esac
@@ -75,8 +76,8 @@ exit $status
 `
 
 // realCodexVersion is the Codex the test builds into its image: 0.170.0, the dist-tag
-// latest of @openai/codex on npm on 2026-11-18. The walled run's settings, refused keys
-// and hook hashes were first checked on 0.167.2. realCodexSums are npm's dist.integrity
+// latest of @openai/codex on npm on 2026-11-18. The walled run's settings and the keys
+// its arguments may not set were first checked on 0.167.2. realCodexSums are npm's dist.integrity
 // of its native build for each engine architecture, sha512 in hex.
 const realCodexVersion = "0.170.0"
 
@@ -85,21 +86,28 @@ var realCodexSums = map[string]string{
 	"arm64": "9892e6e5e89afc672e902ad17d51276150f974e5c613b726a5df5d27f8b191288a89fcc300f686abcdd9126c15864dcfc5b7533d448b4699d765029b352e47a0",
 }
 
+// systemSkillsLine is the text of the error that Codex 0.170.0 logs when it fails to
+// install the system skills: "failed to install system skills: <cause>".
+const systemSkillsLine = "install system skills"
+
 // realCodexImage builds an image on alpine with git, Codex, and [codexScan] with mark at
 // /usr/local/bin/codex-scan. Codex is npm's native build of @openai/codex for this
-// engine's machines, at [realCodexVersion] and checked against [realCodexSums]. The
-// native build's folder stays whole, here at /opt/codex, and the codex command links to
-// its bin/codex, so Codex finds its helpers beside it. The test removes the image at its
-// end.
-func realCodexImage(t *testing.T, mark string) string {
+// engine's machines, at version and checked against sums, the sha512 of the build for
+// each engine architecture in hex. The native build's folder stays whole, here at
+// /opt/codex, and the codex command links to its bin/codex, so Codex finds its helpers
+// beside it. Codex runs only in the image's build and its containers. The test removes
+// the image at its end.
+func realCodexImage(t *testing.T, version string, sums map[string]string, mark string) string {
 	t.Helper()
-	version := realCodexVersion
 	_, arch, _ := strings.Cut(dockerOut(t, "", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"), "/")
 	npmArch := map[string]string{"amd64": "x64", "arm64": "arm64"}[arch]
 	if npmArch == "" {
 		t.Fatalf("Codex has no native build for the engine's machines, %s", arch)
 	}
-	sum := realCodexSums[arch]
+	sum := sums[arch]
+	if sum == "" {
+		t.Fatalf("no checksum of Codex %s for %s", version, arch)
+	}
 	var id [4]byte
 	_, _ = rand.Read(id[:])
 	dir := t.TempDir()
@@ -401,17 +409,18 @@ func (s realCodexSetup) authority(t *testing.T) (*x509.Certificate, *ecdsa.Priva
 	return ca, key
 }
 
-// runRealCodexChild builds the wall's helper and the image, starts the upstream, and
-// runs test t in a separate test binary, with the setup in [envRealCodexChild]: this
+// runRealCodexChild builds the wall's helper and the image, with Codex at version and
+// checked against sums, see [realCodexImage], starts the upstream, and runs test t in a
+// separate test binary, with the setup in [envRealCodexChild]: this
 // process may have read its roots already, and that binary reads them from the
 // upstream's authority. The test binary has until a minute before t's deadline, so this
 // process removes the upstream and the image also when that binary runs out of time.
-func runRealCodexChild(t *testing.T) {
+func runRealCodexChild(t *testing.T, version string, sums map[string]string) {
 	t.Helper()
 	var id [6]byte
 	_, _ = rand.Read(id[:])
 	setup := realCodexSetup{Mark: "qorytest-" + hex.EncodeToString(id[:]), Helper: wallHelper(t)}
-	setup.Image = realCodexImage(t, setup.Mark)
+	setup.Image = realCodexImage(t, version, sums, setup.Mark)
 	ca, caKey := testAuthority(t)
 	u := startUpstream(t, ca, caKey)
 	keyDER, err := x509.MarshalPKCS8PrivateKey(caKey)
@@ -467,7 +476,7 @@ func TestARealWalledCodexRunReachesTheModelThroughTheGateway(t *testing.T) {
 		t.Skip("no docker command")
 	}
 	if os.Getenv(envRealCodexChild) == "" {
-		runRealCodexChild(t)
+		runRealCodexChild(t, realCodexVersion, realCodexSums)
 		return
 	}
 	var setup realCodexSetup
@@ -520,6 +529,10 @@ func TestARealWalledCodexRunReachesTheModelThroughTheGateway(t *testing.T) {
 				"scan: rollout "+codex.HomeInWall+"/sessions/", "scan: no file has the key\n", `"text":"Hi"`)
 			wants(t, r.out, "scan: no variable has the key\n")
 			lacks(t, r.out, `"type":"error"`, "scan: a variable has the key", "scan: wrote config.toml", "scan: a file has the key", "scan: grep failed")
+			// Codex logs this error when it fails to write its system skills into the home,
+			// which it tries only with skills.bundled.enabled on
+			// (codex-rs/ext/skills/src/host_service.rs:164, :293 and :504 at rust-v0.170.0).
+			lacks(t, r.out, systemSkillsLine)
 			log := u.log(t)[before:]
 			mention := "[$workflow-hello](" + codex.HomeInWall + "/skills/workflow-hello/SKILL.md)"
 			if !slices.ContainsFunc(log, func(e upstreamEntry) bool {
