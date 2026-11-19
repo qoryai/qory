@@ -104,3 +104,26 @@ func TestCodexRefusesABadHookNumber(t *testing.T) {
 		t.Fatalf("Build with whole numbers in hooks.json: %v", err)
 	}
 }
+
+// TestCodexRefusesAHookCodexCannotRead is a Codex config.toml or hooks.json fragment with a
+// hook that Codex 0.169.0 cannot decode, after a good one: the compose's build fails with the
+// line that names the event and the hook's place, the fix first, and writes no config.toml.
+func TestCodexRefusesAHookCodexCannotRead(t *testing.T) {
+	for _, c := range []struct{ name, file, fragment, want string }{
+		{"config.toml", "config.toml", "[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\n[[hooks.Stop.hooks]]\ntype = \"mcp_tool\"\nserver = \"s\"\n",
+			"Fix `hooks.Stop[0].hooks[1]` in `settings/codex/config.toml`.\n  It has no `tool` text, and Codex reads no hook of a file with such a hook."},
+		{"hooks.json", "hooks.json", `{"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "/bin/true"}]}, {"matcher": "*", "hooks": [{"type": "shell", "command": "/bin/true"}]}]}}`,
+			"Fix `hooks.PreToolUse[1].hooks[0]` in `settings/codex/hooks.json`.\n  Its `type` is none of command, mcp_tool, prompt and agent, and Codex reads no hook of a file with such a hook."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			res, home := composeEnv(t, withFile("modules/core/settings/codex/"+c.file, c.fragment), nil, "codex")
+			err := render.Build(res, home, lookup(t, "codex"))
+			if err == nil || err.Error() != c.want {
+				t.Fatalf("Build: %v, want %q", err, c.want)
+			}
+			if _, err := os.Stat(filepath.Join(home, "codex", "config.toml")); err == nil {
+				t.Error("the refused compose wrote config.toml")
+			}
+		})
+	}
+}

@@ -267,7 +267,9 @@ const textHookGroups = "Write each event of the hooks in `settings/codex/%s` as 
 // out, since Codex keeps no state of a managed hook. Codex reads no hook of a hooks.json
 // with a key other than description and hooks (codex-rs/config/src/hook_config.rs,
 // HooksFile), so description is left out too. An event whose value is no list fails, with
-// [textHookGroups].
+// [textHookGroups]. So does a group or a hook of either file that Codex cannot decode, see
+// [checkHookShapes], before anything is written: Codex reads no hook of a hooks.json with
+// one, so one such hook would turn off every hook of the run.
 func WalledHooks(hooksJSON, config []byte) ([]byte, error) {
 	events := map[string][]any{}
 	if len(hooksJSON) > 0 {
@@ -278,6 +280,9 @@ func WalledHooks(hooksJSON, config []byte) ([]byte, error) {
 		dec.UseNumber()
 		if err := dec.Decode(&file); err != nil {
 			return nil, fmt.Errorf("read the composed hooks.json: %w", err)
+		}
+		if err := checkHookShapes("hooks.json", file.Hooks); err != nil {
+			return nil, err
 		}
 		for event, v := range file.Hooks {
 			groups, ok := v.([]any)
@@ -292,6 +297,9 @@ func WalledHooks(hooksJSON, config []byte) ([]byte, error) {
 		return nil, err
 	}
 	table, _ := m["hooks"].(map[string]any)
+	if err := checkHookShapes("config.toml", table); err != nil {
+		return nil, err
+	}
 	for event, v := range table {
 		if event == "state" {
 			continue

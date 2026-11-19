@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 
@@ -139,6 +140,96 @@ func TestWalledConfigTurnsOffTheSystemSkills(t *testing.T) {
 		if e := m.Skills.Bundled.Enabled; e == nil || *e {
 			t.Errorf("from %q, skills.bundled.enabled is %v, want false:\n%s", config, e, got)
 		}
+	}
+}
+
+// TestWalledHooksStopsAHookCodexCannotRead is a composed hooks.json or config.toml with one
+// group or hook that Codex 0.169.0 cannot decode, after a good group: WalledHooks fails with
+// the line that names the event, the group's index and the hook's index, the fix first, and
+// writes nothing.
+func TestWalledHooksStopsAHookCodexCannotRead(t *testing.T) {
+	good := `{"hooks": [{"type": "command", "command": "/bin/guard"}]}`
+	for _, c := range []struct{ name, file, hooks, place, cause string }{
+		{"no command", "hooks.json", `{"type": "command"}`, "PreToolUse[1].hooks[0]", "It has no `command` text"},
+		{"null command", "hooks.json", `{"type": "command", "command": null}`, "PreToolUse[1].hooks[0]", "It has no `command` text"},
+		{"command no text", "hooks.json", `{"type": "command", "command": ["/bin/x"]}`, "PreToolUse[1].hooks[0]", "Its `command` is no text"},
+		{"no type", "hooks.json", `{"command": "/bin/x"}`, "PreToolUse[1].hooks[0]", "Its `type` is none of command, mcp_tool, prompt and agent"},
+		{"other type", "hooks.json", `{"type": "script", "command": "/bin/x"}`, "PreToolUse[1].hooks[0]", "Its `type` is none of command, mcp_tool, prompt and agent"},
+		{"hook no table", "hooks.json", `"/bin/x"`, "PreToolUse[1].hooks[0]", "It is no table of keys"},
+		{"text timeout", "hooks.json", `{"type": "command", "command": "/bin/x", "timeout": "30"}`, "PreToolUse[1].hooks[0]", "Its `timeout` is no whole number of 0 or more"},
+		{"negative timeout", "hooks.json", `{"type": "command", "command": "/bin/x", "timeout": -1}`, "PreToolUse[1].hooks[0]", "Its `timeout` is no whole number of 0 or more"},
+		{"async text", "hooks.json", `{"type": "command", "command": "/bin/x", "async": "yes"}`, "PreToolUse[1].hooks[0]", "Its `async` is neither true nor false"},
+		{"async null", "hooks.json", `{"type": "command", "command": "/bin/x", "async": null}`, "PreToolUse[1].hooks[0]", "Its `async` is neither true nor false"},
+		{"status no text", "hooks.json", `{"type": "command", "command": "/bin/x", "statusMessage": 1}`, "PreToolUse[1].hooks[0]", "Its `statusMessage` is no text"},
+		{"both windows", "hooks.json", `{"type": "command", "command": "/bin/x", "commandWindows": "a", "command_windows": "b"}`, "PreToolUse[1].hooks[0]", "It sets both `commandWindows` and `command_windows`"},
+		{"no server", "hooks.json", `{"type": "mcp_tool", "tool": "t"}`, "PreToolUse[1].hooks[0]", "It has no `server` text"},
+		{"no tool", "hooks.json", `{"type": "mcp_tool", "server": "s"}`, "PreToolUse[1].hooks[0]", "It has no `tool` text"},
+		{"input list", "hooks.json", `{"type": "mcp_tool", "server": "s", "tool": "t", "input": [1]}`, "PreToolUse[1].hooks[0]", "Its `input` is no table of keys"},
+		{"input null", "hooks.json", `{"type": "mcp_tool", "server": "s", "tool": "t", "input": {"a": {"b": null}}}`, "PreToolUse[1].hooks[0]", "Its `input` contains a null or a whole number above 2^63-1"},
+		{"input large", "hooks.json", `{"type": "mcp_tool", "server": "s", "tool": "t", "input": {"a": 9223372036854775808}}`, "PreToolUse[1].hooks[0]", "Its `input` contains a null or a whole number above 2^63-1"},
+		{"second hook", "hooks.json", `{"type": "prompt"}, {"type": "command", "command": 7}`, "PreToolUse[1].hooks[1]", "Its `command` is no text"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			hooksJSON := `{"hooks": {"Stop": [` + good + `], "PreToolUse": [` + good + `, {"matcher": "*", "hooks": [` + c.hooks + `]}]}}`
+			got, err := codex.WalledHooks([]byte(hooksJSON), nil)
+			want := "Fix `hooks." + c.place + "` in `settings/codex/hooks.json`.\n  " + c.cause + ", and Codex reads no hook of a file with such a hook."
+			if err == nil || err.Error() != want || got != nil {
+				t.Errorf("%q, %v, want %q", got, err, want)
+			}
+		})
+	}
+	for _, c := range []struct{ name, hooksJSON, config, want string }{
+		{"group no table", `{"hooks": {"Stop": ["/bin/x"]}}`, "",
+			"Fix `hooks.Stop[0]` in `settings/codex/hooks.json`.\n  It is no table of keys, and Codex reads no hook of a file with such a group."},
+		{"matcher no text", `{"hooks": {"Stop": [{"matcher": 1, "hooks": []}]}}`, "",
+			"Fix `hooks.Stop[0]` in `settings/codex/hooks.json`.\n  Its `matcher` is no text, and Codex reads no hook of a file with such a group."},
+		{"hooks no list", `{"hooks": {"Stop": [{"hooks": null}]}}`, "",
+			"Fix `hooks.Stop[0]` in `settings/codex/hooks.json`.\n  Its `hooks` is no list, and Codex reads no hook of a file with such a group."},
+		{"config.toml", "", "[[hooks.SessionStart]]\n[[hooks.SessionStart.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\n[[hooks.SessionStart.hooks]]\ntype = \"command\"\n",
+			"Fix `hooks.SessionStart[0].hooks[1]` in `settings/codex/config.toml`.\n  It has no `command` text, and Codex reads no hook of a file with such a hook."},
+		{"config.toml timeout", "", "[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\ntimeout = \"5\"\n",
+			"Fix `hooks.Stop[0].hooks[0]` in `settings/codex/config.toml`.\n  Its `timeout` is no whole number of 0 or more, and Codex reads no hook of a file with such a hook."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := codex.WalledHooks([]byte(c.hooksJSON), []byte(c.config))
+			if err == nil || err.Error() != c.want || got != nil {
+				t.Errorf("%q, %v, want %q", got, err, c.want)
+			}
+		})
+	}
+}
+
+// TestWalledHooksTakesWhatCodexReads is a composed hooks.json with each type of hook, keys
+// Codex does not know, optional keys set to null, a matcher of null, a group with no hooks
+// and an event Codex does not know, whose value is a list of anything: WalledHooks passes
+// it, as Codex 0.169.0 decodes it.
+func TestWalledHooksTakesWhatCodexReads(t *testing.T) {
+	hooksJSON := `{"hooks": {"PreToolUse": [{"matcher": null, "other": 1, "hooks": [
+		{"type": "command", "command": "/bin/x", "timeout": 0, "async": true, "statusMessage": null, "commandWindows": "x.cmd", "additionalContextLimit": 2500, "extra": [null]},
+		{"type": "mcp_tool", "server": "s", "tool": "t", "input": {"a": [1, 2.5, "x", {"b": true}], "c": -9223372036854775808}, "timeout": null},
+		{"type": "prompt", "prompt": "anything"},
+		{"type": "agent"}]}, {"matcher": "Bash"}],
+		"SomeLaterEvent": [1, null]}}`
+	if _, err := codex.WalledHooks([]byte(hooksJSON), nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestTheLineForABadHookFits is the line for a hook of the longest event name Codex reads,
+// with indexes of three digits, in the longer settings file: at most 100 characters after
+// "qory run: ".
+func TestTheLineForABadHookFits(t *testing.T) {
+	groups := strings.Repeat(`{"hooks": []}, `, 100) + `{"hooks": [` + strings.Repeat(`{"type": "agent"}, `, 100) + `{"type": "command"}]}`
+	_, err := codex.WalledHooks(nil, []byte("[hooks]\nPermissionRequest = ["+strings.NewReplacer(`"hooks": `, "hooks = ", `"type": `, "type = ").Replace(groups)+"]\n"))
+	if err == nil {
+		t.Fatal("no error")
+	}
+	line, _, _ := strings.Cut(err.Error(), "\n")
+	if want := "Fix `hooks.PermissionRequest[100].hooks[100]` in `settings/codex/config.toml`."; line != want {
+		t.Errorf("line 1 is %q, want %q", line, want)
+	}
+	if n := utf8.RuneCountInString("qory run: " + line); n > 100 {
+		t.Errorf("line 1 has %d characters after qory run:, want at most 100", n)
 	}
 }
 

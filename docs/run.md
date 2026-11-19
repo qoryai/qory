@@ -4640,7 +4640,10 @@ The harness's Codex hooks are in neither folder's `config.toml` or `hooks.json`.
 them, the hooks of `settings/codex/hooks.json` and then those of `settings/codex/config.toml`,
 into `hooks.json` in a third folder, `codex-fixed/etc-codex`, and binds that folder read-only at
 `/etc/codex`. Codex 0.169.0 runs a hook from `/etc/codex` as a managed hook: it needs no stored
-hash, and a `hooks.state` setting with `enabled = false` does not turn it off. The bind hides a
+hash, and a `hooks.state` setting with `enabled = false` does not turn it off. Codex reads no hook
+of a `hooks.json` with one hook it cannot decode, so qory checks each group and hook first, as
+the compose does, and stops the run with ``Fix `hooks.<event>[<group>].hooks[<hook>]` in
+`settings/codex/<file>`.`` for such a hook. The bind hides a
 file or a folder that the image has at `/etc/codex`, such as one with a `config.toml` or a
 `requirements.toml`, so the image may have that folder. It does not hide a link: Docker binds the
 folder at the link's target, so a link to `/var/lib/qory-codex-home` shows the writable home at

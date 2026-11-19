@@ -2015,7 +2015,11 @@ Per runtime, the files written into its directory:
   `additionalContextLimit` is negative or fractional, such as 2.0, fails the compose with
   ``Set `<key>` of the `<event>` hook to a whole number of 0 or more.`` and the next line
   ``The hook is in the harness's `settings/codex/<file>`, and Codex ignores the whole file
-  otherwise.`` Codex has no allow list of skills, so the `Skill(harness:<name>)` rules in
+  otherwise.`` A hook group or a hook there that Codex 0.169.0 cannot decode, such as a
+  `command` hook with no `command` text or a `type` other than `command`, `mcp_tool`,
+  `prompt` and `agent`, fails the compose with ``Fix `hooks.<event>[<group>].hooks[<hook>]`
+  in `settings/codex/<file>`.``, the indexes counted from 0, and the next line ``<cause>,
+  and Codex reads no hook of a file with such a hook.`` Codex has no allow list of skills, so the `Skill(harness:<name>)` rules in
   `permissions.allow` of `settings/claude/settings.json` are the Codex list too. In the
   home of a walled Codex run, `config.toml` disables every other skill by name, with a
   `[[skills.config]]` entry with `enabled = false` after any entry the fragment has: each

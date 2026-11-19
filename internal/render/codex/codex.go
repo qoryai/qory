@@ -34,6 +34,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/qoryai/qory/internal/compose"
@@ -117,19 +118,30 @@ func (codex) Reserved() []render.Reserved {
 // instructions written as AGENTS.md end with the names the session registers, see
 // [render.Addressing]: a Codex home registers them as the modules wrote them, and the
 // file states that. Codex reads a project .codex only in a project the user has marked
-// trusted. A fragment that sets a key of [reservedKeys], or a hook number Codex cannot
-// read, see [checkHookNumbers], is refused before anything is written.
+// trusted. A fragment that sets a key of [reservedKeys], a hook number Codex cannot read,
+// see [checkHookNumbers], or a hook group or hook Codex cannot read, see
+// [checkHookShapes], is refused before anything is written.
 func (codex) Render(res *compose.Result, dir, home string) error {
 	if err := checkReserved(res.SettingsFor(Runtime, "config.toml", home)); err != nil {
 		return err
 	}
 	for _, file := range []string{"config.toml", "hooks.json"} {
-		if err := checkHookNumbers(file, res.SettingsFor(Runtime, file, home)); err != nil {
+		m := res.SettingsFor(Runtime, file, home)
+		if err := checkHookNumbers(file, m); err != nil {
+			return err
+		}
+		hooks, _ := m["hooks"].(map[string]any)
+		if err := checkHookShapes(file, hooks); err != nil {
 			return err
 		}
 	}
 	for _, data := range res.CodexHooksJSON {
-		if err := checkHookNumbers("hooks.json", exactJSON(data)); err != nil {
+		m := exactJSON(data)
+		if err := checkHookNumbers("hooks.json", m); err != nil {
+			return err
+		}
+		hooks, _ := m["hooks"].(map[string]any)
+		if err := checkHookShapes("hooks.json", hooks); err != nil {
 			return err
 		}
 	}
@@ -323,6 +335,206 @@ func checkHookNumbers(file string, m map[string]any) error {
 		}
 	}
 	return nil
+}
+
+// hookEvents are the hook events that Codex 0.169.0 reads from a hooks table
+// (codex-rs/protocol/src/hooks.rs, HookEventsToml). It ignores a key of any other name.
+var hookEvents = []string{
+	"PreModelRequest", "PostModelRequest", "PreToolUse", "PermissionRequest", "PostToolUse",
+	"PreCompact", "PostCompact", "SessionStart", "SessionEnd", "UserPromptSubmit",
+	"SubagentStart", "SubagentStop", "Stop", "Interrupt",
+}
+
+// The refusals of a hook group and of a hook that Codex cannot read, see [checkHookShapes],
+// with the group's or the hook's place, the settings file and the cause.
+const (
+	textGroupShape = "Fix `hooks.%s[%d]` in `settings/codex/%s`.\n  %s, and Codex reads no hook of a file with such a group."
+	textHookShape  = "Fix `hooks.%s[%d].hooks[%d]` in `settings/codex/%s`.\n  %s, and Codex reads no hook of a file with such a hook."
+)
+
+// checkHookShapes refuses hooks, the hooks table of the harness's config.toml or
+// hooks.json, file, when a group or a hook of one of [hookEvents] does not decode as Codex
+// 0.169.0 decodes it (codex-rs/protocol/src/hooks.rs, MatcherGroup and
+// HookHandlerConfig): Codex then reads no hook of the file
+// (codex-rs/hooks/src/engine/discovery.rs, load_hooks_json and
+// load_toml_hooks_from_layer). An event's value is a list of groups; a group is a table
+// whose matcher, when set, is text and whose hooks, when set, is a list; a hook is a table
+// whose type is command, with command as text, mcp_tool, with server and tool as text, prompt
+// or agent, and whose other keys of that type have the type Codex reads. Codex ignores a key
+// it does not know, and so does this check. It names the first fault, by event in the order
+// of [hookEvents], then by place.
+func checkHookShapes(file string, hooks map[string]any) error {
+	for _, event := range hookEvents {
+		v, ok := hooks[event]
+		if !ok {
+			continue
+		}
+		groups, ok := listOf(v)
+		if !ok {
+			return fmt.Errorf(textHookGroups, file, event)
+		}
+		for i, g := range groups {
+			group, ok := g.(map[string]any)
+			if !ok {
+				return fmt.Errorf(textGroupShape, event, i, file, "It is no table of keys")
+			}
+			if m, ok := group["matcher"]; ok && m != nil {
+				if _, text := m.(string); !text {
+					return fmt.Errorf(textGroupShape, event, i, file, "Its `matcher` is no text")
+				}
+			}
+			h, ok := group["hooks"]
+			if !ok {
+				continue
+			}
+			handlers, ok := listOf(h)
+			if !ok {
+				return fmt.Errorf(textGroupShape, event, i, file, "Its `hooks` is no list")
+			}
+			for j, h := range handlers {
+				if cause := hookFault(h); cause != "" {
+					return fmt.Errorf(textHookShape, event, i, j, file, cause)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// listOf is v as a list, as JSON and TOML decode one: a list of values, or a list of
+// tables for TOML's arrays of tables.
+func listOf(v any) ([]any, bool) {
+	switch l := v.(type) {
+	case []any:
+		return l, true
+	case []map[string]any:
+		out := make([]any, len(l))
+		for i, m := range l {
+			out[i] = m
+		}
+		return out, true
+	}
+	return nil, false
+}
+
+// hookFault is why Codex 0.169.0 cannot decode h, one hook of a group, see
+// [checkHookShapes]; "" when it can. A key that Codex reads as optional may be null.
+func hookFault(h any) string {
+	hook, ok := h.(map[string]any)
+	if !ok {
+		return "It is no table of keys"
+	}
+	text := func(key string, required bool) string {
+		v, ok := hook[key]
+		if !ok || v == nil {
+			if required {
+				return "It has no `" + key + "` text"
+			}
+			return ""
+		}
+		if _, ok := v.(string); !ok {
+			return "Its `" + key + "` is no text"
+		}
+		return ""
+	}
+	number := func(key string) string {
+		if v, ok := hook[key]; ok && v != nil && !unsigned(v) {
+			return "Its `" + key + "` is no whole number of 0 or more"
+		}
+		return ""
+	}
+	kind, _ := hook["type"].(string)
+	var faults []string
+	switch kind {
+	case "command":
+		faults = append(faults, text("command", true), text("commandWindows", false), text("command_windows", false))
+		if _, a := hook["commandWindows"]; a {
+			if _, b := hook["command_windows"]; b {
+				faults = append(faults, "It sets both `commandWindows` and `command_windows`")
+			}
+		}
+		faults = append(faults, number("timeout"), number("additionalContextLimit"), text("statusMessage", false))
+		if v, ok := hook["async"]; ok {
+			if _, ok := v.(bool); !ok {
+				faults = append(faults, "Its `async` is neither true nor false")
+			}
+		}
+	case "mcp_tool":
+		faults = append(faults, text("server", true), text("tool", true), number("timeout"), text("statusMessage", false))
+		if v, ok := hook["input"]; ok {
+			if input, ok := v.(map[string]any); !ok {
+				faults = append(faults, "Its `input` is no table of keys")
+			} else if !inTOML(input) {
+				faults = append(faults, "Its `input` contains a null or a whole number above 2^63-1")
+			}
+		}
+	case "prompt", "agent":
+	default:
+		return "Its `type` is none of command, mcp_tool, prompt and agent"
+	}
+	for _, f := range faults {
+		if f != "" {
+			return f
+		}
+	}
+	return ""
+}
+
+// unsigned reports whether v, a decoded settings value, is a whole number from 0 to
+// 2^64-1, which Codex reads as an unsigned number.
+func unsigned(v any) bool {
+	switch n := v.(type) {
+	case json.Number:
+		_, err := strconv.ParseUint(string(n), 10, 64)
+		return err == nil
+	case int64:
+		return n >= 0
+	case int:
+		return n >= 0
+	case float64:
+		return n >= 0 && n == math.Trunc(n) && n < math.Exp2(64)
+	}
+	return false
+}
+
+// inTOML reports whether v, the input of an mcp_tool hook, has no null and no whole
+// number above 2^63-1 at any depth: Codex 0.169.0 refuses such an input, since TOML has
+// neither (codex-rs/protocol/src/hooks.rs, deserialize_mcp_tool_input).
+func inTOML(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return false
+	case json.Number:
+		// A number with a fraction or an exponent, or out of range of both, is a float.
+		if _, err := strconv.ParseInt(string(x), 10, 64); err == nil || strings.ContainsAny(string(x), ".eE") {
+			return true
+		}
+		_, err := strconv.ParseUint(string(x), 10, 64)
+		return err != nil
+	case float64:
+		return x != math.Trunc(x) || x < math.Exp2(63)
+	case uint64:
+		return x <= math.MaxInt64
+	case map[string]any:
+		for _, e := range x {
+			if !inTOML(e) {
+				return false
+			}
+		}
+	case []any:
+		for _, e := range x {
+			if !inTOML(e) {
+				return false
+			}
+		}
+	case []map[string]any:
+		for _, e := range x {
+			if !inTOML(e) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // exactJSON decodes a hooks.json fragment with every number as written, a json.Number,
