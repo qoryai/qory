@@ -733,8 +733,8 @@ release may change what an existing document does, and states it under Upgrading
   expected commit or delete it` and the branch, the head and the expected commit on the next
   line. To go on, do one of the two, then take the work item in again. Moving the branch back
   works when the `Expected:` line shows `the start commit`; with `this run's last
-  push` it works only when Qory Apiary recorded that push, and otherwise the next run refuses
-  again, so delete the branch. Line 3 of the text is the loss: either way, the commits on the
+  push` it works only when Qory Apiary recorded that push, and otherwise the next run stops at the head
+  check again, so delete the branch. Line 3 of the text is the loss: either way, the commits on the
   branch that no version has are lost. A branch that is not on the forge cannot be deleted: its
   refusal starts with `Create the branch at the expected commit on the forge`, has
   `Head: none`, and has the `git push` command that creates the branch. The next run creates

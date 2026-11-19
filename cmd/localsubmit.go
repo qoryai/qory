@@ -26,7 +26,7 @@ import (
 const (
 	textPushChecksMissing = "qory run: Push each branch by hand: the key and scope push checks of qory run are not registered.\n  qory pushed nothing and opened no draft; open each draft by hand if you want one."
 	textPushChecksBranch  = "\n  Branch: %s in %s."
-	textPushRefused       = "qory run: Fix the cause below, then run again: a push check refused the push.\n  qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
+	textPushCheckStopped       = "qory run: Fix the cause below, then run again: a push check stopped the push.\n  qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalPushFailed   = "qory run: Fix the cause below, then run again: the push failed, so qory opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalNoHistory    = "qory run: Fix the cause below, then run again: qory could not read the branch or its origin.\n  qory pushed nothing and opened no draft.\n  Branch: %s.\n  Cause: %s"
 	textLocalNoCommits    = "qory run: Open a draft by hand if you want one: qory pushed the branch but could not list commits.\n  qory ran no program for that repository, so it opened no draft for it.\n  Branch: %s in %s.\n  Cause: %s"
@@ -36,7 +36,7 @@ const (
 )
 
 // localPushCheck is a check of a push that a local run makes: it gets the repository and the
-// branch about to be pushed, and an error refuses the push. The check for keys in the commits and
+// branch about to be pushed, and an error stops the push. The check for keys in the commits and
 // the check for changes to files that a session may not change are registered with
 // [registerPushCheck].
 type localPushCheck func(ctx context.Context, repo localRepository) error
@@ -96,7 +96,7 @@ var localPushConfig = func(address string) []string { return nil }
 // person's git configuration, and then runs the submit program of the composed harness once for
 // each pushed repository. passed is whether the session ended with exit 0. The program opens a
 // draft only for a passed session with a hand-off text, and gets the draft none otherwise. A check
-// that refuses ends the step before any push, and a push that fails leaves its repository out of
+// that returns an error ends the step before any push, and a push that fails leaves its repository out of
 // the program. Each line goes to w. It returns the address of each draft that a program returned,
 // in the order of the repositories.
 func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitProgram, passed bool) (drafts []string) {
@@ -138,7 +138,7 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 			return nil
 		}
 		if err := preparation.HandoffCommitted(ctx, repo.Dir, repo.System, repo.Path, repo.Start, repo.Head); err != nil {
-			// The refusal is a line with its cause and the values on indented lines.
+			// The text is a line with its cause and the values on indented lines.
 			for line := range strings.SplitSeq(err.Error(), "\n") {
 				fmt.Fprintln(w, shownErrorText(line))
 			}
@@ -146,7 +146,7 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 		}
 		for _, check := range checks {
 			if err := check(ctx, repo); err != nil {
-				fmt.Fprintf(w, textPushRefused+"\n", shownText(repo.Branch), shownError(err))
+				fmt.Fprintf(w, textPushCheckStopped+"\n", shownText(repo.Branch), shownError(err))
 				return nil
 			}
 		}
@@ -324,8 +324,8 @@ var forgeHost = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a
 var forgePath = regexp.MustCompile(`^[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)+$`)
 
 // remoteSystemPath is the host and the repository path of a git remote address of a forge:
-// https://host/a/b.git, http, ssh and git with a host, and git@host:a/b. It refuses any other
-// scheme, such as file or ext, an address with no host, and a host or path that is not one of a
+// https://host/a/b.git, http, ssh and git with a host, and git@host:a/b. It returns an error for any
+// other scheme, such as file or ext, an address with no host, and a host or path that is not one of a
 // forge, so the checks and the program never get a system such as file.
 func remoteSystemPath(remote string) (system, path string, ok bool) {
 	if strings.Contains(remote, "://") {

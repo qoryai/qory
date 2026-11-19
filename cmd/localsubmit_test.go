@@ -196,7 +196,7 @@ func TestALocalRunWithARefusingCheckPushesNothing(t *testing.T) {
 	if n := timesStarted(t, started); n != 0 {
 		t.Errorf("the program started %d times, want 0", n)
 	}
-	wants(t, out, "qory run: Fix the cause below, then run again: a push check refused the push.\n  qory pushed nothing and opened no draft.")
+	wants(t, out, "qory run: Fix the cause below, then run again: a push check stopped the push.\n  qory pushed nothing and opened no draft.")
 	wants(t, out, "a key is in a commit")
 }
 
@@ -897,7 +897,7 @@ func TestARunWithARunKeyAndNoRunCodeNeverPushesLocally(t *testing.T) {
 	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 || *calls != 0 {
 		t.Errorf("pushed %q, started %d programs and ran %d checks, want none\n%s", got, timesStarted(t, started), *calls, out)
 	}
-	for _, line := range []string{"Draft: ", "qory pushed nothing", "the push failed, so qory opened no draft", "a push check refused the push"} {
+	for _, line := range []string{"Draft: ", "qory pushed nothing", "the push failed, so qory opened no draft", "a push check stopped the push"} {
 		if strings.Contains(out, line) {
 			t.Errorf("the output has %q:\n%s", line, out)
 		}

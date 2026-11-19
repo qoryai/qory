@@ -2855,7 +2855,7 @@ delete the branch, or move it back to the commit that the second line of the ref
 after `Expected:`. Both lose the commits on the branch that no version has. Moving it back works
 when the `Expected:` line shows `the start commit`. When it shows `this run's last
 push`, the next run starts at the newest push that Qory Apiary recorded: moving the branch
-back works only when Apiary recorded that push, and otherwise the next run refuses again,
+back works only when Apiary recorded that push, and otherwise the next run stops at the head check again,
 so delete the branch. A branch that is not on the forge, with `Head: none`, cannot be deleted:
 the refusal starts with `Create the branch at the expected commit on the forge; it is not
 there.` and has the `git push` command that creates it. It occurs when the work item has a
@@ -3035,7 +3035,7 @@ in the checkout. The file is JSON:
 ```
 
 The file is in the checkout, where the session's work is and qory reads it: the home, the
-record and the inputs are mounted read-only, and a pool refuses `wall.mounts`. The session can
+record and the inputs are mounted read-only, and a pool does not allow `wall.mounts`. The session can
 also write the run's transcript folder, which Forager binds and qory does not read, and a run
 outside a pool can write a `--mount` that is not read-only. qory adds the line `/.qory/handoff/` to the checkout's `.git/info/exclude` once
 before the session starts, with the line `/.qory` that the compose adds. That file is local
@@ -3168,8 +3168,8 @@ code. A session that did not pass, or that wrote no hand-off text, gets the draf
 
 Two push checks must be registered by name before qory pushes: `key` (a key or a secret value in
 the run's commits) and `scope` (a change to a file that the session may not change). If one
-refuses, qory pushes nothing and runs no program, and prints `qory run: Fix the cause below, then run
-again: a push check refused the push.`, then `qory pushed nothing and opened no draft.`,
+fails, qory pushes nothing and runs no program, and prints `qory run: Fix the cause below, then run
+again: a push check stopped the push.`, then `qory pushed nothing and opened no draft.`,
 `Branch: <branch>.` and `Cause: <cause>` on lines indented by two spaces. A push that fails prints `qory run: Fix the cause below, then run
 again: the push failed, so qory opened no draft.` and leaves that repository out of the program.
 
