@@ -2169,22 +2169,22 @@ A run stops before the agent starts when:
 Each of these lines stops the run, exit 1. `<c>` is a commit's first 12 characters, and
 `<git line>` is the line that git wrote:
 
-- `Version <n> of the artifact branch has a ref other than <ref>, so the run did not start;
-  the code is used`
-- `Version <n> of the artifact branch does not have exactly one file of at most 65536
+- `Version <n> of the artifact submission has a ref other than <ref>, so the run did not
+  start; the code is used`
+- `Version <n> of the artifact submission does not have exactly one file of at most 262144
   bytes, so the run did not start; the code is used`
-- `Version <n> of the artifact branch does not match the branch format, so the run did not
-  start: <cause>; the code is used`
-- `The stored version of the artifact branch has commit <c>, which is not a commit on
-  <path> on <system>, so the run did not start; the code is used`, then a line indented by
-  two spaces: `The fetch through the run's gateway failed: <git line>`
-- `The stored version of the artifact branch has <value> for <path>, which is not a commit,
-  so the run did not start; the code is used`
+- `Version <n> of the artifact submission does not match the submission format, so the run
+  did not start: <cause>; the code is used`
+- `The stored version of the artifact submission has commit <c>, which is not a commit on
+  <path> on <system>, so the run did not start; the code is used`, then a line indented
+  by two spaces: `The fetch through the run's gateway failed: <git line>`
+- `The stored version of the artifact submission has <value> for <path>, which is not a
+  commit, so the run did not start; the code is used`
 - `Commit <c> of <ref> has a .qory folder that differs from the one at target version <c>,
   so the run did not start; the code is used`, then the line `qory keeps the files of the
   run in .qory.` indented by two spaces
-- `git cannot check out commit <c> of <ref>, the stored version of the artifact branch, so
-  the run did not start; the code is used`, then a line indented by two spaces: `The
+- `git cannot check out commit <c> of <ref>, the stored version of the artifact submission,
+  so the run did not start; the code is used`, then a line indented by two spaces: `The
   checkout in <path> failed: <git line>`
 
 An instance without the feature `workflow_model` returns 404 with no error code to the run
