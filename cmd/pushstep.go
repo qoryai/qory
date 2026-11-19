@@ -316,9 +316,9 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		case repositories == nil:
 			return nil
 		}
-		// Every pushing session stores a version, with the verdict none when it wrote none. Until
-		// reviewer runs exist (Q-35), such a session is the whole review round; Q-35 moves this
-		// call to the end of the round.
+		// Every pushing session stores a version, with the verdict none when it wrote none.
+		// shortcut: a version is stored after every pushing session, replace it when Q-35b moves
+		// the call to the end of the round.
 		verdict, err := newestVerdict(ctx, client, runID)
 		if err != nil {
 			return &runLineError{fmt.Errorf(textNotStored, branch.DeleteBranch(), branch.Ref, shownError(err))}
