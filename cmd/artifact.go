@@ -23,6 +23,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/checkout"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/verdictformat"
@@ -97,9 +98,9 @@ type noWorkItemError struct{}
 // Error returns the line for the person.
 func (noWorkItemError) Error() string { return noWorkItemText }
 
-// artifactRefused reports whether err is a run API error for a type or a limit, for a
-// push check that did not pass, a refused withdrawal ([withdrawRefusedError]), or a
-// refused verdict ([verdictRefusedError]).
+// artifactRefused reports whether err is a run API error for a type, a limit or a
+// decision ([decisionRefusedError]), for a push check that did not pass, a refused
+// withdrawal ([withdrawRefusedError]), or a refused verdict ([verdictRefusedError]).
 // [ExitCode] maps it to [ExitArtifactRefused].
 func artifactRefused(err error) bool {
 	var refused withdrawRefusedError
@@ -110,7 +111,7 @@ func artifactRefused(err error) bool {
 
 	for _, code := range []string{
 		runapi.CodeUnknownType, runapi.CodeTooManyFiles, runapi.CodeTooLarge,
-		runapi.CodePayloadTooLarge, runapi.CodePushCheckFailed,
+		runapi.CodePayloadTooLarge, runapi.CodePushCheckFailed, runapi.CodeUnknownDecision,
 	} {
 		if runapi.HasCode(err, code) {
 			return true
@@ -472,7 +473,7 @@ func withdrawn(artifact runapi.Artifact) bool {
 }
 
 func newArtifactPush() *cobra.Command {
-	var name, note string
+	var name, note, decision string
 
 	var withdraw bool
 
@@ -504,14 +505,21 @@ that push, Qory Apiary reads the template's artifact types and refuses it with 4
 qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with that refusal. Outside a run, qory refuses those types itself, reads the
 template from the factory modules that the checkout exports, and has no approvals to read.
 
+--decision sends the id of the person's note that asked for this version, such as
+gd_01jc4t9…, from the notes that qory work-item show prints: a request for changes, a move
+or an escalation. Later runs read this version in place of the approved one, and the next
+approval by a person lists it. A withdrawal takes --decision too. qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with a
+fix line when the id is not the id of a person's note on the run's work item.
+
 Outside a run, qory keeps the files, or the record of a withdrawal, in .qory/artifacts and
-sends nothing.
+sends nothing. The store keeps no note and no decision.
 
 --verbose adds nothing here.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-item`,
 		Example: `  qory artifact push screenshot shots/checkout.png --name checkout --note "After the fix."
   qory artifact push walkthrough -               # read one file from standard input
+  qory artifact push screenshot shots/checkout.png --name checkout --decision gd_01jc4t9k2m8x5q7w
   qory artifact push demo-script --name scenario-2 --withdraw --note "demo-scenarios v3 removed scenario-2."`,
 		Args: func(c *cobra.Command, args []string) error {
 			if withdraw {
@@ -536,7 +544,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 			}
 
 			if withdraw {
-				return withdrawArtifact(c, runapi.Push{Type: artifactType, Name: name, Note: note, Withdraw: true}, files)
+				return withdrawArtifact(c, runapi.Push{Type: artifactType, Name: name, Note: note, Decision: decision, Withdraw: true}, files)
 			}
 
 			sources, err := readPushSources(c, files)
@@ -553,11 +561,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 				return keepPush(c, artifactType, name, sources)
 			}
 
-			return sendPush(c, client, runapi.Push{Type: artifactType, Name: name, Note: note}, sources)
+			return sendPush(c, client, runapi.Push{Type: artifactType, Name: name, Note: note, Decision: decision}, sources)
 		},
 	}
 	c.Flags().StringVar(&name, "name", "", "the artifact's name, for several artifacts of one type (default main; in a run, only main for questions and review-comments)")
 	c.Flags().StringVar(&note, "note", "", "a note on this version, for a person to read")
+	c.Flags().StringVar(&decision, "decision", "", "the id of the person's note that asked for this version, from qory work-item show")
 	c.Flags().BoolVar(&withdraw, "withdraw", false, "store a version of <type>/<name> with no files, which withdraws the name")
 
 	return c
@@ -725,7 +734,7 @@ func sendPush(c *cobra.Command, client *runapi.Client, push runapi.Push, sources
 }
 
 // postVersion sends push to the run API. A run API with no work item for the run is
-// [noWorkItemInRunText].
+// [noWorkItemInRunText], and a 422 unknown_decision is a [decisionRefusedError].
 func postVersion(ctx context.Context, client *runapi.Client, push runapi.Push) (*runapi.Pushed, error) {
 	pushed, err := client.PushArtifact(ctx, push)
 	// A not_found with a message comes from the gateway's route, and never reached Qory Apiary.
@@ -734,8 +743,38 @@ func postVersion(ctx context.Context, client *runapi.Client, push runapi.Push) (
 		return nil, errors.New(noWorkItemInRunText)
 	}
 
+	if errors.As(err, &apiError) && apiError.Code == runapi.CodeUnknownDecision {
+		// A value with a key's or a code's prefix, such as qrk_, prints as a phrase; any
+		// other value prints quoted and cut to 40 characters.
+		shown := exports.Value(push.Decision, false)
+		if shown == push.Decision {
+			shown = shortValue(push.Decision)
+		}
+
+		return nil, decisionRefusedError{fmt.Sprintf(textDecisionRefused, shown), err}
+	}
+
 	return pushed, err
 }
+
+// textDecisionRefused is the text of a push for which the run API returns 422
+// unknown_decision, with the value of --decision. The run API's line names the request's
+// member, not the flag, so qory words the text itself.
+const textDecisionRefused = "Set --decision to the id of a person's note on this work item, or drop the flag.\n" +
+	"  %s is not such an id. qory work-item show prints the open notes with their ids."
+
+// decisionRefusedError is a push for which the run API returns 422 unknown_decision.
+// [ExitCode] gives it [ExitArtifactRefused]. It unwraps to the run API's error.
+type decisionRefusedError struct {
+	text string
+	err  error
+}
+
+// Error returns the line for the person.
+func (e decisionRefusedError) Error() string { return e.text }
+
+// Unwrap returns the run API's error.
+func (e decisionRefusedError) Unwrap() error { return e.err }
 
 // keepPush keeps the version in the store, outside a run. Standard input has no limit
 // there, but qory reads it only up to [runapi.MaxBody], so longer input stops the push.
