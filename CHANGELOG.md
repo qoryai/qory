@@ -719,10 +719,9 @@ release may change what an existing document does, and states it under Upgrading
   `Branch: <branch> in <folder>.` line for each repository with commits. A remote with
   several push addresses gets `qory run: Remove the extra push addresses of remote origin, so
   it has one.`, how to list the configured addresses with the file of each, how to remove
-  the `pushurl` values of the repository file (`git config --unset-all
-  remote.origin.pushurl`), the global file (`--global`) and the system file (`--system`), a
-  hand edit for an included file, and `git remote set-url --push origin <address>`. A push that landed,
-  followed by a failure to list the run's commits, gets `qory run: Open a draft by hand if
+  the `pushurl` values of each file that `--show-origin` shows (`git config --file <file>
+  --unset-all remote.origin.pushurl`), and `git remote set-url --push origin <address>`. A
+  push that landed, followed by a failure to list the run's commits, gets `qory run: Open a draft by hand if
   you want one: qory pushed the branch but could not list commits.`, and the next line is
   that qory ran no program for that repository. A second run does the work again on a new
   branch. See The submit program in `docs/run.md`.
