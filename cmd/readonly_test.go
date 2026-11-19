@@ -831,20 +831,21 @@ func checkRemovalStopped(t *testing.T, r codeRun, out session.Outcome, code int)
 	}
 }
 
-// TestATimeLimitDuringTheSetupContainersRemovalEndsAsInASetup is a read run whose time
-// limit, the documents' time_limit_minutes, ends while RemoveSetup runs: RemoveSetup's context ends at the limit, and the run
-// takes the path of a setup that the limit cut short: cancelled with timeout, exit 124,
-// and the line of the time limit, with no read_needs_setup_removed.
-func TestATimeLimitDuringTheSetupContainersRemovalEndsAsInASetup(t *testing.T) {
+// TestASetupLimitDuringTheSetupContainersRemovalEndsAsInASetup is a read run whose setup's
+// limit, made 15s here, ends while RemoveSetup runs: RemoveSetup's context ends at the
+// limit, and the run takes the path of a setup that the limit cut short: cancelled with
+// timeout, exit 124, and the line of the setup's limit, which names the removal, with no
+// read_needs_setup_removed. The session's time limit of 1h does not change it.
+func TestASetupLimitDuringTheSetupContainersRemovalEndsAsInASetup(t *testing.T) {
 	listsRepositories(t)
 	removesSetupWith(t, func(ctx context.Context) error {
 		<-ctx.Done()
 		return fmt.Errorf("the removal stopped: %w", ctx.Err())
 	})
-	defer cmd.SetSessionMinute(time.Second)()
-	r, _ := readRunDocuments(t, nil, func(s string) string { return s + "workflows:\n  hello: {}\n" }, func(d map[string]any) { d["time_limit_minutes"] = 15 }, readImage, "")
+	defer cmd.SetSetupLimit(15 * time.Second)()
+	r, _ := readRunDocuments(t, nil, func(s string) string { return s + "workflows:\n  hello: {}\n" }, func(d map[string]any) { d["time_limit_minutes"] = 60 }, readImage, "")
 	checkRemovalStopped(t, r, session.Outcome{State: "cancelled", Reason: "timeout", ExitCode: 124}, 124)
-	wants(t, r.out+r.err.Error(), "✗ set a longer Time limit for the run's workflow on the Workflows page in Qory Apiary\n  the run of the workflow hello was cancelled at its time limit of 15s, before ")
+	wants(t, r.out+r.err.Error(), "✗ the run was cancelled during the removal of the setup container:\n  the steps before ")
 	lacks(t, r.out+r.err.Error(), "read_needs_setup_removed")
 }
 
