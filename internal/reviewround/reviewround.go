@@ -412,13 +412,16 @@ func (n *numbering) fresh() string {
 	}
 }
 
-// JSON is open-findings.json for o.
+// JSON is open-findings.json for o, with <, > and & as they are, not as \u escapes.
 func (o OpenFindings) JSON() ([]byte, error) {
-	data, err := json.MarshalIndent(o, "", "  ")
-	if err != nil {
+	var b bytes.Buffer
+	encoder := json.NewEncoder(&b)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(o); err != nil {
 		return nil, err
 	}
-	return append(data, '\n'), nil
+	return b.Bytes(), nil
 }
 
 // ReadOpenFindings reads data, an open-findings.json that qory wrote, with the checks that

@@ -169,6 +169,9 @@ func TestABlockingFindingRequestsChangesWithEveryOpenFinding(t *testing.T) {
 	if d.Open.Round != 1 || d.NextID != 4 {
 		t.Errorf("round %d, next id %d", d.Open.Round, d.NextID)
 	}
+	if data, _ := d.Open.JSON(); !bytes.Contains(data, []byte(`"quote": "if count >= limit {"`)) {
+		t.Errorf("open-findings.json escapes the quote:\n%s", data)
+	}
 	kept := d.Open.Reviewers[0].Findings[0]
 	if kept.Quote != "if count >= limit {" || kept.File != "internal/batch/batch.go" || kept.Line != 12 ||
 		!strings.HasPrefix(kept.Proof, "failing check:") {
