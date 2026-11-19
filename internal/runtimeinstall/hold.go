@@ -186,14 +186,14 @@ func openLock(path string) (*os.File, error) {
 }
 
 // cleanup removes, of the folder's direct entries, each version's folder older than
-// newest, each temporary entry, each install lock, and each hold file with no version's
-// folder, that no run holds. newest is the version the run installs, which is below the
-// newest release when a stack pins it. A version's folder is removed only when it has
-// the shape that an install makes, [folder.installed]. It reads entries without
-// following a link, and removes no link, and no entry whose name is not a version's or
-// does not start with a temporary prefix, installLockPrefix or holdPrefix. The caller
-// has the folder's lock.
-func (f folder) cleanup(newest string) {
+// current, each temporary entry, each install lock, and each hold file with no version's
+// folder, that no run holds. current is the version the run installs: the newest
+// release, or the version a stack pins, which may be below, equal to or above the newest
+// release. A version's folder is removed only when it has the shape that an install
+// makes, [folder.installed]. It reads entries without following a link, and removes no
+// link, and no entry whose name is not a version's or does not start with a temporary
+// prefix, installLockPrefix or holdPrefix. The caller has the folder's lock.
+func (f folder) cleanup(current string) {
 	entries, err := os.ReadDir(f.base)
 	if err != nil {
 		return
@@ -219,7 +219,7 @@ func (f folder) cleanup(newest string) {
 			}
 			f.unheld(version, func() { removeIf(path, fs.FileMode(0), os.Remove) })
 		case versionShape.MatchString(name):
-			if c, ok := compareVersions(name, newest); !ok || c >= 0 || !f.installed(path) {
+			if c, ok := compareVersions(name, current); !ok || c >= 0 || !f.installed(path) {
 				continue
 			}
 			if f.mounted != nil {

@@ -38,7 +38,7 @@
         "type": "object",
         "required": ["version"],
         "additionalProperties": false,
-        "properties": {"version": {"description": "An exact version: a digit, then up to 63 letters, digits, ., + or -. latest is not one.", "type": "string", "pattern": "^[0-9][0-9A-Za-z.+-]{0,63}$"}}
+        "properties": {"version": {"description": "An exact version: a digit, then up to 63 letters, digits, . or -. latest is not one.", "type": "string", "pattern": "^[0-9][0-9A-Za-z.-]{0,63}$"}}
       }
     },
     "workflows": {

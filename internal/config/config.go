@@ -628,8 +628,8 @@ func closedAtRoot(path string) error {
 // composeIn returns the one document dir holds for a compose, "" for none, and an error
 // for both. With owned, dir is an ancestor's, a file the current user does not own does
 // not count, and a qory.yaml whose harness section pins a runtime is refused, as
-// [Config.apply] refuses it. A qory.yaml
-// that cannot be read is that error, so a mistake in it is reported where it is.
+// [Config.apply] refuses it. A qory.yaml that cannot be read is that error, so a mistake
+// in it is reported where it is.
 func composeIn(dir string, owned bool) (string, error) {
 	var found []string
 	if path := filepath.Join(dir, stack.FileName); exists(path) && (!owned || ownedFile(path)) {
@@ -783,8 +783,8 @@ func pinOutsideCheckout(path string) error {
 // other harness keys, git and env are the machine's and left out. With root, the file is
 // the checkout root's, and its tiers are the repository's map; any other file's are the
 // machine's. Only the checkout root's file pins a runtime's version: harness.runtimes in
-// any other file is refused. A refusal prints a value the file sets as [exports.Value] prints it, and a
-// variable's or a tier's name as [accesskey.ShownName] prints it.
+// any other file is refused. A refusal prints a value the file sets as [exports.Value]
+// prints it, and a variable's or a tier's name as [accesskey.ShownName] prints it.
 func (c *Config) apply(path string, machine, root bool) (file, error) {
 	f, err := read(path)
 	if err != nil {

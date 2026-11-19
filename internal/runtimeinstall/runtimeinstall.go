@@ -2,7 +2,7 @@
 // run's first session, from the publisher's npm tarball: from the runtime cache of the
 // instance's registry, [RegistryFetch], or from npm, [NpmFetch].
 //
-// [Install] asks its [Fetch] for a release of the runtime, the version that
+// [Install] calls [Fetch] for a release of the runtime, the version that
 // [Options.Version] pins, or else the newest: the version, npm's sha512 checksum of the
 // tarball, and a way to open the tarball. It takes the run's hold of the version, which
 // keeps the version's folder until the run ends, and removes the older versions' folders
@@ -50,25 +50,29 @@ var (
 	// first a letter or a digit, so the version is one folder name and never . or ..;
 	// Forager takes 1 to 64 of the same characters.
 	versionShape = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$`)
+	// pinShape is a version a stack may pin: a digit, then up to 63 letters, digits, . or
+	// -. It has no +, which an OCI tag, the registry's tag <version>, does not allow.
+	pinShape = regexp.MustCompile(`^[0-9][0-9A-Za-z.-]{0,63}$`)
 	// runtimeShape is a runtime's name, as Forager's descriptor schema has it.
 	runtimeShape = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 	// digestShape is a sha256 digest.
 	digestShape = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
 
-// ValidVersion reports whether v is a version a stack may pin: the shape of a version
-// that Install takes, with a digit first, so that a dist-tag such as latest is not one.
+// ValidVersion reports whether v is a version a stack may pin, [pinShape]: a digit
+// first, so that a dist-tag such as latest is not one, and no +.
 func ValidVersion(v string) bool {
-	return v != "" && v[0] >= '0' && v[0] <= '9' && versionShape.MatchString(v)
+	return pinShape.MatchString(v)
 }
 
 // NotPublishedError is the error of a [Fetch] whose source has no release of Runtime at
 // the pinned Version: npm returned 404 for the version's document, or the registry's
-// runtime cache returned 404 for the version's tag.
+// runtime cache returned 404 for the version's tag. Its text is the cause alone: the
+// caller adds the fix, with the file that pins the version.
 type NotPublishedError struct{ Runtime, Version string }
 
 func (e *NotPublishedError) Error() string {
-	return fmt.Sprintf("Pin a version of %s that the registry has\nThe registry has no %s %s.", e.Runtime, e.Runtime, e.Version)
+	return fmt.Sprintf("the registry has no %s %s", e.Runtime, e.Version)
 }
 
 // checkError is an error of a release's tarball reader whose text starts with its fix,
@@ -128,7 +132,7 @@ func layout(runtime, arch string) (program, folder string) {
 
 // Fetch returns the release of the runtime at version, or the newest release when
 // version is "". A version the source does not have is a [*NotPublishedError]. Every
-// error's text starts with what to fix: Install returns it as it is.
+// other error's text starts with what to fix: Install returns it as it is.
 type Fetch func(ctx context.Context, runtime, version string) (Release, error)
 
 // Options are what [Install] installs, and where from.
@@ -198,7 +202,7 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 	}
 	if o.Version != "" && !ValidVersion(o.Version) {
 		return Installed{}, fmt.Errorf("Pin an exact version of %s, such as 2.1.320\n"+
-			"The pinned version is %q, and an exact version starts with a digit, followed by up to 63 letters, digits, ., + or -.", o.Runtime, o.Version)
+			"The pinned version is %q, and an exact version starts with a digit, followed by up to 63 letters, digits, . or -.", o.Runtime, o.Version)
 	}
 	if o.Progress != nil {
 		ctx = context.WithValue(ctx, progressKey{}, o.Progress)

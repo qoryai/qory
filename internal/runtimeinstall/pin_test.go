@@ -102,7 +102,7 @@ func TestAPinnedVersionInstallsThatVersion(t *testing.T) {
 
 // TestAPinnedVersionTheRegistryDoesNotHaveIsNotPublished pins claude and codex to 9.9.9,
 // which neither npm nor the registry's runtime cache has: the install returns a
-// *NotPublishedError of the runtime and the version, its fix first.
+// *NotPublishedError of the runtime and the version, whose text is the cause alone.
 func TestAPinnedVersionTheRegistryDoesNotHaveIsNotPublished(t *testing.T) {
 	for _, s := range pinSources() {
 		t.Run(s.name, func(t *testing.T) {
@@ -114,7 +114,7 @@ func TestAPinnedVersionTheRegistryDoesNotHaveIsNotPublished(t *testing.T) {
 			if !errors.As(err, &missing) || missing.Runtime != s.runtime || missing.Version != "9.9.9" {
 				t.Fatalf("the install returned %v, want a NotPublishedError of %s 9.9.9", err, s.runtime)
 			}
-			want := "Pin a version of " + s.runtime + " that the registry has\nThe registry has no " + s.runtime + " 9.9.9."
+			want := "the registry has no " + s.runtime + " 9.9.9"
 			if err.Error() != want {
 				t.Fatalf("the error is %q, want %q", err, want)
 			}
@@ -176,10 +176,10 @@ func TestOnlyA404MakesAPinNotPublished(t *testing.T) {
 }
 
 // TestInstallRefusesAPinThatIsNotAnExactVersion pins versions that are not exact: a
-// dist-tag, a path, and a first character that is not a digit. Install refuses each
-// before it fetches.
+// dist-tag, a path, a first character that is not a digit, and a +, which no OCI tag
+// has. Install refuses each before it fetches.
 func TestInstallRefusesAPinThatIsNotAnExactVersion(t *testing.T) {
-	for _, pin := range []string{"latest", "newest", "../2.1.320", "-1", "2.1.320/x"} {
+	for _, pin := range []string{"latest", "newest", "../2.1.320", "-1", "2.1.320/x", "1.0.0+build.1"} {
 		t.Run(pin, func(t *testing.T) {
 			src := &rt.Source{}
 			src.Publish("2.1.320", rt.PlainTarball(t, "2.1.320"))
@@ -208,10 +208,10 @@ func TestInstallRefusesAReleaseThatIsNotThePin(t *testing.T) {
 }
 
 // TestValidVersion takes an exact version, a digit first, and refuses a dist-tag, an
-// empty version, a path and a version of more than 64 characters.
+// empty version, a path, a version with + and a version of more than 64 characters.
 func TestValidVersion(t *testing.T) {
 	for v, want := range map[string]bool{
-		"2.1.320": true, "0.167.2": true, "0.99.0-alpha.20": true, "1.0.0+build.1": true,
+		"2.1.320": true, "0.167.2": true, "0.99.0-alpha.20": true, "1.0.0+build.1": false,
 		"latest": false, "": false, "v1.0.0": false, "../1": false, "1/2": false,
 		"1" + strings.Repeat("0", 63): true, "1" + strings.Repeat("0", 64): false,
 	} {

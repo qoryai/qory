@@ -491,6 +491,46 @@ type RuntimePin struct {
 	// From is the absolute path of the file that sets the pin. It is set as the stack is
 	// validated.
 	From string `yaml:"-"`
+	// number is whether the file writes version as a YAML number, such as 2.1, which the
+	// decoder reads into Version as the string 2.1. Set by [RuntimePin.UnmarshalYAML].
+	number bool
+}
+
+// UnmarshalYAML reads an entry of runtimes and records in number whether version is a
+// YAML number. A key a pin does not have is reported as the decoder reports an unknown
+// field, since the decode of the entry here does not check its keys.
+func (r *RuntimePin) UnmarshalYAML(n *yaml.Node) error {
+	type plain RuntimePin
+	var unknown []string
+	number := false
+	if n.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			key, value := n.Content[i], n.Content[i+1]
+			switch {
+			case key.Value != "version":
+				unknown = append(unknown, fmt.Sprintf("line %d: field %s not found in type stack.RuntimePin", key.Line, key.Value))
+			case value.Kind == yaml.ScalarNode && (value.ShortTag() == "!!int" || value.ShortTag() == "!!float"):
+				number = true
+			}
+		}
+	}
+	if len(unknown) > 0 {
+		return &yaml.TypeError{Errors: unknown}
+	}
+	var p plain
+	if err := n.Decode(&p); err != nil {
+		// The decoder's text has the type of p; the entry's type is stack.RuntimePin.
+		var typeErr *yaml.TypeError
+		if errors.As(err, &typeErr) {
+			for i, e := range typeErr.Errors {
+				typeErr.Errors[i] = strings.ReplaceAll(e, "stack.plain", "stack.RuntimePin")
+			}
+		}
+		return err
+	}
+	*r = RuntimePin(p)
+	r.number = number
+	return nil
 }
 
 // Tiers are the tier names: the names a tier placeholder, ${qory:<tier>}, may take in an
@@ -848,10 +888,17 @@ func (p *Stack) validate(compose bool) error {
 				"runtimes is in "+exports.FilePlace+".")
 		}
 		pin := p.RuntimePins[name]
+		if pin.number {
+			return exports.Refuse(
+				fmt.Sprintf("Put runtimes.%s.version in quotes, such as version: \"2.1.320\".", name),
+				"Without quotes, YAML reads the version as a number, and an exact version is a string.",
+				fmt.Sprintf("The value is %s.", exports.Value(pin.Version, false)),
+				fmt.Sprintf("runtimes.%s is in %s.", name, exports.FilePlace))
+		}
 		if !runtimeinstall.ValidVersion(pin.Version) {
 			return exports.Refuse(
 				fmt.Sprintf("Set runtimes.%s.version to an exact version, or remove runtimes.%s.", name, name),
-				"An exact version starts with a digit, followed by up to 63 letters, digits, ., + or -. A runtime with no pin installs its latest version.",
+				"An exact version starts with a digit, followed by up to 63 letters, digits, . or -. A runtime with no pin installs its latest version.",
 				fmt.Sprintf("The value is %s.", exports.Value(pin.Version, true)),
 				fmt.Sprintf("runtimes.%s is in %s.", name, exports.FilePlace))
 		}

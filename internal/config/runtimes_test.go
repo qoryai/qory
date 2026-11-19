@@ -76,3 +76,22 @@ func TestDiscoverStackRefusesAnAncestorsPin(t *testing.T) {
 		t.Fatalf("DiscoverStack returned %q, %v\nwant:\n%s", found, err, want)
 	}
 }
+
+// TestComposeRefusesAPinWrittenAsANumber pins codex in the checkout's qory.yaml to an
+// unquoted 2.1, a YAML number: Compose refuses it, the fix first and the file last.
+func TestComposeRefusesAPinWrittenAsANumber(t *testing.T) {
+	isolated(t)
+	root := filepath.Join(t.TempDir(), "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	own := filepath.Join(root, "qory.yaml")
+	write(t, own, "harness:\n  extends: {path: ../base}\n  runtimes:\n    codex:\n      version: 2.1\n")
+	want := "Put runtimes.codex.version in quotes, such as version: \"2.1.320\".\n" +
+		"  Without quotes, YAML reads the version as a number, and an exact version is a string.\n" +
+		"  The value is 2.1.\n" +
+		"  runtimes.codex is in " + own + "."
+	if _, err := config.Compose(own); err == nil || err.Error() != want {
+		t.Fatalf("Compose returned %v\nwant:\n%s", err, want)
+	}
+}
