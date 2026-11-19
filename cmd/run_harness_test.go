@@ -2,10 +2,8 @@ package cmd_test
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -15,7 +13,7 @@ import (
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/checkout"
-	"github.com/qoryai/qory/internal/image"
+	"github.com/qoryai/qory/internal/render/codex"
 	"github.com/qoryai/qory/internal/report"
 )
 
@@ -331,102 +329,86 @@ func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 	wants(t, string(data), "model_verbosity=low")
 }
 
-// joinedWithStep makes the join of each run note the session's spec in specs and end as a
-// session whose setup step Check tools exited with code, in a record in a new temp folder.
-func joinedWithStep(t *testing.T, code int, specs *[]session.SessionSpec) {
+// joinsNoting makes the join of each run note the session's spec in specs and end as a
+// session that succeeded, in a record in a new temp folder.
+func joinsNoting(t *testing.T, specs *[]session.SessionSpec) {
 	t.Helper()
 	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
 		if spec.OnVariables != nil {
 			spec.OnVariables(session.Applied{})
 		}
 		*specs = append(*specs, spec)
-		state := event.StateSucceeded
-		if code != 0 {
-			state = event.StateFailed
-		}
-		dir := t.TempDir()
-		lines := fmt.Sprintf(`{"type":%q,"data":{"step":4,"kind":%q,"name":"Check tools"}}
-{"type":%q,"data":{"step":4,"state":%q,"exit_code":%d}}
-`, event.StepStarted, event.StepSetup, event.StepExited, state, code)
-		writeFile(t, filepath.Join(dir, "session.jsonl"), lines)
-		if code == 0 {
-			return &session.Result{Dir: dir, State: event.StateSucceeded}, nil
-		}
-		return &session.Result{Dir: dir, ExitCode: code, State: event.StateFailed}, nil
+		return &session.Result{Dir: t.TempDir(), State: event.StateSucceeded}, nil
 	}))
 }
 
-// TestAWalledCodexRunWithNoRepositoriesChecksEtcCodexInside is a person's walled Codex run:
-// its session's setup has one step, Check tools, which tests /etc/codex in the agent's
-// container through the helper's setup-command verb. When the step exits with the test's
-// status, qory run prints the line for /etc/codex, not the runtime's exit, and exits 1. The
-// script of the step is tested in internal/image.
-func TestAWalledCodexRunWithNoRepositoriesChecksEtcCodexInside(t *testing.T) {
-	exportingCheckout(t, fakeRuntime(t))
-	walledForager(t)
-	t.Setenv("QORY_RUN_KEY", "")
-	var specs []session.SessionSpec
-	joinedWithStep(t, image.CodexSettingsInsideExit, &specs)
-	out, err := run(t, "run", "codex", "--", "hi")
-	if cmd.ExitCode(err) != 1 {
-		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+// etcCodexMounts are the mounts of spec whose target is /etc/codex or lies in it.
+func etcCodexMounts(spec session.SessionSpec) []wall.Mount {
+	var out []wall.Mount
+	for _, m := range spec.Mounts {
+		if m.Target == codex.SystemInWall || strings.HasPrefix(m.Target, codex.SystemInWall+"/") {
+			out = append(out, m)
+		}
 	}
-	wants(t, out, "qory run: Use an image without /etc/codex: Codex reads its settings there before qory's.\n")
-	lacks(t, out, "exited "+fmt.Sprint(image.CodexSettingsInsideExit))
-	if len(specs) != 1 {
-		t.Fatalf("%d joins, want 1", len(specs))
-	}
-	check := []session.SetupCommand{{Name: "Check tools", Args: []string{"/bin/sh", "-c", image.CodexSettingsInsideScript()}}}
-	if got := specs[0].Setup; len(got) != 1 || got[0].Name != check[0].Name || !slices.Equal(got[0].Args, check[0].Args) {
-		t.Errorf("the session's setup: %q", got)
-	}
-	if got := specs[0].SetupRunner; !slices.Equal(got, []string{wall.HelperPath, "run", "setup-command"}) {
-		t.Errorf("the setup runner: %q", got)
-	}
+	return out
 }
 
-// TestAWalledCodexRunWithNothingAtEtcCodexStarts is the same run with a step that exited 0:
-// Codex started and exited 0, and qory run prints the session's end, not the line for
-// /etc/codex.
-func TestAWalledCodexRunWithNothingAtEtcCodexStarts(t *testing.T) {
-	exportingCheckout(t, fakeRuntime(t))
-	walledForager(t)
-	t.Setenv("QORY_RUN_KEY", "")
-	var specs []session.SessionSpec
-	joinedWithStep(t, 0, &specs)
-	out, err := run(t, "run", "codex", "--", "hi")
-	if err != nil {
-		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
-	}
-	lacks(t, out, "/etc/codex")
-	if len(specs) != 1 || len(specs[0].Setup) != 1 {
-		t.Fatalf("joins: %d\n%s", len(specs), out)
-	}
-}
-
-// TestOnlyAWalledCodexRunChecksEtcCodexInside is a walled Claude Code run and an unwalled
-// Codex run: neither session has a setup.
-func TestOnlyAWalledCodexRunChecksEtcCodexInside(t *testing.T) {
+// TestAWalledCodexRunBindsEtcCodex is a person's walled Codex run, a walled Claude Code
+// run and an unwalled Codex run: the walled Codex session mounts one folder read-only at
+// /etc/codex, etc-codex beside codex-home in the run's folder, with the harness's hooks in
+// hooks.json while the session runs, and has no setup, so no step tests what the image
+// has at /etc/codex. Neither other session mounts anything there or has a setup.
+func TestAWalledCodexRunBindsEtcCodex(t *testing.T) {
 	root, _ := exportingCheckout(t, fakeRuntime(t))
 	t.Setenv("QORY_RUN_KEY", "")
 	var specs []session.SessionSpec
-	joinedWithStep(t, 0, &specs)
+	var hooks string
+	joinsNoting(t, &specs)
 	if out, err := run(t, "run", "codex", "--", "hi"); len(specs) != 1 {
 		t.Fatalf("an unwalled run: %v\n%s", err, out)
 	}
-	if len(specs[0].Setup) != 0 || len(specs[0].SetupRunner) != 0 {
-		t.Errorf("an unwalled Codex run has a setup: %q through %q", specs[0].Setup, specs[0].SetupRunner)
+	walledForager(t)
+	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
+		if spec.OnVariables != nil {
+			spec.OnVariables(session.Applied{})
+		}
+		specs = append(specs, spec)
+		if ms := etcCodexMounts(spec); len(ms) == 1 {
+			data, err := os.ReadFile(filepath.Join(ms[0].Path, "hooks.json"))
+			if err != nil {
+				t.Errorf("the bound hooks.json: %v", err)
+			}
+			hooks = string(data)
+		}
+		return &session.Result{Dir: t.TempDir(), State: event.StateSucceeded}, nil
+	}))
+	if out, err := run(t, "run", "codex", "--", "hi"); err != nil || len(specs) != 2 {
+		t.Fatalf("a walled Codex run: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	ms := etcCodexMounts(specs[1])
+	if len(ms) != 1 || ms[0].Target != "/etc/codex" || !ms[0].ReadOnly || filepath.Base(ms[0].Path) != "etc-codex" || filepath.Base(filepath.Dir(ms[0].Path)) != "codex-fixed" {
+		t.Errorf("the mounts at /etc/codex: %+v", ms)
+	}
+	if !strings.HasPrefix(hooks, "{\n  \"hooks\": {") {
+		t.Errorf("the bound hooks.json: %q", hooks)
+	}
+	if len(specs[1].Setup) != 0 || len(specs[1].SetupRunner) != 0 {
+		t.Errorf("a walled Codex run has a setup: %q through %q", specs[1].Setup, specs[1].SetupRunner)
 	}
 	writeFile(t, filepath.Join(root, "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness:\n  target:\n    runtime: claude\n  modules:\n    - name: core\n      source: {path: modules/core}\n")
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness:\n  launch:\n    claude:\n      command: "+fakeRuntime(t)+"\n")
 	if out, err := run(t, "harness", "compose", "--no-links"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	walledForager(t)
-	if out, err := run(t, "run", "claude", "--", "-p", "hi"); len(specs) != 2 {
+	if out, err := run(t, "run", "claude", "--", "-p", "hi"); len(specs) != 3 {
 		t.Fatalf("a walled Claude Code run: %v\n%s", err, out)
 	}
-	if len(specs[1].Setup) != 0 || len(specs[1].SetupRunner) != 0 {
-		t.Errorf("a walled Claude Code run has a setup: %q through %q", specs[1].Setup, specs[1].SetupRunner)
+	for i, name := range map[int]string{0: "an unwalled Codex run", 2: "a walled Claude Code run"} {
+		if ms := etcCodexMounts(specs[i]); len(ms) != 0 {
+			t.Errorf("%s mounts at /etc/codex: %+v", name, ms)
+		}
+		if len(specs[i].Setup) != 0 || len(specs[i].SetupRunner) != 0 {
+			t.Errorf("%s has a setup: %q through %q", name, specs[i].Setup, specs[i].SetupRunner)
+		}
 	}
 }

@@ -29,14 +29,7 @@ func standIns(t *testing.T, version string) string {
 // and returns what it printed on stdout, on stderr, and its exit status.
 func checkOn(t *testing.T, shell, dir string) (string, string, int) {
 	t.Helper()
-	return checkSettingsOn(t, shell, dir, "")
-}
-
-// checkSettingsOn is [checkOn] for the script of a Codex run, with settings in place of
-// /etc/codex.
-func checkSettingsOn(t *testing.T, shell, dir, settings string) (string, string, int) {
-	t.Helper()
-	c := exec.Command(shell, "-c", sessionCheckScript(dir, settings))
+	c := exec.Command(shell, "-c", sessionCheckScript(dir))
 	c.Env = []string{}
 	var stdout, stderr strings.Builder
 	c.Stdout, c.Stderr = &stdout, &stderr
@@ -168,8 +161,6 @@ func TestSessionCheckLine(t *testing.T) {
 	old := sessionGitOld("/usr/bin/git", "git version 2.24.0")
 	for line, want := range map[string]bool{
 		noSessionGit():                          true,
-		noCodexSettings():                       true,
-		noCodexSettings() + " ":                 false,
 		noSessionTool("tr", toolWhy(t, "tr")):   true,
 		old:                                     true,
 		sessionGitOld("/usr/local/bin/git", ""): true,
@@ -213,7 +204,7 @@ func toolWhy(t *testing.T, name string) string {
 // TestSessionCheckFixesKeepsAtMostOnePerCheck is more lines than the script can print.
 func TestSessionCheckFixesKeepsAtMostOnePerCheck(t *testing.T) {
 	got := SessionCheckFixes(strings.Repeat(noSessionGit()+"\nanother line\n", 1000))
-	if want := len(sessionTools) + 2; len(got) != want {
+	if want := len(sessionTools) + 1; len(got) != want {
 		t.Errorf("%d lines, want %d", len(got), want)
 	}
 }
@@ -250,128 +241,5 @@ func TestTheSessionCheckGoesPastAFileThatDoesNotRun(t *testing.T) {
 		if _, errOut, code := checkOn(t, shell, dirs); errOut != "" || code != 0 {
 			t.Errorf("%s: %q, exit %d", shell, errOut, code)
 		}
-	}
-}
-
-// TestTheCodexCheckRefusesEtcCodex is the script of a Codex run on an image with every
-// program: with a file, a folder or a link that leads nowhere at the place of /etc/codex, it
-// prints the line for /etc/codex, the fix first, and exits 1; with nothing there it passes
-// silently. CodexSessionCheckScript checks /etc/codex itself.
-func TestTheCodexCheckRefusesEtcCodex(t *testing.T) {
-	for _, shell := range shells(t) {
-		dir := standIns(t, "git version 2.47.3")
-		base := t.TempDir()
-		file, folder, link := filepath.Join(base, "file"), filepath.Join(base, "folder"), filepath.Join(base, "link")
-		if err := os.WriteFile(file, nil, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Mkdir(folder, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(filepath.Join(base, "nowhere"), link); err != nil {
-			t.Fatal(err)
-		}
-		for _, at := range []string{file, folder, link} {
-			out, errOut, code := checkSettingsOn(t, shell, dir, at)
-			if want := noCodexSettings() + "\n"; out != "" || errOut != want || code != 1 {
-				t.Errorf("%s, %s: %q, %q, exit %d, want %q", shell, at, out, errOut, code, want)
-			}
-		}
-		if out, errOut, code := checkSettingsOn(t, shell, dir, filepath.Join(base, "absent")); out != "" || errOut != "" || code != 0 {
-			t.Errorf("%s, nothing there: %q, %q, exit %d", shell, out, errOut, code)
-		}
-	}
-	if want := sessionCheckScript(strings.Join(gitSessionDirs, ":"), "/etc/codex"); CodexSessionCheckScript() != want {
-		t.Errorf("CodexSessionCheckScript checks another place:\n%s", CodexSessionCheckScript())
-	}
-	if noCodexSettings() != "Use an image without /etc/codex: Codex reads its settings there before qory's." {
-		t.Errorf("the line: %q", noCodexSettings())
-	}
-}
-
-// TestTheCodexSettingsCheckAlone is the step of a Codex run with no git session: with a
-// file, a folder or a link that leads nowhere at the place of /etc/codex, the line for
-// /etc/codex and exit 1, also with an empty PATH; with nothing there, no output and exit
-// 0. CodexSettingsCheckScript checks /etc/codex itself.
-func TestTheCodexSettingsCheckAlone(t *testing.T) {
-	base := t.TempDir()
-	file, folder, link := filepath.Join(base, "file"), filepath.Join(base, "folder"), filepath.Join(base, "link")
-	if err := os.WriteFile(file, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(folder, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(base, "nowhere"), link); err != nil {
-		t.Fatal(err)
-	}
-	run := func(shell, settings string) (string, string, int) {
-		c := exec.Command(shell, "-c", codexSettingsCheckScript(settings))
-		c.Env = []string{}
-		var stdout, stderr strings.Builder
-		c.Stdout, c.Stderr = &stdout, &stderr
-		err := c.Run()
-		if _, exited := err.(*exec.ExitError); err != nil && !exited {
-			t.Fatal(err)
-		}
-		return stdout.String(), stderr.String(), c.ProcessState.ExitCode()
-	}
-	for _, shell := range shells(t) {
-		for _, at := range []string{file, folder, link} {
-			out, errOut, code := run(shell, at)
-			if want := noCodexSettings() + "\n"; out != "" || errOut != want || code != 1 {
-				t.Errorf("%s, %s: %q, %q, exit %d, want %q", shell, at, out, errOut, code, want)
-			}
-		}
-		if out, errOut, code := run(shell, filepath.Join(base, "absent")); out != "" || errOut != "" || code != 0 {
-			t.Errorf("%s, nothing there: %q, %q, exit %d", shell, out, errOut, code)
-		}
-	}
-	if CodexSettingsCheckScript() != codexSettingsCheckScript("/etc/codex") {
-		t.Errorf("CodexSettingsCheckScript checks another place:\n%s", CodexSettingsCheckScript())
-	}
-}
-
-// TestTheCodexSettingsCheckInside is the step a walled Codex run with no setup runs in
-// the agent's container: with a file, a folder or a link that leads nowhere at the place
-// of /etc/codex, no output and exit [CodexSettingsInsideExit]; with nothing there, no
-// output and exit 0. CodexSettingsInsideScript checks /etc/codex itself, and its line is
-// the line of the step outside.
-func TestTheCodexSettingsCheckInside(t *testing.T) {
-	base := t.TempDir()
-	file, folder, link := filepath.Join(base, "file"), filepath.Join(base, "folder"), filepath.Join(base, "link")
-	if err := os.WriteFile(file, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(folder, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(base, "nowhere"), link); err != nil {
-		t.Fatal(err)
-	}
-	run := func(shell, settings string) (string, int) {
-		c := exec.Command(shell, "-c", codexSettingsInsideScript(settings))
-		c.Env = []string{}
-		out, err := c.CombinedOutput()
-		if _, exited := err.(*exec.ExitError); err != nil && !exited {
-			t.Fatal(err)
-		}
-		return string(out), c.ProcessState.ExitCode()
-	}
-	for _, shell := range shells(t) {
-		for _, at := range []string{file, folder, link} {
-			if out, code := run(shell, at); out != "" || code != CodexSettingsInsideExit {
-				t.Errorf("%s, %s: %q, exit %d", shell, at, out, code)
-			}
-		}
-		if out, code := run(shell, filepath.Join(base, "absent")); out != "" || code != 0 {
-			t.Errorf("%s, nothing there: %q, exit %d", shell, out, code)
-		}
-	}
-	if CodexSettingsInsideScript() != codexSettingsInsideScript("/etc/codex") {
-		t.Errorf("CodexSettingsInsideScript checks another place:\n%s", CodexSettingsInsideScript())
-	}
-	if CodexSettingsFix() != noCodexSettings() {
-		t.Errorf("the line: %q", CodexSettingsFix())
 	}
 }
