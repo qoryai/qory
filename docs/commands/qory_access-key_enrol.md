@@ -18,11 +18,11 @@ answer came, the same command finishes it on this machine, at any time, without 
 the server again. A refused enrolment moves aside only access-key-secret.new, never
 access-key-secret; a key the server enrolled for something else is deleted instead.
 
-When access-key-secret exists, enrol refuses, so it never replaces this machine's
-access key unasked: use --replace to move this machine to a new key, or --print for a
-key kept elsewhere. The one exception is a retry: run the same command again within the
-code's 15 minutes, while access-key-secret still holds the key made for it, and it
-retries with that key.
+When access-key-secret exists, enrol stops with an error, so it never replaces this
+machine's access key unasked: use --replace to move this machine to a new key, or
+--print for a key kept elsewhere. The one exception is a retry: run the same command
+again within the code's 15 minutes, while access-key-secret still holds the key made
+for it, and it retries with that key.
 
 --replace moves this machine to a new key, and the old key stays in use until the new
 one is active. qory makes the new key in access-key-secret.new and enrols it, leaving

@@ -80,24 +80,29 @@ func TestResolveGitThroughTheHostProxyFails(t *testing.T) {
 	}
 	before := s.Tunnels() + s.Denied()
 	for _, c := range []struct{ url, want string }{
-		{"git@github.com:example-org/harness.git", "use an https URL for git@github.com:example-org/harness.git, such as https://github.com/example-org/harness. A run from a control plane fetches git sources only over https, through the run's gateway; ssh would sign in with your private keys in ~/.ssh, outside the gateway."},
-		{"ssh://git@github.com:22/example-org/harness.git", "use an https URL for ssh://git@github.com:22/example-org/harness.git, such as https://github.com/example-org/harness. A run from a control plane fetches git sources only over https, through the run's gateway; ssh would sign in with your private keys in ~/.ssh, outside the gateway."},
-		{"git://example.com/acme/harness", "use an https URL for git://example.com/acme/harness, such as https://example.com/acme/harness. A run from a control plane fetches git sources only over https, through the run's gateway; git:// would reach the host past the gateway."},
-		{"file:///srv/harness", "use an https URL for file:///srv/harness. A run from a control plane fetches git sources only over https, through the run's gateway; file:///srv/harness is a folder of this machine."},
-		{"../harness", "use an https URL for ../harness. A run from a control plane fetches git sources only over https, through the run's gateway; ../harness is a folder of this machine."},
-		{"fd::3", "use an https URL for fd::3. A run from a control plane fetches git sources only over https, through the run's gateway; fd::3 is not an https URL."},
-		{"ext::sh", "use an https URL for ext::sh. A run from a control plane fetches git sources only over https, through the run's gateway; ext::sh is not an https URL."},
+		{"git@github.com:example-org/harness.git", "use an https URL for git@github.com:example-org/harness.git.\n  For example: https://github.com/example-org/harness.\n  A run from a control plane fetches git sources only over https, through the run's gateway; ssh would sign in with your private keys in ~/.ssh, outside the gateway."},
+		{"ssh://git@github.com:22/example-org/harness.git", "use an https URL for ssh://git@github.com:22/example-org/harness.git.\n  For example: https://github.com/example-org/harness.\n  A run from a control plane fetches git sources only over https, through the run's gateway; ssh would sign in with your private keys in ~/.ssh, outside the gateway."},
+		{"git://example.com/acme/harness", "use an https URL for git://example.com/acme/harness.\n  For example: https://example.com/acme/harness.\n  A run from a control plane fetches git sources only over https, through the run's gateway; git:// would reach the host past the gateway."},
+		{"file:///srv/harness", "use an https URL for file:///srv/harness.\n  A run from a control plane fetches git sources only over https, through the run's gateway; file:///srv/harness is a folder of this machine."},
+		{"../harness", "use an https URL for ../harness.\n  A run from a control plane fetches git sources only over https, through the run's gateway; ../harness is a folder of this machine."},
+		{"fd::3", "use an https URL for fd::3.\n  A run from a control plane fetches git sources only over https, through the run's gateway; fd::3 is not an https URL."},
+		{"ext::sh", "use an https URL for ext::sh.\n  A run from a control plane fetches git sources only over https, through the run's gateway; ext::sh is not an https URL."},
 	} {
 		_, err := source.Resolve(t.TempDir(), stack.Source{Git: c.url, Ref: "main"}, source.Options{Cache: t.TempDir(), Git: g})
 		var scheme *source.SchemeError
 		if !errors.As(err, &scheme) || err.Error() != c.want {
 			t.Errorf("%s: %v\nwant %s", c.url, err, c.want)
 		}
+		// Line 1 is the fix, and qory run prints it after "qory run: " within 100
+		// characters.
+		if first, _, _ := strings.Cut(c.want, "\n"); len("qory run: "+first) > 100 {
+			t.Errorf("%s: line 1 has %d characters after qory run: is added, want at most 100", c.url, len("qory run: "+first))
+		}
 	}
 	if after := s.Tunnels() + s.Denied(); after != before {
 		t.Errorf("the sources that are not https reached the proxy %d times", after-before)
 	}
-	if line := source.HTTPSFix("git@github.com:example-org/harness.git", "qory.yaml"); !strings.HasPrefix(line, "use an https URL for git@github.com:example-org/harness.git in qory.yaml, such as https://github.com/example-org/harness. ") {
+	if line := source.HTTPSFix("git@github.com:example-org/harness.git", "qory.yaml"); !strings.HasPrefix(line, "use an https URL for git@github.com:example-org/harness.git in qory.yaml.\n  For example: https://github.com/example-org/harness.\n  ") {
 		t.Errorf("with the file: %s", line)
 	}
 	if line := source.HTTPSFix("https://example.com/acme/harness", "qory.yaml"); line != "" {

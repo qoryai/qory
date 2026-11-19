@@ -274,7 +274,7 @@ func poolDiscovery(ctx context.Context, r *config.Forager, id *serverIdentity) (
 		return nil, explain(err, id)
 	}
 	if !strings.HasPrefix(conf.NodeID, poolNodePrefix) {
-		return nil, input(errors.New("Enrol an access key with a code made for the pool: this machine's access key was not enrolled for a pool."))
+		return nil, input(errors.New("Enrol an access key with a code made for the pool: this key was enrolled without one."))
 	}
 	return conf, nil
 }

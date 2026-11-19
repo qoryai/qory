@@ -151,11 +151,11 @@ func TestTheAgentHomeIsAFixedVariable(t *testing.T) {
 	}
 }
 
-// TestARunKeyReadsNoMachineKeyOfTheCheckout is the checkout's qory.yaml setting
+// TestARunKeyReadsNoMachineHarnessSettingOfTheCheckout is the checkout's qory.yaml setting
 // harness.launch.claude, with --dangerously-skip-permissions, and env: qory run and qory
 // run resend given a run key read neither, and the file's keys are listed as ignored;
 // without a run key both apply.
-func TestARunKeyReadsNoMachineKeyOfTheCheckout(t *testing.T) {
+func TestARunKeyReadsNoMachineHarnessSettingOfTheCheckout(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}

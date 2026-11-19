@@ -1384,11 +1384,11 @@ Before it makes a key, qory checks the code against the pin `forager.yaml` has, 
 of another server is refused. When `forager.yaml` names another `gateway.server.url`,
 enrol refuses: enrol with that server, or change `gateway.server.url` first.
 
-When `access-key-secret` exists, enrol refuses, so it never replaces this machine's key
-unasked: use `--replace`, below, to move the machine to a new key, or `--print` for a
-key kept elsewhere. The one exception is a retry: the same command, with the same code, within
-the 15 minutes, while `access-key-secret` still holds the key made for it, retries with
-that key.
+When `access-key-secret` exists, enrol stops with an error, so it never replaces this
+machine's access key unasked: use `--replace`, below, to move the machine to a new key,
+or `--print` for a key kept elsewhere. The one exception is a retry: the same command,
+with the same code, within the 15 minutes, while `access-key-secret` still holds the key
+made for it, retries with that key.
 
 When the enrolment does not complete:
 
@@ -1411,7 +1411,7 @@ Enrol refuses while `QORY_ACCESS_KEY_ID`, `QORY_ACCESS_KEY_SECRET` or
 contradict the variable. Unset it, or use `--print`. It also refuses while a run without
 a wall is running on this machine: it must end before a key is made.
 
-#### Replace the machine's key
+#### Replace the machine's access key
 
 ```sh
 qory access-key enrol --replace https://apiary.example qecn_…
@@ -3069,7 +3069,7 @@ wall:
 `qory config` lists each value; without `gateway.server.via` it shows
 `gateway.server.via.url  (none: the server is reached directly)  default`.
 
-Enrol the machine's key through the gateway with `--via`:
+Enrol the machine's access key through the gateway with `--via`:
 
 ```sh
 qory access-key enrol --via https://gateway.example:8443 https://apiary.example qecn_…

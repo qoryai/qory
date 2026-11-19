@@ -168,7 +168,7 @@ type SchemeError struct {
 	Name string
 }
 
-// Error is the line [HTTPSFix] makes for the URL and the file; for a source of a
+// Error is the lines [HTTPSFix] makes for the URL and the file; for a source of a
 // [Named] compose, the line with the source's name in place of the URL.
 func (e *SchemeError) Error() string {
 	if e.Name != "" {
@@ -178,9 +178,10 @@ func (e *SchemeError) Error() string {
 }
 
 // HTTPSFix is "" for a git source git fetches over https, an https URL with a host, and
-// otherwise the line a run from a control plane stops with for it: use an https URL for
-// it, in file when file is set, such as the https URL of the same repository when one
-// follows from it, and why. The source is printed with a URL's password hidden. A local
+// otherwise the lines a run from a control plane stops with for it: line 1 is the fix,
+// use an https URL for it, in file when file is set; then the https URL of the same
+// repository as an example when one follows from it, and why. The source is printed
+// with a URL's password hidden. A local
 // path or a file URL is a folder of this machine; an ssh URL or the scp form host:path,
 // which git fetches over ssh, would sign in with your private keys in ~/.ssh, outside
 // the gateway; a git:// URL would reach the host past the gateway; any other is not an
@@ -226,10 +227,11 @@ func HTTPSFix(src, file string) string {
 	if file != "" {
 		line += " in " + file
 	}
+	line += "."
 	if https != "" {
-		line += ", such as " + https
+		line += "\n  For example: " + https + "."
 	}
-	return line + ". A run from a control plane fetches git sources only over https, through the run's gateway; " + why
+	return line + "\n  A run from a control plane fetches git sources only over https, through the run's gateway; " + why
 }
 
 // httpsOf is the https URL of the repository at rest, [user@]host[:port]<sep>path, with
