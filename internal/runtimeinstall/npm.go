@@ -72,9 +72,9 @@ const (
 // document of that version's build for the platform, see [npmPackages], whose
 // dist.integrity is npm's sha512 checksum and whose dist.tarball is the tarball; and the
 // tarball, when Install opens it. A 404 of a pinned version's document is a
-// [*NotPublishedError]. The tarball must
-// be on base's host, and no request follows a redirect to another host. Install checks
-// the tarball against the checksum before it extracts anything.
+// [*NotPublishedError]. The tarball must be on base's host, and no request follows a
+// redirect to another host. Install checks the tarball against the checksum before it
+// extracts anything.
 func NpmFetch(client *http.Client, base, arch string) Fetch {
 	return func(ctx context.Context, runtime, pinned string) (Release, error) {
 		pkg, ok := npmPackages[runtime]

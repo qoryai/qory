@@ -4,16 +4,16 @@
 //
 // [Install] asks its [Fetch] for a release of the runtime, the version that
 // [Options.Version] pins, or else the newest: the version, npm's sha512 checksum of the
-// tarball, and a way to open the tarball. It takes the run's hold
-// of the version, which keeps the version's folder until the run ends, and removes the
-// older versions' folders that an install made, and the temporary entries, that no run
-// holds. It uses the folder <Folder>/<runtime>/<version> when an earlier install of a
-// tarball with the same checksum made it, and opens no tarball then. Otherwise it takes
-// the version's install lock, so that a second run that needs the same version waits and
-// then uses the folder, reads the tarball into a temporary file, checks its checksum, and
-// extracts into a temporary folder either the program's entry, [Release.Program], to
-// bin/<runtime>, or the release's folder, [Release.Folder], whole. It then renames that
-// folder to the version's folder: a folder at that path is always a complete install.
+// tarball, and a way to open the tarball. It takes the run's hold of the version, which
+// keeps the version's folder until the run ends, and removes the older versions' folders
+// that an install made, and the temporary entries, that no run holds. It uses the folder
+// <Folder>/<runtime>/<version> when an earlier install of a tarball with the same
+// checksum made it, and opens no tarball then. Otherwise it takes the version's install
+// lock, so that a second run that needs the same version waits and then uses the folder,
+// reads the tarball into a temporary file, checks its checksum, and extracts into a
+// temporary folder either the program's entry, [Release.Program], to bin/<runtime>, or
+// the release's folder, [Release.Folder], whole. It then renames that folder to the
+// version's folder: a folder at that path is always a complete install.
 package runtimeinstall
 
 import (

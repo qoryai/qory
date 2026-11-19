@@ -25,9 +25,10 @@ import (
 
 // A run of Claude Code or Codex installs its runtime's program before its first session,
 // once the compose named the runtime: [installRuntime] reads the release of the runtime
-// that the composed stack pins, or else its newest release, from the runtime cache of the instance's registry when the machine has one, and from
-// npm otherwise, and keeps each version in the runtimes folder, so a later run on the
-// machine with the same version reads no tarball. qory run prints one line,
+// that the composed stack pins, or else its newest release, from the runtime cache of
+// the instance's registry when the machine has one, and from npm otherwise, and keeps
+// each version in the runtimes folder, so a later run on the machine with the same
+// version reads no tarball. qory run prints one line,
 // "qory run: installed claude 2.1.320", and the session gets the version's folder,
 // [useInstalledRuntime]. The run holds the version's folder until it ends.
 
@@ -80,9 +81,8 @@ func instanceAddress(r *config.Forager) string {
 
 // installRuntime installs the program of runtime, the runtime of the run's session, for
 // the platform linux/<this machine's architecture>, the platform of the container
-// engine. It returns nil for a runtime qory installs no program of. pin
-// is the composed stack's pin of runtime, empty for none, which installs the newest
-// release.
+// engine. It returns nil for a runtime qory installs no program of. pin is the composed
+// stack's pin of runtime, empty for none, which installs the newest release.
 //
 // The source is the registry of machine, the lines after a run code that qory run pool
 // writes, or else the registry of r, [runtimeRegistry], or else npm. The registry's token
