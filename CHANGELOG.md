@@ -728,14 +728,15 @@ release may change what an existing document does, and states it under Upgrading
   list commits.`, and the next line is that qory ran no program for that repository. A second
   run does the work again on a new branch. See The submit program in `docs/run.md`.
 - A push that landed with no version stored has one way out in the line of `qory run`:
-  `delete branch qory/<work item id> of <path> on <system>`. A branch whose head is not the
+  `delete branch qory/<work item id> of <path> on <system>`. The line also has this way out
+  when the list of the run's commits fails after the push landed. A branch whose head is not the
   commit the run expected is refused before any push, with the line `Set the branch to the
   expected commit or delete it` and the branch, the head and the expected commit on the next
   line. To go on, do one of the two, then take the work item in again. Moving the branch back
   works when the `Expected:` line shows `the start commit`; with `this run's last
-  push` it works only when Qory Apiary recorded that push, and otherwise the next run stops at the head
-  check again, so delete the branch. Line 3 of the text is the loss: either way, the commits on the
-  branch that no version has are lost. A branch that is not on the forge cannot be deleted: its
+  push` it works only when Qory Apiary recorded that push, and otherwise the next run stops at
+  the head check again, so delete the branch. Line 3 of the text is the loss: either way, the
+  commits on the branch that no version has are lost. A branch that is not on the forge cannot be deleted: its
   refusal starts with `Create the branch at the expected commit on the forge`, has
   `Head: none`, and has the `git push` command that creates the branch. The next run creates
   a deleted branch at `target_version` when no version exists, and starts from the last
