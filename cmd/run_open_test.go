@@ -140,8 +140,8 @@ func TestRunCancelsARunWhoseSetupPassesItsLimit(t *testing.T) {
 	defer cmd.SetBeforeJoin(func() { time.Sleep(1200 * time.Millisecond) })()
 	out, err := run(t, "run", "claude", "--timeout", "1h")
 	line := "✗ use fewer or smaller modules in the harness, then start the run again\n" +
-		"  the run was cancelled before claude started, during the compose of the harness:\n" +
-		"  the steps before the agent's start may take at most 1s\nqory run: the record is in "
+		"  the run was cancelled during the compose of the harness:\n" +
+		"  the steps before claude starts may take at most 1s\nqory run: the record is in "
 	if cmd.ExitCode(err) != 124 || !strings.Contains(out, line) {
 		t.Fatalf("%v (exit %d), want %q\n%s", err, cmd.ExitCode(err), line, out)
 	}

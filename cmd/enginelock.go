@@ -23,9 +23,10 @@ var errEngineLocked = errors.New("the engine proxy file is locked")
 // test shortens it.
 var engineLockPoll = 100 * time.Millisecond
 
-// textEngineLockWait is the line of a run whose time limit passed while it waited for the
-// engine lock of the engine proxy file %s, with the cause of the end after it.
-const textEngineLockWait = "give the run a longer time limit, or start fewer runs at once: the run ended while another run's image pull held the lock of wall.engine_proxy_file %s: %v"
+// textEngineLockWait is the line of a run whose context's deadline, the end of the run's
+// setup, passed while it waited for the engine lock of the engine proxy file %s, with the
+// cause of the end after it.
+const textEngineLockWait = "start fewer runs at once: the run ended while another run's image pull held the lock of wall.engine_proxy_file %s: %v"
 
 // textEngineLockStopped is the line of a run stopped while it waited for the engine lock
 // of the engine proxy file %s, by a signal or the end of its dispatch, with the cause after

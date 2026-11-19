@@ -18,6 +18,7 @@ import (
 	"github.com/qoryai/forager/wall"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/proxygit/proxygittest"
 	rt "github.com/qoryai/qory/internal/runtimeinstall/runtimeinstalltest"
@@ -527,7 +528,7 @@ func TestARegistryThatKeepsReturning503StopsAtTheSetupLimit(t *testing.T) {
 	if cmd.ExitCode(r.err) != 124 || len(r.joins) != 0 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, r.out, "✗ the run was cancelled before claude started, during the install of the runtime:\n  the steps before the agent's start may take at most 3s\n", "qory run: "+reg.Host()+" has not returned Claude Code (503); check pool.registry\n")
+	wants(t, r.out, "✗ the run was cancelled during the install of the runtime:\n  the steps before claude starts may take at most 3s\n", "qory run: "+reg.Host()+" has not returned Claude Code (503); check pool.registry\n")
 	if len(r.closes) != 1 || r.closes[0].State != event.StateCancelled || r.closes[0].Reason != event.ReasonTimeout || r.closes[0].ExitCode != 124 {
 		t.Errorf("the closes: %+v, want one cancelled with timeout and 124", r.closes)
 	}
@@ -559,11 +560,34 @@ func TestAnImageFetchPastTheSetupLimitEndsTheRun(t *testing.T) {
 	if !errors.Is(cut, context.DeadlineExceeded) {
 		t.Errorf("the image's fetch ended with %v, want the setup's deadline", cut)
 	}
-	wants(t, r.out, "✗ the run was cancelled before claude started, during the fetch of the run's image:\n  the steps before the agent's start may take at most 1s\nqory run: the record is in ")
+	wants(t, r.out, "✗ the run was cancelled during the fetch of the run's image:\n  the steps before claude starts may take at most 1s\nqory run: the record is in ")
 	lacks(t, r.out, "pull the run's image", "Qory Apiary")
 	if len(r.closes) != 1 || r.closes[0].State != event.StateCancelled || r.closes[0].Reason != event.ReasonTimeout || r.closes[0].ExitCode != 124 {
 		t.Errorf("the closes: %+v, want one cancelled with timeout and 124", r.closes)
 	}
+}
+
+// TestAStepThatRunsPastTheSetupLimitIsTheOneNamed is a dispatched walled run whose read of
+// the push checks takes 200ms past a setup limit of 5 seconds and then returns none, as a
+// compose runs to its end past the limit: the copy after it fails at once, and the line
+// names the push checks, the step that ran past the limit, not the copy.
+func TestAStepThatRunsPastTheSetupLimitIsTheOneNamed(t *testing.T) {
+	const limit = 5 * time.Second
+	defer cmd.SetSetupLimit(limit)()
+	defer cmd.SetLoadPushChecks(func(string) ([]compose.PushCheck, error) {
+		time.Sleep(limit + 200*time.Millisecond)
+		return nil, nil
+	})()
+	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
+	reg.PublishPlain("2.1.320")
+	r := endsWithin(t, 30*time.Second, func() installRun {
+		return runInstalling(t, installSetup{reg: reg, npm: rt.StartNpm(t), proxy: proxy, walled: true})
+	})
+	if cmd.ExitCode(r.err) != 124 || len(r.joins) != 0 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out, "✗ the run was cancelled during the load of the push checks:\n  the steps before claude starts may take at most 5s\n")
+	lacks(t, r.out, "during the copy")
 }
 
 // TestARegistryThatKeepsReturning503StopsAtSIGTERM sends SIGTERM to qory run while the

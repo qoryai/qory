@@ -19,40 +19,44 @@ import (
 )
 
 // TestASetupPastItsLimitNamesItsStep is the line of a run whose setup passed its limit
-// of 30 minutes: for each step, line 1 is the fix, with at most 100 characters with "✗ "
-// or "qory run: ", and the cause names the step and the limit. A dispatched run shows the
-// cause alone, whose line 1 with "✗ " has at most 100 characters too, and no line names
+// of 30 minutes: for each step, line 1 is the fix, with at most 100 characters with
+// "qory run: ", which is longer than "✗ ", and the cause names the step, then the runtime
+// and the limit. A dispatched run shows the cause alone, whose line 1 has at most 100
+// characters too, also for a runtime not known yet or with a long name, and no line names
 // Qory Apiary.
 func TestASetupPastItsLimitNamesItsStep(t *testing.T) {
 	if setupLimit != 30*time.Minute {
 		t.Errorf("the setup's limit is %s, want 30m0s", setupLimit)
 	}
+	runtimes := map[string]string{"claude": "claude", "": "the agent", "a-runtime-with-a-name-of-forty-characters": "a-runtime-with-a-name-of-forty-characters"}
 	for step := stepNone; step <= stepSetupRecord; step++ {
 		s, ok := setupSteps[step]
 		if !ok {
 			t.Fatalf("step %d has no name", step)
 		}
-		cause := "the run was cancelled before claude started, during " + s.name + ":\nthe steps before the agent's start may take at most 30 minutes"
-		for _, dispatched := range []bool{false, true} {
-			got := setupPassed(step, "claude", 30*time.Minute, dispatched).Error()
-			want := s.fix + "\n" + cause
-			if dispatched {
-				want = cause
-			}
-			if got != want {
-				t.Errorf("step %d, dispatched %v:\ngot  %q\nwant %q", step, dispatched, got, want)
-			}
-			first, _, _ := strings.Cut(got, "\n")
-			if n := len("qory run: " + first); n > 100 {
-				t.Errorf("step %d, dispatched %v: line 1 has %d characters with qory run: %q", step, dispatched, n, first)
-			}
-			if strings.Contains(got, "Qory Apiary") || strings.HasSuffix(got, ".") {
-				t.Errorf("step %d, dispatched %v: %q", step, dispatched, got)
+		for runtime, shown := range runtimes {
+			cause := "the run was cancelled during " + s.name + ":\nthe steps before " + shown + " starts may take at most 30 minutes"
+			for _, dispatched := range []bool{false, true} {
+				got := setupPassed(step, runtime, 30*time.Minute, dispatched).Error()
+				want := s.fix + "\n" + cause
+				if dispatched {
+					want = cause
+				}
+				if got != want {
+					t.Errorf("step %d, %q, dispatched %v:\ngot  %q\nwant %q", step, runtime, dispatched, got, want)
+				}
+				first, _, _ := strings.Cut(got, "\n")
+				if n := len("qory run: " + first); n > 100 {
+					t.Errorf("step %d, %q, dispatched %v: line 1 has %d characters with qory run: %q", step, runtime, dispatched, n, first)
+				}
+				if strings.Contains(got, "Qory Apiary") || strings.HasSuffix(got, ".") {
+					t.Errorf("step %d, %q, dispatched %v: %q", step, runtime, dispatched, got)
+				}
 			}
 		}
 	}
-	if got := setupPassed(stepFetch, "", time.Second, true).Error(); !strings.HasPrefix(got, "the run was cancelled before the agent started, during the fetch of the run's repositories:\n") || !strings.HasSuffix(got, "at most 1s") {
-		t.Errorf("a setup past a limit of 1s before the runtime is known: %q", got)
+	if got, want := setupPassed(stepFetch, "", time.Second, true).Error(), "the run was cancelled during the fetch of the run's repositories:\nthe steps before the agent starts may take at most 1s"; got != want {
+		t.Errorf("a setup past a limit of 1s before the runtime is known:\ngot  %q\nwant %q", got, want)
 	}
 }
 

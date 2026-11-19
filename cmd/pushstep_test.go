@@ -1887,6 +1887,31 @@ func TestAStopAfterThePushShowsBothWaysOut(t *testing.T) {
 	}
 }
 
+// TestThePushStepCountsTheLimitFromTheAgentsStart is a write run whose setup takes 1.5s,
+// with a time limit of 3s, and a push step whose request that stores the version gets no
+// response: the limit counts from the agent's start, so the step is cut 3s after it, not
+// 3s after the run's open. A limit that counted from the open would end the run within
+// 1.5s of the agent's start.
+func TestThePushStepCountsTheLimitFromTheAgentsStart(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.change = func(d map[string]any) { d["time_limit_minutes"] = 15 }
+	defer cmd.SetSessionMinute(200 * time.Millisecond)()
+	defer cmd.SetPushTimes(200*time.Millisecond, 400*time.Millisecond)()
+	var joined time.Time
+	defer cmd.SetBeforeJoin(func() {
+		time.Sleep(1500 * time.Millisecond)
+		joined = time.Now()
+	})()
+	hangingPost(t, p, nil)
+	r := p.run(t, writesAndCommits(t), nil)
+	ended := time.Now()
+	r.wantsClose(t, event.StateCancelled, 124)
+	if took := ended.Sub(joined); took < 2700*time.Millisecond {
+		t.Errorf("the run ended %s after the agent's start, with a time limit of 3s\n%s", took, r.out)
+	}
+	wants(t, r.out, "the run reached its time limit of 3s")
+}
+
 // TestAStopBeforeThePushLands is a second signal during the push, which a hook of the forge
 // holds open: the line has the fix, and no version is stored.
 func TestAStopBeforeThePushLands(t *testing.T) {

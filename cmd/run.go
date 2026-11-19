@@ -718,13 +718,21 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			// The run's setup, every step from its open to its agent's start, ends at
 			// setupDeadline, [setupBound] after the open, and each step runs on setupCtx.
-			// step is the step that runs, or ran last. Session 1's time limit counts from
-			// the join, see [sessionDeadline].
+			// step is the step that runs, or ran last, which enter sets. Session 1's time limit
+			// counts from the join, see [sessionDeadline].
 			opened := time.Now()
 			setupDeadline := opened.Add(setupBound)
 			setupCtx, cancelSetup := context.WithDeadline(ctx, setupDeadline)
 			defer cancelSetup()
 			var step prepStep
+			// enter makes s the step that runs, unless setupCtx has ended: a step that ran on
+			// past the limit, as a compose does, stays the step that the line names, and the
+			// next step, which fails at once, does not take its place.
+			enter := func(s prepStep) {
+				if setupCtx.Err() == nil {
+					step = s
+				}
+			}
 			// closeRun closes the run with out, and returns what the close came to, nil when
 			// it failed, which Forager's line says.
 			closeRun := func(out session.Outcome) *session.Closed {
@@ -925,7 +933,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// makeCopy makes the copy of a walled run that may write, see [startCopy], within the
 			// run's setup: the working folder's state is that of its commit at HEAD.
 			makeCopy := func() error {
-				step = stepCopy
+				enter(stepCopy)
 				ref := ""
 				if branch != nil {
 					ref = branch.Ref
@@ -948,7 +956,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// session the install, see [useInstalledRuntime].
 			installWork := func() error {
 				if installs(name) {
-					step = stepInstall
+					enter(stepInstall)
 				}
 				var machine runtimeinstall.Machine
 				if code != nil {
@@ -993,11 +1001,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			hostWork := func() error {
 				if run.Repositories() != "" {
 					var err error
-					step = stepBranchRead
+					enter(stepBranchRead)
 					if branch, err = fromCode.readBranch(ctx, run, setupDeadline); err != nil {
 						return &runLineError{err}
 					}
-					step = stepFetch
+					enter(stepFetch)
 					err = inStep(run, streams.errOut, event.StepFetch, fetchStepNameOn(branch, fromCode, runValues(run)), stopped, func(w io.Writer) error {
 						h, err := run.HostProxy()
 						if err != nil {
@@ -1020,7 +1028,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return &runLineError{err}
 				}
 				var freshHome bool
-				step = stepCompose
+				enter(stepCompose)
 				err := inStep(run, streams.errOut, event.StepCompose, composeStepName(runtime), stopped, func(w io.Writer) error {
 					var n *source.Named
 					if fromCode != nil {
@@ -1074,7 +1082,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// setup and the agent. The run's forwarder checks the POSTs from behind the
 				// wall from here on: nothing behind the wall has run yet.
 				if walled {
-					step = stepPushChecks
+					enter(stepPushChecks)
 					done, err := checks.load(setupCtx, run, at.home, spec.RunID, &spec, remote || server != nil && !local)
 					if err != nil {
 						return &runLineError{input(err)}
@@ -1093,7 +1101,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 				if branch != nil {
-					step = stepSwitch
+					enter(stepSwitch)
 					if err := preparation.Switch(setupCtx, cwd, os.Environ(), branch, stderr); err != nil {
 						return &runLineError{err}
 					}
@@ -1122,7 +1130,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// setup container's places, or of the places AgentEnv checks, gets the line a
 			// join's mount refusal gets.
 			setupWork := func() error {
-				step = stepSetupCommands
+				enter(stepSetupCommands)
 				err := runSetup(setupCtx, run, &spec, copied != nil && !copied.plain && !copied.readOnly)
 				var exited *session.SetupError
 				switch {
@@ -1147,7 +1155,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// signal ends as a setup cut short does: the switch after the preparation tests
 			// both before the error.
 			removeSetupWork := func() error {
-				step = stepSetupRemoval
+				enter(stepSetupRemoval)
 				return removeSetup(setupCtx, run)
 			}
 			// imageWork fetches the image of a walled run, see [fetchImage], within the
@@ -1156,7 +1164,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// proxy, the step holds the engine lock, which it waits for within the run's
 			// setup too: see [withEngineLock].
 			imageWork := func() error {
-				step = stepImage
+				enter(stepImage)
 				return withEngineLock(setupCtx, spec.engineProxyFile, code != nil, func() error {
 					return fetchImage(setupCtx, run, spec.EngineProxy, code != nil)
 				})
@@ -1166,7 +1174,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// working folder of a run with no copy, so the push step leaves it out, see
 			// [preparation.RecordSetup].
 			recordSetupWork := func() error {
-				step = stepSetupRecord
+				enter(stepSetupRecord)
 				if copied == nil {
 					if err := preparation.RecordSetup(setupCtx, cwd, os.Environ(), branch); err != nil {
 						return &runLineError{err}

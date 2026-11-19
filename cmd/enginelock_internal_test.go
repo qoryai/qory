@@ -95,7 +95,7 @@ func TestARunThatEndsWhileItWaitsForTheEngineLockStopsWithItsLine(t *testing.T) 
 		ran := false
 		err := withEngineLock(ctx, file, fromCode, func() error { ran = true; return nil })
 		cancel()
-		want := "give the run a longer time limit, or start fewer runs at once: the run ended while another run's image pull held the lock of wall.engine_proxy_file " + file + ": context deadline exceeded"
+		want := "start fewer runs at once: the run ended while another run's image pull held the lock of wall.engine_proxy_file " + file + ": context deadline exceeded"
 		if fromCode {
 			want += codeUsed
 		}

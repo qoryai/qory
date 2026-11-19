@@ -970,9 +970,9 @@ release may change what an existing document does, and states it under Upgrading
 - The steps of a run before the agent's start, from the fetch of its repositories to the
   setup commands, may take 30 minutes together, and no setting changes that. A run past
   the limit closes `cancelled` with the reason `timeout`, exits 124, and prints a fix for
-  the step that was running, then `the run was cancelled before <runtime> started, during
-  <step>:` and `the steps before the agent's start may take at most 30 minutes`. A run from
-  a control plane prints these two lines alone. See Time limits in `docs/run.md`.
+  the step that was running, then `the run was cancelled during <step>:` and `the steps
+  before <runtime> starts may take at most 30 minutes`. A run from a control plane prints
+  these two lines alone. See Time limits in `docs/run.md`.
 - A run with a run key or a run code fetches every git source of its harness through the
   run's stack proxy: the stack, its modules, and the modules of the checkout's file,
   also when the checkout's file is the whole harness. The run's host proxy, with the

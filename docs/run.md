@@ -396,10 +396,10 @@ When the run ends, qory says how, and its exit status goes with it:
   exit 1. The line contains `the agent` in place of `<runtime>` when qory had not read the
   runtime yet: when the signal came late in the run's open or during the fetch of the
   run's repositories, and when the compose failed after the signal.
-- `✗ <fix>`, then `the run was cancelled before <runtime> started, during <step>:` and
-  `the steps before the agent's start may take at most 30 minutes`: the steps before the
-  agent's start ran past their limit of 30 minutes (see [Time limits](#time-limits)), exit
-  124. `<step>` is the step that was running, and line 1 is what to do about it:
+- `✗ <fix>`, then `the run was cancelled during <step>:` and `the steps before <runtime>
+  starts may take at most 30 minutes`: the steps before the agent's start ran past their
+  limit of 30 minutes (see [Time limits](#time-limits)), exit 124. `<step>` is the step
+  that was running, and line 1 is what to do about it:
 
   | `<step>` | Line 1 |
   |---|---|
@@ -411,12 +411,13 @@ When the run ends, qory says how, and its exit status goes with it:
   | the switch to the work item's branch | `check the disk that holds the checkout, then start the run again` |
   | the copy of the checkout | `make the checkout smaller, with less history, Git LFS content and .qory/artifacts` |
   | the fetch of the run's image | `pull the run's image on this machine before the run, or start fewer runs at once` |
-  | the setup commands | `move the slow part of postCreateCommand in .devcontainer/devcontainer.json into the image` |
+  | the setup commands | `move the slow part of the repository's postCreateCommand into the run's image` |
   | the removal of the setup container | `check that this machine's container engine responds, then start the run again` |
   | the record of what the setup changed | `make the setup commands change fewer files in the checkout, then start the run again` |
 
   The line contains `the agent` in place of `<runtime>` when the limit came during the
-  fetch of the run's repositories, and when the compose failed after the limit. A run from
+  read of the work item's branch or the fetch of the run's repositories, and when the
+  compose failed after the limit. A run from
   a control plane prints the cause alone, from `the run was cancelled`, and a run from a
   run code ends it with `; the code is used`.
 - `✗ the run failed: its events could not be recorded, and <runtime> was stopped`: the
@@ -939,9 +940,9 @@ qory run: registry.example.com has not returned Claude Code (503); check pool.re
 ```
 
 A run that ends while it waits ends as a run does before its session starts: at the limit
-of 30 minutes with `the run was cancelled before claude started, during the install of the
-runtime:` and exit 124, and at SIGINT or SIGTERM with `the run was cancelled: qory run got
-SIGTERM before claude started` and exit 1.
+of 30 minutes with `the run was cancelled during the install of the runtime:` and exit
+124, and at SIGINT or SIGTERM with `the run was cancelled: qory run got SIGTERM before
+claude started` and exit 1.
 
 When the registry returns 401 with a Bearer challenge, `qory run` gets a token from the
 challenge's realm. The realm must be the token route of the Qory Apiary instance that
