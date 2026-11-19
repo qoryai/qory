@@ -571,6 +571,37 @@ func TestHarnessPlainRemovesWhatTheHarnessRemoves(t *testing.T) {
 	}
 }
 
+func TestHarnessPlainRemovesEachRefusedCharacterInsideText(t *testing.T) {
+	if got := harnessPlain("a\u2028b\u2029c"); got != "abc" {
+		t.Errorf("the line and paragraph separators inside text: %q", got)
+	}
+	// Each character of REFUSED_SET, inside text, as the harness's plain() removes it.
+	var set []rune
+	for _, span := range [][2]rune{{0x061c, 0x061c}, {0x200e, 0x200f}, {0x202a, 0x202e}, {0x2066, 0x2069},
+		{0x00ad, 0x00ad}, {0x180e, 0x180e}, {0x200b, 0x200b}, {0x2060, 0x2064}, {0xfeff, 0xfeff},
+		{0xfff9, 0xfffb}, {0x2028, 0x2029}} {
+		for r := span[0]; r <= span[1]; r++ {
+			set = append(set, r)
+		}
+	}
+	for _, r := range set {
+		if got := harnessPlain("a" + string(r) + "b"); got != "ab" {
+			t.Errorf("%U inside text: %q", r, got)
+		}
+		if !refused(r) {
+			t.Errorf("refused(%U) is false", r)
+		}
+	}
+	// A point of refused characters alone is empty. U+2028 and U+2029 are also spaces to
+	// strings.TrimSpace, and the others are Cf, so here refused() is not alone in emptying it.
+	finding := `{"severity":"non-blocking","quote":"q","problem":"p","fix":"f","proof":"broken rule: r","point":"\u2028\u202e\u2029"}`
+	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished,
+		Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[`+finding+`]}`)}}})
+	if got := d.Open.Reviewers[0].Findings; len(got) != 1 || got[0].Severity != Blocking {
+		t.Errorf("a point of refused characters: %+v", got)
+	}
+}
+
 func TestMoreFindingsIsSingularForOne(t *testing.T) {
 	for n, want := range map[int]string{1: "1 more open finding", 2: "2 more open findings", 81: "81 more open findings"} {
 		if got := moreFindings(n); got != want {
