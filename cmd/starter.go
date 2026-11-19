@@ -452,6 +452,8 @@ func recordedAs(o server.Outcome) string {
 	}
 	// A reason that contains a key or a code, such as qrk_, prints as a phrase: outcomeOf
 	// prints a reason of the starter's with each _ as a space.
+	// shortcut: endOutcome sends such a reason to the server as it is; replace this with a
+	// refusal before the send when that is decided.
 	out := outcomeOf(o.State, exports.Value(o.Reason, false))
 	if out.reason == "" {
 		return out.word()

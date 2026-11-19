@@ -290,27 +290,34 @@ func TestMainWritesAHardeningErrorToTheStatusDescriptor(t *testing.T) {
 	}
 }
 
-// TestMainMasksAKeyInAnUnknownCommand is qory with a key as its first argument, where a
-// command belongs: cobra's error prints the phrase in its place, and a plain word that is
-// no command prints quoted, as before. Both exit 2.
-func TestMainMasksAKeyInAnUnknownCommand(t *testing.T) {
+// TestMainMasksAKeyInTheCommandLine is qory with a key as its first argument, where a
+// command belongs, and as the value of --json=: the error prints the phrase in its place,
+// and a plain wrong value prints quoted, as before. Each exits 2.
+func TestMainMasksAKeyInTheCommandLine(t *testing.T) {
 	// An invented run key: qrk_ and 40 letters.
 	const letters = "zyxwvutsrqponmlkjihgzyxwvutsrqponmlkjihg"
 	const key = "qrk_" + letters
 
-	for _, c := range []struct{ arg, want string }{
-		{key, "✗ unknown command (a value that contains a run key) for \"qory\"\n"},
-		{"bogus", "✗ unknown command \"bogus\" for \"qory\"\n"},
+	const phrase = "(a value that contains a run key)"
+	for _, c := range []struct {
+		args       []string
+		want       string
+		containKey bool
+	}{
+		{[]string{key}, "✗ unknown command " + phrase + " for \"qory\"\n", true},
+		{[]string{"bogus"}, "✗ unknown command \"bogus\" for \"qory\"\n", false},
+		{[]string{"version", "--json=" + key}, "✗ invalid argument " + phrase + " for \"--json\" flag: strconv.ParseBool: parsing " + phrase + ": invalid syntax\n", true},
+		{[]string{"version", "--json=bogus"}, "✗ invalid argument \"bogus\" for \"--json\" flag: strconv.ParseBool: parsing \"bogus\": invalid syntax\n", false},
 	} {
-		args, _ := json.Marshal([]string{c.arg})
+		args, _ := json.Marshal(c.args)
 		stdout, stderr, _, status := runChild(t, "args", envArgs+"="+string(args))
 		if status != cmd.ExitInput {
-			t.Errorf("qory %s: exit status %d, want %d\n%s%s", c.arg, status, cmd.ExitInput, stdout, stderr)
+			t.Errorf("qory %q: exit status %d, want %d\n%s%s", c.args, status, cmd.ExitInput, stdout, stderr)
 		}
 		if !strings.HasSuffix(stderr, c.want) {
-			t.Errorf("qory %s: stderr %q, want it to end with %q", c.arg, stderr, c.want)
+			t.Errorf("qory %q: stderr %q, want it to end with %q", c.args, stderr, c.want)
 		}
-		if c.arg != key {
+		if !c.containKey {
 			continue
 		}
 		for _, text := range []string{stdout, stderr} {

@@ -1016,6 +1016,10 @@ func shownOrShort(value string) string {
 // the text then still contains a key or a code, each word that contains one prints as
 // [exports.HidePath] prints it. The result unwraps to err, so [ExitCode] reads it as err.
 // An err with none of these values is returned unchanged.
+//
+// shortcut: a path built from a value, such as one made absolute or joined, prints as
+// [exports.HidePath] prints it, "(a name that contains …)", not with [exports.Value]'s
+// phrase; replace it when the callers pass each path they build.
 func masked(err error, values ...string) error {
 	if err == nil {
 		return nil

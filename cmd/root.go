@@ -103,15 +103,12 @@ More: https://github.com/qoryai/qory`,
 func flagValues(err error) []string {
 	var value *pflag.InvalidValueError
 	var notExist *pflag.NotExistError
-	var required *pflag.ValueRequiredError
 	var syntax *pflag.InvalidSyntaxError
 	switch {
 	case errors.As(err, &value):
 		return []string{value.GetValue()}
 	case errors.As(err, &notExist):
-		return []string{"--" + notExist.GetSpecifiedName(), "-" + notExist.GetSpecifiedShortnames(), notExist.GetSpecifiedName()}
-	case errors.As(err, &required):
-		return []string{"-" + required.GetSpecifiedShortnames()}
+		return []string{"--" + notExist.GetSpecifiedName(), "-" + notExist.GetSpecifiedShortnames()}
 	case errors.As(err, &syntax):
 		return []string{syntax.GetSpecifiedFlag()}
 	}
@@ -121,6 +118,9 @@ func flagValues(err error) []string {
 // maskHelpTopics makes cobra's help command print each topic it does not find, a value
 // that contains a key or a code, such as qrk_, as [exports.Value] prints it. The help
 // command prints that line itself, to standard error, and returns no error.
+//
+// shortcut: it wraps the Run of cobra's default help command, found by the name help;
+// replace it with a help command of qory's when cobra's command changes or qory needs one.
 func maskHelpTopics(root *cobra.Command) {
 	root.InitDefaultHelpCmd()
 	for _, c := range root.Commands() {
