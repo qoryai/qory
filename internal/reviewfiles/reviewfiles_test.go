@@ -50,8 +50,8 @@ func copyRoot(t *testing.T) string {
 	return root
 }
 
-// reply is one response of the server.
-type reply struct {
+// received is one response of the server.
+type received struct {
 	ID     json.RawMessage `json:"id"`
 	Result json.RawMessage `json:"result"`
 	Error  *struct {
@@ -60,20 +60,20 @@ type reply struct {
 	} `json:"error"`
 }
 
-// serve sends messages to a server on root and returns its replies, one per line.
-func serve(t *testing.T, root string, messages ...string) ([]reply, error) {
+// serve sends messages to a server on root and returns its responses, one per line.
+func serve(t *testing.T, root string, messages ...string) ([]received, error) {
 	t.Helper()
 	var out bytes.Buffer
 	err := Serve(root, strings.NewReader(strings.Join(messages, "\n")+"\n"), &out)
-	var replies []reply
+	var responses []received
 	for line := range strings.Lines(out.String()) {
-		var r reply
+		var r received
 		if err := json.Unmarshal([]byte(line), &r); err != nil {
-			t.Fatalf("a reply is no JSON line: %q", line)
+			t.Fatalf("a response is no JSON line: %q", line)
 		}
-		replies = append(replies, r)
+		responses = append(responses, r)
 	}
-	return replies, err
+	return responses, err
 }
 
 // call is the text and the isError of tools/call of name with args on root.
@@ -84,19 +84,19 @@ func call(t *testing.T, root, name string, args any) (string, bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	replies, err := serve(t, root, string(data))
-	if err != nil || len(replies) != 1 {
-		t.Fatalf("serve: %v, %d replies", err, len(replies))
+	responses, err := serve(t, root, string(data))
+	if err != nil || len(responses) != 1 {
+		t.Fatalf("serve: %v, %d responses", err, len(responses))
 	}
-	if replies[0].Error != nil {
-		t.Fatalf("tools/call %s: error %d %s", name, replies[0].Error.Code, replies[0].Error.Message)
+	if responses[0].Error != nil {
+		t.Fatalf("tools/call %s: error %d %s", name, responses[0].Error.Code, responses[0].Error.Message)
 	}
 	var result struct {
 		Content []struct{ Type, Text string } `json:"content"`
 		IsError bool                          `json:"isError"`
 	}
-	if err := json.Unmarshal(replies[0].Result, &result); err != nil || len(result.Content) != 1 || result.Content[0].Type != "text" {
-		t.Fatalf("the result is %s", replies[0].Result)
+	if err := json.Unmarshal(responses[0].Result, &result); err != nil || len(result.Content) != 1 || result.Content[0].Type != "text" {
+		t.Fatalf("the result is %s", responses[0].Result)
 	}
 	if result.IsError {
 		if first, _, _ := strings.Cut(result.Content[0].Text, "\n"); len(first) > 100 {
@@ -108,7 +108,7 @@ func call(t *testing.T, root, name string, args any) (string, bool) {
 
 func TestInitializeAndListTheTools(t *testing.T) {
 	root := copyRoot(t)
-	replies, err := serve(t, root,
+	responses, err := serve(t, root,
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"client","version":"1"}}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
 		`{"jsonrpc":"2.0","id":"two","method":"tools/list"}`,
@@ -119,19 +119,19 @@ func TestInitializeAndListTheTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(replies) != 5 {
-		t.Fatalf("%d replies: the notification got one, or a request none", len(replies))
+	if len(responses) != 5 {
+		t.Fatalf("%d responses: a response for the notification, or none for a request", len(responses))
 	}
 	var init struct {
 		ProtocolVersion string                `json:"protocolVersion"`
 		ServerInfo      struct{ Name string } `json:"serverInfo"`
 		Capabilities    map[string]any        `json:"capabilities"`
 	}
-	if err := json.Unmarshal(replies[0].Result, &init); err != nil {
+	if err := json.Unmarshal(responses[0].Result, &init); err != nil {
 		t.Fatal(err)
 	}
 	if init.ProtocolVersion != "2025-06-18" || init.ServerInfo.Name != "qory_review" || init.Capabilities["tools"] == nil {
-		t.Errorf("initialize is %s", replies[0].Result)
+		t.Errorf("initialize is %s", responses[0].Result)
 	}
 	var list struct {
 		Tools []struct {
@@ -143,10 +143,10 @@ func TestInitializeAndListTheTools(t *testing.T) {
 			Annotations map[string]any
 		}
 	}
-	if string(replies[1].ID) != `"two"` {
-		t.Errorf("the id is %s", replies[1].ID)
+	if string(responses[1].ID) != `"two"` {
+		t.Errorf("the id is %s", responses[1].ID)
 	}
-	if err := json.Unmarshal(replies[1].Result, &list); err != nil {
+	if err := json.Unmarshal(responses[1].Result, &list); err != nil {
 		t.Fatal(err)
 	}
 	var names []string
@@ -171,14 +171,14 @@ func TestInitializeAndListTheTools(t *testing.T) {
 		!slices.Equal(props(2), []string{"glob", "path", "pattern"}) {
 		t.Errorf("the arguments are %v, %v, %v", props(0), props(1), props(2))
 	}
-	if string(replies[2].Result) != "{}" {
-		t.Errorf("ping is %s", replies[2].Result)
+	if string(responses[2].Result) != "{}" {
+		t.Errorf("ping is %s", responses[2].Result)
 	}
-	if replies[3].Error == nil || replies[3].Error.Code != -32601 {
-		t.Errorf("an unknown method: %+v", replies[3])
+	if responses[3].Error == nil || responses[3].Error.Code != -32601 {
+		t.Errorf("an unknown method: %+v", responses[3])
 	}
-	if !strings.Contains(string(replies[4].Result), `"protocolVersion":"2025-11-25"`) {
-		t.Errorf("an unknown version: %s", replies[4].Result)
+	if !strings.Contains(string(responses[4].Result), `"protocolVersion":"2025-11-25"`) {
+		t.Errorf("an unknown version: %s", responses[4].Result)
 	}
 }
 
@@ -369,7 +369,7 @@ func tree(t *testing.T, root string) string {
 
 func TestRequestsOfTheWrongForm(t *testing.T) {
 	root := copyRoot(t)
-	replies, err := serve(t, root,
+	responses, err := serve(t, root,
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"write_file","arguments":{"path":"x"}}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_file","arguments":{"path":"README.md","mode":"w"}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_file","arguments":{"path":7}}}`,
@@ -380,7 +380,7 @@ func TestRequestsOfTheWrongForm(t *testing.T) {
 		t.Fatal(err)
 	}
 	codes := []int{}
-	for _, r := range replies {
+	for _, r := range responses {
 		if r.Error == nil {
 			t.Fatalf("no error: %s", r.Result)
 		}
@@ -389,9 +389,9 @@ func TestRequestsOfTheWrongForm(t *testing.T) {
 	if !slices.Equal(codes, []int{-32602, -32602, -32602, -32600, -32600}) {
 		t.Errorf("the codes are %v", codes)
 	}
-	replies, err = serve(t, root, `{"jsonrpc":"2.0","id":1,`)
-	if err == nil || len(replies) != 1 || replies[0].Error == nil || replies[0].Error.Code != -32700 {
-		t.Errorf("a message that is no JSON: %v, %+v", err, replies)
+	responses, err = serve(t, root, `{"jsonrpc":"2.0","id":1,`)
+	if err == nil || len(responses) != 1 || responses[0].Error == nil || responses[0].Error.Code != -32700 {
+		t.Errorf("a message that is no JSON: %v, %+v", err, responses)
 	}
 	if _, err := serve(t, filepath.Join(root, "README.md")); err == nil || !strings.HasPrefix(err.Error(), "Give qory review-files the folder of the reviewer's copy.\n") {
 		t.Errorf("a root that is a file: %v", err)

@@ -55,8 +55,9 @@ const (
 	binaryProbe = 8000
 )
 
-// protocolVersions are the MCP versions the server answers with, newest first. An
-// initialize with one of them gets that one, and any other gets the first.
+// protocolVersions are the MCP versions that the server's result of an initialize can have,
+// newest first. An initialize that asks for one of them gets that one in its result, and
+// any other gets the first.
 var protocolVersions = []string{"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
 
 // The JSON-RPC error codes the server returns.
@@ -115,11 +116,11 @@ func Serve(root string, in io.Reader, out io.Writer) error {
 			_ = send(w, response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{codeParse, "Send each message as JSON: " + err.Error()}})
 			return fmt.Errorf("Send qory review-files JSON-RPC messages.\nA message is not JSON: %w", err)
 		}
-		reply, ok := s.handle(raw)
+		resp, ok := s.handle(raw)
 		if !ok {
 			continue
 		}
-		if err := send(w, reply); err != nil {
+		if err := send(w, resp); err != nil {
 			return err
 		}
 	}
@@ -150,25 +151,25 @@ func (s *server) handle(raw json.RawMessage) (response, bool) {
 	if len(m.ID) == 0 || string(m.ID) == "null" {
 		return response{}, false
 	}
-	reply := response{JSONRPC: "2.0", ID: m.ID}
+	resp := response{JSONRPC: "2.0", ID: m.ID}
 	switch m.Method {
 	case "initialize":
-		reply.Result = s.initialize(m.Params)
+		resp.Result = s.initialize(m.Params)
 	case "ping":
-		reply.Result = struct{}{}
+		resp.Result = struct{}{}
 	case "tools/list":
-		reply.Result = map[string]any{"tools": tools()}
+		resp.Result = map[string]any{"tools": tools()}
 	case "tools/call":
 		result, err := s.call(m.Params)
 		if err != nil {
-			reply.Error = err
+			resp.Error = err
 		} else {
-			reply.Result = result
+			resp.Result = result
 		}
 	default:
-		reply.Error = &rpcError{codeNoMethod, "Call initialize, ping, tools/list or tools/call: the server has no method " + strconv.Quote(m.Method) + "."}
+		resp.Error = &rpcError{codeNoMethod, "Call initialize, ping, tools/list or tools/call: the server has no method " + strconv.Quote(m.Method) + "."}
 	}
-	return reply, true
+	return resp, true
 }
 
 // initialize is the result of initialize: the protocol version, the tools capability and
@@ -263,8 +264,8 @@ type toolResult struct {
 	IsError bool                `json:"isError"`
 }
 
-// call runs the tool that params name. A tool's failure is a result with isError; an
-// unknown tool or arguments of the wrong form are an error of the request.
+// call runs the tool whose name is in params. A tool's failure is a result with isError;
+// an unknown tool or arguments of the wrong form are an error of the request.
 func (s *server) call(params json.RawMessage) (toolResult, *rpcError) {
 	var p struct {
 		Name      string          `json:"name"`
@@ -339,8 +340,9 @@ func shown(rel string) string {
 }
 
 // resolve is rel as a path below the root that os.Root opens, "." for the root itself. It
-// returns an error for an absolute path, a .. that leaves the root, a NUL, and a link on the
-// way that points out of the root.
+// returns an error for an absolute path, a .. that leaves the root and a NUL. os.Root stops
+// a link that points out of the root at the open, and [openError] states it; a .. that
+// leaves the root would also reach os.Root as such a link, so resolve stops it first.
 func (s *server) resolve(rel string) (string, error) {
 	const fix = "Give a path relative to the copy's root, inside it."
 	if strings.ContainsRune(rel, 0) {
@@ -355,28 +357,6 @@ func (s *server) resolve(rel string) (string, error) {
 	clean := path.Clean(rel)
 	if clean == ".." || strings.HasPrefix(clean, "../") {
 		return "", pathError(fix, rel, "leaves the root through ..")
-	}
-	if clean == "." {
-		return clean, nil
-	}
-	parts := strings.Split(clean, "/")
-	for i := range parts {
-		at := strings.Join(parts[:i+1], "/")
-		info, err := s.root.Lstat(at)
-		if err != nil {
-			break
-		}
-		if info.Mode()&fs.ModeSymlink == 0 {
-			continue
-		}
-		target, err := s.root.Readlink(at)
-		if err != nil {
-			return "", pathError(fix, rel, "goes through a link that cannot be read")
-		}
-		resolved := path.Clean(path.Join(path.Dir(at), target))
-		if path.IsAbs(target) || resolved == ".." || strings.HasPrefix(resolved, "../") {
-			return "", pathError(fix, rel, "goes through a link that points out of the root")
-		}
 	}
 	return clean, nil
 }

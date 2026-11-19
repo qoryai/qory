@@ -8,9 +8,9 @@ import (
 
 // newReviewFiles builds the hidden review-files verb: the MCP server qory_review that a
 // reviewer's Codex starts in the reviewer's container, which serves read-only file tools on
-// the reviewer's copy at the folder its argument names (690 (a)). It reads JSON-RPC
-// messages on standard input and writes its responses, and nothing else, on standard
-// output, so it carries [inWall] and no notice of a release reaches standard output.
+// the reviewer's copy in the folder of its argument (690 (a)). It reads JSON-RPC messages
+// on standard input and writes its responses, and nothing else, on standard output. It
+// carries [inWall], so no look for a release runs inside the container.
 func newReviewFiles() *cobra.Command {
 	return &cobra.Command{
 		Use:         "review-files folder",
