@@ -18,7 +18,9 @@ import (
 // tries to write each part of the home that the run binds read-only, to move it away and
 // to remove it, and to write a session file in the writable home, and prints whether the
 // home has the skill workflow-hello and rules/read-access.rules, and whether config.toml
-// marks a project untrusted.
+// marks a project untrusted. It prints whether /etc/codex has the image's files or qory's
+// hooks.json, and tries to write, rename and replace /etc/codex/hooks.json, to add a file
+// to /etc/codex and to rename the folder.
 const stubCodex = `#!/bin/sh
 echo "stub: args $*"
 echo "stub: CODEX_HOME=$CODEX_HOME"
@@ -36,7 +38,19 @@ if mkdir -p "$CODEX_HOME/sessions/2026" && echo line > "$CODEX_HOME/sessions/202
 if test -f "$CODEX_HOME/skills/workflow-hello/SKILL.md"; then echo "stub: skill"; fi
 if test -f "$CODEX_HOME/rules/read-access.rules"; then echo "stub: read rules"; else echo "stub: no read rules"; fi
 if grep -q 'trust_level = "untrusted"' "$CODEX_HOME/config.toml"; then echo "stub: untrusted"; fi
+if test -e /etc/codex/config.toml || test -e /etc/codex/requirements.toml; then echo "stub: the image's /etc/codex"; fi
+if grep -q '"hooks"' /etc/codex/hooks.json; then echo "stub: qory's hooks.json"; fi
+if echo x >> /etc/codex/hooks.json 2>/dev/null; then echo "stub: wrote /etc/codex/hooks.json"; else echo "stub: cannot write /etc/codex/hooks.json"; fi
+if mv /etc/codex/hooks.json /etc/codex/moved.json 2>/dev/null; then echo "stub: renamed /etc/codex/hooks.json"; else echo "stub: cannot rename /etc/codex/hooks.json"; fi
+if echo '{}' > /tmp/planted.json && mv /tmp/planted.json /etc/codex/hooks.json 2>/dev/null; then echo "stub: replaced /etc/codex/hooks.json"; else echo "stub: cannot replace /etc/codex/hooks.json"; fi
+if touch /etc/codex/config.toml 2>/dev/null; then echo "stub: added to /etc/codex"; else echo "stub: cannot add to /etc/codex"; fi
+if mv /etc/codex /etc/codex-moved 2>/dev/null; then echo "stub: renamed /etc/codex"; else echo "stub: cannot rename /etc/codex"; fi
 `
+
+// imageEtcCodex are the Dockerfile's instructions of
+// [TestARealWalledCodexReadRunHasItsHomeBound]: the image has a folder /etc/codex with a
+// config.toml and a requirements.toml, which qory's folder hides.
+const imageEtcCodex = "RUN mkdir -p /etc/codex && echo 'model = \"image\"' > /etc/codex/config.toml && echo '' > /etc/codex/requirements.toml\n"
 
 // TestARealWalledCodexReadRunHasItsHomeBound is a walled Codex run from a run code that
 // only reads, behind a real wall on this machine's engine, with a stub of Codex in the
@@ -44,8 +58,11 @@ if grep -q 'trust_level = "untrusted"' "$CODEX_HOME/config.toml"; then echo "stu
 // skill by its path there; a write into each file and folder that the run binds
 // read-only fails, and so do a move and a removal of each; a write of a session file in the
 // home passes; the home has the harness's skill, the read run's read-access.rules, and a
-// config.toml that marks a project untrusted. The run's folder is gone once the run ends.
-// It runs only with QORY_TEST_DOCKER=1 and docker on the PATH.
+// config.toml that marks a project untrusted. The image has a folder /etc/codex, and the
+// agent sees qory's folder there in its place: hooks.json and none of the image's files,
+// and a write, a rename and a replacement of hooks.json fail, as do a new file and a
+// rename of the folder. The run's folder is gone once the run ends. It runs only with
+// QORY_TEST_DOCKER=1 and docker on the PATH.
 func TestARealWalledCodexReadRunHasItsHomeBound(t *testing.T) {
 	if os.Getenv("QORY_TEST_DOCKER") != "1" {
 		t.Skip("QORY_TEST_DOCKER=1 runs it")
@@ -53,7 +70,7 @@ func TestARealWalledCodexReadRunHasItsHomeBound(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("no docker command")
 	}
-	helper, image := realWallImage(t, "codex", stubCodex)
+	helper, image := realWallImageWith(t, "codex", stubCodex, imageEtcCodex)
 	atGateway(t)
 	codeReal = true
 	t.Cleanup(func() { codeReal = false })
@@ -82,6 +99,9 @@ func TestARealWalledCodexReadRunHasItsHomeBound(t *testing.T) {
 		wants(t, r.out, "stub: cannot move "+name+"\n", "stub: cannot remove "+name+"\n")
 	}
 	wants(t, r.out, "stub: wrote sessions\n", "stub: skill\n", "stub: read rules\n", "stub: untrusted\n")
+	wants(t, r.out, "stub: qory's hooks.json\n", "stub: cannot write /etc/codex/hooks.json\n", "stub: cannot rename /etc/codex/hooks.json\n",
+		"stub: cannot replace /etc/codex/hooks.json\n", "stub: cannot add to /etc/codex\n", "stub: cannot rename /etc/codex\n")
+	lacks(t, r.out, "stub: the image's /etc/codex\n")
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		t.Fatal(err)

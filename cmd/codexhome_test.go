@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -217,6 +218,50 @@ func TestAWalledCodexReadRunGetsTheReadRules(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Dir(home)); !os.IsNotExist(err) {
 		t.Errorf("the run's folder %s is left after the run: %v", filepath.Dir(home), err)
+	}
+}
+
+// TestForagerBindsQorysFolderOverEtcCodex is a person's walled Codex run behind the docker
+// wall, with a program in place of docker and no stand-in for the join: Forager's session
+// checks the mounts, the mount at /etc/codex among them, and starts the agent's
+// container, which binds the folder etc-codex of the run's codex-fixed read-only at
+// /etc/codex, where the image may have a folder of its own. While the session runs, the
+// folder has mode 0755 and contains hooks.json alone, mode 0644.
+func TestForagerBindsQorysFolderOverEtcCodex(t *testing.T) {
+	exportingCheckout(t, fakeRuntime(t))
+	log := walledForager(t)
+	t.Setenv("QORY_RUN_KEY", "")
+	var modes map[string]os.FileMode
+	var names []string
+	t.Cleanup(cmd.SetJoinSession(func(s session.SessionSpec) {
+		for _, m := range s.Mounts {
+			if m.Target != codex.SystemInWall {
+				continue
+			}
+			modes = map[string]os.FileMode{}
+			for _, p := range []string{m.Path, filepath.Join(m.Path, "hooks.json")} {
+				if info, err := os.Lstat(p); err == nil {
+					modes[filepath.Base(p)] = info.Mode()
+				}
+			}
+			entries, _ := os.ReadDir(m.Path)
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+		}
+	}))
+	out, err := run(t, "run", "codex", "--", "hi")
+	data, readErr := os.ReadFile(log)
+	if readErr != nil {
+		t.Fatalf("%v; the run: %v (exit %d)\n%s", readErr, err, cmd.ExitCode(err), out)
+	}
+	lacks(t, out, "Set the target of the mount")
+	bind := regexp.MustCompile(`--mount type=bind,src=(\S+),dst=/etc/codex,readonly( |$)`).FindStringSubmatch(string(data))
+	if bind == nil || filepath.Base(bind[1]) != codex.SystemDir || filepath.Base(filepath.Dir(bind[1])) != "codex-fixed" {
+		t.Fatalf("no read-only bind of codex-fixed/etc-codex at /etc/codex: %v (exit %d)\n%s\n%s", err, cmd.ExitCode(err), out, data)
+	}
+	if modes["etc-codex"] != 0o755|os.ModeDir || modes["hooks.json"] != 0o644 || !slices.Equal(names, []string{"hooks.json"}) {
+		t.Errorf("the bound folder: modes %v, entries %q", modes, names)
 	}
 }
 

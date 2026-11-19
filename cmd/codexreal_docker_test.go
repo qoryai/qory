@@ -75,8 +75,8 @@ exit $status
 `
 
 // realCodexVersion is the Codex the test builds into its image: 0.170.0, the dist-tag
-// latest of @openai/codex on npm on 2026-11-18. The walled run's settings, refused keys
-// and hook hashes were first checked on 0.167.2. realCodexSums are npm's dist.integrity
+// latest of @openai/codex on npm on 2026-11-18. The walled run's settings and refused
+// keys were first checked on 0.167.2. realCodexSums are npm's dist.integrity
 // of its native build for each engine architecture, sha512 in hex.
 const realCodexVersion = "0.170.0"
 

@@ -101,12 +101,19 @@ func wallHelper(t *testing.T) string {
 // the image's reference.
 func realWallImage(t *testing.T, name, agent string) (helper, image string) {
 	t.Helper()
+	return realWallImageWith(t, name, agent, "")
+}
+
+// realWallImageWith is [realWallImage] with the Dockerfile's instructions extra, which run
+// as root before the image's user is set.
+func realWallImageWith(t *testing.T, name, agent, extra string) (helper, image string) {
+	t.Helper()
 	var id [4]byte
 	_, _ = rand.Read(id[:])
 	dir := t.TempDir()
 	helper = wallHelper(t)
 	writeFile(t, filepath.Join(dir, "image", "agent"), agent)
-	writeFile(t, filepath.Join(dir, "image", "Dockerfile"), "FROM public.ecr.aws/docker/library/alpine:3.22\nRUN apk add --no-cache git\nCOPY agent /usr/local/bin/"+name+"\nRUN chmod 755 /usr/local/bin/"+name+"\nUSER 1000:1000\n")
+	writeFile(t, filepath.Join(dir, "image", "Dockerfile"), "FROM public.ecr.aws/docker/library/alpine:3.22\nRUN apk add --no-cache git\nCOPY agent /usr/local/bin/"+name+"\nRUN chmod 755 /usr/local/bin/"+name+"\n"+extra+"USER 1000:1000\n")
 	image = "qory-test-" + name + ":" + hex.EncodeToString(id[:])
 	dockerOut(t, "", "build", "--quiet", "--tag", image, filepath.Join(dir, "image"))
 	t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", "--force", image).Run() })

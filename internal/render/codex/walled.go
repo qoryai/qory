@@ -2,8 +2,6 @@ package codex
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +11,6 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"syscall"
 
@@ -26,29 +23,42 @@ import (
 
 // HomeInWall is the folder in the wall where a walled run binds Codex's writable home
 // and sets CODEX_HOME: one fixed path in every image, whatever HOME the image sets, so
-// qory knows it before the join. Codex keys each hook's trust by this path, see
-// [WalledConfig]. The folder is outside /tmp, since Codex 0.167.2 writes no helper
-// program, such as apply_patch, in a home under the temporary folder
+// qory knows it before the join. The folder is outside /tmp, since Codex 0.167.2 writes
+// no helper program, such as apply_patch, in a home under the temporary folder
 // (codex-rs/arg0/src/lib.rs).
 const HomeInWall = "/var/lib/qory-codex-home"
 
-// Bound is one file or folder of a walled run's Codex home that the run binds read-only
-// at Target, its path in [HomeInWall].
+// SystemInWall is the folder in the wall where Codex 0.169.0 on Linux reads its system
+// settings, config.toml and hooks.json (codex-rs/config/src/loader/mod.rs,
+// SYSTEM_CONFIG_TOML_FILE_UNIX; codex-rs/config/src/state.rs, config_folder). Codex
+// runs a hook of that folder as managed: with no stored hash, and also when a
+// hooks.state entry sets enabled = false (codex-rs/hooks/src/engine/discovery.rs,
+// hook_trust_status and hook_enabled). A walled run binds [SystemDir] there, read-only,
+// in place of whatever the image has at that path.
+const SystemInWall = "/etc/codex"
+
+// SystemDir is the folder of [WriteWalledHome] that a walled run binds at
+// [SystemInWall]. It contains hooks.json alone, see [WalledHooks].
+const SystemDir = "etc-codex"
+
+// Bound is one file or folder that a walled Codex run binds read-only at Target: a part
+// of the run's Codex home, or the folder of Codex's system settings.
 type Bound struct {
-	// Path is the path under the home, such as config.toml or rules.
+	// Path is the path under the home, such as config.toml or rules, or [SystemDir].
 	Path string
 	// Source is the file or folder on this machine, in the folder [WriteWalledHome]
 	// writes, which shares no path with any other mount of the run.
 	Source string
-	// Target is the path in the wall: Path under [HomeInWall].
+	// Target is the path in the wall: Path under [HomeInWall], or [SystemInWall] for
+	// [SystemDir].
 	Target string
 	// Dir marks a folder.
 	Dir bool
 }
 
 // boundFiles are the files of a walled run's home that [WriteWalledHome] writes, and
-// boundDirs the folders it binds. Codex reads hooks from config.toml and hooks.json,
-// sets each variable of .env that is not named CODEX_*, starts the program an
+// boundDirs the folders it binds. Codex reads hooks from config.toml and hooks.json of
+// the home, sets each variable of .env that is not named CODEX_*, starts the program an
 // environments.toml lists, and reads the instructions, rules, skills and agents of its
 // home; bound read-only, none of them is one the agent changes for a later Codex process.
 // Codex reads AGENTS.override.md ahead of AGENTS.md in its home and passes over one that
@@ -59,7 +69,8 @@ var (
 	boundDirs  = []string{"rules", "skills", "agents"}
 )
 
-// noHooks is the hooks.json of a walled run's home: a file with no hook.
+// noHooks is the hooks.json of a walled run's home: a file with no hook. The harness's
+// hooks are in the hooks.json of [SystemDir].
 const noHooks = "{\"hooks\": {}}\n"
 
 // WalledRun is what [WriteWalledHome] needs to know of the run.
@@ -105,17 +116,19 @@ const ReadRulesName = "read-access.rules"
 // <user cache>/qory/runs/<run id>/codex-fixed, and writes into it every part of a walled
 // run's Codex home that the run binds read-only: the config.toml from dir, the runtime's
 // directory of the composed home, with [WalledConfig]'s additions for run.Projects,
-// run.WorkDirs and the git roots of run.Checkouts, see [gitRootsInWall], and with every skill that is not
-// in run.Skills disabled, a hooks.json with no hook, an empty .env, environments.toml and
-// AGENTS.override.md, dir's AGENTS.md, or an empty one, and a copy of each folder of
-// [boundDirs] that dir has, with each link replaced by what it leads to, see [copyTree],
-// or an empty folder. The copy of rules and agents keeps to [walledLimit]. For a run
-// whose access is read, rules/ also contains run.ReadRules
-// as [ReadRulesName], in place of any file of that name in dir's rules; for any other
-// access, rules/ is the copy alone. A mount with a target may share no path on this
-// machine with another mount, so nothing is bound from dir itself, which the run mounts
-// as the harness home. It writes no auth.json. It returns the binds, files first, in a
-// fixed order.
+// run.WorkDirs and the git roots of run.Checkouts, see [gitRootsInWall], and with every
+// skill that is not in run.Skills disabled, a hooks.json with no hook, an empty .env,
+// environments.toml and AGENTS.override.md, dir's AGENTS.md, or an empty one, and a copy
+// of each folder of [boundDirs] that dir has, with each link replaced by what it leads
+// to, see [copyTree], or an empty folder. The copy of rules and agents keeps to
+// [walledLimit]. For a run whose access is read, rules/ also contains run.ReadRules as
+// [ReadRulesName], in place of any file of that name in dir's rules; for any other
+// access, rules/ is the copy alone. It also writes the folder [SystemDir], mode 0755,
+// with the hooks of dir's hooks.json and config.toml in its hooks.json, mode 0644, see
+// [WalledHooks]. A mount with a target may share no path on this machine with another
+// mount, so nothing is bound from dir itself, which the run mounts as the harness home.
+// It writes no auth.json. It returns the binds, files first, then the folders of the
+// home, then [SystemDir] at [SystemInWall], in a fixed order.
 //
 // The skills disabled are every name, other than run.Skills, of a skill in the copy of
 // dir's skills and in run.Checkouts, by [skillNames], and every skill of run.Checkouts
@@ -123,8 +136,8 @@ const ReadRulesName = "read-access.rules"
 // of an allowed one is disabled too. When run.Skills contains
 // [AllSkills], every name of a skill in the copy of dir's skills counts as in run.Skills.
 // A skill that is not there when WriteWalledHome runs keeps its name enabled: one the
-// agent writes during the run, and one in ~/.agents/skills or /etc/codex/skills of the
-// image.
+// agent writes during the run, and one in ~/.agents/skills of the image. The bind at
+// [SystemInWall] hides any /etc/codex/skills of the image.
 func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 	// A folder that exists may have links planted in it; a new one has none.
 	if err := os.Mkdir(files, 0o755); err != nil {
@@ -193,7 +206,17 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 		untrusted = append(untrusted, gitRootsInWall(c, run.Projects)...)
 	}
 	slices.Sort(untrusted)
-	config, err = WalledConfig(config, HomeInWall, slices.Compact(untrusted), slices.Compact(disabled), slices.Compact(disabledPaths))
+	hooksJSON, err := os.ReadFile(filepath.Join(dir, "hooks.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		hooksJSON = nil
+	} else if err != nil {
+		return nil, err
+	}
+	hooks, err := WalledHooks(hooksJSON, config)
+	if err != nil {
+		return nil, err
+	}
+	config, err = WalledConfig(config, slices.Compact(untrusted), slices.Compact(disabled), slices.Compact(disabledPaths))
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +235,86 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 		}
 		out = append(out, Bound{Path: name, Source: p, Target: path.Join(HomeInWall, name)})
 	}
+	system := filepath.Join(files, SystemDir)
+	if err := os.Mkdir(system, 0o755); err != nil {
+		return nil, err
+	}
+	// Mkdir and writeNew take the umask off the mode.
+	if err := os.Chmod(system, 0o755); err != nil {
+		return nil, err
+	}
+	p := filepath.Join(system, "hooks.json")
+	if err := writeNew(p, hooks, 0o644); err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(p, 0o644); err != nil {
+		return nil, err
+	}
+	dirs = append(dirs, Bound{Path: SystemDir, Source: system, Target: SystemInWall, Dir: true})
 	return append(out, dirs...), nil
+}
+
+// textHookGroups is the refusal of a hooks table whose event is no list of hook groups,
+// with the file and the event.
+const textHookGroups = "Write each event of the hooks in `settings/codex/%s` as a list of hook groups.\n  The event %s is no list, and Codex reads no hook of such a file."
+
+// WalledHooks is the hooks.json that a walled Codex run binds in [SystemDir], from
+// hooksJSON and config, the hooks.json and the config.toml of the composed home, either
+// nil when the home has none: the key hooks alone, with each event's groups of hooksJSON
+// and then those of config's hooks table, the order in which Codex 0.169.0 loads the two
+// files of one folder (codex-rs/hooks/src/engine/discovery.rs, discover_handlers). Each
+// group is as the compose wrote it, numbers as written. config's hooks.state is left
+// out, since Codex keeps no state of a managed hook. Codex refuses a hooks.json with a
+// key other than description and hooks (codex-rs/config/src/hook_config.rs, HooksFile),
+// so description is left out too. An event whose value is no list fails, with
+// [textHookGroups].
+func WalledHooks(hooksJSON, config []byte) ([]byte, error) {
+	events := map[string][]any{}
+	if len(hooksJSON) > 0 {
+		var file struct {
+			Hooks map[string]any `json:"hooks"`
+		}
+		dec := json.NewDecoder(bytes.NewReader(hooksJSON))
+		dec.UseNumber()
+		if err := dec.Decode(&file); err != nil {
+			return nil, fmt.Errorf("read the composed hooks.json: %w", err)
+		}
+		for event, v := range file.Hooks {
+			groups, ok := v.([]any)
+			if !ok {
+				return nil, fmt.Errorf(textHookGroups, "hooks.json", event)
+			}
+			events[event] = append(events[event], groups...)
+		}
+	}
+	m := map[string]any{}
+	if _, err := toml.NewDecoder(bytes.NewReader(config)).Decode(&m); err != nil {
+		return nil, err
+	}
+	table, _ := m["hooks"].(map[string]any)
+	for event, v := range table {
+		if event == "state" {
+			continue
+		}
+		switch groups := v.(type) {
+		case []map[string]any:
+			for _, g := range groups {
+				events[event] = append(events[event], g)
+			}
+		case []any:
+			events[event] = append(events[event], groups...)
+		default:
+			return nil, fmt.Errorf(textHookGroups, "config.toml", event)
+		}
+	}
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(map[string]any{"hooks": events}); err != nil {
+		return nil, fmt.Errorf("write the hooks of the walled run: %w", err)
+	}
+	return b.Bytes(), nil
 }
 
 // writeNew writes data to a new file at p, with mode perm. It fails when anything is at
@@ -624,14 +726,13 @@ func writeCopy(in io.Reader, dst string, perm os.FileMode, limit int64) (int64, 
 	return n, err
 }
 
-// WalledConfig is config, a config.toml the compose rendered, with what a walled run adds
-// for a Codex whose home is home in the wall: projects."<path>".trust_level = "untrusted"
-// for each of projects, the paths where the run's checkout is in the wall, so Codex reads
-// no hook, rule or setting of the repository's .codex and writes no trust setting
-// itself; and hooks.state."<home>/config.toml:<event>:<group>:<handler>".trusted_hash
-// for each command and MCP tool hook of config's hooks, so Codex runs the harness's
-// hooks without --dangerously-bypass-hook-trust, which would trust an agent's hooks too.
-// home is absolute and contains no link, as Codex resolves it.
+// WalledConfig is config, a config.toml the compose rendered, with what a walled run adds:
+// projects."<path>".trust_level = "untrusted" for each of projects, the paths where the
+// run's checkout is in the wall, so Codex reads no hook, rule or setting of the
+// repository's .codex and writes no trust setting itself. It leaves out config's hooks
+// table: the run binds those hooks in [SystemInWall], see [WalledHooks], where Codex runs
+// them with no hash, so the run needs neither a trusted_hash nor
+// --dangerously-bypass-hook-trust, which would trust an agent's hooks too.
 //
 // It also turns off the skills Codex ships and the skills of a cloud provider, with
 // skills.bundled.enabled = false and cloud.skills.enabled = false, and adds a
@@ -653,10 +754,10 @@ func writeCopy(in io.Reader, dst string, perm os.FileMode, limit int64) (int64, 
 // false, so Codex runs commands with bash -c, not bash -lc (codex-rs/core/src/shell.rs);
 // features.goals = false, which would continue a goal the agent set
 // (codex-rs/ext/goal/src/runtime.rs); and features.memories = false. Codex 0.167.2 turns
-// the first three on by default (codex-rs/features/src/lib.rs). A --config flag, a
-// trusted project's .codex and the requirements files of /etc/codex can set them again;
-// projects are untrusted here, and the agent image has no /etc/codex.
-func WalledConfig(config []byte, home string, projects, disabled, disabledPaths []string) ([]byte, error) {
+// the first three on by default (codex-rs/features/src/lib.rs). A --config flag and a
+// trusted project's .codex can set them again; projects are untrusted here, and the bind
+// at [SystemInWall] has no config.toml or requirements.toml.
+func WalledConfig(config []byte, projects, disabled, disabledPaths []string) ([]byte, error) {
 	m := map[string]any{}
 	if _, err := toml.NewDecoder(bytes.NewReader(config)).Decode(&m); err != nil {
 		return nil, err
@@ -700,243 +801,6 @@ func WalledConfig(config []byte, home string, projects, disabled, disabledPaths 
 		}
 		m["projects"] = trust
 	}
-	if hooks, ok := m["hooks"].(map[string]any); ok {
-		state := map[string]any{}
-		key := path.Join(home, "config.toml")
-		for event, groups := range hooks {
-			label, ok := eventLabels[event]
-			if !ok {
-				continue
-			}
-			list, ok := groups.([]map[string]any)
-			if !ok {
-				continue
-			}
-			for g, group := range list {
-				handlers, _ := group["hooks"].([]map[string]any)
-				for h, handler := range handlers {
-					hash, ok, err := hookHash(event, group, handler)
-					if err != nil {
-						return nil, err
-					}
-					if ok {
-						state[key+":"+label+":"+strconv.Itoa(g)+":"+strconv.Itoa(h)] = map[string]any{"trusted_hash": hash}
-					}
-				}
-			}
-		}
-		if len(state) > 0 {
-			hooks["state"] = state
-		}
-	}
+	delete(m, "hooks")
 	return render.EncodeTOML(m)
-}
-
-// eventLabels are the hook events of config.toml's hooks table, each with the name Codex
-// uses for it in a hook's key and hash (codex-rs/hooks/src/lib.rs, hook_event_key_label).
-var eventLabels = map[string]string{
-	"PreModelRequest":   "pre_model_request",
-	"PostModelRequest":  "post_model_request",
-	"PreToolUse":        "pre_tool_use",
-	"PermissionRequest": "permission_request",
-	"PostToolUse":       "post_tool_use",
-	"PreCompact":        "pre_compact",
-	"PostCompact":       "post_compact",
-	"SessionStart":      "session_start",
-	"SessionEnd":        "session_end",
-	"UserPromptSubmit":  "user_prompt_submit",
-	"SubagentStart":     "subagent_start",
-	"SubagentStop":      "subagent_stop",
-	"Stop":              "stop",
-	"Interrupt":         "interrupt",
-}
-
-// matched are the events whose hooks take a matcher; Codex leaves the matcher of any
-// other event out of the hash (codex-rs/hooks/src/events/common.rs).
-var matched = map[string]bool{
-	"PreToolUse": true, "PermissionRequest": true, "PostToolUse": true, "SessionStart": true,
-	"SessionEnd": true, "SubagentStart": true, "SubagentStop": true, "PreCompact": true,
-	"PostCompact": true,
-}
-
-// contextEvents are the events whose hooks keep additionalContextLimit.
-var contextEvents = map[string]bool{
-	"PreToolUse": true, "PostToolUse": true, "SessionStart": true, "UserPromptSubmit": true,
-	"SubagentStart": true,
-}
-
-// defaultContextLimit is the additionalContextLimit Codex leaves out of the hash.
-const defaultContextLimit = 2500
-
-// hookHash is the trusted_hash Codex computes for one hook of event in group
-// (codex-rs/hooks/src/engine/discovery.rs, hook_hash, and
-// codex-rs/config/src/fingerprint.rs, version_for_toml): "sha256:" and the SHA-256 of
-// the compact JSON, keys sorted, of the event's label, the matcher where the event takes
-// one, and the one handler normalized, see [commandHandler] and [mcpToolHandler]. False
-// for a handler of any other type, for one Codex skips, and for a hook with U+2028 or
-// U+2029 in its matcher, see [lineSeparator]; none of them gets trust.
-func hookHash(event string, group, handler map[string]any) (string, bool, error) {
-	var normalized map[string]any
-	switch handler["type"] {
-	case "command":
-		normalized = commandHandler(event, handler)
-	case "mcp_tool":
-		normalized = mcpToolHandler(event, handler)
-	}
-	if normalized == nil {
-		return "", false, nil
-	}
-	identity := map[string]any{"event_name": eventLabels[event], "hooks": []any{normalized}}
-	if matcher, ok := group["matcher"].(string); ok && matched[event] {
-		if lineSeparator(matcher) {
-			return "", false, nil
-		}
-		identity["matcher"] = matcher
-	}
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(identity); err != nil {
-		return "", false, fmt.Errorf("hash a %s hook: %w", event, err)
-	}
-	sum := sha256.Sum256(bytes.TrimSuffix(b.Bytes(), []byte("\n")))
-	return "sha256:" + hex.EncodeToString(sum[:]), true, nil
-}
-
-// commandHandler is a command hook's handler as Codex normalizes it before the hash:
-// type, command as written, timeout with Codex's default and limits, async, and
-// statusMessage and additionalContextLimit when they count. nil for a command of only
-// white space, which Codex skips, and for U+2028 or U+2029 in the command or
-// statusMessage.
-func commandHandler(event string, handler map[string]any) map[string]any {
-	command, ok := handler["command"].(string)
-	if !ok || strings.TrimSpace(command) == "" || lineSeparator(command) {
-		return nil
-	}
-	normalized := map[string]any{"type": "command", "command": command, "timeout": hookTimeout(event, handler["timeout"]), "async": handler["async"] == true}
-	if s, ok := handler["statusMessage"].(string); ok {
-		if lineSeparator(s) {
-			return nil
-		}
-		normalized["statusMessage"] = s
-	}
-	if n, ok := handler["additionalContextLimit"].(int64); ok && contextEvents[event] && n != defaultContextLimit {
-		normalized["additionalContextLimit"] = n
-	}
-	return normalized
-}
-
-// mcpToolHandler is an MCP tool hook's handler as Codex normalizes it before the hash:
-// type, server and tool as written, input, an empty table when it has none, see
-// [hashedInput], timeout with Codex's default and limits, and statusMessage when it is
-// set. nil for a SessionEnd hook and for an empty server or tool, which Codex skips, for
-// U+2028 or U+2029 in a string, and for an input that [hashedInput] cannot write.
-//
-// Codex 0.167.2's app-server, asked with hooks/list, gave the same hashes for inputs
-// with strings, booleans, integers, an array and a nested table, and the status trusted.
-func mcpToolHandler(event string, handler map[string]any) map[string]any {
-	if event == "SessionEnd" {
-		return nil
-	}
-	server, _ := handler["server"].(string)
-	tool, _ := handler["tool"].(string)
-	if strings.TrimSpace(server) == "" || strings.TrimSpace(tool) == "" || lineSeparator(server) || lineSeparator(tool) {
-		return nil
-	}
-	input := map[string]any{}
-	if v, ok := handler["input"]; ok {
-		m, ok := v.(map[string]any)
-		if !ok {
-			return nil
-		}
-		h, ok := hashedInput(m)
-		if !ok {
-			return nil
-		}
-		input = h.(map[string]any)
-	}
-	normalized := map[string]any{"type": "mcp_tool", "server": server, "tool": tool, "input": input, "timeout": hookTimeout(event, handler["timeout"])}
-	if s, ok := handler["statusMessage"].(string); ok {
-		if lineSeparator(s) {
-			return nil
-		}
-		normalized["statusMessage"] = s
-	}
-	return normalized
-}
-
-// numberKey is the key of the table that serde_json writes in place of a number when it
-// is built with its arbitrary_precision feature, as Codex 0.167.2 is: the number's text
-// is the key's value.
-const numberKey = "$serde_json::private::Number"
-
-// hashedInput is v, a value TOML decoded in an MCP tool hook's input, as Codex writes it
-// in the hash: a string or a boolean as it is, an integer as a table of [numberKey] and
-// its decimal text, and a table or an array with each value so written. False for a
-// string with U+2028 or U+2029, which encoding/json escapes and serde_json does not, and
-// for a float or a date, whose text qory cannot write as Codex does.
-func hashedInput(v any) (any, bool) {
-	switch v := v.(type) {
-	case string:
-		return v, !lineSeparator(v)
-	case bool:
-		return v, true
-	case int64:
-		return map[string]any{numberKey: strconv.FormatInt(v, 10)}, true
-	case map[string]any:
-		out := make(map[string]any, len(v))
-		for k, e := range v {
-			h, ok := hashedInput(e)
-			if !ok || lineSeparator(k) {
-				return nil, false
-			}
-			out[k] = h
-		}
-		return out, true
-	case []any:
-		out := make([]any, len(v))
-		for i, e := range v {
-			h, ok := hashedInput(e)
-			if !ok {
-				return nil, false
-			}
-			out[i] = h
-		}
-		return out, true
-	case []map[string]any:
-		out := make([]any, len(v))
-		for i, e := range v {
-			h, ok := hashedInput(e)
-			if !ok {
-				return nil, false
-			}
-			out[i] = h
-		}
-		return out, true
-	}
-	return nil, false
-}
-
-// lineSeparator reports whether s contains U+2028 or U+2029. serde_json writes them as
-// they are, and encoding/json escapes them, so a hook with either in a string it hashes
-// gets no trust rather than a hash Codex does not compute.
-func lineSeparator(s string) bool {
-	return strings.ContainsAny(s, "\u2028\u2029")
-}
-
-// hookTimeout is a hook's timeout in seconds as Codex normalizes it: SessionEnd and
-// Interrupt default to 1 and are held between 1 and 3; every other event defaults to 600
-// and is at least 1.
-func hookTimeout(event string, v any) int64 {
-	n, set := v.(int64)
-	if event == "SessionEnd" || event == "Interrupt" {
-		if !set {
-			return 1
-		}
-		return min(max(n, 1), 3)
-	}
-	if !set {
-		return 600
-	}
-	return max(n, 1)
 }
