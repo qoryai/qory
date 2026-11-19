@@ -766,6 +766,11 @@ func WalledConfig(config []byte, projects, disabled, disabledPaths []string) ([]
 	if skills == nil {
 		skills = map[string]any{}
 	}
+	// skills.bundled.enabled = false is the setting that keeps Codex 0.169.0 from installing
+	// its system skills into the writable home: it installs them only when bundled skills
+	// are on (codex-rs/ext/skills/src/host_service.rs:164 and :293 at rust-v0.169.0, see
+	// bundled_skills_enabled_from_stack). A home whose config.toml has no skills table
+	// installs them.
 	skills["bundled"] = map[string]any{"enabled": false}
 	entries, _ := skills["config"].([]map[string]any)
 	for _, name := range disabled {

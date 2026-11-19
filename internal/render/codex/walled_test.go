@@ -116,6 +116,32 @@ func TestWalledConfigTrustsNoProjectAndAddsNoState(t *testing.T) {
 	}
 }
 
+// TestWalledConfigTurnsOffTheSystemSkills is a composed config.toml that turns bundled
+// skills on, and one with no skills table: the walled config.toml sets
+// skills.bundled.enabled = false in both, the setting that keeps Codex from installing its
+// system skills into the run's writable home.
+func TestWalledConfigTurnsOffTheSystemSkills(t *testing.T) {
+	for _, config := range []string{"[skills.bundled]\nenabled = true\n", "model = \"m\"\n"} {
+		got, err := codex.WalledConfig([]byte(config), nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m struct {
+			Skills struct {
+				Bundled struct {
+					Enabled *bool `toml:"enabled"`
+				} `toml:"bundled"`
+			} `toml:"skills"`
+		}
+		if _, err := toml.Decode(string(got), &m); err != nil {
+			t.Fatal(err)
+		}
+		if e := m.Skills.Bundled.Enabled; e == nil || *e {
+			t.Errorf("from %q, skills.bundled.enabled is %v, want false:\n%s", config, e, got)
+		}
+	}
+}
+
 // TestWalledHooksIsGolden is the hooks.json a walled run binds in /etc/codex, from a
 // composed hooks.json with a description, a PreToolUse group and a Stop group, and the
 // config.toml [composed] with two Stop hooks and a hooks.state entry: the key hooks

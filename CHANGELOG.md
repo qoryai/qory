@@ -1411,7 +1411,8 @@ release may change what an existing document does, and states it under Upgrading
   `settings/claude/settings.json` allows: each skill in the home and in the checkout's
   `.codex/skills` and `.agents/skills`, and every skill of the checkout by its path,
   whatever its name. `Skill(harness:*)` allows every skill of the harness. It turns off
-  the skills Codex ships and a cloud's skills. See the codex entry
+  the skills Codex ships with `skills.bundled.enabled = false`, so Codex 0.169.0 installs
+  no system skills into the writable home, and a cloud's skills. See the codex entry
   in `contracts/harness/v1/README.md`.
 - Compose refuses a Codex `settings/codex/config.toml` or `settings/codex/hooks.json` with
   a hook whose `timeout` or `additionalContextLimit` is negative or fractional, with ``Set
