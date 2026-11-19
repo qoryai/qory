@@ -3,6 +3,7 @@ package runtimeinstall_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -13,16 +14,19 @@ import (
 )
 
 // pinSource is a runtime's npm stub or registry stub with two versions, the older one
-// and the newest, which is latest on npm and newest in the registry.
+// and the newest, which is latest on npm and newest in the registry. start starts the
+// stub and returns a Fetch that sends its requests with client, the stub's request
+// paths, and the stub's host and port.
 type pinSource struct {
 	name, runtime, older, newest string
-	start                        func(t *testing.T) (runtimeinstall.Fetch, func() []string)
+	npm                          bool
+	start                        func(t *testing.T, client *http.Client) (runtimeinstall.Fetch, func() []string, string)
 }
 
 // pinSources are claude and codex, each from npm and from the registry's runtime cache.
 func pinSources() []pinSource {
-	npm := func(codex bool, versions ...string) func(t *testing.T) (runtimeinstall.Fetch, func() []string) {
-		return func(t *testing.T) (runtimeinstall.Fetch, func() []string) {
+	npm := func(codex bool, versions ...string) func(t *testing.T, client *http.Client) (runtimeinstall.Fetch, func() []string, string) {
+		return func(t *testing.T, client *http.Client) (runtimeinstall.Fetch, func() []string, string) {
 			start := rt.StartNpm
 			if codex {
 				start = rt.StartCodexNpm
@@ -31,11 +35,11 @@ func pinSources() []pinSource {
 			for _, v := range versions {
 				n.Publish(v)
 			}
-			return runtimeinstall.NpmFetch(http.DefaultClient, n.URL(), "amd64"), n.Paths
+			return runtimeinstall.NpmFetch(client, n.URL(), "amd64"), n.Paths, strings.TrimPrefix(n.URL(), "http://")
 		}
 	}
-	registry := func(codex bool, versions ...string) func(t *testing.T) (runtimeinstall.Fetch, func() []string) {
-		return func(t *testing.T) (runtimeinstall.Fetch, func() []string) {
+	registry := func(codex bool, versions ...string) func(t *testing.T, client *http.Client) (runtimeinstall.Fetch, func() []string, string) {
+		return func(t *testing.T, client *http.Client) (runtimeinstall.Fetch, func() []string, string) {
 			start := rt.StartRegistry
 			if codex {
 				start = rt.StartCodexRegistry
@@ -44,14 +48,14 @@ func pinSources() []pinSource {
 			for _, v := range versions {
 				r.PublishPlain(v)
 			}
-			return runtimeinstall.RegistryFetch(http.DefaultClient, r.Host(), "amd64", r.Instance()), r.Paths
+			return runtimeinstall.RegistryFetch(client, r.Host(), "amd64", r.Instance()), r.Paths, r.Host()
 		}
 	}
 	return []pinSource{
-		{"claude from npm", "claude", "2.1.300", "2.1.320", npm(false, "2.1.300", "2.1.320")},
-		{"claude from the registry", "claude", "2.1.300", "2.1.320", registry(false, "2.1.300", "2.1.320")},
-		{"codex from npm", "codex", "0.167.2", "0.170.0", npm(true, "0.167.2", "0.170.0")},
-		{"codex from the registry", "codex", "0.167.2", "0.170.0", registry(true, "0.167.2", "0.170.0")},
+		{"claude from npm", "claude", "2.1.300", "2.1.320", true, npm(false, "2.1.300", "2.1.320")},
+		{"claude from the registry", "claude", "2.1.300", "2.1.320", false, registry(false, "2.1.300", "2.1.320")},
+		{"codex from npm", "codex", "0.167.2", "0.170.0", true, npm(true, "0.167.2", "0.170.0")},
+		{"codex from the registry", "codex", "0.167.2", "0.170.0", false, registry(true, "0.167.2", "0.170.0")},
 	}
 }
 
@@ -75,7 +79,7 @@ func TestAPinnedVersionInstallsThatVersion(t *testing.T) {
 				want = s.newest
 			}
 			t.Run(s.name+" "+want, func(t *testing.T) {
-				fetch, paths := s.start(t)
+				fetch, paths, _ := s.start(t, http.DefaultClient)
 				got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
 					Keys: rt.Keys(), Fetch: fetch, Runtime: s.runtime, Version: pin, Folder: t.TempDir(),
 				})
@@ -102,7 +106,7 @@ func TestAPinnedVersionInstallsThatVersion(t *testing.T) {
 func TestAPinnedVersionTheRegistryDoesNotHaveIsNotPublished(t *testing.T) {
 	for _, s := range pinSources() {
 		t.Run(s.name, func(t *testing.T) {
-			fetch, _ := s.start(t)
+			fetch, _, _ := s.start(t, http.DefaultClient)
 			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
 				Keys: rt.Keys(), Fetch: fetch, Runtime: s.runtime, Version: "9.9.9", Folder: t.TempDir(),
 			})
@@ -115,6 +119,59 @@ func TestAPinnedVersionTheRegistryDoesNotHaveIsNotPublished(t *testing.T) {
 				t.Fatalf("the error is %q, want %q", err, want)
 			}
 		})
+	}
+}
+
+// statusFor is a transport that sends each request on, and replaces a 200 response to a
+// request of the version's document or tag, a path with /<version> that is no tarball,
+// with an empty response of status. The registry's first request of the tag has no
+// token and gets 401 from the stub, so status replaces only the request with the token.
+type statusFor struct {
+	version string
+	status  int
+}
+
+func (s statusFor) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := http.DefaultTransport.RoundTrip(req)
+	if err != nil || resp.StatusCode != http.StatusOK || !strings.Contains(req.URL.Path, "/"+s.version) || strings.HasSuffix(req.URL.Path, ".tgz") {
+		return resp, err
+	}
+	resp.Body.Close()
+	return &http.Response{StatusCode: s.status, Status: http.StatusText(s.status), Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1, Header: http.Header{}, Body: http.NoBody, Request: req}, nil
+}
+
+// TestOnlyA404MakesAPinNotPublished pins claude and codex to a version that npm and the
+// registry's runtime cache have, and has npm return 500 for the version's document, and
+// the registry 500 and then 401 for the version's tag: the install returns no
+// *NotPublishedError, and the first line of its error is the fix for that status.
+func TestOnlyA404MakesAPinNotPublished(t *testing.T) {
+	for _, s := range pinSources() {
+		statuses := []int{http.StatusInternalServerError}
+		if !s.npm {
+			statuses = append(statuses, http.StatusUnauthorized)
+		}
+		for _, status := range statuses {
+			t.Run(fmt.Sprintf("%s %d", s.name, status), func(t *testing.T) {
+				fetch, _, host := s.start(t, &http.Client{Transport: statusFor{version: s.older, status: status}})
+				_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+					Keys: rt.Keys(), Fetch: fetch, Runtime: s.runtime, Version: s.older, Folder: t.TempDir(),
+				})
+				fix := "Check that this machine reaches " + host
+				switch {
+				case !s.npm && status == http.StatusUnauthorized:
+					fix = "Check that Qory Apiary lets the run pull shared/runtimes/" + s.runtime
+				case !s.npm:
+					fix = "Check that the run's proxy reaches the registry at " + host
+				}
+				var missing *runtimeinstall.NotPublishedError
+				if err == nil || errors.As(err, &missing) || !strings.HasPrefix(err.Error(), fix+"\n") {
+					t.Fatalf("the install returned %v, want an error whose first line is %q", err, fix)
+				}
+				if !strings.Contains(err.Error(), fmt.Sprintf("returned %d", status)) {
+					t.Fatalf("the error %q has no status %d", err, status)
+				}
+			})
+		}
 	}
 }
 
