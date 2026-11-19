@@ -582,7 +582,8 @@ release may change what an existing document does, and states it under Upgrading
   and the cause follow on lines 2 and 3, and for ssh the cause is `ssh would sign in
   with your private keys in ~/.ssh, outside the gateway.` The help of `qory access-key
   enrol` says "this machine's access key", and that enrol stops with an error when
-  `access-key-secret` exists.
+  `access-key-secret` exists. `docs/run.md`, `docs/harness.md` and the harness contract
+  README call the harness keys of a machine's `qory.yaml` "machine harness settings".
 - A push that landed with no version stored, and a push that fails as a branch that moved,
   give one way out in the line of `qory run`: `delete branch qory/<work item id> of <path>
   on <system>`. Deleting it loses the commits on that branch that no version has. The next

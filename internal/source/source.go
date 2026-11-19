@@ -169,10 +169,11 @@ type SchemeError struct {
 }
 
 // Error is the lines [HTTPSFix] makes for the URL and the file; for a source of a
-// [Named] compose, the line with the source's name in place of the URL.
+// [Named] compose, the fix with the source's name in place of the URL on line 1, and
+// the cause on line 2.
 func (e *SchemeError) Error() string {
 	if e.Name != "" {
-		return "use an https URL for " + e.Name + ": a run from a control plane fetches git sources only over https"
+		return "use an https URL for " + e.Name + ".\n  A run from a control plane fetches git sources only over https."
 	}
 	return HTTPSFix(e.URL, e.File)
 }
