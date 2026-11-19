@@ -255,9 +255,17 @@ func WriteWalledHome(dir, files string, run WalledRun) ([]Bound, error) {
 	return append(out, dirs...), nil
 }
 
-// textHookGroups is the refusal of a hooks table whose event is no list of hook groups,
-// with the file and the event.
-const textHookGroups = "Write each event of the hooks in `settings/codex/%s` as a list of hook groups.\n  The event %s is no list, and Codex reads no hook of such a file."
+// textHookGroups is the cause of a hooks table whose event is no list of hook groups,
+// with the event.
+const textHookGroups = "The event %s is no list, and Codex reads no hook of such a file."
+
+// hookGroupsError is the refusal of a hooks table of file whose event is no list of hook
+// groups, in module, or in the merged file for module "", see [hookError].
+func hookGroupsError(file, module, event string) error {
+	return hookError(file, module, fmt.Sprintf(textHookGroups, event), func(at string) string {
+		return "Write each event of the hooks in " + at + " as a list of hook groups."
+	})
+}
 
 // WalledHooks is the hooks.json that a walled Codex run binds in [SystemDir], from
 // hooksJSON and config, the hooks.json and the config.toml of the composed home, either
@@ -282,13 +290,13 @@ func WalledHooks(hooksJSON, config []byte) ([]byte, error) {
 		if err := dec.Decode(&file); err != nil {
 			return nil, fmt.Errorf("read the composed hooks.json: %w", err)
 		}
-		if err := checkHookShapes("hooks.json", file.Hooks); err != nil {
+		if err := checkHookShapes("hooks.json", "", file.Hooks); err != nil {
 			return nil, err
 		}
 		for event, v := range file.Hooks {
 			groups, ok := v.([]any)
 			if !ok {
-				return nil, fmt.Errorf(textHookGroups, "hooks.json", event)
+				return nil, hookGroupsError("hooks.json", "", event)
 			}
 			events[event] = append(events[event], groups...)
 		}
@@ -298,7 +306,7 @@ func WalledHooks(hooksJSON, config []byte) ([]byte, error) {
 		return nil, err
 	}
 	table, _ := m["hooks"].(map[string]any)
-	if err := checkHookShapes("config.toml", table); err != nil {
+	if err := checkHookShapes("config.toml", "", table); err != nil {
 		return nil, err
 	}
 	for event, v := range table {
@@ -313,7 +321,7 @@ func WalledHooks(hooksJSON, config []byte) ([]byte, error) {
 		case []any:
 			events[event] = append(events[event], groups...)
 		default:
-			return nil, fmt.Errorf(textHookGroups, "config.toml", event)
+			return nil, hookGroupsError("config.toml", "", event)
 		}
 	}
 	var b bytes.Buffer

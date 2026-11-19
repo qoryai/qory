@@ -1427,9 +1427,12 @@ release may change what an existing document does, and states it under Upgrading
 - Compose stops on a Codex `settings/codex/config.toml` or `settings/codex/hooks.json` with
   a hook group or a hook that Codex 0.169.0 cannot decode, such as a `command` hook with no
   `command` text, with ``Fix `hooks.<event>[<group>].hooks[<hook>]` in
-  `settings/codex/<file>`.`` and the next line ``<cause>, and Codex reads no hook of a file
-  with such a hook.`` Codex reads no hook of a `hooks.json` with one such hook. A walled
-  Codex run makes the same check before it writes the hooks of `/etc/codex`.
+  `settings/codex/<file>` of module <name>.`` and the next line ``<cause>, and Codex reads
+  no hook of a file with such a hook.`` The group and the hook are numbered in that
+  module's file. For a module name too long for the first line, the second line starts
+  with ``The file is in module <name>.`` Codex reads no hook of a `hooks.json` with one
+  such hook. A walled Codex run makes the same check before it writes the hooks of
+  `/etc/codex`.
 - Compose refuses a module that ships `files/codex/auth.json`, Codex's login file, with
   ``Remove `files/codex/auth.json` from module <name>.`` and the next line ``A Codex run
   takes its model key from the run, not from a file.``

@@ -155,6 +155,15 @@ type Exclude struct {
 	Listed string
 }
 
+// HooksFragment is the hooks of one module's Codex settings fragment.
+type HooksFragment struct {
+	// Module is the module's name, and File the fragment's file, config.toml or
+	// hooks.json.
+	Module, File string
+	// Hooks is the value of the fragment's hooks key, as decoded.
+	Hooks any
+}
+
 // Result is a composed stack: what a renderer writes and what the report records.
 type Result struct {
 	// Stack is the stack that was composed.
@@ -179,6 +188,11 @@ type Result struct {
 	// merged into Settings like any other; the Codex renderer reads these to tell a
 	// number such as 2.0, which Codex refuses, from 2, which the merge cannot.
 	CodexHooksJSON [][]byte
+	// CodexHooks are the hooks of every module's settings/codex/config.toml and
+	// settings/codex/hooks.json fragment that has a hooks key, as decoded, before the
+	// merge, in module order. The Codex renderer checks each one, so a hook that Codex
+	// cannot read is found by its module and its place in that module's file.
+	CodexHooks []HooksFragment
 	// MCP contains the composed MCP servers by name, each the object its module's
 	// mcp/<name>.json contains, with every $QORY_HARNESS_HOME as written, before
 	// substitution. [Result.MCPFor] renders it for a home.
@@ -1759,6 +1773,9 @@ func mergeFile(res *Result, runtime, file, path, modName string, decided map[str
 	default:
 		return exports.Refuse(fmt.Sprintf("Rename the settings fragment of module %s to end in .json or .toml.", shown(modName)),
 			"The file is "+exports.HidePath(path)+".")
+	}
+	if hooks, ok := src["hooks"]; ok && runtime == "codex" && (file == "config.toml" || file == "hooks.json") {
+		res.CodexHooks = append(res.CodexHooks, HooksFragment{Module: modName, File: file, Hooks: hooks})
 	}
 	m := &merger{file: "settings/" + runtime + "/" + file, module: modName, setBy: res.setBy}
 	dst := res.Settings[runtime][file]

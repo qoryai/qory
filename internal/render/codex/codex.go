@@ -36,6 +36,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/qoryai/forager/accesskey"
 
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/module"
@@ -126,22 +129,26 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 		return err
 	}
 	for _, file := range []string{"config.toml", "hooks.json"} {
-		m := res.SettingsFor(Runtime, file, home)
-		if err := checkHookNumbers(file, m); err != nil {
-			return err
-		}
-		hooks, _ := m["hooks"].(map[string]any)
-		if err := checkHookShapes(file, hooks); err != nil {
+		if err := checkHookNumbers(file, res.SettingsFor(Runtime, file, home)); err != nil {
 			return err
 		}
 	}
 	for _, data := range res.CodexHooksJSON {
-		m := exactJSON(data)
-		if err := checkHookNumbers("hooks.json", m); err != nil {
+		if err := checkHookNumbers("hooks.json", exactJSON(data)); err != nil {
 			return err
 		}
-		hooks, _ := m["hooks"].(map[string]any)
-		if err := checkHookShapes("hooks.json", hooks); err != nil {
+	}
+	// Each module's hooks before the merged ones, so a fault is found at its place in the
+	// module's file.
+	for _, f := range res.CodexHooks {
+		hooks, _ := f.Hooks.(map[string]any)
+		if err := checkHookShapes(f.File, f.Module, hooks); err != nil {
+			return err
+		}
+	}
+	for _, file := range []string{"config.toml", "hooks.json"} {
+		hooks, _ := res.SettingsFor(Runtime, file, home)["hooks"].(map[string]any)
+		if err := checkHookShapes(file, "", hooks); err != nil {
 			return err
 		}
 	}
@@ -345,12 +352,32 @@ var hookEvents = []string{
 	"SubagentStart", "SubagentStop", "Stop", "Interrupt",
 }
 
-// The errors of a hook group and of a hook that Codex cannot read, see [checkHookShapes],
-// with the group's or the hook's place, the settings file and the cause.
+// The causes of a hook group and of a hook that Codex cannot read, see [checkHookShapes],
+// after the fault.
 const (
-	textGroupShape = "Fix `hooks.%s[%d]` in `settings/codex/%s`.\n  %s, and Codex reads no hook of a file with such a group."
-	textHookShape  = "Fix `hooks.%s[%d].hooks[%d]` in `settings/codex/%s`.\n  %s, and Codex reads no hook of a file with such a hook."
+	textGroupShape = "%s, and Codex reads no hook of a file with such a group."
+	textHookShape  = "%s, and Codex reads no hook of a file with such a hook."
 )
+
+// runLineMax is the most characters that the first line of an error has after
+// "qory run: ", which qory run prints before it: 100 in all.
+const runLineMax = 90
+
+// hookError is the error with the fix line that fix makes of the place of file, a
+// settings file of the harness's Codex settings, and cause as its second line. With
+// module, the place is file in that module, by name: in the fix line when the line has
+// at most [runLineMax] characters, and otherwise at the start of the second line.
+func hookError(file, module, cause string, fix func(at string) string) error {
+	at := "`settings/codex/" + file + "`"
+	if module == "" {
+		return fmt.Errorf("%s\n  %s", fix(at), cause)
+	}
+	name := accesskey.ShownName(module, false)
+	if line := fix(at + " of module " + name); utf8.RuneCountInString(line) <= runLineMax {
+		return fmt.Errorf("%s\n  %s", line, cause)
+	}
+	return fmt.Errorf("%s\n  The file is in module %s. %s", fix(at), name, cause)
+}
 
 // checkHookShapes fails on hooks, the hooks table of the harness's config.toml or
 // hooks.json, file, when a group or a hook of one of [hookEvents] does not decode as Codex
@@ -362,8 +389,14 @@ const (
 // whose type is command, with command as text, mcp_tool, with server and tool as text, prompt
 // or agent, and whose other keys of that type have the type Codex reads. Codex ignores a key
 // it does not know, and so does this check. It names the first fault, by event in the order
-// of [hookEvents], then by place.
-func checkHookShapes(file string, hooks map[string]any) error {
+// of [hookEvents], then by place: its place in a module's file with the module's name,
+// and its place in the merged file for module "".
+func checkHookShapes(file, module string, hooks map[string]any) error {
+	groupFault := func(event string, i int, fault string) error {
+		return hookError(file, module, fmt.Sprintf(textGroupShape, fault), func(at string) string {
+			return fmt.Sprintf("Fix `hooks.%s[%d]` in %s.", event, i, at)
+		})
+	}
 	for _, event := range hookEvents {
 		v, ok := hooks[event]
 		if !ok {
@@ -371,16 +404,16 @@ func checkHookShapes(file string, hooks map[string]any) error {
 		}
 		groups, ok := listOf(v)
 		if !ok {
-			return fmt.Errorf(textHookGroups, file, event)
+			return hookGroupsError(file, module, event)
 		}
 		for i, g := range groups {
 			group, ok := g.(map[string]any)
 			if !ok {
-				return fmt.Errorf(textGroupShape, event, i, file, "It is no table of keys")
+				return groupFault(event, i, "It is no table of keys")
 			}
 			if m, ok := group["matcher"]; ok && m != nil {
 				if _, text := m.(string); !text {
-					return fmt.Errorf(textGroupShape, event, i, file, "Its `matcher` is no text")
+					return groupFault(event, i, "Its `matcher` is no text")
 				}
 			}
 			h, ok := group["hooks"]
@@ -389,11 +422,13 @@ func checkHookShapes(file string, hooks map[string]any) error {
 			}
 			handlers, ok := listOf(h)
 			if !ok {
-				return fmt.Errorf(textGroupShape, event, i, file, "Its `hooks` is no list")
+				return groupFault(event, i, "Its `hooks` is no list")
 			}
 			for j, h := range handlers {
-				if cause := hookFault(h); cause != "" {
-					return fmt.Errorf(textHookShape, event, i, j, file, cause)
+				if fault := hookFault(h); fault != "" {
+					return hookError(file, module, fmt.Sprintf(textHookShape, fault), func(at string) string {
+						return fmt.Sprintf("Fix `hooks.%s[%d].hooks[%d]` in %s.", event, i, j, at)
+					})
 				}
 			}
 		}

@@ -3,7 +3,9 @@ package render_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/render"
 )
@@ -111,9 +113,9 @@ func TestCodexRefusesABadHookNumber(t *testing.T) {
 func TestCodexStopsOnAHookCodexCannotRead(t *testing.T) {
 	for _, c := range []struct{ name, file, fragment, want string }{
 		{"config.toml", "config.toml", "[[hooks.Stop]]\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"/bin/true\"\n[[hooks.Stop.hooks]]\ntype = \"mcp_tool\"\nserver = \"s\"\n",
-			"Fix `hooks.Stop[0].hooks[1]` in `settings/codex/config.toml`.\n  It has no `tool` text, and Codex reads no hook of a file with such a hook."},
+			"Fix `hooks.Stop[0].hooks[1]` in `settings/codex/config.toml` of module core.\n  It has no `tool` text, and Codex reads no hook of a file with such a hook."},
 		{"hooks.json", "hooks.json", `{"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "/bin/true"}]}, {"matcher": "*", "hooks": [{"type": "shell", "command": "/bin/true"}]}]}}`,
-			"Fix `hooks.PreToolUse[1].hooks[0]` in `settings/codex/hooks.json`.\n  Its `type` is none of command, mcp_tool, prompt and agent, and Codex reads no hook of a file with such a hook."},
+			"Fix `hooks.PreToolUse[1].hooks[0]` in `settings/codex/hooks.json` of module core.\n  Its `type` is none of command, mcp_tool, prompt and agent, and Codex reads no hook of a file with such a hook."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			res, home := composeEnv(t, withFile("modules/core/settings/codex/"+c.file, c.fragment), nil, "codex")
@@ -123,6 +125,44 @@ func TestCodexStopsOnAHookCodexCannotRead(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(home, "codex", "config.toml")); err == nil {
 				t.Error("the failed compose wrote config.toml")
+			}
+		})
+	}
+}
+
+// twoHookModules is envStack with a second module, named name, after core: core's
+// hooks.json has two Stop groups that Codex reads, and the second module's file has
+// fragment.
+func twoHookModules(name, file, fragment string) map[string]string {
+	files := withFile("modules/core/settings/codex/hooks.json", `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "/bin/a"}]}, {"hooks": [{"type": "command", "command": "/bin/b"}]}]}}`)
+	files["qory.yaml"] = strings.Replace(files["qory.yaml"], "      source: {path: modules/core}\n", "      source: {path: modules/core}\n    - name: "+name+"\n      source: {path: modules/second}\n", 1)
+	files["modules/second/qory-module.yaml"] = "apiVersion: qory.dev/v1alpha1\nname: " + name + "\n"
+	files["modules/second/settings/codex/"+file] = fragment
+	return files
+}
+
+// TestCodexNamesTheModuleOfABadHook is a harness of two modules whose second module has a
+// Stop hook that Codex cannot read, after core's two Stop groups: the compose stops with the
+// hook's place in the second module's file, group 0 and not group 2 of the merged hooks, and
+// the module's name, in the fix line, or, for a name too long for it, on the second line.
+func TestCodexNamesTheModuleOfABadHook(t *testing.T) {
+	long := strings.Repeat("m", 40)
+	for _, c := range []struct{ name, module, file, fragment, want string }{
+		{"hooks.json", "second", "hooks.json", `{"hooks": {"Stop": [{"hooks": [{"type": "command"}]}]}}`,
+			"Fix `hooks.Stop[0].hooks[0]` in `settings/codex/hooks.json` of module second.\n  It has no `command` text, and Codex reads no hook of a file with such a hook."},
+		{"config.toml", "second", "config.toml", "[[hooks.Stop]]\nmatcher = 1\n",
+			"Fix `hooks.Stop[0]` in `settings/codex/config.toml` of module second.\n  Its `matcher` is no text, and Codex reads no hook of a file with such a group."},
+		{"a long name", long, "hooks.json", `{"hooks": {"Stop": [{"hooks": [{"type": "command"}]}]}}`,
+			"Fix `hooks.Stop[0].hooks[0]` in `settings/codex/hooks.json`.\n  The file is in module " + long + ". It has no `command` text, and Codex reads no hook of a file with such a hook."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			res, home := composeEnv(t, twoHookModules(c.module, c.file, c.fragment), nil, "codex")
+			err := render.Build(res, home, lookup(t, "codex"))
+			if err == nil || err.Error() != c.want {
+				t.Fatalf("Build: %v, want %q", err, c.want)
+			}
+			if line, _, _ := strings.Cut(err.Error(), "\n"); utf8.RuneCountInString("qory run: "+line) > 100 {
+				t.Errorf("line 1 has more than 100 characters after qory run: %q", line)
 			}
 		})
 	}
