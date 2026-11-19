@@ -285,6 +285,9 @@ type Git struct {
 type Memo struct {
 	mu   sync.Mutex
 	seen map[[2]string]memoEntry
+	// sealed is set by [Memo.Seal]: a source the memo has no clone of fails, see
+	// [SealedError].
+	sealed bool
 }
 
 // memoEntry is one resolution a [Memo] holds: the full commit and the warning it came
@@ -306,6 +309,49 @@ func (m *Memo) get(url, ref string) (memoEntry, bool) {
 	defer m.mu.Unlock()
 	e, ok := m.seen[[2]string{url, ref}]
 	return e, ok
+}
+
+// Seal makes m the pins of every later compose that shares it: a git source whose URL and
+// ref m holds, with its clone in the cache, resolves to the commit m holds, and any other
+// git source fails with a [*SealedError], with no lookup and no fetch. qory run seals the
+// memo of a run's first compose, so the compose of a later session of the run reads the
+// run's cache alone, at the commits of the first. A nil memo has no seal.
+func (m *Memo) Seal() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sealed = true
+}
+
+// isSealed reports whether [Memo.Seal] sealed m.
+func (m *Memo) isSealed() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sealed
+}
+
+// SealedError is a git source that a compose with a sealed [Memo] has no clone of: the
+// first compose of the run did not fetch it, and a later one contacts no remote.
+type SealedError struct {
+	// URL is the git URL as the stack writes it, and Ref the ref.
+	URL, Ref string
+	// Name is the source as a text of a [Named] compose shows it; "" for a source whose
+	// address shows.
+	Name string
+}
+
+// Error has the source, by its name for a named stack's source; it is masked as
+// [FetchError.Error] is.
+func (e *SealedError) Error() string {
+	if e.Name != "" {
+		return e.Name + " is not in the run's cache: the run's first compose did not fetch it"
+	}
+	return secretmask.Default().Replace(fmt.Sprintf("%s at %s is not in the run's cache: the run's first compose did not fetch it", exports.URL(e.URL), exports.Value(e.Ref, false)))
 }
 
 // put records what url at ref resolved to. A nil memo records nothing.
@@ -501,6 +547,13 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	}
 	dir := filepath.Join(cache, folderName(s.Git, opts))
 	got, ok := opts.Memo.get(s.Git, s.Ref)
+	if (!ok || !cloned(filepath.Join(dir, got.commit))) && opts.Memo.isSealed() {
+		e := &SealedError{URL: s.Git, Ref: s.Ref}
+		if n != nil {
+			e.Name = shownAs(s, opts)
+		}
+		return Resolved{}, e
+	}
 	if !ok || !cloned(filepath.Join(dir, got.commit)) {
 		var err error
 		start := time.Now()
