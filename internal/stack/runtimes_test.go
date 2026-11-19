@@ -74,26 +74,32 @@ func TestNewComposeReadsTheRuntimePinsOfACheckout(t *testing.T) {
 }
 
 // TestExtendTakesTheNearerPinOfEachRuntime extends a base that pins claude and codex
-// with a checkout that pins codex: the checkout's pin of codex wins, from its file, and
-// the base's pin of claude stays, from the base's file. Neither file pinning gives none.
+// with a checkout that pins one of them, claude and then codex: the checkout's pin of
+// that runtime wins, from its file, and the base's pin of the other stays, from the
+// base's file. When neither file pins a runtime, the result has no pins.
 func TestExtendTakesTheNearerPinOfEachRuntime(t *testing.T) {
-	base := &Stack{Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Extending: &Extending{}, Root: "/repo", File: "/repo/qory-stack.yaml",
-		RuntimePins: map[string]RuntimePin{"claude": {Version: "2.1.300", From: "/repo/qory-stack.yaml"}, "codex": {Version: "0.167.2", From: "/repo/qory-stack.yaml"}}}
-	p := &Stack{Extends: Source{Path: "../repo"}, File: "/app/qory.yaml",
-		RuntimePins: map[string]RuntimePin{"codex": {Version: "0.170.0", From: "/app/qory.yaml"}}}
-	out, err := Extend(base, p)
-	if err != nil {
-		t.Fatal(err)
+	const baseFile, checkoutFile = "/repo/qory-stack.yaml", "/app/qory.yaml"
+	basePins := map[string]RuntimePin{"claude": {Version: "2.1.300", From: baseFile}, "codex": {Version: "0.167.2", From: baseFile}}
+	nearer := map[string]RuntimePin{"claude": {Version: "2.1.320", From: checkoutFile}, "codex": {Version: "0.170.0", From: checkoutFile}}
+	newBase := func() *Stack {
+		return &Stack{Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Extending: &Extending{}, Root: "/repo", File: baseFile}
 	}
-	want := map[string]RuntimePin{"claude": {Version: "2.1.300", From: "/repo/qory-stack.yaml"}, "codex": {Version: "0.170.0", From: "/app/qory.yaml"}}
-	if len(out.RuntimePins) != 2 || out.RuntimePins["claude"] != want["claude"] || out.RuntimePins["codex"] != want["codex"] {
-		t.Fatalf("the pins are %+v, want %+v", out.RuntimePins, want)
+	for _, c := range []struct{ pinned, other string }{{"claude", "codex"}, {"codex", "claude"}} {
+		base := newBase()
+		base.RuntimePins = map[string]RuntimePin{"claude": basePins["claude"], "codex": basePins["codex"]}
+		p := &Stack{Extends: Source{Path: "../repo"}, File: checkoutFile, RuntimePins: map[string]RuntimePin{c.pinned: nearer[c.pinned]}}
+		out, err := Extend(base, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out.RuntimePins) != 2 || out.RuntimePins[c.pinned] != nearer[c.pinned] || out.RuntimePins[c.other] != basePins[c.other] {
+			t.Fatalf("the checkout pins %s: the pins are %+v, want %s %+v and %s %+v", c.pinned, out.RuntimePins, c.pinned, nearer[c.pinned], c.other, basePins[c.other])
+		}
+		if base.RuntimePins[c.pinned] != basePins[c.pinned] {
+			t.Fatalf("Extend changed the base's pins: %+v", base.RuntimePins)
+		}
 	}
-	if base.RuntimePins["codex"].Version != "0.167.2" {
-		t.Fatalf("Extend changed the base's pins: %+v", base.RuntimePins)
-	}
-	base.RuntimePins, p.RuntimePins = nil, nil
-	if out, err = Extend(base, p); err != nil || out.RuntimePins != nil {
+	if out, err := Extend(newBase(), &Stack{Extends: Source{Path: "../repo"}, File: checkoutFile}); err != nil || out.RuntimePins != nil {
 		t.Fatalf("no pins: %+v, %v", out.RuntimePins, err)
 	}
 }

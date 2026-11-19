@@ -2,6 +2,7 @@ package cmd_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,60 +100,80 @@ func TestAPinTheRegistryDoesNotHaveStopsADispatchedRun(t *testing.T) {
 	}
 }
 
-// TestAPinTheRegistryDoesNotHaveStopsAPersonsRun runs claude in a checkout on a person's
-// machine, with no run key, from npm, or from the registry's runtime cache when
-// forager.yaml sets pool.registry, each of which has only claude 2.1.320. A pin of 9.9.9
-// in the checkout's qory.yaml, and a pin of 2.1.300 in the base stack that the checkout's
-// qory.yaml extends, each stop the run before the session: qory run prints the fix line,
-// with the name of the file that pins the version, then the cause.
+// TestAPinTheRegistryDoesNotHaveStopsAPersonsRun runs claude and codex in a checkout on
+// a person's machine, with no run key, from npm, or from the registry's runtime cache
+// when forager.yaml sets pool.registry, each of which has only claude 2.1.320 and codex
+// 0.170.0. A pin of 9.9.9 in the checkout's qory.yaml, a pin of the base stack that the
+// checkout's qory.yaml extends (claude 2.1.300, codex 0.167.2), and a pin of 9.9.9 in the
+// checkout's qory.yaml over the base's pin each stop the run before the session: qory run
+// prints the fix line, with the name of the file of the nearer pin, then the cause.
 func TestAPinTheRegistryDoesNotHaveStopsAPersonsRun(t *testing.T) {
-	for _, c := range []struct {
-		name, fixture, version, file string
-		pin                          string
-		registry                     bool
-	}{
-		{"a pin in the checkout's qory.yaml", "two-modules", "9.9.9", "qory.yaml", "  runtimes:\n    claude:\n      version: 9.9.9\n", false},
-		{"a pin in the base stack", "runtimes-nearer-layer-wins", "2.1.300", "qory-stack.yaml", "", false},
-		{"a pin the registry's cache does not have", "two-modules", "9.9.9", "qory.yaml", "  runtimes:\n    claude:\n      version: 9.9.9\n", true},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			defer cmd.SetInstallRuntimes(true)()
-			defer cmd.SetRuntimeKeys(rt.Keys())()
-			npm := rt.StartNpm(t)
-			npm.Publish("2.1.320")
-			defer cmd.SetNpmRegistry(npm.URL())()
-			root := newCheckout(t)
-			copyFixture(t, c.fixture, root)
-			if c.registry {
-				reg := rt.StartRegistry(t)
-				reg.PublishPlain("2.1.320")
-				defer cmd.SetInstanceAddress(func(*config.Forager) string { return reg.Instance() })()
-				writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "pool:\n  registry: "+reg.Host()+"/qory-env\n  run_config: "+t.TempDir()+"\n")
-			}
-			if c.pin != "" {
-				doc, err := os.ReadFile(filepath.Join(root, "qory.yaml"))
-				if err != nil {
-					t.Fatal(err)
+	// docs are the checkout's qory.yaml for each fixture, with the runtime as %[1]s.
+	docs := map[string]string{
+		"two-modules": "apiVersion: qory.dev/v1alpha1\nharness:\n  target:\n    runtime: %[1]s\n  modules:\n" +
+			"    - name: core\n      source: {path: modules/core}\n    - name: nextjs\n      source: {path: modules/nextjs}\n",
+		"runtimes-nearer-layer-wins": "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: stack}\n  target:\n    runtime: %[1]s\n",
+	}
+	for _, rc := range []struct{ runtime, newest, base string }{{"claude", "2.1.320", "2.1.300"}, {"codex", "0.170.0", "0.167.2"}} {
+		for _, c := range []struct {
+			name, fixture, version, file string
+			pin, registry                bool
+		}{
+			{"a pin in the checkout's qory.yaml", "two-modules", "9.9.9", "qory.yaml", true, false},
+			{"a pin in the base stack", "runtimes-nearer-layer-wins", rc.base, "qory-stack.yaml", false, false},
+			{"a pin in the checkout's qory.yaml over the base's", "runtimes-nearer-layer-wins", "9.9.9", "qory.yaml", true, false},
+			{"a pin the registry's cache does not have", "two-modules", "9.9.9", "qory.yaml", true, true},
+		} {
+			t.Run(rc.runtime+" "+c.name, func(t *testing.T) {
+				defer cmd.SetInstallRuntimes(true)()
+				defer cmd.SetRuntimeKeys(rt.Keys())()
+				startNpm, startRegistry := rt.StartNpm, rt.StartRegistry
+				if rc.runtime == "codex" {
+					startNpm, startRegistry = rt.StartCodexNpm, rt.StartCodexRegistry
 				}
-				writeFile(t, filepath.Join(root, "qory.yaml"), string(doc)+c.pin)
-			}
-			composedForFake(t, root, fakeRuntime(t))
-			t.Setenv("QORY_RUN_KEY", "")
-			out, err := run(t, "run", "claude", "--", "-p", "hi")
-			if err == nil || cmd.ExitCode(err) != 1 {
-				t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
-			}
-			want := "Set runtimes.claude.version in " + c.file + " to a version the registry has.\n" +
-				"  The registry has no claude " + c.version + "."
-			wants(t, out+err.Error(), want)
-			if first, _, _ := strings.Cut(want, "\n"); len("qory run: "+first) > 100 {
-				t.Errorf("the fix line has %d characters with qory run:, over 100", len("qory run: "+first))
-			}
-			lacks(t, out, "hello from")
-			if c.registry && len(npm.Paths()) != 0 {
-				t.Errorf("npm got requests %q, want none", npm.Paths())
-			}
-		})
+				npm := startNpm(t)
+				npm.Publish(rc.newest)
+				defer cmd.SetNpmRegistry(npm.URL())()
+				root := newCheckout(t)
+				copyFixture(t, c.fixture, root)
+				if c.registry {
+					reg := startRegistry(t)
+					reg.PublishPlain(rc.newest)
+					defer cmd.SetInstanceAddress(func(*config.Forager) string { return reg.Instance() })()
+					writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "pool:\n  registry: "+reg.Host()+"/qory-env\n  run_config: "+t.TempDir()+"\n")
+				}
+				doc := fmt.Sprintf(docs[c.fixture], rc.runtime)
+				if c.pin {
+					doc += "  runtimes:\n    " + rc.runtime + ":\n      version: 9.9.9\n"
+				}
+				writeFile(t, filepath.Join(root, "qory.yaml"), doc)
+				args := []string{"run", rc.runtime}
+				if rc.runtime == "claude" {
+					composedForFake(t, root, fakeRuntime(t))
+					args = append(args, "--", "-p", "hi")
+				} else {
+					writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml"), "apiVersion: qory.dev/v1alpha1\nharness:\n  launch:\n    codex:\n      command: "+fakeRuntime(t)+"\n")
+					if out, err := run(t, "harness", "compose", "--runtime", "codex", "--no-links"); err != nil {
+						t.Fatalf("%v\n%s", err, out)
+					}
+				}
+				t.Setenv("QORY_RUN_KEY", "")
+				out, err := run(t, args...)
+				if err == nil || cmd.ExitCode(err) != 1 {
+					t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+				}
+				want := "Set runtimes." + rc.runtime + ".version in " + c.file + " to a version the registry has.\n" +
+					"  The registry has no " + rc.runtime + " " + c.version + "."
+				wants(t, out+err.Error(), want)
+				if first, _, _ := strings.Cut(want, "\n"); len("qory run: "+first) > 100 {
+					t.Errorf("the fix line has %d characters with qory run:, over 100", len("qory run: "+first))
+				}
+				lacks(t, out, "hello from")
+				if c.registry && len(npm.Paths()) != 0 {
+					t.Errorf("npm got requests %q, want none", npm.Paths())
+				}
+			})
+		}
 	}
 }
 
