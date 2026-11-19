@@ -822,7 +822,7 @@ session:
   instance:                # optional
     name: build-01         # how the server shows this machine; the host name by default
   run:                     # optional
-    timeout: 5h30m         # stop a run that runs this long, compose included
+    timeout: 5h30m         # stop the agent this long after it starts
     stop_signal: SIGINT    # requests it to stop; the runtime's descriptor's, else SIGTERM
     stop_grace: 30s        # between that signal and SIGKILL; 10s
 wall:                      # start the runtime in a container; optional
