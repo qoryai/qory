@@ -384,6 +384,41 @@ func filteredCheckout(t *testing.T) (string, string, string) {
 	return dir, testGit(t, dir, "rev-parse", "HEAD"), marker
 }
 
+func TestTheDiffShowsAFileThatAttributesMarkBinary(t *testing.T) {
+	sessionGit(t)
+	// git before 2.40 reads attributes beside GIT_ATTR_SOURCE. The git folder of the copy
+	// then gets an attribute file that marks *.txt binary, as an attribute that reaches the
+	// diff would.
+	head := "printf 'ref: refs/heads/main\\n' > \"$G/HEAD\"\n"
+	withScript(t, append(noAttrSource, head, head+"printf '*.txt -diff\\n' > \"$G/info/attributes\"\n")...)
+	dir := t.TempDir()
+	testGit(t, dir, "init", "-q", "--object-format=sha1", "-b", "main")
+	write(t, dir, ".gitattributes", "*.txt -diff\n", 0o644)
+	write(t, dir, "a.txt", "old line\n", 0o644)
+	testGit(t, dir, "add", "-A")
+	testGit(t, dir, "commit", "-q", "-m", "base")
+	base := testGit(t, dir, "rev-parse", "HEAD")
+	write(t, dir, "a.txt", "new line\n", 0o644)
+	testGit(t, dir, "commit", "-q", "-am", "head")
+	f, out, err := copyOf(t, filepath.Join(dir, ".git"), testGit(t, dir, "rev-parse", "HEAD"), base)
+	if err != nil {
+		t.Fatalf("the copy session: %v\n%s", err, out)
+	}
+	if _, err := f.Result(); err != nil {
+		t.Fatal(err)
+	}
+	diff, err := os.ReadFile(f.Diff())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(diff), "-old line\n+new line\n") || strings.Contains(string(diff), "Binary files") {
+		t.Errorf("the diff hides the change of a.txt:\n%s", diff)
+	}
+	if !strings.Contains(script, "g diff --text ") {
+		t.Error("the diff of the script has no --text")
+	}
+}
+
 // plant writes the loose object id of the git folder dir again, with the object of the given
 // kind and bytes in its place, as an agent that can write the git folder could.
 func plant(t *testing.T, dir, id, kind string, data []byte) {

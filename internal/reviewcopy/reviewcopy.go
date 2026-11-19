@@ -340,7 +340,9 @@ while read -r frommode tomode fromid toid rest; do
 	blob_checked "${frommode#:}" "$fromid" && blob_checked "$tomode" "$toid" ||
 		fail "the diff has a file whose bytes do not have its object id"
 done < "$T/raw"
-g diff --no-ext-diff --no-textconv --no-color "$from" "$commit" > "$R/commit.diff"
+# --text: no attribute marks a file binary and leaves its change out of the diff, also in git
+# before 2.40, which does not read GIT_ATTR_SOURCE.
+g diff --text --no-ext-diff --no-textconv --no-color "$from" "$commit" > "$R/commit.diff"
 chmod -R a-w "$W"
 chmod a-w "$R/commit.diff"
 printf 'done\n' > "$T/done"
