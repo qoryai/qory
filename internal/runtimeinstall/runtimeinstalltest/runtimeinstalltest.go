@@ -158,8 +158,8 @@ func (s *Source) Fail(err error) {
 	s.err = err
 }
 
-// Fetch is the source's [runtimeinstall.Fetch].
-func (s *Source) Fetch(_ context.Context, runtime string) (runtimeinstall.Release, error) {
+// Fetch is the source's [runtimeinstall.Fetch]: it returns the newest release whatever the version.
+func (s *Source) Fetch(_ context.Context, runtime, _ string) (runtimeinstall.Release, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.fetches++

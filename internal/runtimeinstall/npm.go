@@ -68,13 +68,15 @@ const (
 
 // NpmFetch is a [Fetch] from the npm registry at base, such as [NpmRegistry], through
 // client, for the platform linux/arch. It reads, in this order, the dist-tags of the
-// runtime's package, whose latest is the version; the document of that version's build
-// for the platform, see [npmPackages], whose dist.integrity is npm's sha512 checksum and whose
-// dist.tarball is the tarball; and the tarball, when Install opens it. The tarball must
+// runtime's package, whose latest is the version, unless a version is pinned; the
+// document of that version's build for the platform, see [npmPackages], whose
+// dist.integrity is npm's sha512 checksum and whose dist.tarball is the tarball; and the
+// tarball, when Install opens it. A 404 of a pinned version's document is a
+// [*NotPublishedError]. The tarball must
 // be on base's host, and no request follows a redirect to another host. Install checks
 // the tarball against the checksum before it extracts anything.
 func NpmFetch(client *http.Client, base, arch string) Fetch {
-	return func(ctx context.Context, runtime string) (Release, error) {
+	return func(ctx context.Context, runtime, pinned string) (Release, error) {
 		pkg, ok := npmPackages[runtime]
 		if !ok {
 			return Release{}, fmt.Errorf("Install %s some other way\nqory installs only %s from npm", runtime, strings.Join(Runtimes(), " and "))
@@ -88,13 +90,16 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 			return Release{}, fmt.Errorf("Set the npm registry to an https URL\nThe npm registry's address is not an https URL:\n  %q", base)
 		}
 		n := &npm{client: sameHost(client, root), root: root, runtime: runtime}
-		var tags map[string]string
-		if err := n.document(ctx, "/-/package/"+pkg.tags+"/dist-tags", maxDistTags, "the dist-tags of "+pkg.tags, &tags); err != nil {
-			return Release{}, err
-		}
-		version := tags["latest"]
-		if !versionShape.MatchString(version) {
-			return Release{}, fmt.Errorf(textRelease+"The dist-tag latest of %s is %q, and a version is 1 to 64 letters, digits, ., + or -, the first a letter or a digit", pkg.tags, version)
+		version := pinned
+		if version == "" {
+			var tags map[string]string
+			if err := n.document(ctx, "/-/package/"+pkg.tags+"/dist-tags", maxDistTags, "the dist-tags of "+pkg.tags, &tags); err != nil {
+				return Release{}, err
+			}
+			version = tags["latest"]
+			if !versionShape.MatchString(version) {
+				return Release{}, fmt.Errorf(textRelease+"The dist-tag latest of %s is %q, and a version is 1 to 64 letters, digits, ., + or -, the first a letter or a digit", pkg.tags, version)
+			}
 		}
 		platform, docVersion := pkg.platform(version, cpu)
 		var doc struct {
@@ -107,6 +112,10 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 		}
 		what := platform + " " + docVersion
 		if err := n.document(ctx, "/"+platform+"/"+url.PathEscape(docVersion), maxVersion, what, &doc); err != nil {
+			var missing *npmNotFound
+			if pinned != "" && errors.As(err, &missing) {
+				return Release{}, &NotPublishedError{Runtime: runtime, Version: pinned}
+			}
 			return Release{}, err
 		}
 		if doc.Version != docVersion {
@@ -193,10 +202,15 @@ func (n *npm) get(ctx context.Context, u, accept, what string) (*http.Response, 
 	}
 	drain(resp)
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf(textRelease+"%s returned 404: npm has no such %s release", upper(what), n.runtime)
+		return nil, &npmNotFound{fmt.Sprintf(textRelease+"%s returned 404: npm has no such %s release", upper(what), n.runtime)}
 	}
 	return nil, fmt.Errorf("Check that this machine reaches %s\n%s returned %d", n.root.Host, what, resp.StatusCode)
 }
+
+// npmNotFound is the error of a request that npm returned 404 to.
+type npmNotFound struct{ text string }
+
+func (e *npmNotFound) Error() string { return e.text }
 
 // noRegistry is the error of a run whose proxy returned 403 or 407 to the CONNECT to
 // npm's host, which a run with no registry reaches only through its proxy: the run's

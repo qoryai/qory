@@ -148,7 +148,7 @@ func TestTheInstallCausesStandAlone(t *testing.T) {
 	}
 	install := installStub
 	noTarballOf := func(version string) runtimeinstall.Fetch {
-		return func(context.Context, string) (runtimeinstall.Release, error) {
+		return func(context.Context, string, string) (runtimeinstall.Release, error) {
 			integrity := rt.Integrity(rt.PlainTarball(t, version))
 			signed := "@anthropic-ai/claude-code-linux-x64@" + version
 			return runtimeinstall.Release{Version: version, Integrity: integrity, Signed: signed, Signatures: rt.Signatures(signed, integrity)}, nil
