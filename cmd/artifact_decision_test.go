@@ -107,6 +107,34 @@ func TestArtifactPushOfAnUnknownDecision(t *testing.T) {
 	}
 }
 
+// TestArtifactPushOfAnUnknownDecisionShowsTheValueShort is line 2 of a 422
+// unknown_decision for a long value, cut to 40 characters, and for a value with a key's
+// prefix, which a phrase replaces.
+func TestArtifactPushOfAnUnknownDecisionShowsTheValueShort(t *testing.T) {
+	const runKey = "qrk_value-for-the-test-only"
+
+	for name, c := range map[string]struct{ value, shown, hidden string }{
+		"long":    {"gd_" + strings.Repeat("a", 60), `"gd_` + strings.Repeat("a", 37) + `" and more`, strings.Repeat("a", 38)},
+		"run key": {runKey, "(a value that contains a run key)", "qrk_"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			inCheckout(t)
+			server := startRunAPI(t)
+			server.status = http.StatusUnprocessableEntity
+			server.response = unknownDecisionResponse
+
+			_, err := runIn(t, "text", "artifact", "push", "screenshot", "-", "--decision", c.value)
+			want := "Set --decision to the id of a person's note on this work item, or drop the flag.\n  " +
+				c.shown + " is not such an id. qory work-item show prints the open notes with their ids."
+			wantExit(t, err, cmd.ExitArtifactRefused, want)
+
+			if err != nil && strings.Contains(err.Error(), c.hidden) {
+				t.Errorf("err = %q, want no %q", err, c.hidden)
+			}
+		})
+	}
+}
+
 // TestArtifactPushOutsideARunKeepsNoDecision is --decision outside a run: as with --note,
 // the store keeps the files and nothing else, and nothing is sent.
 func TestArtifactPushOutsideARunKeepsNoDecision(t *testing.T) {

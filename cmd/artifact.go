@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/wall"
 	"github.com/spf13/cobra"
 
@@ -743,20 +744,30 @@ func postVersion(ctx context.Context, client *runapi.Client, push runapi.Push) (
 	}
 
 	if errors.As(err, &apiError) && apiError.Code == runapi.CodeUnknownDecision {
-		return nil, decisionRefusedError{fmt.Sprintf(textDecisionRefused, push.Decision), err}
+		return nil, decisionRefusedError{fmt.Sprintf(textDecisionRefused, shownDecision(push.Decision)), err}
 	}
 
 	return pushed, err
 }
 
-// textDecisionRefused is the text of a push whose --decision the run API refused with 422
-// unknown_decision, with the id. The run API's line names the request's member, not the
-// flag, so qory words the refusal itself.
+// textDecisionRefused is the text of a push for which the run API returns 422
+// unknown_decision, with the value of --decision. The run API's line names the request's
+// member, not the flag, so qory words the text itself.
 const textDecisionRefused = "Set --decision to the id of a person's note on this work item, or drop the flag.\n" +
-	"  %q is not such an id. qory work-item show prints the open notes with their ids."
+	"  %s is not such an id. qory work-item show prints the open notes with their ids."
 
-// decisionRefusedError is a push whose decision the run API refused with 422
-// unknown_decision. [ExitCode] gives it [ExitArtifactRefused]. It unwraps to the run API's
+// shownDecision returns the value of --decision as [textDecisionRefused] prints it: a
+// phrase in place of a value that contains a key's or a code's prefix, such as qrk_,
+// else the value quoted and cut by [shortValue].
+func shownDecision(value string) string {
+	if shown := accesskey.ShownValue(value, false); shown != value {
+		return shown
+	}
+
+	return shortValue(value)
+}
+
+// decisionRefusedError is a push for which the run API returns 422 unknown_decision. [ExitCode] gives it [ExitArtifactRefused]. It unwraps to the run API's
 // error.
 type decisionRefusedError struct {
 	text string
