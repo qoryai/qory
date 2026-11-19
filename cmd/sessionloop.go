@@ -16,6 +16,9 @@ const (
 	// textSessionNumber has the gateway's number of the session, the number qory served on
 	// the session's route, and [codeUsed].
 	textSessionNumber = "update qory or Forager: the gateway numbered the session %d, and qory served session %d on its route%s"
+	// textLaterCodexHome has the folder of the Codex home that stayed, the number of the
+	// session before and of the next session, the removal's error, and [codeUsed].
+	textLaterCodexHome = "remove %s by hand, then take the work item in again: qory could not remove the Codex home of session %d before session %d: %s%s"
 	// textNoStopProof and textContainerKept have what qory did not do, such as "qory pushed
 	// nothing", and [codeUsed].
 	textNoStopProof   = "run the stage behind a wall: without one, a process of the session could still write .git/config, so %s%s"
@@ -34,7 +37,7 @@ const laterHarnessDir = "harness-%d"
 // is whether the run has a wall, whose join removes the agent's container; kept is
 // [openedRun.ContainerKept], whether a container of the run may still run. A run with no
 // wall has no proof. qory run stops a write run from a run code with no wall before its join,
-// so only a test reaches that branch.
+// so a read run with no wall reaches that branch, before its session 2.
 func agentStopProof(walled, kept bool, skipped string) error {
 	switch {
 	case !walled:

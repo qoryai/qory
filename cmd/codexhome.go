@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -194,21 +193,19 @@ func belowInWall(dir, p string) (string, bool) {
 // removeCodexHome removes the folders of [walledCodexHome] from root, the folder of a
 // run's copy, when the run ends, also when the copy stays, and before each later Codex
 // session of a run. report prints a line of qory run for each folder it could not remove;
-// the error is the first such line, nil when every folder went.
-func removeCodexHome(root string, report func(string)) error {
-	var first error
+// stayed and err are the first such folder and its error, "" and nil when every folder went.
+func removeCodexHome(root string, report func(string)) (stayed string, err error) {
 	for _, name := range []string{codexHomeName, codexFixedName} {
 		path := filepath.Join(root, name)
 		if _, err := os.Lstat(path); err != nil {
 			continue
 		}
-		if err := runcopy.RemoveFolder(path); err != nil {
-			line := fmt.Sprintf(textCopyNoRemove, exports.Value(path, false), exports.HideError(err))
-			report(line)
-			if first == nil {
-				first = errors.New(line)
+		if removeErr := runcopy.RemoveFolder(path); removeErr != nil {
+			report(fmt.Sprintf(textCopyNoRemove, exports.Value(path, false), exports.HideError(removeErr)))
+			if err == nil {
+				stayed, err = path, removeErr
 			}
 		}
 	}
-	return first
+	return stayed, err
 }

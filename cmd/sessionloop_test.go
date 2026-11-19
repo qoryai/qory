@@ -544,26 +544,35 @@ func TestTheStepsBeforeALaterSessionPastTheSetupLimitCloseTheRun(t *testing.T) {
 }
 
 // TestALaterSessionNeedsProofThatTheSessionBeforeStopped is a read run, with no push step,
-// whose container of session 1 may still run: the run closes failed, exit 1, before it
-// sends the next-session request, with the line that starts with its fix, and session 2
-// does not join.
+// whose container of session 1 may still run. With an answer that starts session 2, the run
+// closes failed, exit 1, after the next-session request, with the line that starts with its
+// fix, and session 2 does not join. With the end, the run closes succeeded, as a run whose
+// container stays does after its one session.
 func TestALaterSessionNeedsProofThatTheSessionBeforeStopped(t *testing.T) {
-	r := runLoop(t, loopSetup{
-		answers: []string{laterAnswer(2, "claude", "example-provider-2", 30)},
-		nowhere: func(n *cmd.Nowhere) { n.ContainerKept = true },
+	kept := func(n *cmd.Nowhere) { n.ContainerKept = true }
+	t.Run("session 2", func(t *testing.T) {
+		r := runLoop(t, loopSetup{answers: []string{laterAnswer(2, "claude", "example-provider-2", 30)}, nowhere: kept})
+		if len(r.joins) != 1 || len(r.bodies) != 1 || cmd.ExitCode(r.err) != 1 {
+			t.Fatalf("%d joins and %d requests, %v (exit %d)\n%s", len(r.joins), len(r.bodies), r.err, cmd.ExitCode(r.err), r.out)
+		}
+		if len(r.closes) != 1 || r.closes[0].State != event.StateFailed {
+			t.Errorf("the run closed with %+v, want failed", r.closes)
+		}
+		wants(t, r.out, "qory run: take the work item in again in Qory Apiary: a container of the session may still run and write the working folder, so session 2 does not start; the code is used\n")
 	})
-	if len(r.joins) != 1 || len(r.bodies) != 0 || cmd.ExitCode(r.err) != 1 {
-		t.Fatalf("%d joins and %d requests, %v (exit %d)\n%s", len(r.joins), len(r.bodies), r.err, cmd.ExitCode(r.err), r.out)
-	}
-	if len(r.closes) != 1 || r.closes[0].State != event.StateFailed {
-		t.Errorf("the run closed with %+v, want failed", r.closes)
-	}
-	wants(t, r.out, "qory run: take the work item in again in Qory Apiary: a container of the session may still run and write the working folder, so session 2 does not start; the code is used\n")
+	t.Run("end", func(t *testing.T) {
+		r := runLoop(t, loopSetup{answers: []string{`{"next":"end"}`}, nowhere: kept})
+		if len(r.joins) != 1 || len(r.bodies) != 1 || len(r.closes) != 1 || r.closes[0].State != event.StateSucceeded {
+			t.Errorf("%d joins, %d requests, the closes %+v, %v\n%s", len(r.joins), len(r.bodies), r.closes, r.err, r.out)
+		}
+		lacks(t, r.out, "does not start")
+	})
 }
 
 // TestACodexHomeThatStaysEndsTheRunBeforeTheNextSession is a run of two Codex sessions
 // whose Codex home of session 1 cannot be removed: the run closes failed, exit 1, with the
-// line that starts with the removal by hand, and session 2 does not join.
+// line that starts with the removal by hand and then has the cause, and session 2 does not
+// join.
 func TestACodexHomeThatStaysEndsTheRunBeforeTheNextSession(t *testing.T) {
 	r := runLoop(t, loopSetup{
 		answers: []string{laterAnswer(2, "codex", "example-provider-2", 30)},
@@ -587,7 +596,7 @@ func TestACodexHomeThatStaysEndsTheRunBeforeTheNextSession(t *testing.T) {
 	if len(r.closes) != 1 || r.closes[0].State != event.StateFailed {
 		t.Errorf("the run closed with %+v, want failed", r.closes)
 	}
-	wants(t, r.out, "qory run: remove ", ", then take the work item in again: qory removes the Codex home of session 1 before session 2 starts; the code is used\n")
+	wants(t, r.out, "qory run: remove ", " by hand, then take the work item in again: qory could not remove the Codex home of session 1 before session 2: ", "; the code is used\n")
 }
 
 // TestALaterSessionComposesTheBaseOfTheHarnessFromTheRunsCache is a run whose harness

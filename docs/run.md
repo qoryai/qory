@@ -2775,7 +2775,9 @@ tier map in `sessions`.
 
 qory composes, installs and runs git for the next session only with proof that the session's
 processes stopped: the run has a wall, and no container of the run is kept. Without that
-proof the run closes `failed` before the next session, a run without a push step too. A push
+proof the run closes `failed` before the next session, a run without a push step too, with
+a line that ends `so session <n> does not start; the code is used`. A read run with no wall
+has no such proof, so it ends after session 1 when Qory Apiary starts a session 2. A push
 between two sessions needs the same proof; without it the push step fails
 with `take the work item in again in Qory Apiary: a container of the session may still run
 and write the working folder, so qory pushed nothing`.
@@ -2796,12 +2798,15 @@ minutes in all. The link has no `Retry-After`, so every wait doubles. Then:
   Contact support: the next-session request after session <n> failed.`, then `Qory Apiary
   returned <status>: <message or code>`.
 - A stop while qory waits to send the request again, or during the steps before the next
-  session: the run closes `cancelled` with the reason `interrupted`, exit 1, with `qory run:
-  the run was cancelled: qory run got <signal> before session <n> started`.
+  session: the run closes `cancelled` with the reason `interrupted`, exit 1, with `✗ the
+  run was cancelled: qory run got <signal> before session <n> started`.
 - A runtime qory does not run, a workflow whose access differs from session 1's, a harness
   that is the checkout's file, which the branch may have changed, or a step before the
   session that fails, such as the runtime's install: the run closes `failed`, exit 1, with
-  the step's line, and the session does not join.
+  the step's line, and the session does not join. A Codex home of the session before that
+  qory cannot remove ends the run so, with `qory run: remove <folder> by hand, then take the
+  work item in again: qory could not remove the Codex home of session <n-1> before session
+  <n>: <error>`.
 
 The commits that earlier sessions pushed stay on the branch.
 

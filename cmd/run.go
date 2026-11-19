@@ -1211,7 +1211,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				case copied != nil:
 					root := copied.dir.Root()
 					codexRoot = root
-					cleanups = append(cleanups, func() { _ = removeCodexHome(root, said) })
+					cleanups = append(cleanups, func() { _, _ = removeCodexHome(root, said) })
 				default:
 					d, err := runcopy.NewCodexHome(spec.RunID, state, spec.RunsDir)
 					if err != nil {
@@ -1420,8 +1420,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// The Codex home of an earlier session goes, with its sessions' files, before
 				// the next join.
 				if codexRoot != "" {
-					if err := removeCodexHome(codexRoot, func(string) {}); err != nil {
-						return &runLineError{fmt.Errorf("%w, then take the work item in again: qory removes the Codex home of session %d before session %d starts%s", err, n-1, n, codeUsed)}
+					if stayed, err := removeCodexHome(codexRoot, func(string) {}); err != nil {
+						return &runLineError{fmt.Errorf(textLaterCodexHome, exports.Value(stayed, false), n-1, n, exports.HideError(err), codeUsed)}
 					}
 				}
 				// The session's inputs.json replaces the one before, in the inputs folder and in
@@ -1513,7 +1513,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var ending pushEnding
 			var returns, afterClose, returnFailed bool
 			var backCtx context.Context
-			// cancelBack ends the backCtx of the last pass: each pass ends the one before.
+			// cancelBack ends the backCtx of the last pass: each pass ends the one before at its
+			// start.
 			cancelBack := func() {}
 			defer func() { cancelBack() }()
 			stopNow := func() stopRead { return stopRead{ctx.Err() != nil, again.Err() != nil, got()} }
@@ -1523,6 +1524,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var laterTimedOut bool
 		sessions:
 			for {
+				cancelBack()
 				joined = false
 				// Forager's limit of the session is the whole of its time limit: the setup's
 				// time, and the steps between two sessions, are not in it.
@@ -1579,7 +1581,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if copied != nil {
 					copied.cutBy = func() string { return ending.cutLine(stopNow(), returnAfterSignal) }
 				}
-				cancelBack()
 				backCtx, cancelBack = returnContext(ctx, again, func(wait time.Duration) {
 					if returns && again.Err() == nil {
 						said(fmt.Sprintf(textCopyWaiting, got(), wait))
@@ -1643,11 +1644,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				// From here on number is the session that joins next.
 				number = res.Session + 1
-				// No process of the session may run on when qory composes, installs or runs git
-				// on this machine for the next session, a run with no push step too.
-				if laterErr = agentStopProof(walled, run.ContainerKept(), fmt.Sprintf("session %d does not start", number)); laterErr != nil {
-					break
-				}
 				a, endLine, nextErr := askNextSession(ctx, run.NextSession, res.Session, asked)
 				switch {
 				case nextErr != nil:
@@ -1659,6 +1655,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				case a.Next == contracts.NextSessionKindEnd:
 					said(fmt.Sprintf(textLaterEnd, res.Session))
 					break sessions
+				}
+				// No process of the session may run on when qory composes, installs or runs git
+				// on this machine for the next session, a run with no push step too.
+				if laterErr = agentStopProof(walled, run.ContainerKept(), fmt.Sprintf("session %d does not start", number)); laterErr != nil {
+					break
 				}
 				if err := fromCode.next(a); err != nil {
 					laterErr = &runLineError{err}

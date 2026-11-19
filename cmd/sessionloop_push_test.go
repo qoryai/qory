@@ -24,12 +24,15 @@ import (
 )
 
 // sharedPushRepo is a [pushRepo] whose documents set shared_run, with a harness document
-// that defines a stack of the module hello of acme/site and its workflow hello, write. The
+// that defines a stack of the module hello of acme/site and its workflow hello, write; the
+// module has the skill workflow-hello, by which Codex starts the workflow. The
 // next-session request after session n gets answers[n-1], or the end once answers run out;
 // requests counts the requests.
 func sharedPushRepo(t *testing.T, answers ...string) (p *pushRepo, requests func() int) {
 	t.Helper()
-	p = newPushRepo(t, "write")
+	p = newPushRepoWith(t, "write", map[string]string{
+		"modules/hello/skills/workflow-hello/SKILL.md": "---\nname: workflow-hello\ndescription: Say hello.\n---\n\nSay hello.\n",
+	})
 	url := p.h.server.URL("acme/site")
 	p.stackProxy = true
 	p.change = func(d map[string]any) {
@@ -348,8 +351,8 @@ func TestEachSessionEndsAtItsTimeLimit(t *testing.T) {
 }
 
 // TestACodexInstallThatFailsInAWriteRunKeepsThePushOfSession1 is a write run of claude whose
-// answer starts session 2 on codex, whose install fails: npm cannot be reached through the
-// run's host proxy. Session 1's commit stays on the branch with its version stored, the run
+// answer starts session 2 on codex, whose install fails: the run's host proxy returns 403 to
+// the request to npm. Session 1's commit stays on the branch with its version stored, the run
 // closes failed, exit 1, and session 2 does not join.
 func TestACodexInstallThatFailsInAWriteRunKeepsThePushOfSession1(t *testing.T) {
 	defer cmd.SetNpmRegistry("http://127.0.0.1:9")()
@@ -373,6 +376,7 @@ func TestACodexInstallThatFailsInAWriteRunKeepsThePushOfSession1(t *testing.T) {
 	if posts, _, stored := p.api.counts(); posts != 1 || stored != 1 {
 		t.Errorf("%d POST and %d versions, want 1 and 1", posts, stored)
 	}
-	wants(t, r.out, "qory run: session 2 starts the workflow hello on codex\n")
+	wants(t, r.out, "qory run: session 2 starts the workflow hello on codex\n", "qory run: composed 2 entries from 1 module for codex\n",
+		"qory run: the dist-tags of @openai/codex returned 403; the code is used\n")
 	lacks(t, r.out, "installed codex")
 }
