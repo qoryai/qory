@@ -2,7 +2,7 @@
 
 What `qory harness compose` reads and what it writes.
 
-## Twelve files
+## Thirteen files
 
 | File | Lives in | Defines |
 |---|---|---|
@@ -18,6 +18,7 @@ What `qory harness compose` reads and what it writes.
 | a review comments document | the file of a version of the artifact type `review-comments` | a work item's review comments on its artifact versions and the replies to them (§The review comments format). No compose reads it |
 | a proposal sources document | the file `sources.json` of a version of the artifact type `proposal` | every source a run used to write the proposal, with the reason for each (§The proposal sources format). No compose reads it |
 | a verdict document | the file of a version of the artifact type `verdict`, which `qory run verdict` stores | a run's verdict, and its points: for `escalate` the points a person acts on, and for `changes-requested` what the next round fixes (§The verdict format). No compose reads it |
+| a review report | `report.json`, which one reviewer of a review round writes | the reviewer's findings on the reviewed commit, each blocking or non-blocking (§The review report format). qory's review round reads it; no compose reads it |
 
 Every module has a `qory-module.yaml`; it defines the module's name, and a directory
 without one is not a module. `qory.yaml` is optional: every setting has a default. It has
@@ -1012,6 +1013,51 @@ documents fails the schema:
 {"verdict": "passed", "track": {"id": "Small-Change", "reason": "The change touches one config file."}}
 {"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one config file.", "stage": "build"}}
 {"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one config file.\nIt adds no code."}}
+```
+
+## The review report format
+
+A review report records the findings of one reviewer of a review round on the reviewed
+commit. The reviewer writes it as `report.json`, and qory's review round reads it, with
+the result of the full suite, to decide the round's verdict. This is version 1 of the
+format ([review-report.schema.json](review-report.schema.json)):
+
+```json
+{"reviewer": "code-reviewer",
+ "findings": [{"severity": "blocking", "quote": "if count >= limit {",
+               "problem": "A batch of exactly the limit is cut, so the last item of a full page is lost.",
+               "fix": "Cut only a batch of more than the limit, and test a batch of the limit.",
+               "proof": "failing check: TestBatchAtLimit fails with 99 of 100 items.",
+               "point": "A batch of exactly the limit loses its last item.",
+               "file": "internal/batch/batch.go", "line": 12}]}
+```
+
+| Member | Meaning |
+|---|---|
+| `reviewer` | the reviewer's agent name: lower-case letters, digits and hyphens, from a letter or a digit, at most 64 characters. Required |
+| `findings` | the reviewer's findings, a list that may be empty. Required |
+| `id` | the id of a finding of the round before that this finding repeats, `f` and a number from 1 of at most 6 digits. Optional |
+| `severity` | `blocking`: the round is not clean while the finding is open; `non-blocking`: the finding is open, and the round can still pass. Required |
+| `quote` | the text of the reviewed commit that the finding is about, 1 to 2000 characters. Required |
+| `problem` | what is wrong, 1 to 2000 characters. Required |
+| `fix` | what the next session changes, 1 to 2000 characters. Required |
+| `proof` | `failing check: `, `failing input: ` or `broken rule: `, then the evidence, at most 1000 characters. A blocking finding has a failing check or a failing input. Required |
+| `point` | the finding in one line, 1 to 500 characters, with at least one character that is not a space. qory trims the spaces at its ends. Required |
+| `file` | the path of the file that the finding is about, 1 to 500 characters. Optional |
+| `line` | the line of `file`, a whole number from 1. Optional |
+
+A report has no member other than `reviewer` and `findings`, and a finding has no member
+other than those of the table. qory reads at most 1 MiB of the file and follows no link.
+A report that is missing, is not one JSON object, does not match the schema, or has
+another reviewer's name is a blocking finding that qory writes for the reviewer. Each of
+these documents fails the schema:
+
+```json
+{"reviewer": "code-reviewer"}
+{"reviewer": "code-reviewer", "findings": [], "result": "clean"}
+{"reviewer": "code-reviewer", "findings": [{"severity": "minor", "quote": "q", "problem": "p", "fix": "f", "proof": "failing input: x", "point": "p"}]}
+{"reviewer": "code-reviewer", "findings": [{"severity": "blocking", "quote": "q", "problem": "p", "fix": "f", "proof": "broken rule: r", "point": "p"}]}
+{"reviewer": "code-reviewer", "findings": [{"severity": "non-blocking", "quote": "q", "problem": "p", "fix": "f", "proof": "broken rule: r", "point": " "}]}
 ```
 
 ## The module manifest
