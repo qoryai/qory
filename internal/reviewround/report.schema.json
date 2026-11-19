@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Report of a reviewer of a change",
+  "description": "Test fixture: the draft of qory's report schema for a review round, written from the review-round contract (report.json with a reviewer and findings, severity blocking or non-blocking, no result word). Replace it with qory's contracts/harness/v1 schema when that lands.",
+  "type": "object",
+  "required": [
+    "reviewer",
+    "findings"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "reviewer": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": [
+        "severity",
+        "quote",
+        "problem",
+        "fix",
+        "proof",
+        "point"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^f[1-9][0-9]{0,5}$"
+        },
+        "severity": {
+          "enum": [
+            "blocking",
+            "non-blocking"
+          ]
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "problem": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "fix": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "proof": {
+          "type": "string",
+          "maxLength": 1000,
+          "pattern": "^(failing check|failing input|broken rule): [^\\s]"
+        },
+        "point": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "^[^\\n\\r]+$"
+        },
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "if": {
+        "required": [
+          "severity"
+        ],
+        "properties": {
+          "severity": {
+            "const": "blocking"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "proof": {
+            "not": {
+              "pattern": "^broken rule"
+            }
+          }
+        }
+      }
+    }
+  }
+}
