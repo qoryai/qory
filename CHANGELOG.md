@@ -599,9 +599,9 @@ release may change what an existing document does, and states it under Upgrading
   refuses `fast` as it refuses any name that is not a tier, with the list of the tiers.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
-  qory stops a run whose documents have one. `time_limit_minutes` is the time limit of
-  the run's session, and its only one: a stack's workflow sets none, qory sets no
-  default, and documents without it give the session no limit. Qory Apiary writes 180
+  qory stops a run whose documents have one. `time_limit_minutes` is the only time limit
+  of the run's session: a stack's workflow sets none. When the run documents have no
+  `time_limit_minutes`, qory sets no time limit for the session. Qory Apiary writes 180
   minutes for a workflow with no Time limit. At the limit the session stops, and the
   full suite's after step and the push step still run. The documents can
   also contain `shared_run` and `full_suite`. With `full_suite` true, the session runs the full
