@@ -1183,3 +1183,19 @@ func TestDeleteBranchIsTheOnlyWayOut(t *testing.T) {
 		t.Errorf("DeleteBranch() = %q, want %q", got, want)
 	}
 }
+
+// TestAListThatFailsAfterThePushSaysThePushLanded is the error of a listing of the run's commits
+// that failed after the push landed: line 1 is the fix, and the text says the push landed and
+// the listing failed, not that a check before the push failed.
+func TestAListThatFailsAfterThePushSaysThePushLanded(t *testing.T) {
+	b := &WorkBranch{Ref: testRef, system: "git.example.com", pushed: []string{"acme/shop"}}
+	cause := gitFailed(errors.New("fatal: bad revision"))
+	err := listFailed(b, cause)
+	want := "qory run: delete branch qory/wi_1 of acme/shop on git.example.com: qory pushed acme/shop and stored no version, because the list of the run's commits failed: "
+	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.Contains(err.Error(), "fatal: bad revision") {
+		t.Errorf("the error is %v, want the start %q", err, want)
+	}
+	if !errors.Is(err, cause) {
+		t.Errorf("the error does not unwrap to the listing's error: %v", err)
+	}
+}
