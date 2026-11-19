@@ -454,9 +454,6 @@ func TestMaskTheComposedFile(t *testing.T) {
 	})
 
 	t.Run("a key in the file's name", func(t *testing.T) {
-		// A part of a path that the compose builds from -f, such as the file's name, prints
-		// as exports.HidePath prints it.
-		const namePhrase = "(a name that contains a run key)"
 		dir := filepath.Join(root, "stacks")
 		writeManifest(t, filepath.Join(dir, "modules", "core"), "core")
 		writeFile(t, filepath.Join(dir, "modules", "core", "AGENTS.md"), "# core\n")
@@ -471,7 +468,7 @@ func TestMaskTheComposedFile(t *testing.T) {
 
 			args := []string{"harness", "compose", "--runtime", "claude", "-f", file}
 			if name == maskKey {
-				wantMasked(t, cmd.ExitInput, fmt.Sprintf(lines, namePhrase, ""), args...)
+				wantMasked(t, cmd.ExitInput, fmt.Sprintf(lines, keyPhrase, ""), args...)
 			} else {
 				wantPlain(t, cmd.ExitInput, fmt.Sprintf(lines, "plain.yaml", " of the stack in plain.yaml"), args...)
 			}

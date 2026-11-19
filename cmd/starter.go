@@ -438,7 +438,7 @@ func endOutcome(word, reason string) (server.Outcome, error) {
 		return o, input(fmt.Errorf("--reason %s is not a code: a lower-case letter, then lower-case letters, digits and _, at most 64", exports.Value(reason, false)))
 	}
 	if !event.StarterReason(reason) {
-		return o, input(fmt.Errorf("--reason %s is one of Forager's reasons; give one of yours", exports.Value(reason, false)))
+		return o, input(fmt.Errorf("--reason %s is one of Forager's reasons; give one of yours", reason))
 	}
 	o.Reason = reason
 	return o, nil
@@ -452,8 +452,8 @@ func recordedAs(o server.Outcome) string {
 	}
 	// A reason that contains a key or a code, such as qrk_, prints as a phrase: outcomeOf
 	// prints a reason of the starter's with each _ as a space.
-	// shortcut: endOutcome sends such a reason to the server as it is; replace this with a
-	// refusal before the send when that is decided.
+	// shortcut: endOutcome sends such a reason to the server as it is; replace this when
+	// endOutcome ends with an input error for a reason that contains a key or a code.
 	out := outcomeOf(o.State, exports.Value(o.Reason, false))
 	if out.reason == "" {
 		return out.word()

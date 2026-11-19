@@ -1418,9 +1418,9 @@ release may change what an existing document does, and states it under Upgrading
     `--<value>`, `-<value>` or `---<value>`;
   - the file errors of `qory artifact push <file>`, of `--withdraw` with files, and of
     `qory run verdict escalate --points`;
-  - the errors and rows of `qory harness compose -f`, `qory worktree add -f` and `qory
-    run -f`, and the errors of `qory run --home`;
-  - an error reading the harness report of `--home`;
+  - the errors of `qory harness compose -f`, `qory worktree add -f` and `qory run -f`
+    that printed the file's path or name, and the compose's `qory` and `retired` rows;
+  - an error reading the harness report of `--home`, also for `qory run`;
   - `qory gateway --listen`, also in the cause of a failed lookup of its host;
   - a read-write `--mount` that contains qory's state directory;
   - the line of `qory run end` with a `--reason` that contains a key.

@@ -81,12 +81,8 @@ func reservedMounts(root string, mounts []wall.Mount) error {
 			continue
 		}
 		if relation := homeOrState(m.Path); relation != "" {
-			shown := hostgit.Shown(m.Path)
-			if v := exports.Value(m.Path, false); v != m.Path {
-				shown = v
-			}
 			// relation prints a path under the mount, such as the state directory.
-			return input(masked(fmt.Errorf("make the mount %s read-only, with :ro on --mount or in wall.mounts: it %s, and a walled run may change any file in a read-write mount", shown, relation), m.Path))
+			return input(exports.HideValueError(fmt.Errorf("make the mount %s read-only, with :ro on --mount or in wall.mounts: it %s, and a walled run may change any file in a read-write mount", hostgit.Shown(m.Path), relation), m.Path))
 		}
 	}
 	return nil

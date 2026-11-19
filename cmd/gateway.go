@@ -190,7 +190,7 @@ More: ` + gatewayDocs,
 				if errors.As(err, &op) && op.Op == "listen" {
 					// op.Err, such as a failed lookup, prints the host as written.
 					host, _, _ := net.SplitHostPort(addr)
-					return fmt.Errorf("listen on %s: %w", exports.Value(addr, false), masked(op.Err, addr, host))
+					return fmt.Errorf("listen on %s: %w", exports.Value(addr, false), exports.HideValueError(op.Err, host))
 				}
 				return explain(err, id)
 			}

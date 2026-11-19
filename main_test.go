@@ -26,10 +26,10 @@ import (
 // "harden" with gateway.HardenProcess, "mask" with a hardening that fails with an
 // error that contains a value of the mask list and a signed URL, and "statusorder" as
 // qory run with an update check that opens the file envStatusFile names first thing, and
-// "args" as qory with the arguments, a JSON array, that envArgs holds.
+// "args" as qory with the arguments in envArgs.
 const envChild = "QORY_TEST_MAIN_CHILD"
 
-// envArgs holds the arguments of the child in "args".
+// envArgs is the variable set to the arguments of the child in "args", as a JSON array.
 const envArgs = "QORY_TEST_MAIN_ARGS"
 
 // resultPrefix starts the one line on which a child reports.

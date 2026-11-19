@@ -1,14 +1,10 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
-	"slices"
-	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
@@ -93,26 +89,11 @@ More: https://github.com/qoryai/qory`,
 	root.AddCommand(shortcuts()...)
 	root.AddCommand(worktreeShortcuts()...)
 	root.PersistentFlags().BoolP("verbose", "v", false, "print more of what the command does; each command's help lists what")
-	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return input(masked(err, flagValues(err)...)) })
+	// An error of pflag's prints the flag or the value as written, and each word of it
+	// that contains a key or a code, such as qrk_, prints as a phrase.
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return input(exports.HideValueError(err, "")) })
 	maskHelpTopics(root)
 	return root
-}
-
-// flagValues are the values a person wrote that err, an error of pflag's, prints: the
-// flag's value, the unknown flag as written, or the flag of a bad syntax.
-func flagValues(err error) []string {
-	var value *pflag.InvalidValueError
-	var notExist *pflag.NotExistError
-	var syntax *pflag.InvalidSyntaxError
-	switch {
-	case errors.As(err, &value):
-		return []string{value.GetValue()}
-	case errors.As(err, &notExist):
-		return []string{"--" + notExist.GetSpecifiedName(), "-" + notExist.GetSpecifiedShortnames()}
-	case errors.As(err, &syntax):
-		return []string{syntax.GetSpecifiedFlag()}
-	}
-	return nil
 }
 
 // maskHelpTopics makes cobra's help command print each topic it does not find, a value
@@ -171,21 +152,17 @@ func noArgs(cmd *cobra.Command, args []string) error {
 // error. The caller decides what to print and which status to exit with: [ErrReported]
 // reports whether the command printed the failure itself, [ExitCode] which status it gets.
 func Execute() error {
-	return masked(Root().Execute(), commandLineValues(os.Args[1:])...)
-}
-
-// commandLineValues are the values of args, the arguments after the program's name, that
-// an error of cobra's or pflag's may print: each argument, and the part after the first =
-// of a flag written as --name=value. A command qory does not have, such as qory <arg>,
-// gets an error of cobra's before any check of qory's runs.
-func commandLineValues(args []string) []string {
-	values := slices.Clone(args)
-	for _, a := range args {
-		if _, value, ok := strings.Cut(a, "="); ok {
-			values = append(values, value)
+	err := Root().Execute()
+	// An error of cobra's, such as that of a command qory does not have, prints an
+	// argument as written before any check of qory's runs. When an argument contains a
+	// key or a code, such as qrk_, each word of the error that contains one, quoted or
+	// not, prints as a phrase.
+	for _, arg := range os.Args[1:] {
+		if exports.Value(arg, false) != arg {
+			return exports.HideValueError(err, "")
 		}
 	}
-	return values
+	return err
 }
 
 // RunsQoryRun reports whether args, the arguments after the program's name, start qory

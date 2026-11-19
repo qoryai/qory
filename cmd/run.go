@@ -144,12 +144,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			return nil
 		},
-		RunE: func(cmd *cobra.Command, args []string) (err error) {
-			// A path of --home or -f that contains a key or a code, such as qrk_, prints
-			// as a phrase in each error of the run, see [masked]; the values as given,
-			// since the run sets composing.file later.
-			given := []string{h.home, reportFor(h.home), composing.file}
-			defer func() { err = masked(err, given...) }()
+		RunE: func(cmd *cobra.Command, args []string) error {
 			// The run's mask list starts empty, and each secret value of the run joins it
 			// once qory run reads the value. qory's lines, and the agent's output on pipes,
 			// are masked with it; see [runStreams].
@@ -700,7 +695,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				} else {
 					err = explain(err, id)
 				}
-				return withRecord(streams.errOut, masked(err, given...), record)
+				return withRecord(streams.errOut, err, record)
 			}
 			// A walled run whose composed home has push checks checks each POST of its run
 			// API from behind the wall, see [runPushChecks].
@@ -1270,7 +1265,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if errors.As(prepErr, &line) {
 					fixes := toolFixes(record, prepErr)
 					if fixes == nil {
-						fixes = []string{masked(line, given...).Error()}
+						fixes = []string{line.Error()}
 					}
 					for _, fix := range fixes {
 						said(fix)
@@ -1284,7 +1279,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					said("the record is in " + record)
 					return prepErr
 				}
-				return withRecord(streams.errOut, masked(prepErr, given...), record)
+				return withRecord(streams.errOut, prepErr, record)
 			}
 			spec.Timeout = left
 			// Forager's session masks the runtime's output with the run's masker, on a

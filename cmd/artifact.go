@@ -605,7 +605,7 @@ func readPushSources(c *cobra.Command, files []string) ([]pushSource, error) {
 		} else {
 			info, err := os.Stat(file)
 			if err != nil {
-				return nil, input(fmt.Errorf("Pass a file that exists. %w", masked(err, file)))
+				return nil, input(fmt.Errorf("Pass a file that exists. %w", exports.HideValueError(err, file)))
 			}
 
 			if !info.Mode().IsRegular() {
@@ -664,7 +664,7 @@ func (s pushSource) copyTo(w io.Writer) error {
 
 	file, err := os.Open(s.path)
 	if err != nil {
-		return fmt.Errorf("Check %s. Reading it failed: %w", exports.Value(s.path, false), masked(err, s.path))
+		return fmt.Errorf("Check %s. Reading it failed: %w", exports.Value(s.path, false), exports.HideValueError(err, s.path))
 	}
 	defer file.Close()
 
@@ -681,7 +681,7 @@ func (s pushSource) bytesOf() ([]byte, error) {
 
 	content, err := os.ReadFile(s.path)
 	if err != nil {
-		return nil, fmt.Errorf("Check %s. Reading it failed: %w", exports.Value(s.path, false), masked(err, s.path))
+		return nil, fmt.Errorf("Check %s. Reading it failed: %w", exports.Value(s.path, false), exports.HideValueError(err, s.path))
 	}
 
 	return content, nil
@@ -1011,49 +1011,6 @@ func shownOrShort(value string) string {
 	return shortValue(value)
 }
 
-// masked is err with each of values that contains a key or a code, such as qrk_, printed
-// as [exports.Value] prints it: in place of the value quoted, then of the value bare. If
-// the text then still contains a key or a code, each word that contains one prints as
-// [exports.HidePath] prints it. The result unwraps to err, so [ExitCode] reads it as err.
-// An err with none of these values is returned unchanged.
-//
-// shortcut: a path built from a value, such as one made absolute or joined, prints as
-// [exports.HidePath] prints it, "(a name that contains …)", not with [exports.Value]'s
-// phrase; replace it when the callers pass each path they build.
-func masked(err error, values ...string) error {
-	if err == nil {
-		return nil
-	}
-
-	secrets := slices.DeleteFunc(slices.Clone(values), func(v string) bool { return v == "" || exports.Value(v, false) == v })
-	if len(secrets) == 0 {
-		return err
-	}
-
-	// A longer value first, so a value inside another is not replaced in the longer one.
-	slices.SortFunc(secrets, func(a, b string) int { return len(b) - len(a) })
-
-	text := err.Error()
-	for _, v := range secrets {
-		text = strings.ReplaceAll(text, strconv.Quote(v), exports.Value(v, true))
-		text = strings.ReplaceAll(text, v, exports.Value(v, false))
-	}
-
-	return maskedError{exports.HidePath(text), err}
-}
-
-// maskedError is an error whose text [masked] printed without a key or a code.
-type maskedError struct {
-	text string
-	err  error
-}
-
-// Error is the text without the key or the code.
-func (e maskedError) Error() string { return e.text }
-
-// Unwrap returns the error whose text has the key or the code.
-func (e maskedError) Unwrap() error { return e.err }
-
 // readPoints returns the points of verdict from path, the file of --points; given is true
 // when the command line has --points. escalate needs the file, and the other verdicts
 // take none.
@@ -1072,13 +1029,13 @@ func readPoints(verdict, path string, given bool) ([]runapi.Point, error) {
 
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, input(fmt.Errorf("Pass a file that exists to --points. %w", masked(err, path)))
+		return nil, input(fmt.Errorf("Pass a file that exists to --points. %w", exports.HideValueError(err, path)))
 	}
 	defer file.Close()
 
 	data, err := io.ReadAll(io.LimitReader(file, maxPointsFile+1))
 	if err != nil {
-		return nil, input(fmt.Errorf("Check the file of --points. Reading it failed: %w", masked(err, path)))
+		return nil, input(fmt.Errorf("Check the file of --points. Reading it failed: %w", exports.HideValueError(err, path)))
 	}
 
 	if len(data) > maxPointsFile {
