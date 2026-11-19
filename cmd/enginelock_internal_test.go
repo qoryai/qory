@@ -78,11 +78,10 @@ func TestTheEngineLockRunsOneImageStepAtATime(t *testing.T) {
 	release()
 }
 
-// TestARunThatEndsWhileItWaitsForTheEngineLockStopsWithItsLine is a run whose time
-// limit passes while another holds the lock: its step does not run, and its line starts
-// with the fix, with "; the code is used" after it for a run from a run code. A run
-// stopped while it waits gets the line of a stop.
-func TestARunThatEndsWhileItWaitsForTheEngineLockStopsWithItsLine(t *testing.T) {
+// TestARunStoppedWhileItWaitsForTheEngineLockStopsWithItsLine is a run whose context ends
+// while another holds the lock: its step does not run, and its line starts with the fix,
+// with "; the code is used" after it for a run from a run code.
+func TestARunStoppedWhileItWaitsForTheEngineLockStopsWithItsLine(t *testing.T) {
 	shortLockPoll(t)
 	file := engineFile(t, engineComplete, 0o600)
 	release, err := lockEngine(t.Context(), file)
@@ -91,11 +90,12 @@ func TestARunThatEndsWhileItWaitsForTheEngineLockStopsWithItsLine(t *testing.T) 
 	}
 	defer release()
 	for _, fromCode := range []bool{false, true} {
-		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+		ctx, cancel := context.WithCancel(t.Context())
+		time.AfterFunc(30*time.Millisecond, cancel)
 		ran := false
 		err := withEngineLock(ctx, file, fromCode, func() error { ran = true; return nil })
 		cancel()
-		want := "start fewer runs at once: the run ended while another run's image pull held the lock of wall.engine_proxy_file " + file + ": context deadline exceeded"
+		want := "start the run again if it is still wanted: the run was stopped while another run's image pull held the lock of wall.engine_proxy_file " + file + ": context canceled"
 		if fromCode {
 			want += codeUsed
 		}
@@ -106,16 +106,6 @@ func TestARunThatEndsWhileItWaitsForTheEngineLockStopsWithItsLine(t *testing.T) 
 		if ran {
 			t.Error("the step ran without the lock")
 		}
-	}
-	// A run stopped while it waits, by a signal or the end of its dispatch, ends with a
-	// line of a stop, not of a time limit.
-	ctx, cancel := context.WithCancel(t.Context())
-	time.AfterFunc(30*time.Millisecond, cancel)
-	err = withEngineLock(ctx, file, false, func() error { t.Error("the step ran without the lock"); return nil })
-	want := "start the run again if it is still wanted: the run was stopped while another run's image pull held the lock of wall.engine_proxy_file " + file + ": context canceled"
-	var line *runLineError
-	if !errors.As(err, &line) || line.Error() != want {
-		t.Errorf("a stopped run: %v, want the line %q", err, want)
 	}
 }
 

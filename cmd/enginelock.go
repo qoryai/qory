@@ -23,11 +23,6 @@ var errEngineLocked = errors.New("the engine proxy file is locked")
 // test shortens it.
 var engineLockPoll = 100 * time.Millisecond
 
-// textEngineLockWait is the line of a run whose context's deadline, the end of the run's
-// setup, passed while it waited for the engine lock of the engine proxy file %s, with the
-// cause of the end after it.
-const textEngineLockWait = "start fewer runs at once: the run ended while another run's image pull held the lock of wall.engine_proxy_file %s: %v"
-
 // textEngineLockStopped is the line of a run stopped while it waited for the engine lock
 // of the engine proxy file %s, by a signal or the end of its dispatch, with the cause after
 // it.
@@ -35,9 +30,9 @@ const textEngineLockStopped = "start the run again if it is still wanted: the ru
 
 // lockEngine takes the engine lock of the engine proxy file at path: it opens the file
 // as [readEngineProxy] does, with the same refusals, and takes an exclusive flock of the
-// descriptor, trying again every [engineLockPoll] until ctx ends: [textEngineLockWait]
-// when its deadline passed, [textEngineLockStopped] when it was cancelled. The function
-// it returns releases the lock.
+// descriptor, trying again every [engineLockPoll] until ctx ends, with
+// [textEngineLockStopped]. qory run prints the line of the setup's limit in place of it
+// when the setup's deadline ended ctx. The function it returns releases the lock.
 func lockEngine(ctx context.Context, path string) (func(), error) {
 	f, _, err := openEngineProxy(path)
 	if err != nil {
@@ -56,11 +51,7 @@ func lockEngine(ctx context.Context, path string) (func(), error) {
 		select {
 		case <-ctx.Done():
 			f.Close()
-			text := textEngineLockStopped
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				text = textEngineLockWait
-			}
-			return nil, fmt.Errorf(text, exports.Value(path, false), context.Cause(ctx))
+			return nil, fmt.Errorf(textEngineLockStopped, exports.Value(path, false), context.Cause(ctx))
 		case <-time.After(engineLockPoll):
 		}
 	}
