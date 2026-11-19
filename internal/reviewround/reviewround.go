@@ -187,7 +187,8 @@ var idForm = regexp.MustCompile(`^f[1-9][0-9]{0,5}$`)
 
 // Decide decides r. The error is for a round that a caller made wrong: a number below 1, no
 // reviewer, a reviewer with a name of another form or the name full-suite, a name twice, or
-// an ending that is none of [Finished], [Failed] and [TimedOut]. A report that is missing or
+// an ending that is none of [Finished], [Failed] and [TimedOut], and for reviewers so many
+// that open-findings.json has no room for their entries. A report that is missing or
 // invalid is a finding, never an error. The decision's open findings make an
 // open-findings.json of at most [MaxOpenBytes]: past that, the findings that come last in
 // the order of the verdict's points stay out of the file, and each reviewer that has fewer
