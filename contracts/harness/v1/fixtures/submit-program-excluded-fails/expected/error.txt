@@ -1,0 +1,2 @@
+Keep skills/a in module forge, or move skills/a/open-draft out of it.
+  The submit_program of module forge is in skills/a, and an exclude or only of module forge leaves skills/a out.
