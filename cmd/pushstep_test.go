@@ -77,6 +77,9 @@ type pushAPI struct {
 	rows     []recordedRow
 	record   func(n int, w http.ResponseWriter) bool
 	index    func(n int, w http.ResponseWriter) bool
+	// other, when set, responds to a request of no route above, and returns whether it did;
+	// a request it leaves gets 404.
+	other func(w http.ResponseWriter, r *http.Request) bool
 }
 
 // newPushAPI serves a run API whose work item has the id [workItem] and the stage st_a.
@@ -114,6 +117,7 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 		a.posted(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/runs/r/pushed-commits":
 		a.recordedPush(w, r)
+	case a.other != nil && a.other(w, r):
 	default:
 		http.NotFound(w, r)
 	}

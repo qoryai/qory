@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -72,9 +73,11 @@ func homeReport(home string) report.Report {
 // join of session n; a nil result and error is a session that succeeded. change, when set,
 // changes the documents, and nowhere the run's [cmd.Nowhere]. joined, when set, gets the
 // spec of session n as it joins. extends, when true, makes the harness document extend the
-// stack of the folder examples/hello in place of defining one.
+// stack of the folder examples/hello in place of defining one. files are more files of the
+// checkout, by path, beside the module hello's.
 type loopSetup struct {
 	extends bool
+	files   map[string]string
 	answers []string
 	joined  func(n int, spec session.SessionSpec)
 	result  func(n int) (*session.Result, error)
@@ -119,14 +122,16 @@ func runLoop(t *testing.T, s loopSetup) loopRun {
 	if s.extends {
 		defines = nil
 	}
+	files := map[string]string{
+		"examples/hello/modules/hello/skills/workflow-hello/SKILL.md": "---\nname: workflow-hello\ndescription: Say hello.\n---\n\nSay hello.\n",
+		"examples/hello/modules/hello/skills/workflow-edit/SKILL.md":  "---\nname: workflow-edit\ndescription: Edit.\n---\n\nEdit.\n",
+	}
+	maps.Copy(files, s.files)
 	r.harnessRun = codeHarness{
 		defines: defines,
 		// Codex starts a workflow by its skill, and the module hello ships a command. The
 		// skill workflow-edit is there for a workflow edit that a test adds.
-		files: map[string]string{
-			"examples/hello/modules/hello/skills/workflow-hello/SKILL.md": "---\nname: workflow-hello\ndescription: Say hello.\n---\n\nSay hello.\n",
-			"examples/hello/modules/hello/skills/workflow-edit/SKILL.md":  "---\nname: workflow-edit\ndescription: Edit.\n---\n\nEdit.\n",
-		},
+		files: files,
 		change: func(d map[string]any) {
 			d["shared_run"] = true
 			d["access"] = "read"
@@ -599,5 +604,68 @@ func TestALaterSessionComposesTheBaseOfTheHarnessFromTheRunsCache(t *testing.T) 
 	wants(t, r.out, "for codex\n")
 	if s := r.joins[1].report.Sessions; len(s) != 2 || s[1].Runtime != "codex" {
 		t.Errorf("the report's sessions are %+v", s)
+	}
+}
+
+// TestALaterSessionComposesWithTheTiersOfItsAnswer is a run whose run settings map the tier
+// balanced to example-small, and whose answer starts session 2 with a model choice that maps
+// it to example-other, with a module agent whose model is ${qory:balanced}: session 2's agent
+// is written with example-other, and the report has each session's tier map, with the one
+// tier that an agent sets.
+func TestALaterSessionComposesWithTheTiersOfItsAnswer(t *testing.T) {
+	models := []any{map[string]any{"id": "example-large"}, map[string]any{"id": "example-small"}, map[string]any{"id": "example-other"}}
+	choice := func(balanced string) map[string]any {
+		return map[string]any{
+			"runtime": "claude", "model": "example-large", "provider_models": models,
+			"tiers": map[string]any{"light": "example-large", "balanced": balanced, "thinking": "example-large"},
+		}
+	}
+	var second map[string]any
+	if err := json.Unmarshal([]byte(laterAnswer(2, "claude", "example-provider-2", 30)), &second); err != nil {
+		t.Fatal(err)
+	}
+	second["model_choice"] = choice("example-other")
+	answer, _ := json.Marshal(second)
+	var agents []string
+	r := runLoop(t, loopSetup{
+		answers: []string{string(answer)},
+		files: map[string]string{
+			"examples/hello/modules/hello/agents/mid.md": "---\nname: mid\ndescription: Works in the middle tier.\nmodel: ${qory:balanced}\n---\n\nWorks.\n",
+		},
+		change: func(d map[string]any) { d["run_settings"] = choice("example-small") },
+		joined: func(_ int, spec session.SessionSpec) {
+			data, _ := os.ReadFile(filepath.Join(spec.HarnessHome, "claude", "agents", "mid.md"))
+			agents = append(agents, string(data))
+		},
+	})
+	if r.err != nil || len(r.joins) != 2 || len(agents) != 2 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	for i, want := range []string{"example-small", "example-other"} {
+		if !strings.Contains(agents[i], "model: "+want+"\n") {
+			t.Errorf("session %d's agent mid is %q, want the model %s", i+1, agents[i], want)
+		}
+		if s := r.joins[1].report.Sessions; len(s) != 2 || len(s[i].Tiers) != 1 || s[i].Tiers["balanced"].Model != want {
+			t.Errorf("the report's sessions are %+v, want session %d's balanced on %s", s, i+1, want)
+		}
+	}
+}
+
+// TestASessionWithoutAKeyAfterOneWithAKeyJoinsWithNone is a run whose answers start session
+// 2 with the model key example-provider-2 and session 3 with no model_credential: session 3
+// joins with no key, and not with session 2's.
+func TestASessionWithoutAKeyAfterOneWithAKeyJoinsWithNone(t *testing.T) {
+	third := strings.Replace(laterAnswer(3, "claude", "", 30), `"model_credential":"",`, "", 1)
+	if strings.Contains(third, "model_credential") {
+		t.Fatalf("the answer of session 3 is %s", third)
+	}
+	r := runLoop(t, loopSetup{answers: []string{laterAnswer(2, "claude", "example-provider-2", 30), third}})
+	if r.err != nil || len(r.joins) != 3 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	for i, want := range []string{"", "example-provider-2", ""} {
+		if got := r.joins[i].spec.ModelCredential; got != want {
+			t.Errorf("session %d joins with the key %q, want %q", i+1, got, want)
+		}
 	}
 }

@@ -2,15 +2,24 @@ package cmd_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
 
+	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/proxygit/proxygittest"
 )
 
@@ -159,4 +168,211 @@ func TestAFailureBeforeSession2KeepsThePushOfSession1(t *testing.T) {
 	if !strings.Contains(r.out, "example-runtime") {
 		t.Errorf("the output does not show the runtime:\n%s", r.out)
 	}
+}
+
+// suiteServed gives the run API of p the build plan suitePlan beside the versions of the
+// branch, and POST verdict, which answers 201, or leaves the request with no response when
+// hang returns true for the verdict's number, from 1. order is each verdict that arrived,
+// "verdict", and each next-session request, "next", in the order they arrived.
+func suiteServed(t *testing.T, p *pushRepo, hang func(n int) bool) (order func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var got []string
+	note := func(s string) {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, s)
+	}
+	sum := sha256.Sum256([]byte(suitePlan))
+	plan := map[string]any{"type": "build-plan", "name": "main", "newest_version": 1, "versions": []any{map[string]any{
+		"id": "bp1", "number": 1, "writer": map[string]any{"kind": "run", "run_id": "earlier"},
+		"files": []any{map[string]any{"filename": "build-plan.md", "size": len(suitePlan), "sha256": hex.EncodeToString(sum[:])}},
+	}}}
+	p.api.index = func(_ int, w http.ResponseWriter) bool {
+		rec := httptest.NewRecorder()
+		p.api.writeIndex(rec)
+		var index map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &index); err != nil {
+			t.Error(err)
+			return false
+		}
+		index["artifacts"] = append(index["artifacts"].([]any), plan)
+		json.NewEncoder(w).Encode(index)
+		return true
+	}
+	verdicts := 0
+	p.api.other = func(w http.ResponseWriter, r *http.Request) bool {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/files/build-plan.md"):
+			io.WriteString(w, suitePlan)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/verdict"):
+			note("verdict")
+			verdicts++
+			if hang != nil && hang(verdicts) {
+				conn, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Error(err)
+					return true
+				}
+				t.Cleanup(func() { conn.Close() })
+				return true
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, `{"version":1,"artifact":{"type":"verdict","name":"main","version":{"id":"v1","number":1}}}`)
+		default:
+			return false
+		}
+		return true
+	}
+	next := p.nextSession
+	p.nextSession = func(ctx context.Context, body []byte) ([]byte, error) {
+		note("next")
+		return next(ctx, body)
+	}
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(got)
+	}
+}
+
+// suiteResults is the result of each join of a run, numbered by the gateway from 1, whose
+// session that has an after step runs it with a red suite, as Forager's after step does.
+// spec is the spec of the session that joins, which [pushRepo.mountsOf] sets.
+func suiteResults(t *testing.T, spec *session.SessionSpec) func() (*session.Result, error) {
+	n := numbered()
+	return func() (*session.Result, error) {
+		res, err := n()
+		if len(spec.After) > 0 {
+			res.After = runAfter(t, *spec, suiteEnd{result: suiteRed, exit: 1})
+		}
+		return res, err
+	}
+}
+
+// fullSuiteAnswer is laterAnswer with full_suite true.
+func fullSuiteAnswer(n int, minutes int) string {
+	return strings.Replace(laterAnswer(n, "claude", "example-provider-2", minutes), `"full_suite":false`, `"full_suite":true`, 1)
+}
+
+// TestASessionsSuiteIsPostedBeforeTheNextSessionRequest is a write run whose answer starts
+// session 2 with full_suite: session 1 runs no suite, session 2 runs the full suite in its
+// after step, and qory posts the suite's verdict before the next-session request after
+// session 2. The run closes succeeded.
+func TestASessionsSuiteIsPostedBeforeTheNextSessionRequest(t *testing.T) {
+	p, requests := sharedPushRepo(t, fullSuiteAnswer(2, 30))
+	order := suiteServed(t, p, nil)
+	var spec session.SessionSpec
+	var afters []bool
+	p.mountsOf = func(s session.SessionSpec) {
+		spec = s
+		afters = append(afters, len(s.After) > 0)
+	}
+	joins := 0
+	r := p.run(t, func(d string) {
+		joins++
+		writeFile(t, filepath.Join(d, "file-"+strconv.Itoa(joins)+".txt"), "text\n")
+		commitAll(t, d, "Add file "+strconv.Itoa(joins))
+	}, suiteResults(t, &spec))
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if joins != 2 || requests() != 2 {
+		t.Fatalf("%d joins and %d next-session requests, want 2 and 2\n%s", joins, requests(), r.out)
+	}
+	if !slices.Equal(afters, []bool{false, true}) {
+		t.Errorf("the sessions have an after step: %v, want only session 2", afters)
+	}
+	if got, want := order(), []string{"next", "verdict", "next"}; !slices.Equal(got, want) {
+		t.Errorf("the requests arrived in the order %q, want %q", got, want)
+	}
+}
+
+// TestEachSessionEndsAtItsTimeLimit is a write run whose documents set 30 minutes and whose
+// answer starts session 2 with 60, where a minute lasts 100ms: session 1 joins with 3s and
+// session 2 with 6s. The verdict of session 2's suite, or the version of its push, then
+// gets no response, and the step that waits for it ends at session 2's limit, 6s after
+// session 2's start, and not at once, as it would at session 1's limit.
+func TestEachSessionEndsAtItsTimeLimit(t *testing.T) {
+	defer cmd.SetSessionMinute(100 * time.Millisecond)()
+	defer cmd.SetPushTimes(200*time.Millisecond, 400*time.Millisecond)()
+	for name, hangPush := range map[string]bool{"suite": false, "push": true} {
+		t.Run(name, func(t *testing.T) {
+			p, _ := sharedPushRepo(t, fullSuiteAnswer(2, 60))
+			p.change = func(change func(map[string]any)) func(map[string]any) {
+				return func(d map[string]any) {
+					change(d)
+					d["time_limit_minutes"] = 30
+				}
+			}(p.change)
+			suiteServed(t, p, func(int) bool { return !hangPush })
+			if hangPush {
+				hangingPost(t, p, nil)
+				p.api.post = func(post func(int, http.ResponseWriter) (bool, bool)) func(int, http.ResponseWriter) (bool, bool) {
+					return func(n int, w http.ResponseWriter) (bool, bool) {
+						if n == 1 {
+							return false, true
+						}
+						return post(n, w)
+					}
+				}(p.api.post)
+			}
+			var spec session.SessionSpec
+			var limits []time.Duration
+			var second time.Time
+			p.mountsOf = func(s session.SessionSpec) {
+				spec = s
+				limits = append(limits, s.Timeout)
+				second = time.Now()
+			}
+			joins := 0
+			r := p.run(t, func(d string) {
+				joins++
+				writeFile(t, filepath.Join(d, "file-"+strconv.Itoa(joins)+".txt"), "text\n")
+				commitAll(t, d, "Add file "+strconv.Itoa(joins))
+			}, suiteResults(t, &spec))
+			took := time.Since(second)
+			if joins != 2 || len(limits) != 2 {
+				t.Fatalf("%d joins, want 2\n%s", joins, r.out)
+			}
+			if limits[0] <= 2500*time.Millisecond || limits[0] > 3*time.Second || limits[1] <= 5500*time.Millisecond || limits[1] > 6*time.Second {
+				t.Errorf("the sessions join with %v, want 3s and 6s", limits)
+			}
+			if took < 5*time.Second {
+				t.Errorf("the run ended %v after session 2's start, want at its limit of 6s\n%s", took, r.out)
+			}
+			if len(r.closes) != 1 || r.closes[0].State == event.StateSucceeded {
+				t.Errorf("the run closed with %+v, want an end at the limit", r.closes)
+			}
+		})
+	}
+}
+
+// TestACodexInstallThatFailsInAWriteRunKeepsThePushOfSession1 is a write run of claude whose
+// answer starts session 2 on codex, whose install fails: npm cannot be reached through the
+// run's host proxy. Session 1's commit stays on the branch with its version stored, the run
+// closes failed, exit 1, and session 2 does not join.
+func TestACodexInstallThatFailsInAWriteRunKeepsThePushOfSession1(t *testing.T) {
+	defer cmd.SetNpmRegistry("http://127.0.0.1:9")()
+	p, requests := sharedPushRepo(t, laterAnswer(2, "codex", "example-provider-2", 30))
+	joins := 0
+	r := p.run(t, func(d string) {
+		joins++
+		writeFile(t, filepath.Join(d, "first.txt"), "first\n")
+		commitAll(t, d, "Add a first file")
+		// Session 1 installs nothing, so that only the install of codex reaches npm.
+		t.Cleanup(cmd.SetInstallRuntimes(true))
+	}, numbered())
+	r.wantsClose(t, event.StateFailed, 1)
+	if joins != 1 || requests() != 1 {
+		t.Errorf("%d joins and %d next-session requests, want 1 and 1", joins, requests())
+	}
+	head := p.branchHead(t)
+	if got := proxygittest.Git(t, p.bare, "log", "--format=%s", p.first+".."+head); got != "Add a first file" {
+		t.Errorf("the branch's new commits are:\n%s", got)
+	}
+	if posts, _, stored := p.api.counts(); posts != 1 || stored != 1 {
+		t.Errorf("%d POST and %d versions, want 1 and 1", posts, stored)
+	}
+	wants(t, r.out, "qory run: session 2 starts the workflow hello on codex\n")
+	lacks(t, r.out, "installed codex")
 }
