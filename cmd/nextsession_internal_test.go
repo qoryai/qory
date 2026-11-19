@@ -140,38 +140,6 @@ func GatewayBusyErr() error {
 	return &server.StatusError{What: "the next-session request", Status: http.StatusServiceUnavailable, Message: "Send the next-session request again."}
 }
 
-// TestTheNextSessionRequestIsSentAgainAfterAFailureThatMayPass is a request whose first send
-// gets each failure that a second send may not meet, and whose second gets the answer: no
-// response, Qory Apiary's 503 unavailable, a 429, and a refusal of the gateway's. Each is sent
-// twice, after a wait of 1 s.
-func TestTheNextSessionRequestIsSentAgainAfterAFailureThatMayPass(t *testing.T) {
-	for name, first := range map[string]error{
-		"no response":    errors.New("dial tcp: connection refused"),
-		"apiary 503":     &accesskey.Refusal{Status: http.StatusServiceUnavailable, Code: "unavailable", From: accesskey.FromApiary, Text: "Send the request again."},
-		"429":            &accesskey.Refusal{Status: http.StatusTooManyRequests, Code: "rate_limited", From: accesskey.FromApiary},
-		"gateway 502":    &accesskey.Refusal{Status: http.StatusBadGateway, Code: "control_plane_unavailable", From: accesskey.FromGateway},
-		"gateway 413":    &accesskey.Refusal{Status: http.StatusRequestEntityTooLarge, Code: "payload_too_large", From: accesskey.FromGateway},
-		"gateway closes": GatewayBusyErr(),
-	} {
-		t.Run(name, func(t *testing.T) {
-			waits := shortWaits(t)
-			link := &nextLink{respond: func(n int) ([]byte, error) {
-				if n == 1 {
-					return nil, first
-				}
-				return []byte(endAnswer), nil
-			}}
-			a, ended, err := askNextSession(context.Background(), link.send, 1, succeededOut)
-			if err != nil || ended != "" || a.Next != contracts.NextSessionKindEnd {
-				t.Fatalf("askNextSession: %+v, %q, %v", a, ended, err)
-			}
-			if link.sends() != 2 || !slices.Equal(*waits, []time.Duration{time.Second}) {
-				t.Errorf("%d sends after the waits %v, want 2 after 1s", link.sends(), *waits)
-			}
-		})
-	}
-}
-
 // TestAnEndedRunGetsOneNextSessionRequest is a request that finds the run over: Qory
 // Apiary's 409 run_ended, the gateway's 410, and an error that wraps session.ErrRunClosed.
 // Each is one send, no error, and the line of runEndedLine.
@@ -198,31 +166,89 @@ func TestAnEndedRunGetsOneNextSessionRequest(t *testing.T) {
 	}
 }
 
-// TestARefusalOfQoryApiaryEndsTheRunWithItsLine is each refusal code of Qory Apiary's that
-// C-1 lists and that is not sent again: 400 invalid_request, 404 not_found and 409
-// session_mismatch. Each is one send and an error with the fix first and Qory Apiary's
-// status and text.
-func TestARefusalOfQoryApiaryEndsTheRunWithItsLine(t *testing.T) {
-	for _, r := range []*accesskey.Refusal{
-		{Status: http.StatusBadRequest, Code: "invalid_request", From: accesskey.FromApiary, Text: "The body is not a next-session request."},
-		{Status: http.StatusNotFound, Code: "not_found", From: accesskey.FromApiary},
-		{Status: http.StatusConflict, Code: "session_mismatch", From: accesskey.FromApiary},
+// TestEachRefusalCodeOfTheNextSessionRequest is a request whose first send gets each code of
+// next-session-refusal.schema.json from Qory Apiary, a refusal of the gateway's and a failure
+// with no response, and whose second send gets the end. rate_limited, unavailable, the
+// gateway's refusal and no response are sent again after 1 s; run_ended is one send and the
+// end line; every other code of Qory Apiary's is one send and an error with the fix first and
+// Qory Apiary's status and code.
+func TestEachRefusalCodeOfTheNextSessionRequest(t *testing.T) {
+	apiary := func(status int, code string) error {
+		return &accesskey.Refusal{Status: status, Code: code, From: accesskey.FromApiary}
+	}
+	for name, c := range map[string]struct {
+		err     error
+		retried bool
+		ended   string
+	}{
+		"bad_request":                  {err: apiary(http.StatusBadRequest, "bad_request")},
+		"unsupported_contract_version": {err: apiary(http.StatusBadRequest, "unsupported_contract_version")},
+		"not_found":                    {err: apiary(http.StatusNotFound, "not_found")},
+		"run_ended":                    {err: apiary(http.StatusConflict, "run_ended"), ended: textRunEndedLater},
+		"payload_too_large":            {err: apiary(http.StatusRequestEntityTooLarge, "payload_too_large")},
+		"invalid_request":              {err: apiary(http.StatusBadRequest, "invalid_request")},
+		"session_mismatch":             {err: apiary(http.StatusConflict, "session_mismatch")},
+		"rate_limited":                 {err: apiary(http.StatusTooManyRequests, "rate_limited"), retried: true},
+		"unavailable":                  {err: apiary(http.StatusServiceUnavailable, "unavailable"), retried: true},
+		"gateway refusal":              {err: &accesskey.Refusal{Status: http.StatusBadGateway, Code: "control_plane_unavailable", From: accesskey.FromGateway}, retried: true},
+		"gateway 413":                  {err: &accesskey.Refusal{Status: http.StatusRequestEntityTooLarge, Code: "payload_too_large", From: accesskey.FromGateway}, retried: true},
+		"uncoded 503":                  {err: GatewayBusyErr(), retried: true},
+		"no response":                  {err: errors.New("dial tcp: connection refused"), retried: true},
 	} {
-		t.Run(r.Code, func(t *testing.T) {
+		t.Run(name, func(t *testing.T) {
 			waits := shortWaits(t)
-			link := &nextLink{respond: func(int) ([]byte, error) { return nil, r }}
-			_, ended, err := askNextSession(context.Background(), link.send, 1, succeededOut)
-			if ended != "" || err == nil {
-				t.Fatalf("askNextSession: %q, %v, want an error", ended, err)
+			link := &nextLink{respond: func(n int) ([]byte, error) {
+				if n == 1 {
+					return nil, c.err
+				}
+				return []byte(endAnswer), nil
+			}}
+			a, ended, err := askNextSession(context.Background(), link.send, 1, succeededOut)
+			switch {
+			case c.retried:
+				if err != nil || ended != "" || a.Next != contracts.NextSessionKindEnd {
+					t.Errorf("askNextSession: %+v, %q, %v; want the end after a second send", a, ended, err)
+				}
+				if link.sends() != 2 || !slices.Equal(*waits, []time.Duration{time.Second}) {
+					t.Errorf("%d sends after the waits %v, want 2 after 1s", link.sends(), *waits)
+				}
+				return
+			case c.ended != "":
+				if err != nil || ended != c.ended {
+					t.Errorf("askNextSession: %q, %v, want %q", ended, err, c.ended)
+				}
+			default:
+				var r *accesskey.Refusal
+				errors.As(c.err, &r)
+				want := fmt.Sprintf("qory run: Contact support: Qory Apiary refused the next-session request after session 1.\n  Qory Apiary returned %d: %s", r.Status, r.Code)
+				if ended != "" || err == nil || err.Error() != want {
+					t.Errorf("askNextSession: %q, %v, want the error %q", ended, err, want)
+				}
 			}
 			if link.sends() != 1 || len(*waits) != 0 {
 				t.Errorf("%d sends and %d waits, want 1 and 0", link.sends(), len(*waits))
 			}
-			want := fmt.Sprintf("qory run: Contact support: Qory Apiary refused the next-session request after session 1.\n  Qory Apiary returned %d: ", r.Status)
-			if !strings.HasPrefix(err.Error(), want) || !strings.Contains(err.Error(), r.Code) && r.Text == "" {
-				t.Errorf("the error is %q, want it to start with %q", err, want)
-			}
 		})
+	}
+}
+
+// TestACoded503IsSentAgainUntilItPasses is Qory Apiary's 503 unavailable on the first three
+// sends and a session on the fourth: the request is sent four times, after 1 s, 2 s and 4 s,
+// and the session is read.
+func TestACoded503IsSentAgainUntilItPasses(t *testing.T) {
+	waits := shortWaits(t)
+	link := &nextLink{respond: func(n int) ([]byte, error) {
+		if n < 4 {
+			return nil, &accesskey.Refusal{Status: http.StatusServiceUnavailable, Code: "unavailable", From: accesskey.FromApiary}
+		}
+		return []byte(sessionAnswer), nil
+	}}
+	a, ended, err := askNextSession(context.Background(), link.send, 1, succeededOut)
+	if err != nil || ended != "" || a.Next != contracts.NextSessionKindSession {
+		t.Fatalf("askNextSession: %+v, %q, %v", a, ended, err)
+	}
+	if want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}; link.sends() != 4 || !slices.Equal(*waits, want) {
+		t.Errorf("%d sends after the waits %v, want 4 after %v", link.sends(), *waits, want)
 	}
 }
 
