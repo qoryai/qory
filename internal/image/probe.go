@@ -331,8 +331,9 @@ const maxSessionGitLine = 200
 
 // SessionCheckLine is line, one line of what [SessionCheckScript] printed, as qory prints it,
 // and whether the script can print it. The image runs the script, so the line can contain
-// anything: a line about a program is one of the fixed lines, and a line about git's version has one of the script's forms, at most
-// [maxSessionGitLine] bytes of valid UTF-8 with no control or format character.
+// anything: a line about a program is one of the fixed lines, and a line about git's version
+// has one of the script's forms, at most [maxSessionGitLine] bytes of valid UTF-8 with no
+// control or format character.
 func SessionCheckLine(line string) (string, bool) {
 	if line == noSessionGit() {
 		return line, true
