@@ -211,19 +211,24 @@ func TestARunKeyFetchesGitSourcesOverHTTPSOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const cause = ". A run from a control plane fetches git sources only over https, through the run's gateway; "
+	const cause = ".\n  A run from a control plane fetches git sources only over https, through the run's gateway; "
 	for _, c := range []struct{ name, url, why string }{
 		{"a local path", local, cause + local + " is a folder of this machine."},
 		{"a file URL", "file://" + local, cause + "file://" + local + " is a folder of this machine."},
-		{"an ssh URL", "ssh://git@example.com/acme/h.git", ", such as https://example.com/acme/h" + cause + "ssh would use this machine's keys."},
-		{"the scp form", "git@example.com:acme/h.git", ", such as https://example.com/acme/h" + cause + "ssh would use this machine's keys."},
-		{"a git URL", "git://example.com/acme/h.git", ", such as https://example.com/acme/h" + cause + "git:// would reach the host past the gateway."},
+		{"an ssh URL", "ssh://git@example.com/acme/h.git", ".\n  For example: https://example.com/acme/h" + cause + "ssh would sign in with your private keys in ~/.ssh, outside the gateway."},
+		{"the scp form", "git@example.com:acme/h.git", ".\n  For example: https://example.com/acme/h" + cause + "ssh would sign in with your private keys in ~/.ssh, outside the gateway."},
+		{"a git URL", "git://example.com/acme/h.git", ".\n  For example: https://example.com/acme/h" + cause + "git:// would reach the host past the gateway."},
 	} {
 		writeOwnStack(t, root, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: extra\n    source: {git: \""+c.url+"\", ref: main}\n")
 		out, err, n := inCheckoutRun(t, "claude")
 		want := "use an https URL for " + c.url + " in qory.yaml" + c.why
 		if err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput || !strings.Contains(out, "\nqory run: "+want+"\n") {
 			t.Errorf("%s: %v (exit %d), want %q\n%s", c.name, err, cmd.ExitCode(err), want, out)
+		}
+		// A temporary folder's path has no fixed length, so only a URL's line 1 is
+		// held to 100 characters.
+		if first, _, _ := strings.Cut(want, "\n"); !strings.Contains(c.url, local) && len("qory run: "+first) > 100 {
+			t.Errorf("%s: line 1 has %d characters, want at most 100: %s", c.name, len("qory run: "+first), first)
 		}
 		if !n.stoppedBeforeJoin() {
 			t.Errorf("%s: the run closed with %v, joined %v, want failed before the join", c.name, n.closes, n.joined)
@@ -255,7 +260,7 @@ func TestARunKeyExtendsAGitStackOverHTTPSOnly(t *testing.T) {
 	}
 
 	out, err, n := inCheckoutRun(t, "claude")
-	want := "use an https URL for " + url + " in qory.yaml. A run from a control plane fetches git sources only over https, through the run's gateway; " + url + " is a folder of this machine."
+	want := "use an https URL for " + url + " in qory.yaml.\n  A run from a control plane fetches git sources only over https, through the run's gateway; " + url + " is a folder of this machine."
 	if err == nil || err.Error() != want || cmd.ExitCode(err) != cmd.ExitInput {
 		t.Errorf("%v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
 	}

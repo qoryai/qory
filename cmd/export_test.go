@@ -31,6 +31,7 @@ import (
 	"github.com/qoryai/qory/internal/pool/prebuild"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
+	"github.com/qoryai/qory/internal/render/codex"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/runcopy"
 	"github.com/qoryai/qory/internal/runtimeinstall"
@@ -302,6 +303,14 @@ func ArtifactsForCheck(base string) (func(ctx context.Context, dir string, types
 	return artifactsForCheck(client), nil
 }
 
+// SetWriteWalledHome makes a walled Codex run write the read-only parts of its Codex home
+// with f, and returns what restores the writer.
+func SetWriteWalledHome(f func(dir, files string, run codex.WalledRun) ([]codex.Bound, error)) func() {
+	before := writeWalledHome
+	writeWalledHome = f
+	return func() { writeWalledHome = before }
+}
+
 // SetLoadPushChecks makes qory run read the push checks of a home with f, and returns
 // what restores the reader.
 func SetLoadPushChecks(f func(home string) ([]compose.PushCheck, error)) func() {
@@ -420,11 +429,18 @@ type Nowhere struct {
 	NoPushProxy             bool
 	PushProxyErr            func() error
 	// OnCall, when not nil, gets each call [OpenNowhereWith] lists, as the call is made.
-	OnCall      func(call string)
-	AtGateway   bool
-	Real        bool
-	PolicyImage string
-	OnImage     func(session.Image)
+	OnCall    func(call string)
+	AtGateway bool
+	// GatewayServer, when not nil, is the control plane the gateway of AtGateway reports
+	// each run to and takes each run's configuration from; nil starts it with none.
+	GatewayServer *gateway.Server
+	// GatewayAllow, when not empty, is the allow list of the policy of the machine the
+	// gateway of AtGateway starts with, under enforce: the gateway's proxy dials a
+	// private network address only when an entry of that list allows it.
+	GatewayAllow []string
+	Real         bool
+	PolicyImage  string
+	OnImage      func(session.Image)
 	// CloseErr, when not nil, is the error of the run's Close, which then returns no result.
 	CloseErr error
 	// WallKept is [session.Closed.WallKept] of the run's Close. A RemoveSetup that returns
@@ -492,7 +508,7 @@ func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func()
 		var at *gatewayRun
 		if n.AtGateway {
 			var err error
-			if at, err = openAtGateway(ctx, spec, n.PolicyImage); err != nil {
+			if at, err = openAtGateway(ctx, spec, n.PolicyImage, n.GatewayAllow, n.GatewayServer); err != nil {
 				return nil, err
 			}
 		}
@@ -597,20 +613,26 @@ func answeredImage(spec session.OpenSpec, selected string) session.Image {
 	return session.Image{Ref: selected}
 }
 
-// openAtGateway starts a gateway in this process with no server, which keeps the
-// record of each run in the folder of its id under spec.RunsDir and runs each under a
-// policy that selects image, "" for no policy, and opens the run of spec there, over
-// the gateway's local link.
-func openAtGateway(ctx context.Context, spec session.OpenSpec, image string) (*gatewayRun, error) {
+// openAtGateway starts a gateway in this process with the control plane srv, nil for
+// none, which keeps the record of each run in the folder of its id under spec.RunsDir
+// and runs each under a policy that selects image and, under enforce, allows the hosts
+// of allow; with neither, under no policy. It opens the run of spec there, over the
+// gateway's local link.
+func openAtGateway(ctx context.Context, spec session.OpenSpec, image string, allow []string, srv *gateway.Server) (*gatewayRun, error) {
 	var pol *gateway.Policy
-	if image != "" {
-		pol = &gateway.Policy{Version: 1, Image: image, Egress: gateway.PolicyEgress{Mode: "observe"}}
+	if image != "" || len(allow) > 0 {
+		egress := gateway.PolicyEgress{Mode: "observe"}
+		if len(allow) > 0 {
+			egress = gateway.PolicyEgress{Mode: "enforce", Allow: allow}
+		}
+		pol = &gateway.Policy{Version: 1, Image: image, Egress: egress}
 	}
 	g, err := gateway.Start(ctx, gateway.Config{
 		RunDir:       func(id string) string { return filepath.Join(spec.RunsDir, id) },
 		NoLinkSocket: true,
 		Report:       func(string) {},
 		Policy:       pol,
+		Server:       srv,
 	})
 	if err != nil {
 		return nil, err
@@ -1190,6 +1212,22 @@ func SetNpmRegistry(url string) func() {
 	before := npmRegistry
 	npmRegistry = url
 	return func() { npmRegistry = before }
+}
+
+// SetRunRuntimes makes names the runtimes that a run from a run code runs on, and
+// returns what restores the default.
+func SetRunRuntimes(names ...string) func() {
+	before := runRuntimes
+	runRuntimes = func() []string { return names }
+	return func() { runRuntimes = before }
+}
+
+// SetRuntimeKeys makes qory run check npm's signatures with keys, and returns what
+// restores the default.
+func SetRuntimeKeys(keys []runtimeinstall.SigningKey) func() {
+	before := runtimeKeys
+	runtimeKeys = keys
+	return func() { runtimeKeys = before }
 }
 
 // SetInstanceAddress makes qory run read the address of its Qory Apiary instance with

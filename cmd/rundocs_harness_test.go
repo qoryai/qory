@@ -374,28 +374,31 @@ func TestARunCodeComposesTheWorkspacesHarnessThroughTheStackProxy(t *testing.T) 
 
 // TestARunCodeComposesAHarnessDocumentThatDefinesAStack is a run from a run code whose
 // documents contain a harness document with no extends, which defines a stack of the
-// module hello and its workflow hello, with a time_limit of 4h. qory composes it for
-// run_settings.runtime, or for claude, the default runtime, when the documents have no
-// run settings, though the document has no target. The workflow's time_limit is the
-// session's time limit, and no text shows an address.
+// module hello and its workflow hello, with a time_limit of 4h, once with run_settings
+// naming claude and once naming codex. qory composes it for that runtime, though the
+// document has no target, and starts that runtime's program. The workflow's time_limit is
+// the session's time limit, and no text shows an address.
 func TestARunCodeComposesAHarnessDocumentThatDefinesAStack(t *testing.T) {
-	for name, settings := range map[string]any{"run settings": map[string]any{"runtime": "claude"}, "no run settings": nil} {
-		t.Run(name, func(t *testing.T) {
+	for _, runtime := range []string{"claude", "codex"} {
+		t.Run(runtime, func(t *testing.T) {
 			r := codeHarness{
 				defines: map[string]any{"hello": map[string]any{"time_limit": "4h", "access": "write"}},
+				// Codex starts a workflow by its skill, and the module hello ships a command.
+				files: map[string]string{"examples/hello/modules/hello/skills/workflow-hello/SKILL.md": "---\nname: workflow-hello\ndescription: Say hello.\n---\n\nSay hello.\n"},
 				change: func(d map[string]any) {
-					if settings != nil {
-						d["run_settings"] = settings
-					}
+					d["run_settings"] = map[string]any{"runtime": runtime}
 				},
 			}.run(t)
 			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}
 			wants(t, r.out,
-				"qory run: the run "+keyRunID+" starts the workflow hello of "+workspaceHarness+" on claude\n",
+				"qory run: the run "+keyRunID+" starts the workflow hello of "+workspaceHarness+" on "+runtime+"\n",
 				"qory run: fetched the module hello at "+r.commit[:12]+" in ",
 				"qory run: composed ")
+			if program := r.spec.Command + " " + strings.Join(r.spec.Args, " "); !strings.Contains(program, "/"+runtime+" ") && !strings.HasPrefix(program, runtime+" ") {
+				t.Errorf("the session starts %q, want %s", program, runtime)
+			}
 			if want := []session.HarnessSource{{Source: "module hello", Commit: r.commit}}; !slices.Equal(r.spec.Harness, want) {
 				t.Errorf("the harness list is %+v, want %+v", r.spec.Harness, want)
 			}
@@ -564,7 +567,7 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 		{"a module's source does not parse", codeHarness{stack: thenMore("https://" + proxygittest.Host + "%40evil.example/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
 			[]string{"correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: Correct the URL in the source of the module more.\n  qory could not read it as a URL.\n  The source of the module more is in " + workspaceBase + "; the code is used\n"}},
 		{"a module's source is not https", codeHarness{stack: thenMore("http://" + proxygittest.Host + "/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
-			[]string{"qory run: use an https URL for the module more, then take the work item in again in Qory Apiary: a run from a control plane fetches git sources only over https; the code is used\n"}},
+			[]string{"qory run: use an https URL for the module more, then take the work item in again.\n  A run from a control plane fetches git sources only over https; the code is used\n"}},
 		{"two modules ship one skill", codeHarness{stack: withTools(tools, toolsRef), tools: map[string]string{
 			"modules/tools/qory-module.yaml":      "apiVersion: qory.dev/v1alpha1\nname: tools\n",
 			"modules/tools/skills/greet/SKILL.md": "---\nname: greet\ndescription: Greets.\n---\nHello.\n",
@@ -654,7 +657,7 @@ func TestARunCodeOfAHiddenCheckoutHarnessThatFailsShowsNoAddress(t *testing.T) {
 		{"a module's ref is gone", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": toolsURL, "ref": "tools-gone", "path": "modules/tools"}}}, tools: toolsModule()}, cmd.ExitInput,
 			"qory run: set the ref of the module tools to a branch, tag or commit its repository has, then take the work item in again in Qory Apiary: the repository of the module tools has no branch or tag by the ref it is set to; the code is used\n"},
 		{"a module's source is not https", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": "git@" + proxygittest.Host + ":example-org/tools.git", "ref": toolsRef}}}}, cmd.ExitInput,
-			"qory run: use an https URL for the module tools, then take the work item in again in Qory Apiary: a run from a control plane fetches git sources only over https; the code is used\n"},
+			"qory run: use an https URL for the module tools, then take the work item in again.\n  A run from a control plane fetches git sources only over https; the code is used\n"},
 		{"the stack proxy returns 403 for a module's host", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": "https://other.test/example-org/tools.git", "ref": toolsRef, "path": "modules/tools"}}}}, 1,
 			"qory run: add the host of the module tools to gateway.stack_hosts in the gateway's forager.yaml or to the stack_hosts of the run configuration that Qory Apiary sends, and, for a private repository, a harness credential for the module tools to that run configuration, then take the work item in again: the fetch of the module tools through the run's stack proxy failed: the stack proxy returned 403, as it does for a host that neither list of stack hosts contains, and for a host of the run configuration's stack_hosts that the gateway's policy denies or has path rules for; the code is used\n"},
 		{"the base's URL has a user part", codeHarness{document: func(s string) string { return strings.Replace(s, "https://", "https://reader:s3cret@", 1) }}, cmd.ExitInput,

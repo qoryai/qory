@@ -352,7 +352,7 @@ type Config struct {
 	Files []string
 	// Ignored are the keys the checkout root's file sets that a compose under extends
 	// leaves out, such as harness.model, git and env, in the order the file is read; nil
-	// when the file sets none or its machine keys are read.
+	// when the file sets none or its machine harness settings are read.
 	Ignored []string
 	// origins maps a row key to the file that set it, or [Default].
 	origins map[string]string
@@ -406,8 +406,8 @@ type harnessSection struct {
 }
 
 // composes reports whether the section carries a compose document: modules, extends,
-// bindings, extensions, workflows or hooks. A section of machine keys alone is not a
-// document.
+// bindings, extensions, workflows or hooks. A section of machine harness settings alone is
+// not a document.
 func (h *harnessSection) composes() bool {
 	return h != nil && (len(h.Modules) > 0 || h.extends() || h.Bind.Len() > 0 || len(h.Extensions) > 0 || len(h.Workflows) > 0 || len(h.Hooks) > 0)
 }
@@ -789,7 +789,7 @@ func (c *Config) apply(path string, machine, root bool) (file, error) {
 		}
 	}
 	if !machine {
-		c.Ignored = f.machineKeys()
+		c.Ignored = f.machineSettings()
 		return f, nil
 	}
 	if h := f.Harness; h != nil {
@@ -967,9 +967,9 @@ func tierEntry(node *yaml.Node) (stack.Tier, bool) {
 	return t, false
 }
 
-// machineKeys lists the machine's keys the file sets: the harness keys that are not its
-// document, then git and env.
-func (f file) machineKeys() []string {
+// machineSettings lists the machine harness settings the file sets, the harness keys
+// that are not its document, then git and env.
+func (f file) machineSettings() []string {
 	var keys []string
 	if h := f.Harness; h != nil {
 		for _, k := range []struct {

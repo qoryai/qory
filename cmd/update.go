@@ -201,8 +201,9 @@ func runTool(cmd *cobra.Command, u *ui.UI, waiting, landed, name string, args ..
 
 // walledVerb reports whether args select a verb that runs inside a container, one that
 // carries [inWall]: qory run nest, relay, forward, prepare, exec, agent-env, hold,
-// setup-command, seed or prebuild-step, which the wall starts, and the commands of a work
-// item, which an agent starts. The command tree finds it, so a flag before it,
+// setup-command, seed or prebuild-step, which the wall starts, the commands of a work item,
+// which an agent starts, and qory review-files, which a reviewer's Codex starts. The command
+// tree finds it, so a flag before it,
 // such as -v, is read as the tree reads it.
 func walledVerb(args []string) bool {
 	c, _, err := Root().Find(args)

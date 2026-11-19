@@ -290,7 +290,7 @@ func TestARefusalMovesAsideOnlyTheKeyMadeForTheCode(t *testing.T) {
 			t.Errorf("%s: %v", c.name, got)
 		}
 		if old, _ := dir.OldSecrets(); !dir.SameSecret(mine) || len(old) != 0 {
-			t.Errorf("%s: this machine's key was moved aside", c.name)
+			t.Errorf("%s: this machine's access key was moved aside", c.name)
 		}
 		if _, err := os.Lstat(dir.Path(foragerdir.PendingFile)); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("%s: the pending enrolment stayed: %v", c.name, err)

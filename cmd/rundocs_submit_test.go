@@ -46,8 +46,8 @@ func submitLines(out string) []string {
 
 // TestARunKeepsTheDocumentsSubmitWhenTheHarnessHasNone is a run from a run code whose
 // documents have submit reply-draft at end_of_run, and whose composed harness has no
-// process.yaml: the run's submit is the documents', as it is, and the run prints no submit
-// line.
+// process.yaml: the run's submit is the documents', as it is, and the run prints no
+// submit line.
 func TestARunKeepsTheDocumentsSubmitWhenTheHarnessHasNone(t *testing.T) {
 	change := withSubmit("reply-draft", "end_of_run")
 	r := submitRun(t, change, nil)
@@ -97,7 +97,8 @@ func TestARunWhoseHarnessHasAnotherSubmitKeepsTheDocumentsSubmitAndPrintsBoth(t 
 
 // TestARunWhoseDocumentsHaveNoSubmitHasNoSubmitSettings is a run from a run code whose
 // documents have no submit, and whose composed harness has a process.yaml in the module
-// hello with submit reply-draft at after_gate: the run's submit is nil, and the run prints one line that shows the harness's submit as unused.
+// hello with submit reply-draft at after_gate: the run's submit is nil, and the run
+// prints one line that shows the harness's submit as unused.
 func TestARunWhoseDocumentsHaveNoSubmitHasNoSubmitSettings(t *testing.T) {
 	r := submitRun(t, nil, harnessSubmit("reply-draft", "after_gate"))
 	want := "qory run: submit: documents have no submit, so harness's reply-draft at after_gate is unused\n"

@@ -11,15 +11,20 @@ import (
 
 // Npm stands in for the npm registry on loopback: the dist-tags of
 // @anthropic-ai/claude-code, the documents of the versions of
-// @anthropic-ai/claude-code-linux-x64 and -arm64, and their tarballs.
+// @anthropic-ai/claude-code-linux-x64 and -arm64, and their tarballs. One from
+// [StartCodexNpm] publishes Codex instead: the dist-tags of @openai/codex, the
+// documents of its versions <version>-linux-x64 and -linux-arm64, and their tarballs.
 type Npm struct {
 	t           *testing.T
 	srv         *httptest.Server
+	codex       bool
 	mu          sync.Mutex
 	latest      string
 	versions    map[string]npmVersion
 	paths       []string
 	tarballGets int
+	// sign returns dist.signatures of a version's document; nil leaves them out.
+	sign func(signed, integrity string) any
 }
 
 // npmVersion is a published version of a platform's package.
@@ -32,6 +37,8 @@ type npmVersion struct {
 const (
 	npmTags     = "@anthropic-ai/claude-code"
 	npmPlatform = "@anthropic-ai/claude-code-linux-"
+	// codexPackage is Codex's package, whose versions include each platform's build.
+	codexPackage = "@openai/codex"
 )
 
 // StartNpm starts an npm stub on loopback until the test ends.
@@ -39,6 +46,13 @@ func StartNpm(t *testing.T) *Npm {
 	n := &Npm{t: t, versions: map[string]npmVersion{}}
 	n.srv = httptest.NewServer(http.HandlerFunc(n.serve))
 	t.Cleanup(n.srv.Close)
+	return n
+}
+
+// StartCodexNpm starts an npm stub of Codex on loopback until the test ends.
+func StartCodexNpm(t *testing.T) *Npm {
+	n := StartNpm(t)
+	n.codex = true
 	return n
 }
 
@@ -50,6 +64,9 @@ func (n *Npm) URL() string { return n.srv.URL }
 func (n *Npm) Publish(version string) {
 	for cpu, arch := range map[string]string{"x64": "amd64", "arm64": "arm64"} {
 		b := PlainTarball(n.t, version+" "+arch)
+		if n.codex {
+			b = CodexTarball(n.t, version, arch)
+		}
 		n.PublishWith(cpu, version, b, Integrity(b), "")
 	}
 	n.SetLatest(version)
@@ -61,10 +78,22 @@ func (n *Npm) Publish(version string) {
 func (n *Npm) PublishWith(cpu, version string, tarball []byte, integrity, tarballURL string) {
 	if tarballURL == "" {
 		tarballURL = n.srv.URL + "/" + npmPlatform + cpu + "/-/claude-code-linux-" + cpu + "-" + version + ".tgz"
+		if n.codex {
+			tarballURL = n.srv.URL + "/" + codexPackage + "/-/codex-" + version + "-linux-" + cpu + ".tgz"
+		}
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.versions[cpu+" "+version] = npmVersion{integrity: integrity, tarball: tarballURL, body: tarball}
+}
+
+// SignWith makes each version's document have sign(signed, integrity) as its
+// dist.signatures, where signed is <package>@<version>, or none when sign returns nil.
+// By default the stub signs with [Signatures].
+func (n *Npm) SignWith(sign func(signed, integrity string) any) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.sign = sign
 }
 
 // SetLatest sets the dist-tag latest to version.
@@ -92,7 +121,11 @@ func (n *Npm) serve(w http.ResponseWriter, req *http.Request) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.paths = append(n.paths, req.URL.Path)
-	if req.URL.Path == "/-/package/"+npmTags+"/dist-tags" {
+	tags := npmTags
+	if n.codex {
+		tags = codexPackage
+	}
+	if req.URL.Path == "/-/package/"+tags+"/dist-tags" {
 		if n.latest == "" {
 			http.NotFound(w, req)
 			return
@@ -102,8 +135,20 @@ func (n *Npm) serve(w http.ResponseWriter, req *http.Request) {
 	}
 	for key, v := range n.versions {
 		cpu, version, _ := strings.Cut(key, " ")
-		if req.URL.Path == "/"+npmPlatform+cpu+"/"+version {
-			doc := map[string]any{"name": npmPlatform + cpu, "version": version, "dist": map[string]string{"integrity": v.integrity, "tarball": v.tarball}}
+		name, docVersion := npmPlatform+cpu, version
+		if n.codex {
+			name, docVersion = codexPackage, version+"-linux-"+cpu
+		}
+		if req.URL.Path == "/"+name+"/"+docVersion {
+			dist := map[string]any{"integrity": v.integrity, "tarball": v.tarball}
+			sign := n.sign
+			if sign == nil {
+				sign = func(signed, integrity string) any { return Signatures(signed, integrity) }
+			}
+			if sigs := sign(name+"@"+docVersion, v.integrity); sigs != nil {
+				dist["signatures"] = sigs
+			}
+			doc := map[string]any{"name": name, "version": docVersion, "dist": dist}
 			_ = json.NewEncoder(w).Encode(doc)
 			return
 		}

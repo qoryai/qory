@@ -36,7 +36,7 @@ import (
 	_ "github.com/qoryai/qory/internal/render/amp"
 	_ "github.com/qoryai/qory/internal/render/any"
 	_ "github.com/qoryai/qory/internal/render/claude"
-	_ "github.com/qoryai/qory/internal/render/codex"
+	"github.com/qoryai/qory/internal/render/codex"
 	_ "github.com/qoryai/qory/internal/render/copilot"
 	_ "github.com/qoryai/qory/internal/render/cursor"
 	_ "github.com/qoryai/qory/internal/render/gemini"
@@ -495,7 +495,7 @@ type composeOptions struct {
 	// inCheckout is set for a run given a run key: every path source that a file inside
 	// the checkout lists resolves inside the checkout, every git source it lists is an
 	// https URL, the compose reads no git or env key of the checkout's qory.yaml and no
-	// machine key under harness, such as model or launch, and it starts as if there were
+	// machine harness setting, such as model or launch, and it starts as if there were
 	// no report.
 	inCheckout bool
 	// walled is set for a run behind a wall: the home contains copies of every module's
@@ -687,6 +687,18 @@ type composed struct {
 	// submitProgram is the composed harness's submit program, its command with the home's
 	// path in it; nil when no module declares one.
 	submitProgram *compose.SubmitProgram
+	// codex is what a walled Codex run writes its Codex home from, see [codexParts].
+	codex codexParts
+}
+
+// codexParts are the parts of a compose that [codex.WriteWalledHome] reads besides the
+// composed home: the skills the run may load, [codex.AllowedSkills], the harness's
+// execpolicy rules for a read run, compose.Result.CodexReadRules, and the folders the
+// compose read its modules from, compose.Result.SourceDirs.
+type codexParts struct {
+	skills     []string
+	readRules  []byte
+	sourceDirs []string
 }
 
 // composeHome is [runCompose] returning what it composed; nil after a check or a dry
@@ -752,7 +764,8 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 	for _, rt := range targets {
 		checkoutOnly[rt.Name()] = render.CheckoutOnly(rt, res)
 	}
-	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, checkoutOnly: checkoutOnly, submitProgram: res.SubmitProgramFor(at.home)}, nil
+	parts := codexParts{skills: codex.AllowedSkills(res), readRules: res.CodexReadRules, sourceDirs: res.SourceDirs()}
+	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, checkoutOnly: checkoutOnly, submitProgram: res.SubmitProgramFor(at.home), codex: parts}, nil
 }
 
 // pushChecksWritable stops a walled run before the home is written when a module
@@ -879,7 +892,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	// stands over the document.
 	// A run given a run key reads them from no checkout's qory.yaml either, as
 	// [locateRun] does, so the repository a dispatched run works on sets no git or env
-	// key and no machine key under harness, such as model or launch.
+	// key and no machine harness setting, such as model or launch.
 	var conf config.Config
 	loadConf := func(extends bool) (err error) {
 		if conf, err = config.Load(root, !extends && !o.inCheckout); err != nil {
@@ -1160,8 +1173,8 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	}
 	var baseErr error
 	rep.Worktree, baseErr = reportBase(at.root, conf)
-	// The machine keys of a qory.yaml at the checkout root are not read under
-	// extends, and a row says so, on a dry run as well, so the person who wrote
+	// The machine harness settings of a qory.yaml at the checkout root are not read
+	// under extends, and a row says so, on a dry run as well, so the person who wrote
 	// them learns that the base stack decides.
 	skippedConfig := moved
 	if base != nil {
@@ -1608,9 +1621,9 @@ const (
 	// ExitNoWorkItem is qory work-item show with no work item, on a command that has no
 	// collision: the harness verbs use the same number for ExitCollision.
 	ExitNoWorkItem = 3
-	// ExitArtifactRefused is a push that failed the run API's check of its type or a
-	// limit, or a verdict that the run API refused with 422 invalid_artifact, on a command
-	// that has no foreign path: the harness verbs use the same number for ExitForeign.
+	// ExitArtifactRefused is a push that failed the run API's check of its type, a limit or
+	// its decision, or a verdict for which the run API returns 422 invalid_artifact, on a
+	// command that has no foreign path: the harness verbs use the same number for ExitForeign.
 	ExitArtifactRefused = 4
 )
 

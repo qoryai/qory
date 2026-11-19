@@ -25,36 +25,58 @@ const (
 	oldReasonQuiet                 = "quiet"
 )
 
+// The reasons of Forager's contract for a model key the model provider rejected with a
+// 401: model_key_switch, with paused, when another key of the run is usable, and
+// model_key_unauthorized, with failed, when no key is left.
+const (
+	reasonModelKeySwitch       = event.ReasonModelKeySwitch
+	reasonModelKeyUnauthorized = event.ReasonModelKeyUnauthorized
+)
+
 // outcome is how qory says a run ended, by the state and the reason Forager gives: the
-// outcome, as qory says it after "the run", and the reason in qory's words, empty when
-// there is none to say.
+// outcome, as qory says it after "the run", the reason in qory's words, empty when there
+// is none to say, and what can happen next, empty when there is nothing to say.
 type outcome struct {
 	// lost is the outcome of a run whose session went silent or whose end was never
 	// recorded, failed with session_lost or gateway_lost, as Qory Apiary shows it.
 	completed, failed, cancelled, lost bool
 	// paused is the outcome of a run in the state paused: every model key of the run
-	// reached its limit, the reason model_key_limit, the one reason of that state.
+	// reached its limit, the reason model_key_limit, or the model provider rejected a
+	// model key and another is usable, model_key_switch.
 	paused bool
+	// keysRejected is a run failed because the model provider rejected every model key,
+	// model_key_unauthorized. Forager stopped the runtime, so the runtime's exit does not
+	// say the outcome.
+	keysRejected bool
 	// noOutcome is a run whose starter ended it and gave no outcome, stopped.
 	noOutcome bool
 	// known is false when neither the state nor the reason says how the run ended.
 	known  bool
 	reason string
+	// next is what can happen to the run next, said after the reason, such as "the run
+	// can continue on another key".
+	next string
 }
 
 // outcomeOf is how the run ended, by state and reason. Forager's own reasons have the
 // outcome they always end a run with, and are said in qory's words; the time limit's is
 // said with its limit by the caller, so here it has no words, nor has a run stopped from
 // where it was started, interrupted, or a quiet one. A run in the state paused stopped
-// at the model key limit. Any other reason is the run's starter's, said as it gave it
-// with spaces for underscores, under the state.
+// after the model provider rejected a model key, with model_key_switch, and otherwise at
+// the model key limit. Any other reason is the run's starter's, said as it gave it with
+// spaces for underscores, under the state.
 func outcomeOf(state, reason string) outcome {
 	o := outcome{known: true}
 	if state == event.StatePaused {
 		o.paused, o.reason = true, "every model key reached its limit"
+		if reason == reasonModelKeySwitch {
+			o.reason, o.next = "the model provider rejected a model key", "the run can continue on another key"
+		}
 		return o
 	}
 	switch reason {
+	case reasonModelKeyUnauthorized:
+		o.failed, o.keysRejected, o.reason = true, true, "the model provider rejected every model key"
 	case event.ReasonSessionLost:
 		o.lost, o.reason = true, fmt.Sprintf("it lost contact with the gateway for %s", runQuiet)
 	case event.ReasonGatewayLost:
@@ -121,16 +143,35 @@ func (o outcome) phrase() string {
 
 // said is the run's end as qory says it: "the run <outcome>: <reason>", ": <reason>"
 // left out when there is none to say, and ", with no outcome given" for a run its
-// starter ended without one.
+// starter ended without one. A next step follows the reason after ", and ".
 func (o outcome) said() string {
 	s := "the run " + o.phrase()
 	switch {
 	case o.noOutcome:
 		s += ", with no outcome given"
 	case o.reason != "":
-		s += ": " + o.reason
+		s += ": " + o.because()
 	}
 	return s
+}
+
+// because is the reason, and the next step after ", and " when there is one.
+func (o outcome) because() string {
+	if o.next == "" {
+		return o.reason
+	}
+	return o.reason + ", and " + o.next
+}
+
+// stopped is the run's end as qory says it when the gateway closed the run and the
+// runtime was stopped: [outcome.said] with ", and <runtime> was stopped" after it, or, for
+// an outcome with a next step, before that step: "<reason>, <runtime> was stopped, and
+// <next>".
+func (o outcome) stopped(runtime string) string {
+	if o.next == "" || o.noOutcome {
+		return o.said() + ", and " + runtime + " was stopped"
+	}
+	return "the run " + o.phrase() + ": " + o.reason + ", " + runtime + " was stopped, and " + o.next
 }
 
 // exitCode is qory's exit status for a run with this outcome: 0 when it completed, 1
@@ -143,8 +184,13 @@ func (o outcome) exitCode() int {
 }
 
 // agrees says whether the run's own exit, its runtime's status, says what the outcome
-// does: completed for 0, failed for any other exit or a signal.
+// does: completed for 0, failed for any other exit or a signal. A run failed because the
+// model provider rejected every model key agrees with no exit: Forager stopped the
+// runtime.
 func (o outcome) agrees(exitedZero bool) bool {
+	if o.keysRejected {
+		return false
+	}
 	if exitedZero {
 		return o.completed
 	}
@@ -162,5 +208,5 @@ func endsAs(state, reason string) string {
 	if o.reason == "" {
 		return o.word()
 	}
-	return o.word() + ": " + o.reason
+	return o.word() + ": " + o.because()
 }

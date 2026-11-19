@@ -1,0 +1,14 @@
+{
+  "reviewer": "security-reviewer",
+  "findings": [
+    {
+      "id": "f2",
+      "severity": "non-blocking",
+      "quote": "token := os.Getenv(\"TOKEN\")",
+      "problem": "The token is read on each call.",
+      "fix": "Read the token once at the start.",
+      "proof": "broken rule: the package reads its settings at the start.",
+      "point": "The token is read on each call."
+    }
+  ]
+}

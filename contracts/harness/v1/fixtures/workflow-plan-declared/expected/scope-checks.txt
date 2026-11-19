@@ -1,0 +1,1 @@
+change-plan core $QORY_HARNESS_HOME/modules/core/checks/check.js scope --plan

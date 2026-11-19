@@ -25,6 +25,7 @@ import (
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
+	"github.com/qoryai/qory/internal/runtimeinstall"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
 )
@@ -144,8 +145,15 @@ const harnessFile = "harness.yaml"
 
 // codeDocumentsOf reads documents, the documents of the answer to a run code, for a
 // step qory runs: explore, which [codeRunOf] reads further, or prebuild, which
-// [runCodePrebuild] runs. Each error is exit 1 and ends with [codeUsed].
+// [runCodePrebuild] runs. Each error is exit 1. Each ends with [codeUsed], except
+// [textNoRuntime], whose first line ends with it: explore documents start an agent
+// session, so they require run settings with a runtime. Documents with no run settings,
+// or with run settings whose runtime is missing, empty or null, get that refusal before
+// the schema check, see [lacksRuntime].
 func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
+	if lacksRuntime(documents) {
+		return contracts.Documents{}, noRuntime()
+	}
 	doc, err := provisioner.ReadDocuments(documents)
 	switch {
 	case err != nil:
@@ -157,8 +165,9 @@ func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
 }
 
 // codeRunOf reads doc, the documents of the answer to a run code for the step explore.
-// Each error ends with [codeUsed]: a source of the harness document that qory does not
-// fetch is an input error, see [harnessChecked], and every other error is exit 1.
+// Each error ends with [codeUsed], [textNoRuntime] on its first line: a source of the
+// harness document that qory does not fetch is an input error, see [harnessChecked], and
+// every other error is exit 1.
 func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Workflow == "" {
 		return nil, errors.New("set a workflow for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no workflow" + codeUsed)
@@ -168,11 +177,15 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	}
 	hidden := doc.HarnessHidden != nil && *doc.HarnessHidden
 	runtime, settings := provisioner.Settings(doc.RunSettings)
-	// A runtime this qory does not render has no headless start either.
-	if rt, err := render.Lookup(runtime); err != nil {
-		return nil, noHeadless(runtime)
-	} else if _, ok := rt.(render.Headless); !ok {
-		return nil, noHeadless(runtime)
+	// A workflow runs on the runtime of the workspace or of its workflow settings, which
+	// Qory Apiary sends in run_settings, required in explore documents; qory sets no
+	// default runtime. codeDocumentsOf refuses such documents first; this check covers
+	// documents that reach codeRunOf another way.
+	if runtime == "" {
+		return nil, noRuntime()
+	}
+	if !slices.Contains(runRuntimes(), runtime) {
+		return nil, notRunRuntime(runtime)
 	}
 	var harness []byte
 	defines := doc.Harness != nil && doc.Harness.Harness.Extends == nil
@@ -634,7 +647,7 @@ func (r *codeRun) workflowArgs(name string, rep report.Report, in, system string
 	}
 	h, ok := rt.(render.Headless)
 	if !ok {
-		return nil, noHeadless(name)
+		return nil, notRunRuntime(name)
 	}
 	// Every kind, the skipped ones too, so a workflow of a kind the runtime does not
 	// render gets the line with the kind it does invoke.
@@ -686,10 +699,84 @@ func (r *codeRun) harnessAt(system string) string {
 	return checkoutHarness + " for the target " + path
 }
 
-// noHeadless is the error of a run from a run code on the runtime name, which has no
-// headless start, see [render.Headless]. It is exit 1 and ends with [codeUsed].
-func noHeadless(name string) error {
-	return fmt.Errorf("set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for %s%s", accesskey.ShownName(name, false), codeUsed)
+// textNoRuntime is the refusal of documents whose run settings name no runtime, with the
+// runtimes that a run from a run code runs on, see [runRuntimes]. Its first line ends
+// with [codeUsed] and a full stop.
+const textNoRuntime = "The run settings set no runtime, so the run did not start" + codeUsed + ".\n  qory runs one of %s."
+
+// noRuntime is the error of explore documents with no run settings, or with run
+// settings that set no runtime. It is exit 1.
+func noRuntime() error {
+	return fmt.Errorf(textNoRuntime, listOf(runRuntimes()))
+}
+
+// lacksRuntime reports whether documents are for the step explore, which starts an agent
+// session and so requires run settings with a runtime, and have no run_settings, a null
+// one, or run settings with no runtime, an empty one or a null one. Any other form, such as run
+// settings that are no object, is left to the schema check. A prebuild starts no agent
+// session, and the schema refuses run settings in its documents.
+func lacksRuntime(documents json.RawMessage) bool {
+	var d struct {
+		Step        string          `json:"step"`
+		RunSettings json.RawMessage `json:"run_settings"`
+	}
+	if json.Unmarshal(documents, &d) != nil || d.Step != provisioner.StepExplore {
+		return false
+	}
+	if len(d.RunSettings) == 0 || string(d.RunSettings) == "null" {
+		return true
+	}
+	var settings map[string]json.RawMessage
+	if json.Unmarshal(d.RunSettings, &settings) != nil {
+		return false
+	}
+	runtime, ok := settings["runtime"]
+	return !ok || string(runtime) == `""` || string(runtime) == "null"
+}
+
+// runRuntimes are the runtimes that a run from a run code runs on, in alphabetical
+// order: those that qory installs, see [runtimeinstall.Runtimes], that have a
+// descriptor in Forager's runtimes.json, see [foragerList], and that qory renders with
+// a headless start. The runtimes.json is embedded in the Forager module, and
+// TestForagerAndQoryListTheSameRuntimes reads it, so an error reading it gives none. A
+// test replaces the set with SetRunRuntimes.
+var runRuntimes = installedHeadlessRuntimes
+
+// installedHeadlessRuntimes is the set of [runRuntimes].
+func installedHeadlessRuntimes() []string {
+	described, _ := foragerList()
+	var names []string
+	for _, n := range runtimeinstall.Runtimes() {
+		if !slices.ContainsFunc(described, func(rt foragerRuntime) bool { return rt.Name == n }) {
+			continue
+		}
+		if rt, err := render.Lookup(n); err == nil {
+			if _, ok := rt.(render.Headless); ok {
+				names = append(names, n)
+			}
+		}
+	}
+	return names
+}
+
+// listOf is names as a list for a message: "claude and codex", or "claude, codex, and
+// gemini".
+func listOf(names []string) string {
+	switch len(names) {
+	case 0, 1:
+		return strings.Join(names, "")
+	case 2:
+		return names[0] + " and " + names[1]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + ", and " + names[len(names)-1]
+}
+
+// notRunRuntime is the error of a run from a run code on the runtime name, which is not
+// one of [runRuntimes]. Only a dispatched run gets it, so it is the cause alone, with no
+// fix line, under the user's ruling 771 (a), on two lines that each stay within 100
+// characters with "qory run: ". It is exit 1 and ends with [codeUsed].
+func notRunRuntime(name string) error {
+	return fmt.Errorf("qory runs a run code's workflow on one of %s,\n  and not on %s%s", listOf(runRuntimes()), accesskey.ShownName(name, false), codeUsed)
 }
 
 // entryKeys are rep's entries as <kind>/<name>, the form [render.Addresses] takes.

@@ -150,6 +150,29 @@ func TestARunCodeForAPrebuildRunsTheBuild(t *testing.T) {
 	})
 }
 
+// TestARunCodeForAPrebuildRunsWithNoRunSettings is a prebuild from a run code whose
+// documents have no run_settings: a prebuild starts no agent session, so it needs no
+// runtime, and the build runs once.
+func TestARunCodeForAPrebuildRunsWithNoRunSettings(t *testing.T) {
+	docker, _ := fakeDocker(t)
+	wall := "machine: aws-ec2\npool:\n  registry: registry.example.com/targets\n  run_config: /srv/pool/runs\nwall:\n  adapter: docker\n  image: " + prebuildAgent + "\n  images_allow: [registry.example.com/agents/]\n  command: " + docker + "\n  helper: " + staticELF(t) + "\n  user: \"1000:1000\"\n" + prebuildImages
+	documents := prebuildDocuments(t, "prebuild.json")
+	var doc map[string]any
+	if err := json.Unmarshal(documents, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := doc["run_settings"]; ok {
+		t.Fatal("the fixture prebuild.json has run_settings")
+	}
+	got, out, err, _ := prebuildFromCode(t, documents, wall, nil)
+	if err != nil {
+		t.Fatalf("%v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+	if got.calls != 1 {
+		t.Errorf("the prebuild ran %d times", got.calls)
+	}
+}
+
 // TestARunCodeForAPrebuildTakesTheMachineStepsFile is a prebuild from a run code with
 // --machine-steps-file, and one without: the prebuild's settings have the file's path,
 // from which the prebuild writes the run's machine step, or none.

@@ -1730,6 +1730,13 @@ func subcommand(args []string) string {
 // of the push step of a walled run: each reads no system or global configuration file,
 // and each has [proxygit.Hardened].
 func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
+	// GIT_CONFIG_NOSYSTEM=0 below lets Apple's git read its gitconfig with
+	// credential.helper=osxkeychain, which GIT_CONFIG_SYSTEM does not replace.
+	if runtime.GOOS == "darwin" {
+		if origin := gitCredentialHelperOrigin(t); origin != "" {
+			t.Skipf("git reads credential.helper from %s even with GIT_CONFIG_SYSTEM set, so a git of this test would open the macOS keychain; CI on Linux runs this test", origin)
+		}
+	}
 	p := newPushRepo(t, "write")
 	// The values of the test differ from the ones the step must set.
 	empty := filepath.Join(tempDir(t), "gitconfig")

@@ -249,8 +249,8 @@ func TestExtendsRefusesAClosedBase(t *testing.T) {
 
 // TestExtendsReadsTheOwnFileAndNamesWhatItLeavesOut is the checkout's qory.yaml under
 // extends: the compose says what it read from the file, its document and its worktree
-// keys, and names the machine keys the file sets that it left out. A file that sets
-// none gets no ignored row.
+// keys, and names the machine harness settings the file sets that it left out. A file
+// that sets none gets no ignored row.
 func TestExtendsReadsTheOwnFileAndNamesWhatItLeavesOut(t *testing.T) {
 	url := baseRepo(t)
 	root := consumerCheckout(t, url)
@@ -277,8 +277,8 @@ func TestExtendsReadsTheOwnFileAndNamesWhatItLeavesOut(t *testing.T) {
 // TestExtendsGovernsFilesByPrefix is the base opening claude/rules to consumers: a rule
 // file lands in .claude/rules through the link, a file under another path is refused
 // naming the prefixes, a consumer giving a base module a source is told the module
-// belongs to the base, and the machine keys of the checkout's qory.yaml are
-// announced as not read.
+// belongs to the base, and the machine harness settings of the checkout's qory.yaml
+// are announced as not read.
 func TestExtendsGovernsFilesByPrefix(t *testing.T) {
 	url := baseRepo(t)
 	root := consumerCheckout(t, url)

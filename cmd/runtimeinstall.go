@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,21 +22,17 @@ import (
 	"github.com/qoryai/qory/internal/secretmask"
 )
 
-// A run of Claude Code installs its runtime's program before its first session, once
-// the compose named the runtime: [installRuntime] reads the runtime's newest release,
+// A run of Claude Code or Codex installs its runtime's program before its first session,
+// once the compose named the runtime: [installRuntime] reads the runtime's newest release,
 // from the runtime cache of the instance's registry when the machine has one, and from
 // npm otherwise, and keeps each version in the runtimes folder, so a later run on the
 // machine with the same version reads no tarball. qory run prints one line,
 // "qory run: installed claude 2.1.320", and the session gets the version's folder,
 // [useInstalledRuntime]. The run holds the version's folder until it ends.
 
-// installedRuntime is the runtime whose program qory run installs: claude, Forager's
-// descriptor name of Claude Code. qory installs no other runtime.
-const installedRuntime = "claude"
-
-// textNoRuntimeProxy is the line of a run whose host proxy, through which qory reads the
-// runtime, did not open, with the runtime and Forager's error after it.
-const textNoRuntimeProxy = "Run again: the run's host proxy, through which qory installs %s, did not open: %s"
+// textNoRuntimeProxy is the error of a run whose host proxy, through which qory reads the
+// runtime, did not open: the fix line, then the cause, with the runtime and Forager's error.
+const textNoRuntimeProxy = "Run again\nThe run's host proxy, through which qory installs %s, did not open:\n  %s"
 
 // The seams of the install that a test replaces: the npm registry, whether a run
 // installs at all, which the tests of other parts of qory run turn off, and where the
@@ -43,7 +40,10 @@ const textNoRuntimeProxy = "Run again: the run's host proxy, through which qory 
 var (
 	npmRegistry     = runtimeinstall.NpmRegistry
 	installRuntimes = true
-	instanceOf      = instanceAddress
+	// runtimeKeys are the keys an install checks npm's signatures with; nil stands for
+	// the keys built into qory.
+	runtimeKeys []runtimeinstall.SigningKey
+	instanceOf  = instanceAddress
 	// installStandIn is nil outside the tests. A test sets it, with installRuntimes off,
 	// to give a session of Claude Code the folder of a program in place of an install:
 	// Forager joins no session of Claude Code without one. It gets the session's Command.
@@ -84,7 +84,7 @@ func instanceAddress(r *config.Forager) string {
 // run's host proxy, proxied set; a run on a person's machine with neither sends its
 // requests directly. The host proxy closes once the install ends.
 func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machine runtimeinstall.Machine, proxied bool, runtime, state string, report func(string)) (*runtimeinstall.Installed, error) {
-	if !installRuntimes || runtime != installedRuntime {
+	if !installRuntimes || !slices.Contains(runtimeinstall.Runtimes(), runtime) {
 		return nil, nil
 	}
 	registry := machine.Registry
@@ -123,7 +123,7 @@ func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machi
 	if r != nil && r.Wall != nil {
 		command = r.Wall.Command
 	}
-	opts := runtimeinstall.Options{Fetch: fetch, Runtime: runtime, Folder: folder, Mounted: engineMounts(command), Progress: report}
+	opts := runtimeinstall.Options{Fetch: fetch, Runtime: runtime, Folder: folder, Mounted: engineMounts(command), Progress: report, Keys: runtimeKeys}
 	in, err := runtimeinstall.Install(ctx, opts)
 	if err != nil {
 		return nil, err
@@ -144,6 +144,31 @@ func installFailed(err error) error {
 		lines[i] = integration.Printable(exports.HideValues(l))
 	}
 	return errors.New(strings.Join(lines, "\n"))
+}
+
+// causeOnly is err, an install's error of a fix line and the cause on the lines after it,
+// as a dispatched run shows it, under the user's ruling 771 (a): the cause alone, with no
+// indent on its first line and its first letter in lower case, as [fetchImage] shows a
+// refused image, and no full stop at its end, since [codeUsed] may follow. A long first
+// line goes on after its first comma, on an indented line. Qory Apiary shows the run's
+// output, and the fix line advises a person who runs qory. An error of one line stays as
+// it is.
+func causeOnly(err error) error {
+	_, cause, ok := strings.Cut(err.Error(), "\n")
+	if !ok || cause == "" {
+		return err
+	}
+	cause = strings.TrimSuffix(lowerFirst(strings.TrimLeft(cause, " ")), ".")
+	// A first line that, with "qory run: " and [codeUsed], has more than 100 characters
+	// goes on at its first comma, with the words after it on an indented line.
+	first, rest, _ := strings.Cut(cause, "\n")
+	if before, after, ok := strings.Cut(first, ", "); ok && len("qory run: ")+len(first)+len(codeUsed) > 100 {
+		cause = before + ",\n  " + after
+		if rest != "" {
+			cause += "\n" + rest
+		}
+	}
+	return errors.New(cause)
 }
 
 // useInstalledRuntime is the one place where the session's spec gets the installed

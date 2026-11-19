@@ -168,22 +168,25 @@ type SchemeError struct {
 	Name string
 }
 
-// Error is the line [HTTPSFix] makes for the URL and the file; for a source of a
-// [Named] compose, the line with the source's name in place of the URL.
+// Error is the lines [HTTPSFix] makes for the URL and the file; for a source of a
+// [Named] compose, the fix with the source's name in place of the URL on line 1, and
+// the cause on line 2.
 func (e *SchemeError) Error() string {
 	if e.Name != "" {
-		return "use an https URL for " + e.Name + ": a run from a control plane fetches git sources only over https"
+		return "use an https URL for " + e.Name + ".\n  A run from a control plane fetches git sources only over https."
 	}
 	return HTTPSFix(e.URL, e.File)
 }
 
 // HTTPSFix is "" for a git source git fetches over https, an https URL with a host, and
-// otherwise the line a run from a control plane stops with for it: use an https URL for
-// it, in file when file is set, such as the https URL of the same repository when one
-// follows from it, and why. The source is printed with a URL's password hidden. A local
+// otherwise the lines a run from a control plane stops with for it: line 1 is the fix,
+// use an https URL for it, in file when file is set; then the https URL of the same
+// repository as an example when one follows from it, and why. The source is printed
+// with a URL's password hidden. A local
 // path or a file URL is a folder of this machine; an ssh URL or the scp form host:path,
-// which git fetches over ssh, would use this machine's keys; a git:// URL would reach
-// the host past the gateway; any other is not an https URL.
+// which git fetches over ssh, would sign in with your private keys in ~/.ssh, outside
+// the gateway; a git:// URL would reach the host past the gateway; any other is not an
+// https URL.
 func HTTPSFix(src, file string) string {
 	shown := exports.URL(src)
 	why, https := "", ""
@@ -198,7 +201,7 @@ func HTTPSFix(src, file string) string {
 		case "file":
 			why = shown + " is a folder of this machine."
 		case "ssh", "git+ssh", "ssh+git":
-			why = "ssh would use this machine's keys."
+			why = "ssh would sign in with your private keys in ~/.ssh, outside the gateway."
 			https = httpsOf(rest, "/")
 		case "git":
 			why = "git:// would reach the host past the gateway."
@@ -216,7 +219,7 @@ func HTTPSFix(src, file string) string {
 	} else if i := strings.Index(src, ":"); i > 0 && !strings.Contains(src[:i], "/") {
 		// git reads host:path as ssh when no slash comes before the first colon, and any
 		// other source without a scheme as a path on this machine.
-		why = "ssh would use this machine's keys."
+		why = "ssh would sign in with your private keys in ~/.ssh, outside the gateway."
 		https = httpsOf(src, ":")
 	} else {
 		why = shown + " is a folder of this machine."
@@ -225,10 +228,11 @@ func HTTPSFix(src, file string) string {
 	if file != "" {
 		line += " in " + file
 	}
+	line += "."
 	if https != "" {
-		line += ", such as " + https
+		line += "\n  For example: " + https + "."
 	}
-	return line + ". A run from a control plane fetches git sources only over https, through the run's gateway; " + why
+	return line + "\n  A run from a control plane fetches git sources only over https, through the run's gateway; " + why
 }
 
 // httpsOf is the https URL of the repository at rest, [user@]host[:port]<sep>path, with

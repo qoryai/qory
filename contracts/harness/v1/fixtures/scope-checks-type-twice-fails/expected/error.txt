@@ -1,0 +1,2 @@
+Remove the scope check for build-plan from module core or web.
+  A type has one scope check, and both modules declare one.

@@ -129,3 +129,20 @@ func TestAModuleRefusalKeepsTheFixLineShortWithNamesOf64Characters(t *testing.T)
 		}
 	}
 }
+
+// TestAFixLineOf98CharactersStaysAndOneOf99MovesTheValue is the refusal for an MCP server
+// file that is no JSON object, for the longest module name a refusal prints: a fix line of
+// 98 characters, which is 100 under the "✗ " that qory prints, names the file, and one of
+// 99 characters names it on the second line.
+func TestAFixLineOf98CharactersStaysAndOneOf99MovesTheValue(t *testing.T) {
+	at98 := strings.Repeat("f", 37)
+	at99 := strings.Repeat("f", 38)
+	if got := jsonObjectRefusal(at98, "cause").Error(); !strings.HasPrefix(got, "Write "+at98+" in the module as one JSON object.\n") {
+		t.Errorf("98 characters: %q", got)
+	}
+	got := jsonObjectRefusal(at99, "cause").Error()
+	first, rest, _ := strings.Cut(got, "\n")
+	if strings.Contains(first, at99) || !strings.Contains(rest, at99) {
+		t.Errorf("99 characters: the file is in line 1, or not in the next lines:\n%s", got)
+	}
+}
