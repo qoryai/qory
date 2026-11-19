@@ -965,10 +965,10 @@ release may change what an existing document does, and states it under Upgrading
   the image of `wall.prebuild_image`, on the host before a run; a missing prebuild image
   fails the prebuild with the engine's error for the pull. See The engine proxy in
   `docs/run.md`.
-- The line of a run from a run code whose time limit came before the runtime started
-  contains `the workspace's harness` for a harness document that defines a stack, and `the
-  checkout's harness or the base it extends` for a run whose documents contain no
-  harness, in place of `the base of the checkout's harness, when it has one`.
+- A run from a run code whose time limit came before the runtime started prints two
+  lines: `set a longer Time limit for the run's workflow on the Workflows page in Qory
+  Apiary`, then `the run of the workflow <workflow> was cancelled at its time limit of
+  <limit>, before <runtime> started`.
 - A run with a run key or a run code fetches every git source of its harness through the
   run's stack proxy: the stack, its modules, and the modules of the checkout's file,
   also when the checkout's file is the whole harness. The run's host proxy, with the
