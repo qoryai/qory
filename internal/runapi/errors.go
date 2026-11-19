@@ -25,6 +25,9 @@ const (
 	CodeTooLarge        = "too_large"
 	CodeInvalidArtifact = "invalid_artifact"
 	CodeUnavailable     = "unavailable"
+	// CodeUnknownDecision is a push whose decision is not the id of a person's note on
+	// the run's work item.
+	CodeUnknownDecision = "unknown_decision"
 	// The refusals of a withdrawal.
 	CodeTypeNotWithdrawable = "type_not_withdrawable"
 	CodeWithdrawalWithFiles = "withdrawal_with_files"

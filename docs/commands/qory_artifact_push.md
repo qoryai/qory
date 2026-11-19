@@ -29,8 +29,14 @@ that push, Qory Apiary reads the template's artifact types and refuses it with 4
 qory exits 4 with that refusal. Outside a run, qory refuses those types itself, reads the
 template from the factory modules that the checkout exports, and has no approvals to read.
 
+--decision sends the id of the person's note that asked for this version, such as
+gd_01jc4t9…, from the notes that qory work-item show prints: a request for changes, a move
+or an escalation. Later runs read this version in place of the approved one, and the next
+approval by a person lists it. A withdrawal takes --decision too. qory exits 4 with a
+fix line when the id is not the id of a person's note on the run's work item.
+
 Outside a run, qory keeps the files, or the record of a withdrawal, in .qory/artifacts and
-sends nothing.
+sends nothing. The store keeps no note and no decision.
 
 --verbose adds nothing here.
 
@@ -44,17 +50,19 @@ qory artifact push <type> [<file>...] [flags]
 
 ```
   qory artifact push screenshot shots/checkout.png --name checkout --note "After the fix."
-  qory artifact push explainer -                 # read one file from standard input
+  qory artifact push walkthrough -               # read one file from standard input
+  qory artifact push screenshot shots/checkout.png --name checkout --decision gd_01jc4t9k2m8x5q7w
   qory artifact push demo-script --name scenario-2 --withdraw --note "demo-scenarios v3 removed scenario-2."
 ```
 
 ### Options
 
 ```
-  -h, --help          help for push
-      --name string   the artifact's name, for several artifacts of one type (default main; in a run, only main for questions and review-comments)
-      --note string   a note on this version, for a person to read
-      --withdraw      store a version of <type>/<name> with no files, which withdraws the name
+      --decision string   the id of the person's note that asked for this version, from qory work-item show
+  -h, --help              help for push
+      --name string       the artifact's name, for several artifacts of one type (default main; in a run, only main for questions and review-comments)
+      --note string       a note on this version, for a person to read
+      --withdraw          store a version of <type>/<name> with no files, which withdraws the name
 ```
 
 ### Options inherited from parent commands

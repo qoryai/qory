@@ -18,6 +18,14 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
+  the type whose launch version sets what the workflow's session may push. A module
+  declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: one
+  command for each type. `qory harness compose` ends with an error when the `plan` of a
+  workflow is not an artifact type, when a workflow with a `plan` has an access other
+  than `write`, and when no module of the base stack declares a scope check for the type
+  of a `plan`. A module that a checkout adds to the base declares none that counts.
+  `qory run` does not read `plan` or `scope_checks`.
 - A skill with the frontmatter keys `notes_for` (a role or a list of roles) and `paths` (one
   glob or more from the checkout root) is a note. The compose exits 2, with the fix as
   line 1, for a note with any of these:
@@ -30,6 +38,10 @@ release may change what an existing document does, and states it under Upgrading
   module of the checkout's `qory.yaml`, 1 for a module of its base stack). With no note it
   is `{"notes": []}`. It is not the `notes.json` of a push check. See "Notes" in
   `docs/harness.md`.
+- `qory artifact push --decision <note id>` sends the id of the person's note that asked
+  for the version, such as a request for changes, a move or an escalation, as `decision`
+  in `POST artifacts`. A withdrawal takes it too. `qory artifact push` exits 4 for a 422
+  `unknown_decision`, with the fix on line 1. Outside a run, the store keeps no decision.
 - `qory run verdict` proposes a track for the work item: `--track <id>` is the id of a
   track that the gate of the run's stage offers, and `--track-reason <text>` is the
   reason, one sentence on one line of 1 to 300 characters. Pass both or neither. A track's
@@ -626,6 +638,17 @@ release may change what an existing document does, and states it under Upgrading
   runs a run code's workflow on one of claude and codex,` and the next line `and not on
   <runtime>; the code is used`. Until now, a run on `gemini`, `opencode` or `cursor`
   started, with no install of the runtime.
+- Three texts name what each key is. `qory run pool` with a key not enrolled for a pool
+  stops with `Enrol an access key with a code made for the pool: this key was enrolled
+  without one.` A git source that is not https in a run from a control plane stops with
+  the fix alone on line 1, `use an https URL for <source> in <file>.`; the example URL
+  and the cause follow on lines 2 and 3, and for ssh the cause is `ssh would sign in
+  with your private keys in ~/.ssh, outside the gateway.` With a hidden harness, line 1
+  is `use an https URL for <source>, then take the work item in again.` and line 2 the
+  cause. The help of `qory access-key
+  enrol` says "this machine's access key", and that enrol stops with an error when
+  `access-key-secret` exists. `docs/run.md`, `docs/harness.md` and the harness contract
+  README call the harness keys of a machine's `qory.yaml` "machine harness settings".
 - A push that landed with no version stored, and a push that fails as a branch that moved,
   give one way out in the line of `qory run`: `delete branch qory/<work item id> of <path>
   on <system>`. Deleting it loses the commits on that branch that no version has. The next
@@ -1500,6 +1523,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- A compose error that has a short form for a long first line switches to it when the
+  first line has more than 98 characters. The line that qory prints has the 2 characters
+  of `✗ ` before it, so a line of 99 or 100 characters printed at 101 or 102. This covers
+  the errors for a duplicate scope check, a plan with no scope check, and a member of a
+  role group that is not shipped, left out or lacks a part of its contract.
 - A push check's container runs under the `runtime` that `wall.images` sets for the
   wall's default image, such as `runsc` (gVisor). Until now, it ran under the engine's
   default runtime.

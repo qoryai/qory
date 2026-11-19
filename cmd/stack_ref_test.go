@@ -238,7 +238,7 @@ func TestARunWithARunKeyFetchesAStackReferenceThroughTheStackProxy(t *testing.T)
 	if cmd.ExitCode(err) != cmd.ExitInput || !n.stoppedBeforeJoin() {
 		t.Errorf("%v (exit %d), want exit 2 before the join\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, out, "qory run: use an https URL for git@github.com:example-org/extra.git, such as https://github.com/example-org/extra. ")
+	wants(t, out, "qory run: use an https URL for git@github.com:example-org/extra.git.\n  For example: https://github.com/example-org/extra.\n  ")
 }
 
 // TestARunKeyStopsAStackReferenceWithAnAddressFault is qory run given a run key, with -f

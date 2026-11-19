@@ -1,2 +1,2 @@
-Set the push check for spec of module core to a program file.
-  checks/check.js is not a file.
+Set the program of the push check to a file in its module.
+  checks/check.js of module core is not a file, and it is the program of the push check for spec.

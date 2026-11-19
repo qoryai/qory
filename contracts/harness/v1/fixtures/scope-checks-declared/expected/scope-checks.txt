@@ -1,0 +1,2 @@
+build-plan core $QORY_HARNESS_HOME/modules/core/checks/check.js scope --plan
+change-plan web $QORY_HARNESS_HOME/modules/web/bin/check

@@ -1,0 +1,4 @@
+apiVersion: qory.dev/v1alpha1
+name: core
+scope_checks:
+  build-plan: [checks/check.js, scope, --plan]
