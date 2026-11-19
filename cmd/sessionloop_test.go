@@ -3,6 +3,7 @@ package cmd_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/qoryai/forager/accesskey"
@@ -37,11 +39,12 @@ func laterAnswer(n int, runtime, credential string, minutes int) string {
 
 // loopJoin is one join of a [loopRun]: the session's spec, the route's status for a
 // request of the session's number and of the number before it, during the join, and the
-// harness report of the run's home then.
+// harness report and inputs.json of the run's home then.
 type loopJoin struct {
 	spec              session.SessionSpec
 	served, servedOld int
 	report            report.Report
+	inputs            string
 }
 
 // loopRun is what a run of several sessions came to.
@@ -67,8 +70,10 @@ func homeReport(home string) report.Report {
 // answers[n-1], or the end once answers run out. result, when set, is the result of the
 // join of session n; a nil result and error is a session that succeeded. change, when set,
 // changes the documents, and nowhere the run's [cmd.Nowhere]. joined, when set, gets the
-// spec of session n as it joins.
+// spec of session n as it joins. extends, when true, makes the harness document extend the
+// stack of the folder examples/hello in place of defining one.
 type loopSetup struct {
+	extends bool
 	answers []string
 	joined  func(n int, spec session.SessionSpec)
 	result  func(n int) (*session.Result, error)
@@ -78,7 +83,7 @@ type loopSetup struct {
 
 // runLoop runs qory run from a run code whose documents set shared_run, on claude with a
 // read access and 30 minutes, with a harness document that defines a stack of the module
-// hello and its workflow hello, read, behind the fake docker's wall. Each join succeeds,
+// hello and its workflows hello and edit, read, behind the fake docker's wall. Each join succeeds,
 // with the gateway's number from 1, unless s.result returns another result.
 func runLoop(t *testing.T, s loopSetup) loopRun {
 	t.Helper()
@@ -89,6 +94,10 @@ func runLoop(t *testing.T, s loopSetup) loopRun {
 		mu.Lock()
 		n := len(r.joins) + 1
 		j := loopJoin{spec: spec, served: routeStatus(route, n), servedOld: routeStatus(route, n-1), report: homeReport(r.home)}
+		if found, _ := filepath.Glob(filepath.Join(r.home, "*", "inputs.json")); len(found) == 1 {
+			b, _ := os.ReadFile(found[0])
+			j.inputs = string(b)
+		}
 		r.joins = append(r.joins, j)
 		mu.Unlock()
 		if spec.OnVariables != nil {
@@ -105,8 +114,12 @@ func runLoop(t *testing.T, s loopSetup) loopRun {
 		return &session.Result{State: event.StateSucceeded, Session: n}, nil
 	}))
 	r.home = filepath.Join(tempDir(t), "home")
+	defines := map[string]any{"hello": map[string]any{"access": "read"}, "edit": map[string]any{"access": "read"}}
+	if s.extends {
+		defines = nil
+	}
 	r.harnessRun = codeHarness{
-		defines: map[string]any{"hello": map[string]any{"access": "read"}},
+		defines: defines,
 		// Codex starts a workflow by its skill, and the module hello ships a command. The
 		// skill workflow-edit is there for a workflow edit that a test adds.
 		files: map[string]string{
@@ -159,18 +172,18 @@ func routeStatus(route http.Handler, n int) int {
 }
 
 // TestARunOfSeveralSessionsJoinsOncePerSession is a run whose documents set shared_run,
-// on claude, whose next-session answers start session 2 on codex with the model key
-// example-provider-2 for 60 minutes and session 3 on claude with example-provider-3, then
-// end the run. qory joins three times, each join with its runtime, key and time limit; the
-// route serves only the session that runs; each request sends the session's number and
-// how it ended; the harness is composed for each session's runtime from the run's cache,
-// with no second fetch; the report lists each session's runtime; and the run closes
-// succeeded, exit 0.
+// on claude, whose next-session answers start session 2 on codex with the workflow edit,
+// the model key example-provider-2, 60 minutes and the inputs of attempt 2, and session 3
+// on claude with example-provider-3, then end the run. qory joins three times, each join
+// with its runtime, workflow, inputs, key and time limit; session 3 has no Codex home; the
+// route serves only the session that runs; each request sends the session's number and how
+// it ended; the harness is composed for each session's runtime from the run's cache, with
+// no second fetch; the report lists each session's runtime; and the run closes succeeded,
+// exit 0.
 func TestARunOfSeveralSessionsJoinsOncePerSession(t *testing.T) {
-	r := runLoop(t, loopSetup{answers: []string{
-		laterAnswer(2, "codex", "example-provider-2", 60),
-		laterAnswer(3, "claude", "example-provider-3", 30),
-	}})
+	second := strings.Replace(laterAnswer(2, "codex", "example-provider-2", 60), `"workflow":"hello"`, `"workflow":"edit"`, 1)
+	second = strings.Replace(second, `"inputs":{"version":1}`, `"inputs":{"run":{"attempt":2},"version":1}`, 1)
+	r := runLoop(t, loopSetup{answers: []string{second, laterAnswer(3, "claude", "example-provider-3", 30)}})
 	if r.err != nil || len(r.joins) != 3 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
@@ -193,6 +206,24 @@ func TestARunOfSeveralSessionsJoinsOncePerSession(t *testing.T) {
 			t.Errorf("session %d: the route answers the session %d and the session before %d", i+1, j.served, j.servedOld)
 		}
 	}
+	for i, want := range []string{"hello", "edit", "hello"} {
+		args := strings.Join(r.joins[i].spec.Args, " ")
+		other := map[string]string{"hello": "edit", "edit": "hello"}[want]
+		if !strings.Contains(args, want) || strings.Contains(args, other) {
+			t.Errorf("session %d starts with the arguments %q, want the workflow %s", i+1, args, want)
+		}
+	}
+	if !strings.Contains(r.joins[1].inputs, `"attempt": 2`) && !strings.Contains(r.joins[1].inputs, `"attempt":2`) || strings.Contains(r.joins[2].inputs, "attempt") {
+		t.Errorf("the inputs of session 2 are %q, of session 3 %q", r.joins[1].inputs, r.joins[2].inputs)
+	}
+	for _, m := range r.joins[2].spec.Mounts {
+		if m.Target == "/var/lib/qory-codex-home" {
+			t.Errorf("session 3 on claude has the Codex home %s", m.Path)
+		}
+	}
+	if strings.Contains(strings.Join(r.joins[2].spec.LaunchFixed, " "), "CODEX_HOME") {
+		t.Errorf("session 3 on claude has %q", r.joins[2].spec.LaunchFixed)
+	}
 	for i, body := range r.bodies {
 		if want := `{"session":` + strconv.Itoa(i+1) + `,"state":"succeeded","reason":null}`; body != want {
 			t.Errorf("request %d is %s, want %s", i+1, body, want)
@@ -210,7 +241,7 @@ func TestARunOfSeveralSessionsJoinsOncePerSession(t *testing.T) {
 	if n := strings.Count(r.out, "qory run: composed "); n != 3 {
 		t.Errorf("the run composed %d times, want 3:\n%s", n, r.out)
 	}
-	wants(t, r.out, "qory run: session 2 starts the workflow hello on codex\n", "qory run: session 3 starts the workflow hello on claude\n", "Qory Apiary starts no session after session 3, so the run ends\n")
+	wants(t, r.out, "qory run: session 2 starts the workflow edit on codex\n", "qory run: session 3 starts the workflow hello on claude\n", "Qory Apiary starts no session after session 3, so the run ends\n")
 	rep := r.joins[2].report
 	if len(rep.Sessions) != 3 || rep.Sessions[0].Runtime != "claude" || rep.Sessions[1].Runtime != "codex" || rep.Sessions[2].Runtime != "claude" || rep.Sessions[2].Session != 3 {
 		t.Errorf("the report's sessions are %+v", rep.Sessions)
@@ -341,7 +372,7 @@ func TestARunOfSeveralSessionsEndsAsItsAnswersAndSessionsSay(t *testing.T) {
 			return &session.Result{State: event.StateSucceeded, Session: 2}, nil
 		}}, joins: 1, state: event.StateFailed, exit: 1, line: "qory run: update qory or Forager: the gateway numbered the session 2, and qory served session 1 on its route; the code is used\n"},
 		"not_found": {s: loopSetup{nowhere: refused(http.StatusNotFound, "not_found")}, joins: 1, state: event.StateFailed, exit: 1,
-			line: "qory run: Contact support: Qory Apiary refused the next-session request after session 1.\n"},
+			line: "qory run: Contact support: the next-session request after session 1 failed.\n  Qory Apiary returned 404: Example text.\n"},
 		"run_ended": {s: loopSetup{nowhere: refused(http.StatusConflict, "run_ended")}, joins: 1, state: event.StateSucceeded,
 			line: "qory run: Qory Apiary ended this run, so qory pushes nothing more and no later session starts.\n"},
 		"another runtime": {s: loopSetup{answers: []string{laterAnswer(2, "example-runtime", "example-provider-2", 30)}}, joins: 1, requests: 1, state: event.StateFailed, exit: 1,
@@ -438,4 +469,42 @@ func TestACodexInstallThatFailsBeforeSession2EndsTheRun(t *testing.T) {
 		"qory run: the dist-tags of @openai/codex returned 404: npm has no such codex release; the code is used\n")
 	lacks(t, r.out, "installed codex")
 	lacks(t, r.out, rt.ProxyPassword)
+}
+
+// TestASignalWhileTheNextSessionRequestWaitsStopsTheRun is a run whose first next-session
+// request gets no response, and which gets SIGTERM during the wait before the second send:
+// the run closes cancelled with the reason interrupted, exit 1, with the line of a run
+// cancelled before its agent started, and no second session joins.
+func TestASignalWhileTheNextSessionRequestWaitsStopsTheRun(t *testing.T) {
+	r := runLoop(t, loopSetup{nowhere: func(n *cmd.Nowhere) {
+		n.NextSession = func(context.Context, []byte) ([]byte, error) {
+			syscall.Kill(os.Getpid(), syscall.SIGTERM)
+			return nil, errors.New("dial tcp: connection refused")
+		}
+	}})
+	if len(r.joins) != 1 || cmd.ExitCode(r.err) != 1 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if len(r.closes) != 1 || r.closes[0].State != event.StateCancelled || r.closes[0].Reason != event.ReasonInterrupted {
+		t.Errorf("the run closed with %+v, want cancelled with interrupted", r.closes)
+	}
+	wants(t, r.out, "the run was cancelled: qory run got SIGTERM before claude started")
+	lacks(t, r.out, "Check the gateway's connection")
+}
+
+// TestALaterSessionComposesTheBaseOfTheHarnessFromTheRunsCache is a run whose harness
+// document extends a stack, with session 2 on codex: the base is fetched once, for session
+// 1, and session 2's compose for codex reads it from the run's cache.
+func TestALaterSessionComposesTheBaseOfTheHarnessFromTheRunsCache(t *testing.T) {
+	r := runLoop(t, loopSetup{extends: true, answers: []string{laterAnswer(2, "codex", "example-provider-2", 30)}})
+	if r.err != nil || len(r.joins) != 2 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if n := strings.Count(r.out, "qory run: fetched "+workspaceBase+" at "); n != 1 {
+		t.Errorf("the run fetched the base %d times, want once:\n%s", n, r.out)
+	}
+	wants(t, r.out, "for codex\n")
+	if s := r.joins[1].report.Sessions; len(s) != 2 || s[1].Runtime != "codex" {
+		t.Errorf("the report's sessions are %+v", s)
+	}
 }

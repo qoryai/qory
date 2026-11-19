@@ -65,6 +65,7 @@ func numbered() func() (*session.Result, error) {
 // claude, each of which commits: session 1's commit is on the forge's branch, with its
 // version stored, before session 2 joins; session 2's commit follows it, with a second
 // version; and the run closes succeeded after two push steps and two next-session requests.
+// The checkout's setup, the image's fetch and the stack proxy are once for the run.
 func TestTheNextSessionStartsAfterThePushOfTheSessionBefore(t *testing.T) {
 	p, requests := sharedPushRepo(t, laterAnswer(2, "claude", "example-provider-2", 30))
 	joins := 0
@@ -98,6 +99,17 @@ func TestTheNextSessionStartsAfterThePushOfTheSessionBefore(t *testing.T) {
 	}
 	if got := r.pushSteps(); len(got) != 2 || got[0] != event.StateSucceeded || got[1] != event.StateSucceeded {
 		t.Errorf("the push steps exited %v, want two succeeded", got)
+	}
+	for call, want := range map[string]int{"setup": 1, "fetch image": 1, "stack proxy": 1} {
+		n := 0
+		for _, c := range r.calls {
+			if c == call {
+				n++
+			}
+		}
+		if n != want {
+			t.Errorf("the run made the call %q %d times, want %d: %q", call, n, want, r.calls)
+		}
 	}
 }
 
