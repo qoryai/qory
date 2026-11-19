@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -139,7 +140,7 @@ func TestRunCancelsARunWhoseSetupPassesItsLimit(t *testing.T) {
 	defer cmd.SetSetupLimit(time.Second)()
 	defer cmd.SetBeforeJoin(func() { time.Sleep(1200 * time.Millisecond) })()
 	out, err := run(t, "run", "claude", "--timeout", "1h")
-	line := "✗ use fewer or smaller modules in the harness, then start the run again\n" +
+	line := "✗ check the connection to the harness's git hosts, or use fewer or smaller modules\n" +
 		"  the run was cancelled during the compose of the harness:\n" +
 		"  the steps before claude starts may take at most 1s\nqory run: the record is in "
 	if cmd.ExitCode(err) != 124 || !strings.Contains(out, line) {
@@ -150,6 +151,48 @@ func TestRunCancelsARunWhoseSetupPassesItsLimit(t *testing.T) {
 	if got, want := typesOf(rec), []string{"run.started", "run.exited"}; !slices.Equal(got, want) {
 		t.Errorf("the record's events are %q, want %q", got, want)
 	}
+	if state, reason, exit := endOf(dataOf(rec, "dev.qory.run.exited")); state != "cancelled" || reason != "timeout" || exit != 124 {
+		t.Errorf("run.exited is %s, %q, %v", state, reason, exit)
+	}
+}
+
+// TestRunStopsAComposeAtTheSetupLimit is a run whose harness lists a module at a git
+// host that takes the connection and never answers, with a setup limit of 1s and a
+// git.timeout of 30s: the setup's limit stops the compose's git, so the run ends within
+// 15s, cancelled with the reason timeout, exit 124, with the line that names the compose.
+// A compose that ran to its end would take the 30s of git.timeout.
+func TestRunStopsAComposeAtTheSetupLimit(t *testing.T) {
+	root := newCheckout(t)
+	fakeLaunch(t, fakeRuntime(t))
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			t.Cleanup(func() { conn.Close() })
+		}
+	}()
+	writeOwnStack(t, root, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - source: {git: \"http://"+l.Addr().String()+"/acme/harness\", ref: main, path: modules/core}\n")
+	machineConfig(t, "git:\n  timeout: 30s\n")
+	defer cmd.SetSetupLimit(time.Second)()
+	start := time.Now()
+	out, err := run(t, "run", "claude")
+	if took := time.Since(start); took > 15*time.Second {
+		t.Errorf("the run ended after %s, with a setup limit of 1s", took)
+	}
+	line := "✗ check the connection to the harness's git hosts, or use fewer or smaller modules\n" +
+		"  the run was cancelled during the compose of the harness:\n" +
+		"  the steps before the agent starts may take at most 1s\nqory run: the record is in "
+	if cmd.ExitCode(err) != 124 || !strings.Contains(out, line) {
+		t.Fatalf("%v (exit %d), want %q\n%s", err, cmd.ExitCode(err), line, out)
+	}
+	rec := sessionRecord(t, root)
 	if state, reason, exit := endOf(dataOf(rec, "dev.qory.run.exited")); state != "cancelled" || reason != "timeout" || exit != 124 {
 		t.Errorf("run.exited is %s, %q, %v", state, reason, exit)
 	}

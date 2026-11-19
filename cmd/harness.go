@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -511,6 +512,9 @@ type composeOptions struct {
 	// [source.Named], no text shows the address of a git source.
 	git   *source.Git
 	cache string
+	// ctx, when set, stops every git command of the compose once it ends: qory run's
+	// setup context, see [setupLimit].
+	ctx context.Context
 	// checkedAs, when set, is the harness as a text shows it, such as the workspace's
 	// harness, for a compose whose git goes through the run's stack proxy, which sets
 	// the run configuration's harness credentials: [compose.CheckBase] checks the URL of the base before it is fetched,
@@ -920,7 +924,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 			return nil, err
 		}
 		updateFrom()
-		fetchOpts := compose.Options{Update: update, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Memo: memo}
+		fetchOpts := compose.Options{Update: update, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Context: o.ctx, Memo: memo}
 		if o.git != nil {
 			fetchOpts.Git, fetchOpts.Cache = o.git, o.cache
 		}
@@ -999,7 +1003,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 			pins[l.Source] = l.Pin
 		}
 	}
-	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env, Memo: memo, Tiers: resolveTiers(flagTiers, conf), Copies: copies(at, o.walled || o.hidden), Walled: o.walled, Hidden: o.hidden, Checkout: at.root}
+	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Context: o.ctx, Env: conf.Env, Memo: memo, Tiers: resolveTiers(flagTiers, conf), Copies: copies(at, o.walled || o.hidden), Walled: o.walled, Hidden: o.hidden, Checkout: at.root}
 	if o.fromDocuments && o.checkedAs != "" {
 		opts.StackAs = o.checkedAs + " in Qory Apiary"
 	}

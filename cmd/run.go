@@ -765,7 +765,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// [transcriptLinkFor].
 			var link transcriptLink
 			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
-				composing.writable = nil
+				composing.writable, composing.ctx = nil, setupCtx
 				for _, m := range spec.Mounts {
 					if !m.ReadOnly {
 						composing.writable = append(composing.writable, m.Path)

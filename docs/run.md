@@ -405,7 +405,7 @@ When the run ends, qory says how, and its exit status goes with it:
   |---|---|
   | the read of the work item's branch | `check this machine's connection to the gateway, then start the run again` |
   | the fetch of the run's repositories | `check the gateway's connection to the repositories' host, then start the run again` |
-  | the compose of the harness | `use fewer or smaller modules in the harness, then start the run again` |
+  | the compose of the harness | `check the connection to the harness's git hosts, or use fewer or smaller modules` |
   | the install of the runtime | `set pool.registry in forager.yaml to a runtime cache, then start the run again` |
   | the load of the push checks | `check that this machine's container engine responds, then start the run again` |
   | the switch to the work item's branch | `check the disk that holds the checkout, then start the run again` |
@@ -1100,8 +1100,8 @@ copy, the fetch of the run's image, the setup commands and the record of what th
 No setting changes this limit. When it is reached, the step that is running stops, the
 runtime does not start, `dev.qory.run.exited` records `cancelled` with the reason `timeout`,
 and `qory run` exits 124 with a line that names the step (see [What `qory run`
-does](#what-qory-run-does)). A compose that is running at the limit runs to its end; the
-runtime does not start after it. Setup commands that run inside the agent's container, with
+does](#what-qory-run-does)). The compose stops at the limit too: qory stops the git command
+that fetches a source of the harness. Setup commands that run inside the agent's container, with
 `wall.setup: inside`, run in the join, so the session's time limit covers them in place of
 this one.
 

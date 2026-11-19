@@ -42,7 +42,7 @@ var setupSteps = map[prepStep]struct{ name, fix string }{
 	stepNone:          {"the start of its setup", "start the run again"},
 	stepBranchRead:    {"the read of the work item's branch", "check this machine's connection to the gateway, then start the run again"},
 	stepFetch:         {"the fetch of the run's repositories", "check the gateway's connection to the repositories' host, then start the run again"},
-	stepCompose:       {"the compose of the harness", "use fewer or smaller modules in the harness, then start the run again"},
+	stepCompose:       {"the compose of the harness", "check the connection to the harness's git hosts, or use fewer or smaller modules"},
 	stepInstall:       {"the install of the runtime", "set pool.registry in forager.yaml to a runtime cache, then start the run again"},
 	stepPushChecks:    {"the load of the push checks", "check that this machine's container engine responds, then start the run again"},
 	stepSwitch:        {"the switch to the work item's branch", "check the disk that holds the checkout, then start the run again"},

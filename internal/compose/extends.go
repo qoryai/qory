@@ -73,7 +73,7 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 	if p.Extends.Path == "" && p.Extends.Git == "" {
 		return p, nil, nil
 	}
-	so := source.Options{Pin: pin, Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo, Git: opts.Git}
+	so := source.Options{Pin: pin, Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Context: opts.Context, Memo: opts.Memo, Git: opts.Git}
 	var named *source.Named
 	if opts.Git != nil && opts.Git.Named != nil {
 		named = opts.Git.Named
