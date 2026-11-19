@@ -430,7 +430,7 @@ func TestAFullSuiteThatCannotStartPostsAnEscalate(t *testing.T) {
 	}
 }
 
-// TestACustomPlanTypesFullRowRunsAsTheSuite: the stack names change-plan for the workflow, the work
+// TestACustomPlanTypesFullRowRunsAsTheSuite: workflows.<name>.plan is change-plan for the workflow, the work
 // item has a version of change-plan with a full row, and that row's command is the suite, in the
 // after step.
 func TestACustomPlanTypesFullRowRunsAsTheSuite(t *testing.T) {
@@ -475,7 +475,7 @@ func TestAPlanTypeWithNoFullCommandStartsNoSuite(t *testing.T) {
 	}
 }
 
-// TestTheSuiteDoesNotFallBackToTheBuildPlan: the stack names change-plan, and the work item has a
+// TestTheSuiteDoesNotFallBackToTheBuildPlan: the plan type set in workflows.<name>.plan is change-plan, and the work item has a
 // build-plan with a full row and no change-plan: no suite runs, and the point is the one for a plan
 // type with no version.
 func TestTheSuiteDoesNotFallBackToTheBuildPlan(t *testing.T) {
@@ -517,9 +517,9 @@ func TestAWriteWorkflowWithNoPlanAndHeadMovedPostsEscalate(t *testing.T) {
 	if err != nil || closed.State != event.StateSucceeded {
 		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
 	}
-	const want = `{"verdict":"escalate","points":[{"text":"Set workflows.fix.plan in the stack: the workflow fix has no plan in the stack.","action":"run_again"}]}`
+	const want = `{"verdict":"escalate","points":[{"text":"Set workflows.fix.plan in the stack: the workflow has no plan.","action":"run_again"}]}`
 	if posted := api.posted(); len(posted) != 1 || posted[0] != want {
 		t.Errorf("posted %q, want %s", posted, want)
 	}
-	wants(t, out, "Set workflows.fix.plan in the stack: the workflow fix has no plan in the stack.")
+	wants(t, out, "Set workflows.fix.plan in the stack: the workflow has no plan.")
 }

@@ -1152,8 +1152,8 @@ line 1 past 98 characters. The home contains
 `push-checks.json` with each check, sorted by type, with its `reads` and its program's
 absolute path in the home; a harness whose modules declare no check has no such file.
 
-`scope_checks`, optional, declares the checks of the plan of an artifact type, the type that a
-workflow of the stack names in `plan`. It is a map from the type to one command, a list:
+`scope_checks`, optional, declares the checks of the plan of an artifact type, the plan type
+set in `workflows.<name>.plan`. It is a map from the type to one command, a list:
 the program, a file in the module as for `push_checks`, then its arguments. The command is
 written to take `--base <start commit>` and `--artifacts <folder>` as its last arguments,
 and it exits 0 when the plan holds. The compose declares and checks them, and `qory run` does not run them. Only a module of the run's base stack

@@ -191,7 +191,7 @@ var planOf = func(c *codeRun, workflows map[string]stack.Workflow) (workflow, pl
 // textFullSuiteNoPlan is the refusal of a run whose run settings set full_suite and whose workflow
 // has write-no-push access: that access allows no plan, see [stack.Workflow], so no plan type
 // could give the suite its full command.
-const textFullSuiteNoPlan = "Remove full_suite from the run settings of workflow %[1]s.\n  The run did not start: %[1]s has write-no-push access, so it has no plan to read the full suite from" + codeUsed + "."
+const textFullSuiteNoPlan = "Remove full_suite from the run settings of workflow %[1]s.\n  The run did not start: %[1]s has write-no-push access, so it has no plan to read the full suite from" + codeUsed
 
 // fullSuiteNoPlan is the error of a run from a run code whose documents set full_suite and whose
 // workflow, in workflows, has write-no-push access, nil for any other run. A run that only reads

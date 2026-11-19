@@ -365,7 +365,7 @@ func TestTheFullSuiteRefusalIsFixFirstAsPrinted(t *testing.T) {
 		if got := utf8.RuneCountInString(line1); got != c.runes {
 			t.Errorf("line 1 as printed has %d characters, want %d", got, c.runes)
 		}
-		if want := "    The run did not start: " + c.name + " has write-no-push access, so it has no plan to read the full suite from; the code is used."; line2 != want {
+		if want := "    The run did not start: " + c.name + " has write-no-push access, so it has no plan to read the full suite from; the code is used"; line2 != want {
 			t.Errorf("line 2 as printed is %q, want %q", line2, want)
 		}
 	}

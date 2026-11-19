@@ -38,9 +38,9 @@ func (f *suiteFault) kind() suiteKind {
 // The points of a suite that did not start before the after step was set. The text is line 1,
 // the fix, when the agent can fix the cause, is the point's fix. A text that has a plan type or a
 // workflow name has at most 100 characters for a type of up to 34 characters. [textFaultNoPlanIn]
-// has the workflow name twice, so it has at most 100 characters for a workflow of up to 13. The
-// stack allows names of up to 64 bytes, so a longer name makes the line longer than 100
-// characters, and the verdict format allows 500. These lines are printed in full: a 64-byte type
+// has the workflow name once, and with the mark that qory run prints it has at most 100
+// characters for a workflow of up to 39. The stack allows names of up to 64 bytes, so a longer
+// name makes the line longer than 100 characters, and the verdict format allows 500. These lines are printed in full: a 64-byte type
 // makes [textFaultNoCmd] 130 characters.
 const (
 	textFaultNoPlan   = "The full suite did not start: the work item has no usable %s."
@@ -58,7 +58,7 @@ const (
 	textFixBadFile    = "Write a relative path below the repository as the Result file, or none."
 	textFaultPlanRead = "The full suite did not start: qory could not read the %s."
 	textShownBadFile  = "The full suite did not start: the result file is no path below the repository."
-	textFaultNoPlanIn = "Set workflows.%[1]s.plan in the stack: the workflow %[1]s has no plan in the stack."
+	textFaultNoPlanIn = "Set workflows.%s.plan in the stack: the workflow has no plan."
 	textFaultNoRunAPI = "The full suite did not start: qory cannot reach the run API."
 	textFaultNoGit    = "The full suite did not start: the session's folder has no .git folder."
 	textFaultBadStart = "The full suite did not start: qory could not read the commit the session started at."

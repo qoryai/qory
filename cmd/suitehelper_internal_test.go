@@ -910,8 +910,7 @@ func TestThePointTextsHaveAtMost100Characters(t *testing.T) {
 	const planType, workflow = "change-request-plan", "implement-the-fix-wf"
 	for _, text := range []string{
 		fmt.Sprintf(textFaultNoFull, planType), fmt.Sprintf(textFixNoFull, planType),
-		// This text has the name twice: it has at most 100 characters for a workflow of up to 13 characters.
-		fmt.Sprintf(textFaultNoPlanIn, "fix-pipeline"),
+		fmt.Sprintf(textFaultNoPlanIn, workflow),
 		fmt.Sprintf(textFaultNoPlan, planType), fmt.Sprintf(textFixNoPlan, planType), fmt.Sprintf(textFaultTooBig, planType),
 		fmt.Sprintf(textFixTooBig, planType), fmt.Sprintf(textFaultNoCmd, planType), fmt.Sprintf(textFaultPlanRead, planType),
 	} {
@@ -1094,10 +1093,10 @@ func TestLaunchFullReadsTheFileOfThePlanTypeAndNoOther(t *testing.T) {
 	}
 }
 
-// TestAWorkflowWithNoPlanGetsTheAfterStepThatTellsIfHeadMoved: with no plan type, openSuites reads
+// TestAWorkflowWithNoPlanGetsTheAfterStepThatChecksWhetherHeadMoved: with no plan type, openSuites reads
 // no plan, sets the after step with the command noPlanCommand and no result file, and keeps the
 // fault for a session that moved HEAD; the fault has no fix, and the agent cannot mend it.
-func TestAWorkflowWithNoPlanGetsTheAfterStepThatTellsIfHeadMoved(t *testing.T) {
+func TestAWorkflowWithNoPlanGetsTheAfterStepThatChecksWhetherHeadMoved(t *testing.T) {
 	api := newFakeAPI(t)
 	spec := &runSpec{}
 	spec.Dir = workspaceRepo(t)
@@ -1111,7 +1110,7 @@ func TestAWorkflowWithNoPlanGetsTheAfterStepThatTellsIfHeadMoved(t *testing.T) {
 	if api.indexCalls != 0 {
 		t.Errorf("the run API was read %d times, want 0", api.indexCalls)
 	}
-	const text = "Set workflows.fix.plan in the stack: the workflow fix has no plan in the stack."
+	const text = "Set workflows.fix.plan in the stack: the workflow has no plan."
 	if r.noPlan.point.Text != text || r.noPlan.fixable || r.noPlan.point.Fix != "" || len(text) > 100 || !validPoint(r.noPlan.point) {
 		t.Errorf("fault %+v", r.noPlan)
 	}

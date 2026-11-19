@@ -3536,8 +3536,8 @@ artifact type set in `workflows.<name>.plan` for the run's workflow (see
 [The plan of a write workflow](#the-plan-of-a-write-workflow)), in the file `<type>.md`: the
 name `main`, or the one name the work item has, at its newest version that is not cancelled.
 For the Qory stack the type is `build-plan`, and the file is `build-plan.md`. qory reads no other
-plan type: a version of `build-plan` is not read when the workflow sets another plan type. qory reads the plan once, after the setup commands of
-`wall.setup: outside` (the default) and before the session joins, with one request for the
+plan type: a version of `build-plan` is not read when the workflow sets another plan type. qory
+reads the plan once, after the setup commands of `wall.setup: outside` (the default) and before the session joins, with one request for the
 artifact index and one to download the plan. A plan that the agent pushes during the session
 changes nothing. The row's `Result file` is a path below the repository, or `none`. A work item
 with no usable version of the plan type, or one with no `Commands` table or no `full` row, gets
@@ -3549,13 +3549,14 @@ succeeded, qory posts the cause as a verdict, see After the session.
 suite command, and a session of it that has `full_suite` true still gets a suite result. The
 after step only checks whether HEAD moved. A session that left HEAD at the commit it started
 at is `skipped`, as above. For a session that moved HEAD, qory runs no suite, prints and posts
-`Set workflows.<name>.plan in the stack: the workflow <name> has no plan in the stack.`, and posts
+`Set workflows.<name>.plan in the stack: the workflow has no plan.`, and posts
 `escalate`, since the agent cannot add a plan type to the stack. A workflow with
 `write-no-push` access cannot name a plan type, so a run of it whose documents set `full_suite`
 true stops after the compose, before the join, exit 1, with two lines: `Remove
 full_suite from the run settings of workflow <name>.` and `The run did not start: <name> has
-write-no-push access, so it has no plan to read the full suite from; the code is used.` The run closes `failed` with `no_session` (exit code -1). A run that only
-reads the checkout runs no suite and is not refused.
+write-no-push access, so it has no plan to read the full suite from; the code is used`. The run
+closes `failed` with `no_session` (exit code -1). A run that only reads the checkout runs no suite
+and is not refused.
 
 **Where it runs.** After the agent's container is removed, Forager starts a new container of the run's
 image with the workspace mounted for writing, on the run's network, with the run's
@@ -3676,11 +3677,13 @@ order of preference:
   withdrawn versions), `the <type> is larger than 1 MiB`, `<type> has no full command` (no `Commands`
   table, or no `full` row), `the full row of the <type> has no command`, `the command of the full
   row is too long or has a NUL`, `the result file of the full row is no path below the repository`
-  (each with a `fix`), `qory could not read the <type>`, `qory cannot reach the run API`, `Set workflows.<name>.plan in the stack: the workflow <name> has no
-  plan in the stack` (for a session that moved HEAD), `the session's folder has no .git
+  (each with a `fix`), `qory could not read the <type>`, `qory cannot reach the run API`, `the session's folder has no .git
   folder` and `qory could not read the commit the session started at`. For a script that ended before the command, the cause is `the script could not make a folder it
   needs` (70), `git could not clone HEAD of the workspace` (71), `git could not read HEAD of the
   workspace` (72) or `the image may lack sh or git` (127).
+- For a session that moved HEAD and whose workflow has no plan type, `Set workflows.<name>.plan in
+  the stack: the workflow has no plan.`, printed as it is, with no `The full suite did not start:`
+  lead.
 - For an after step whose container did not start or exited before the script (-1, 125 or another
   status, including a status file that is missing or garbled), the text starts with `Contact
   support:`. On a machine that runs macOS it is `Contact support: the full suite needs a Linux

@@ -1184,8 +1184,8 @@ func SetFullSuite(yes bool) func() {
 	return func() { fullSuiteOf = before }
 }
 
-// SetPlan makes qory take workflow for the workflow of the run and plan for the plan type that the
-// stack names for it, as a run with a run code and that stack has them, and returns what restores
+// SetPlan makes qory take workflow for the workflow of the run and plan for the plan type set in
+// workflows.<name>.plan for it, as a run with a run code and that stack has them, and returns what restores
 // the default.
 func SetPlan(workflow, plan string) func() {
 	before := planOf
