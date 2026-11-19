@@ -382,10 +382,13 @@ func TestDecideStopsOnARoundMadeWrong(t *testing.T) {
 }
 
 func TestAPointOfSpacesIsNoValidReport(t *testing.T) {
-	// The format stops a point of ASCII spaces, and Decide one of Unicode spaces.
-	const format, trimmed = "does not match pattern", "the point has no character that is not a space"
+	// The format stops a point of ASCII spaces, and Decide one of Unicode spaces or of
+	// characters that the harness's plain() removes.
+	const format, trimmed = "does not match pattern", "the point has no character that shows"
 	for name, c := range map[string]struct{ point, cause string }{
 		"a space": {" ", format}, "a tab": {"\t", format}, "U+00A0": {"\u00a0", trimmed}, "U+00A0 and a space": {"\u00a0 ", trimmed},
+		"U+200B": {"\u200b", trimmed}, "U+3164": {"\u3164", trimmed}, "U+034F": {"\u034f", trimmed},
+		"U+FEFF": {"\ufeff", trimmed}, "the four": {"\u200b \u3164\u034f\ufeff", trimmed},
 	} {
 		point := c.point
 		t.Run(name, func(t *testing.T) {
@@ -519,6 +522,34 @@ func TestTheCutKeepsAFileOfTheLimit(t *testing.T) {
 	}
 }
 
+func TestAHiddenPointHasQorysTextInTheVerdict(t *testing.T) {
+	for _, point := range []string{"\u200b", "\u3164", "\u034f", "\ufeff"} {
+		got := points(OpenFindings{Round: 1, Reviewers: []ReviewerFindings{{Reviewer: "code-reviewer", Findings: []Finding{
+			{ID: "f1", Severity: Blocking, Point: point},
+		}}}})
+		if len(got) != 1 || got[0].Text != "A finding of code-reviewer has a point with no readable text." {
+			t.Errorf("%U: the points are %+v", []rune(point)[0], got)
+		}
+	}
+	// A suite's point of hidden characters alone gets qory's text.
+	d := decide(t, Round{Number: 1, Suite: &Suite{State: SuiteFailed, Point: "\u200b\u3164"},
+		Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]}`)}}})
+	if p := d.Open.Reviewers[0].Findings[0].Point; p != "The full suite failed." {
+		t.Errorf("the suite's point is %q", p)
+	}
+}
+
+func TestHarnessPlainRemovesWhatTheHarnessRemoves(t *testing.T) {
+	for in, want := range map[string]string{
+		" a\u200bb\u3164c\u034fd\ufeff ": "abcd", "\u2028x\u2029": "x", "a\tb": "a b",
+		"\ufe0f\U000e0041\u00ad\u202e\ufffc": "", "\u00a0point\u00a0": "point",
+	} {
+		if got := harnessPlain(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestMoreFindingsIsSingularForOne(t *testing.T) {
 	for n, want := range map[int]string{1: "1 more open finding", 2: "2 more open findings", 81: "81 more open findings"} {
 		if got := moreFindings(n); got != want {
@@ -536,6 +567,10 @@ func TestReadOpenFindingsChecksTheFile(t *testing.T) {
 		{`{"round":1,"reviewers":[{"reviewer":"r","findings":[{"id":"x","severity":"blocking","point":"p"}]}]}`, "no id of the form"},
 		{`{"round":1,"reviewers":[{"reviewer":"r","findings":[{"id":"f1","severity":"minor","point":"p"}]}]}`, "a severity"},
 		{`{"round":1,"reviewers":[{"reviewer":"r","findings":[{"id":"f1","severity":"blocking","point":" "}]}]}`, "an empty point"},
+		{`{"round":1,"reviewers":[{"reviewer":"r","findings":[{"id":"f1","severity":"blocking","point":"\u200b"}]}]}`, "an empty point"},
+		{`{"round":1,"reviewers":[{"reviewer":"r","findings":[{"id":"f1","severity":"blocking","point":"\u3164"}]}]}`, "an empty point"},
+		{`{"round":1,"reviewers":[{"reviewer":"r","findings":[{"id":"f1","severity":"blocking","point":"\u034f"}]}]}`, "an empty point"},
+		{`{"round":1,"reviewers":[{"reviewer":"r","findings":[{"id":"f1","severity":"blocking","point":"\ufeff"}]}]}`, "an empty point"},
 		{`{"round":1,"reviewers":[],"more":1}`, "is not one JSON object"},
 		{`{"round":1,"reviewers":[]} []`, "continues after"},
 	} {

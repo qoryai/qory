@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -83,7 +84,7 @@ const (
 	textNoPoint     = "A finding of %s has a point with no readable text."
 	textMore        = "The review has %s than these points list."
 	textCut         = "The review has %s of %s than this file lists."
-	textBlankPoint  = "at '/findings/%d/point': the point has no character that is not a space"
+	textBlankPoint  = "at '/findings/%d/point': the point has no character that shows"
 )
 
 // Finding is one finding of a reviewer, as its report has it and open-findings.json carries
@@ -341,6 +342,9 @@ func suiteOutcome(s *Suite) (*Finding, bool) {
 		return &Finding{Severity: Blocking, Point: textNoSuite}, true
 	}
 	text := plainLine(s.Point, maxPointText)
+	if harnessPlain(text) == "" {
+		text = ""
+	}
 	switch s.State {
 	case SuitePassed:
 		return nil, false
@@ -431,11 +435,11 @@ func parseReport(name string, data []byte) (report, string) {
 	if r.Reviewer != name {
 		return report{}, fmt.Sprintf(textOtherName, name, r.Reviewer)
 	}
-	// The format's \S excludes only the spaces of ASCII. strings.TrimSpace, which
-	// ReadOpenFindings uses, also removes a space of Unicode, such as U+00A0.
+	// The format's \S excludes only the spaces of ASCII. A point of other spaces, or of
+	// characters that show nothing, such as U+200B, is empty to the harness: see [harnessPlain].
 	for i := range r.Findings {
 		r.Findings[i].Point = strings.TrimSpace(r.Findings[i].Point)
-		if r.Findings[i].Point == "" {
+		if harnessPlain(r.Findings[i].Point) == "" {
 			return report{}, fmt.Sprintf(textNotSchema, name, fmt.Sprintf(textBlankPoint, i))
 		}
 	}
@@ -464,7 +468,7 @@ func points(open OpenFindings) []runapi.Point {
 	for _, entry := range open.Reviewers {
 		for _, f := range entry.Findings {
 			text := plainLine(f.Point, maxPointText)
-			if text == "" {
+			if harnessPlain(text) == "" {
 				text = fmt.Sprintf(textNoPoint, entry.Reviewer)
 			}
 			p := runapi.Point{Text: text, Action: runapi.ActionRunAgain}
@@ -590,7 +594,7 @@ func ReadOpenFindings(data []byte) (OpenFindings, error) {
 				return broken("has %s with no id of the form f<number>", which)
 			case f.Severity != Blocking && f.Severity != NonBlocking:
 				return broken("has %s with a severity that is neither blocking nor non-blocking", which)
-			case strings.TrimSpace(f.Point) == "":
+			case harnessPlain(f.Point) == "":
 				return broken("has %s with an empty point", which)
 			case f.Line < 0:
 				return broken("has %s with a line that is not a whole number of 1 or more", which)
@@ -640,6 +644,45 @@ func plainLine(text string, limit int) string {
 	}
 	runes := []rune(line)
 	return strings.TrimSpace(string(runes[:limit-1])) + "…"
+}
+
+// harnessPlain is text as the harness's plain() leaves it before findings open checks a point
+// (qoryai/harness, modules/core/skills/running-a-workflow/lib/base.cjs:130-131): each
+// control character (CONTROL_ALL) a space, each character of REFUSED_SET and of HIDDEN
+// removed, and the spaces at the ends trimmed. A point whose harnessPlain is "" is empty to
+// the harness. HIDDEN's lone surrogate cannot be in a Go string: JSON decodes one as U+FFFD.
+func harnessPlain(text string) string {
+	var b strings.Builder
+	for _, r := range text {
+		switch {
+		case r <= 0x1f, r >= 0x7f && r <= 0x9f:
+			b.WriteRune(' ')
+		case refused(r) || hidden(r):
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// refused reports whether r is in base.cjs's REFUSED_SET: the bidirectional marks and
+// controls, the invisible characters, and the line and paragraph separators.
+func refused(r rune) bool {
+	switch {
+	case r == 0x061c, r == 0x200e, r == 0x200f, r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069,
+		r == 0x00ad, r == 0x180e, r == 0x200b, r >= 0x2060 && r <= 0x2064, r == 0xfeff,
+		r >= 0xfff9 && r <= 0xfffb, r == 0x2028, r == 0x2029:
+		return true
+	}
+	return false
+}
+
+// hidden reports whether r is in base.cjs's HIDDEN: Default_Ignorable_Code_Point, which
+// Unicode derives from Other_Default_Ignorable_Code_Point, Cf and Variation_Selector, or Cf,
+// or U+FFFC. Go's tables and Node's may be of different Unicode versions.
+func hidden(r rune) bool {
+	return unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) || unicode.Is(unicode.Cf, r) ||
+		unicode.Is(unicode.Variation_Selector, r) || r == 0xfffc
 }
 
 // excluded reports whether the line of contracts/harness/v1/verdict.schema.json excludes
