@@ -20,6 +20,7 @@ import (
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/runtimeinstall"
 )
 
 // APIVersion is the format version this qory reads, [exports.APIVersion], and the one a
@@ -429,6 +430,11 @@ type Stack struct {
 	// the harness section of a checkout's qory.yaml that defines a stack; a section that
 	// extends a stack sets none, and [Extend] takes the base's.
 	Workflows map[string]Workflow `yaml:"workflows,omitempty"`
+	// RuntimePins are the versions of the runtimes that qory run installs, by runtime
+	// name, from runtimes; a runtime they leave out installs its newest release. A stack
+	// file sets them, and so does the harness section of a checkout's qory.yaml. After
+	// [Extend], the checkout's pin of a runtime replaces the base's.
+	RuntimePins map[string]RuntimePin `yaml:"runtimes,omitempty"`
 	// Hooks are the workflow hooks of a checkout's qory.yaml, from harness.hooks, read
 	// only in a document that extends a stack; a stack file has none. After [Extend],
 	// they are the checkout's.
@@ -476,6 +482,15 @@ type Workflow struct {
 	// HookPoints are the points of the workflow where a checkout extending the stack
 	// may add workflow hooks, by the point's name; nil for none.
 	HookPoints map[string]HookPoint `yaml:"hook_points,omitempty"`
+}
+
+// RuntimePin is the version a stack pins of a runtime, an entry of runtimes.
+type RuntimePin struct {
+	// Version is an exact version, see [runtimeinstall.ValidVersion].
+	Version string `yaml:"version"`
+	// From is the absolute path of the file that sets the pin. It is set as the stack is
+	// validated.
+	From string `yaml:"-"`
 }
 
 // Tiers are the tier names: the names a tier placeholder, ${qory:<tier>}, may take in an
@@ -824,6 +839,24 @@ func (p *Stack) validate(compose bool) error {
 		}
 		w.TimeLimit = d
 		p.Workflows[name] = w
+	}
+	for _, name := range slices.Sorted(maps.Keys(p.RuntimePins)) {
+		if !slices.Contains(runtimeinstall.Runtimes(), name) {
+			return exports.Refuse(
+				fmt.Sprintf("Remove %s from runtimes.", accesskey.ShownName(name, false)),
+				"qory installs and pins only "+strings.Join(runtimeinstall.Runtimes(), " and ")+".",
+				"runtimes is in "+exports.FilePlace+".")
+		}
+		pin := p.RuntimePins[name]
+		if !runtimeinstall.ValidVersion(pin.Version) {
+			return exports.Refuse(
+				fmt.Sprintf("Set runtimes.%s.version to an exact version, or remove runtimes.%s.", name, name),
+				"An exact version starts with a digit, followed by up to 63 letters, digits, ., + or -. A runtime with no pin installs its latest version.",
+				fmt.Sprintf("The value is %s.", exports.Value(pin.Version, true)),
+				fmt.Sprintf("runtimes.%s is in %s.", name, exports.FilePlace))
+		}
+		pin.From = p.File
+		p.RuntimePins[name] = pin
 	}
 	// A stack that a checkout's qory.yaml defines cannot be extended, so no hook can
 	// reach a point it declares.
@@ -1197,7 +1230,8 @@ func FileAllowed(name string, prefixes []string) bool {
 // [Base.Qory] does. It refuses a base that extends another and a base without an
 // extending block. An entry of p that lists a base module by its name is no module of
 // the result: its exclude becomes that base module's [Module.CheckoutExclude], under the
-// rules of [checkoutExclude]. An extension key both files set is p's. The result's File
+// rules of [checkoutExclude]. An extension key both files set is p's, and so is a
+// runtime's pin, [Stack.RuntimePins]. The result's File
 // and Root are p's.
 func Extend(base, p *Stack) (*Stack, error) {
 	if base.Extends.Path != "" || base.Extends.Git != "" {
@@ -1265,6 +1299,14 @@ func Extend(base, p *Stack) (*Stack, error) {
 	}
 	if len(out.Extensions) == 0 {
 		out.Extensions = nil
+	}
+	out.RuntimePins = nil
+	if len(base.RuntimePins)+len(p.RuntimePins) > 0 {
+		out.RuntimePins = maps.Clone(base.RuntimePins)
+		if out.RuntimePins == nil {
+			out.RuntimePins = map[string]RuntimePin{}
+		}
+		maps.Copy(out.RuntimePins, p.RuntimePins)
 	}
 	return &out, nil
 }

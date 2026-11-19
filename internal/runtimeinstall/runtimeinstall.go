@@ -198,7 +198,7 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 	}
 	if o.Version != "" && !ValidVersion(o.Version) {
 		return Installed{}, fmt.Errorf("Pin an exact version of %s, such as 2.1.320\n"+
-			"The pinned version %q is not a digit, then up to 63 letters, digits, ., + or -.", o.Runtime, o.Version)
+			"The pinned version is %q, and an exact version starts with a digit, followed by up to 63 letters, digits, ., + or -.", o.Runtime, o.Version)
 	}
 	if o.Progress != nil {
 		ctx = context.WithValue(ctx, progressKey{}, o.Progress)

@@ -400,16 +400,19 @@ type harnessSection struct {
 	// Workflows are the workflows of the stack the section defines, as a stack file
 	// sets them; a section that extends a stack takes the base's and sets none.
 	Workflows map[string]stack.Workflow `yaml:"workflows,omitempty"`
+	// RuntimePins are the versions of the runtimes that qory run installs, as a stack file
+	// sets them; only the checkout root's file sets them, see [Config.apply].
+	RuntimePins map[string]stack.RuntimePin `yaml:"runtimes,omitempty"`
 	// Hooks are the workflow hooks the checkout adds at the hook points of the stack it
 	// extends; a section that defines a stack sets none.
 	Hooks []stack.Hook `yaml:"hooks,omitempty"`
 }
 
 // composes reports whether the section carries a compose document: modules, extends,
-// bindings, extensions, workflows or hooks. A section of machine harness settings alone is
-// not a document.
+// bindings, extensions, workflows, runtimes or hooks. A section of machine harness
+// settings alone is not a document.
 func (h *harnessSection) composes() bool {
-	return h != nil && (len(h.Modules) > 0 || h.extends() || h.Bind.Len() > 0 || len(h.Extensions) > 0 || len(h.Workflows) > 0 || len(h.Hooks) > 0)
+	return h != nil && (len(h.Modules) > 0 || h.extends() || h.Bind.Len() > 0 || len(h.Extensions) > 0 || len(h.Workflows) > 0 || len(h.RuntimePins) > 0 || len(h.Hooks) > 0)
 }
 
 // extends reports whether the section names a stack to extend, by directory or by export.
@@ -725,7 +728,7 @@ func OnBase(path, base string) (*stack.Stack, stack.Source, error) {
 // document is the file's harness section as the stack it holds, before validation.
 func (f file) document() *stack.Stack {
 	h := f.Harness
-	return &stack.Stack{APIVersion: f.APIVersion, RetiredAPIVersion: f.retired, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Bind: h.Bind, Extensions: h.Extensions, Workflows: h.Workflows, Hooks: h.Hooks}
+	return &stack.Stack{APIVersion: f.APIVersion, RetiredAPIVersion: f.retired, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Bind: h.Bind, Extensions: h.Extensions, Workflows: h.Workflows, RuntimePins: h.RuntimePins, Hooks: h.Hooks}
 }
 
 // ErrRelativeConfigHome is the refusal of an XDG_CONFIG_HOME that is no absolute path,
@@ -766,7 +769,8 @@ func ownedFile(path string) bool {
 // machine false, only the worktree section, the qory key and the tiers are taken: the
 // other harness keys, git and env are the machine's and left out. With root, the file is
 // the checkout root's, and its tiers are the repository's map; any other file's are the
-// machine's. A refusal prints a value the file sets as [exports.Value] prints it, and a
+// machine's. Only the checkout root's file pins a runtime's version: harness.runtimes in
+// any other file is refused. A refusal prints a value the file sets as [exports.Value] prints it, and a
 // variable's or a tier's name as [accesskey.ShownName] prints it.
 func (c *Config) apply(path string, machine, root bool) (file, error) {
 	f, err := read(path)
@@ -782,6 +786,11 @@ func (c *Config) apply(path string, machine, root bool) (file, error) {
 	}
 	if err := c.applyWorktree(path, f.Worktree); err != nil {
 		return f, err
+	}
+	if f.Harness != nil && len(f.Harness.RuntimePins) > 0 && !root {
+		return f, exports.Refuse("Move runtimes to the checkout's "+FileName+" or to the base "+stack.FileName+".",
+			"Only the checkout's "+FileName+" and the base stack pin a runtime's version.",
+			"harness.runtimes is in "+exports.HidePath(path)+".")
 	}
 	if f.Harness != nil && f.Harness.Tiers != nil {
 		if err := c.applyTiers(path, f.Harness.Tiers, root); err != nil {

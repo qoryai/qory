@@ -1,0 +1,3 @@
+Remove gemini from runtimes.
+  qory installs and pins only claude and codex.
+  runtimes is in qory.yaml.
