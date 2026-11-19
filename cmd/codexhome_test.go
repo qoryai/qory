@@ -225,7 +225,7 @@ func TestAWalledCodexReadRunGetsTheReadRules(t *testing.T) {
 // wall, with a program in place of docker and no stand-in for the join: Forager's session
 // checks the mounts, the mount at /etc/codex among them, and starts the agent's
 // container, which binds the folder etc-codex of the run's codex-fixed read-only at
-// /etc/codex, where the image may have a folder of its own. While the session runs, the
+// /etc/codex, which hides any folder the image has there. While the session runs, the
 // folder has mode 0755 and contains hooks.json alone, mode 0644.
 func TestForagerBindsQorysFolderOverEtcCodex(t *testing.T) {
 	exportingCheckout(t, fakeRuntime(t))

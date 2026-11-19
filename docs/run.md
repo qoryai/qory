@@ -4636,10 +4636,10 @@ into `hooks.json` in a third folder, `codex-fixed/etc-codex`, and binds that fol
 `/etc/codex`. Codex 0.169.0 runs a hook from `/etc/codex` as a managed hook: it needs no stored
 hash, and a `hooks.state` setting with `enabled = false` does not turn it off. The bind hides
 whatever the image has at `/etc/codex`, such as a `config.toml` or a `requirements.toml`, so
-the image may have that folder. The folder has mode 0755 and `hooks.json` mode 0644, with the
-owner that the engine shows for a bind, such as your user's id on Linux, not root. A write, a
-rename or a replacement of `hooks.json` fails, and so does a new file in the folder, since the
-bind is read-only.
+the image may have that folder. The folder has mode 0755 and `hooks.json` mode 0644. qory writes
+both as your user, so the container can show them with an owner other than root. The bind is
+read-only, so a write, a rename or a replacement of `hooks.json` fails, and so does a new file
+in the folder.
 
 `config.toml` marks the checkout untrusted, at its path in the container and at
 `/workspace`, so Codex reads no hook, rule or setting of the repository's `.codex`. It

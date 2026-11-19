@@ -264,9 +264,9 @@ const textHookGroups = "Write each event of the hooks in `settings/codex/%s` as 
 // and then those of config's hooks table, the order in which Codex 0.169.0 loads the two
 // files of one folder (codex-rs/hooks/src/engine/discovery.rs, discover_handlers). Each
 // group is as the compose wrote it, numbers as written. config's hooks.state is left
-// out, since Codex keeps no state of a managed hook. Codex refuses a hooks.json with a
-// key other than description and hooks (codex-rs/config/src/hook_config.rs, HooksFile),
-// so description is left out too. An event whose value is no list fails, with
+// out, since Codex keeps no state of a managed hook. Codex reads no hook of a hooks.json
+// with a key other than description and hooks (codex-rs/config/src/hook_config.rs,
+// HooksFile), so description is left out too. An event whose value is no list fails, with
 // [textHookGroups].
 func WalledHooks(hooksJSON, config []byte) ([]byte, error) {
 	events := map[string][]any{}
