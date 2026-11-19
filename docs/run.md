@@ -4630,6 +4630,17 @@ run's copy, or, for a run with no copy, a new folder at that path:
   read-only at its path under `/var/lib/qory-codex-home`, so a write into it fails, and
   so does a move or a removal of one of them.
 
+The harness's Codex hooks are in neither folder's `config.toml` or `hooks.json`. qory writes
+them, the hooks of `settings/codex/hooks.json` and then those of `settings/codex/config.toml`,
+into `hooks.json` in a third folder, `codex-fixed/etc-codex`, and binds that folder read-only at
+`/etc/codex`. Codex 0.169.0 runs a hook from `/etc/codex` as a managed hook: it needs no stored
+hash, and a `hooks.state` setting with `enabled = false` does not turn it off. The bind hides
+whatever the image has at `/etc/codex`, such as a `config.toml` or a `requirements.toml`, so
+the image may have that folder. The folder has mode 0755 and `hooks.json` mode 0644, with the
+owner that the engine shows for a bind, such as your user's id on Linux, not root. A write, a
+rename or a replacement of `hooks.json` fails, and so does a new file in the folder, since the
+bind is read-only.
+
 `config.toml` marks the checkout untrusted, at its path in the container and at
 `/workspace`, so Codex reads no hook, rule or setting of the repository's `.codex`. It
 marks the working folder untrusted at both paths too, with and without its links
@@ -4794,22 +4805,6 @@ program, such as:
 ```text
 qory run: install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has
 ```
-
-A walled Codex run that lists repositories also has the step `Check tools`, with a test of
-`/etc/codex`, where Codex reads settings before the ones qory writes. A write run in a copy runs
-both tests in that one step; any other such run, such as a read run, runs the test of
-`/etc/codex` alone. When the image has anything at `/etc/codex`, the step fails with:
-
-```text
-qory run: Use an image without /etc/codex: Codex reads its settings there before qory's.
-```
-
-A walled Codex run that lists no repositories, such as a person's walled run, runs the test of
-`/etc/codex` in the agent's container, in a setup step named `Check tools`, before Codex starts.
-The step prints nothing. When the image has anything at `/etc/codex`, qory prints the same line,
-the run closes as failed, and qory run exits with 1. A walled read run that lists no repositories
-has no such step: its workspace is mounted read-only, and Forager runs no setup step beside a
-read-only workspace. Claude Code runs and unwalled runs have no such step.
 
 If the step exits 127 with no such line, which is what docker does for an image with no `/bin/sh`,
 qory prints:

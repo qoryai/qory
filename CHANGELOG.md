@@ -808,7 +808,12 @@ release may change what an existing document does, and states it under Upgrading
   an empty `.env`, `environments.toml` and `AGENTS.override.md`, the harness's
   `AGENTS.md`, and copies of `rules/`, `skills/` and `agents/` into `<user
   cache>/qory/runs/<run id>/codex-fixed`, and binds each read-only at its path in the
-  home. A walled Codex run copies the composed home's `skills/`, `rules/` and `agents/`
+  home. qory writes the harness's Codex hooks, those of `settings/codex/hooks.json` and
+  then those of `settings/codex/config.toml`, into `hooks.json` of the folder
+  `codex-fixed/etc-codex`, mode 0755, and binds that folder read-only at `/etc/codex`, in
+  place of anything the image has there. Codex 0.169.0 runs those hooks as managed: with
+  no stored hash, and also when a `hooks.state` setting turns them off. A walled Codex run
+  copies the composed home's `skills/`, `rules/` and `agents/`
   with every link replaced by the file or folder it leads to, since Codex 0.167.2 passes
   over a `SKILL.md` that is a link. A link whose target lies outside the composed home,
   the folders of the harness's modules and qory's module cache fails the run with ``Remove
@@ -1359,15 +1364,6 @@ release may change what an existing document does, and states it under Upgrading
   unwalled run passed every argument unchanged.
 - A refusal of a walled Codex run's arguments writes each control character of the key
   or feature it repeats as an escape, such as `\n`.
-- On a walled Codex run that lists repositories, the `Check tools` setup step fails when
-  the image has anything at `/etc/codex`, with ``Use an image without /etc/codex: Codex
-  reads its settings there before qory's.`` A write run in a copy runs this test in the
-  step it has; any other such run, such as a read run, gets the step with this test alone.
-  The step of a Claude Code run is unchanged.
-- A walled Codex run that lists no repositories, except a read run, tests `/etc/codex` in
-  a `Check tools` setup step in the agent's container before Codex starts. When the image
-  has anything there, qory prints the same line, the run closes as failed, and qory run
-  exits with 1.
 - The line for an image with no `sh` reads ``the setup of a walled run runs sh from these
   folders``, in place of ``the git session of a walled run``.
 - Compose accepts `settings/codex/read-access.rules`, Codex execpolicy rules for a run
