@@ -496,7 +496,7 @@ func pushURLsText(n int) string {
 const pushURLsHow = ".\n  List the configured addresses and the file of each with git config --show-origin --get-all remote.origin.pushurl, or with git config --show-origin --get-all remote.origin.url when that prints none.\n" +
 	"  Do not use git remote get-url --push --all: it shows the addresses after the insteadOf rewrites of git.\n" +
 	"  For each file that --show-origin shows (the path after file:), run git config --file <file> --unset-all remote.origin.pushurl in the top folder of the repository. Put a path with spaces in quotes, and edit a file by hand when git prints its path in double quotes. Exit status 5 means that file has no pushurl value. The system file usually needs administrator rights.\n" +
-	"  If --show-origin shows command line: instead of a file, run unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS in the shell that runs qory, then run qory again.\n" +
+	"  If --show-origin shows command line: instead of a file, run unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS (fish: set -e GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS) in the shell that runs qory, then run qory again.\n" +
 	"  Then run git remote set-url --push origin <address> with the address to keep.\n"
 
 // TestALocalRunWithTwoUrlValuesPushesNothing is a remote origin with two url values and no pushurl:

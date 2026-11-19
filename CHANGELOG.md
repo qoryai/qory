@@ -720,12 +720,13 @@ release may change what an existing document does, and states it under Upgrading
   several push addresses gets `qory run: Remove the extra push addresses of remote origin, so
   it has one.`, how to list the configured addresses with the file of each, how to remove
   the `pushurl` values of each file that `--show-origin` shows (`git config --file <file>
-  --unset-all remote.origin.pushurl`), what to do for a value that shows as `command line:`
-  (unset `GIT_CONFIG_COUNT` and `GIT_CONFIG_PARAMETERS`), and `git remote set-url --push
-  origin <address>`. A push that landed, followed by a failure to list the run's commits, gets
-  `qory run: Open a draft by hand if you want one: qory pushed the branch but could not list
-  commits.`, and the next line is that qory ran no program for that repository. A second run
-  does the work again on a new branch. See The submit program in `docs/run.md`.
+  --unset-all remote.origin.pushurl`, and a hand edit for a file whose path git prints in double
+  quotes), what to do for a value that shows as `command line:` (unset `GIT_CONFIG_COUNT` and
+  `GIT_CONFIG_PARAMETERS`, with the fish form, then run qory again), and `git remote set-url
+  --push origin <address>`. A push that landed, followed by a failure to list the run's commits,
+  gets `qory run: Open a draft by hand if you want one: qory pushed the branch but could not
+  list commits.`, and the next line is that qory ran no program for that repository. A second
+  run does the work again on a new branch. See The submit program in `docs/run.md`.
 - A push that landed with no version stored has one way out in the line of `qory run`:
   `delete branch qory/<work item id> of <path> on <system>`. A branch whose head is not the
   commit the run expected is refused before any push, with the line `Set the branch to the

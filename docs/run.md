@@ -3127,7 +3127,8 @@ indented by two spaces:
   status 5 means that file has no pushurl value. The system file usually needs administrator
   rights.`
 - `If --show-origin shows command line: instead of a file, run unset GIT_CONFIG_COUNT
-  GIT_CONFIG_PARAMETERS in the shell that runs qory, then run qory again.`
+  GIT_CONFIG_PARAMETERS (fish: set -e GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS) in the shell that
+  runs qory, then run qory again.`
 - `Then run git remote set-url --push origin <address> with the address to keep.`
 
 Git has one push address for each `pushurl` value, and with no `pushurl` it has one for each

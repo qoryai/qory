@@ -154,3 +154,41 @@ func TestThePrintedCommandsRemoveEveryPushURLValue(t *testing.T) {
 		t.Errorf("%q leaves the values %q, want none", remove, left)
 	}
 }
+
+// TestThePrintedUnsetCommandRemovesAPushAddressOfTheEnvironment takes the unset command from
+// [textLocalPushURLs] and runs it with sh in an environment that adds a push address: one
+// address is left afterwards, where two are before.
+func TestThePrintedUnsetCommandRemovesAPushAddressOfTheEnvironment(t *testing.T) {
+	unset := strings.TrimSpace(regexp.MustCompile(`unset (?:GIT_CONFIG_[A-Z_]+ ?)+`).FindString(textLocalPushURLs))
+	if unset == "" {
+		t.Fatalf("the text has no unset command:\n%s", textLocalPushURLs)
+	}
+	repo := t.TempDir()
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, "GIT_CONFIG_") || strings.HasPrefix(kv, "XDG_CONFIG_HOME=")
+	})
+	env = append(env, "HOME="+repo, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=remote.origin.pushurl", "GIT_CONFIG_VALUE_0=https://git.example.com/acme/env.git",
+		"GIT_CONFIG_PARAMETERS='remote.origin.pushurl=https://git.example.com/acme/parameters.git'")
+	addresses := func(script string) string {
+		c := exec.Command("sh", "-c", script)
+		c.Dir = repo
+		c.Env = env
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", script, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	// The setup runs in a shell without the variables, so the repository file has one address.
+	addresses("unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS; git init --quiet && " +
+		"git remote add origin https://git.example.com/acme/app.git && " +
+		"git config remote.origin.pushurl https://git.example.com/acme/keep.git")
+	const get = "git remote get-url --push --all origin"
+	if before := addresses(get); strings.Count(before, "\n") < 1 {
+		t.Fatalf("the environment adds no address, so the test shows nothing:\n%s", before)
+	}
+	if after := addresses(unset + "; " + get); after != "https://git.example.com/acme/keep.git" {
+		t.Errorf("%q leaves the addresses %q, want only the address of the repository file", unset, after)
+	}
+}
