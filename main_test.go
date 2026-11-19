@@ -25,8 +25,12 @@ import (
 // mode its value names, in place of the tests: "fail" with a hardening that fails,
 // "harden" with gateway.HardenProcess, "mask" with a hardening that fails with an
 // error that contains a value of the mask list and a signed URL, and "statusorder" as
-// qory run with an update check that opens the file envStatusFile names first thing.
+// qory run with an update check that opens the file envStatusFile names first thing, and
+// "args" as qory with the arguments, a JSON array, that envArgs holds.
 const envChild = "QORY_TEST_MAIN_CHILD"
+
+// envArgs holds the arguments of the child in "args".
+const envArgs = "QORY_TEST_MAIN_ARGS"
 
 // resultPrefix starts the one line on which a child reports.
 const resultPrefix = "main-test-result: "
@@ -78,6 +82,15 @@ func TestMain(m *testing.M) {
 			return func() {}
 		}
 		os.Args = []string{"qory", "run", "--gateway", "https://gateway.example"}
+		main()
+		os.Exit(0)
+	case "args":
+		var args []string
+		if err := json.Unmarshal([]byte(os.Getenv(envArgs)), &args); err != nil {
+			os.Stdout.WriteString(err.Error() + "\n")
+			os.Exit(3)
+		}
+		os.Args = append([]string{"qory"}, args...)
 		main()
 		os.Exit(0)
 	case "statusflag":
@@ -274,5 +287,41 @@ func TestMainWritesAHardeningErrorToTheStatusDescriptor(t *testing.T) {
 	status, stderr := statusLines(t, "statusharden")
 	if want := "✗ allow the test's call: it failed with ***\n"; status != want {
 		t.Errorf("descriptor 3 got %q, want %q; stderr %q", status, want, stderr)
+	}
+}
+
+// TestMainMasksAKeyInAnUnknownCommand is qory with a key as its first argument, where a
+// command belongs: cobra's error prints the phrase in its place, and a plain word that is
+// no command prints quoted, as before. Both exit 2.
+func TestMainMasksAKeyInAnUnknownCommand(t *testing.T) {
+	// An invented run key: qrk_ and 40 letters.
+	const letters = "zyxwvutsrqponmlkjihgzyxwvutsrqponmlkjihg"
+	const key = "qrk_" + letters
+
+	for _, c := range []struct{ arg, want string }{
+		{key, "✗ unknown command (a value that contains a run key) for \"qory\"\n"},
+		{"bogus", "✗ unknown command \"bogus\" for \"qory\"\n"},
+	} {
+		args, _ := json.Marshal([]string{c.arg})
+		stdout, stderr, _, status := runChild(t, "args", envArgs+"="+string(args))
+		if status != cmd.ExitInput {
+			t.Errorf("qory %s: exit status %d, want %d\n%s%s", c.arg, status, cmd.ExitInput, stdout, stderr)
+		}
+		if !strings.HasSuffix(stderr, c.want) {
+			t.Errorf("qory %s: stderr %q, want it to end with %q", c.arg, stderr, c.want)
+		}
+		if c.arg != key {
+			continue
+		}
+		for _, text := range []string{stdout, stderr} {
+			if strings.Contains(strings.ToLower(text), "qrk_") {
+				t.Errorf("the text has the key's prefix: %q", text)
+			}
+			for i := 0; i+6 <= len(letters); i++ {
+				if strings.Contains(text, letters[i:i+6]) {
+					t.Errorf("the text has %q of the key: %q", letters[i:i+6], text)
+				}
+			}
+		}
 	}
 }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/ui"
 )
@@ -19,7 +20,7 @@ type versionError struct {
 
 // Error is one line: the file, the version, the range, and what to do.
 func (e *versionError) Error() string {
-	return fmt.Sprintf("%s: this qory is %s, and %s wants %s; install a qory in that range, or contact its owner", e.file, e.version, e.what, e.want)
+	return fmt.Sprintf("%s: this qory is %s, and %s wants %s; install a qory in that range, or contact its owner", exports.Value(e.file, false), e.version, e.what, e.want)
 }
 
 // qoryChecks checks the documents a command reads against the running qory, one call
@@ -48,7 +49,7 @@ func (c *qoryChecks) check(file, what string, want stack.Constraint) error {
 	if c.version == "" {
 		if !c.seen[file] {
 			c.seen[file] = true
-			c.rows = append(c.rows, [2]string{"qory", build().title() + "  (a build from source; not checked against " + want.String() + " in " + ui.Short(file, c.root) + ")"})
+			c.rows = append(c.rows, [2]string{"qory", build().title() + "  (a build from source; not checked against " + want.String() + " in " + exports.Value(ui.Short(file, c.root), false) + ")"})
 		}
 		return nil
 	}
@@ -95,5 +96,5 @@ func (r *retiredRows) add(what, declared string) {
 		return
 	}
 	r.seen[what] = true
-	r.rows = append(r.rows, [2]string{"retired", ui.Short(what, r.root) + "  (apiVersion " + declared + "; read as " + stack.APIVersion + ", the line to write)"})
+	r.rows = append(r.rows, [2]string{"retired", exports.Value(ui.Short(what, r.root), false) + "  (apiVersion " + declared + "; read as " + stack.APIVersion + ", the line to write)"})
 }
