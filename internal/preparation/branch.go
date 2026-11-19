@@ -43,7 +43,7 @@ type WorkBranch struct {
 	// cancel, from the work item's record of pushed commits; the run starts there instead of
 	// at Version when that commit descends from the commit of Version, or from the
 	// repository's target commit when Version has none. Cancelled is every commit that a
-	// cancelled run pushed.
+	// cancelled run pushed. The caller has checked each commit as a full commit id.
 	Pushed, Cancelled []Landed
 	// Repositories is every repository of the run, the target first, set by [RunAt] and
 	// [Switch].

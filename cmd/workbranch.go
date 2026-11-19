@@ -77,7 +77,9 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, timeout time.Du
 	}
 
 	if version == nil {
-		pushedStarts(branch, snapshot.PushedCommits)
+		if err := pushedStarts(branch, snapshot.PushedCommits); err != nil {
+			return nil, err
+		}
 
 		return branch, nil
 	}
@@ -98,7 +100,9 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, timeout time.Du
 		branch.Version = append(branch.Version, submission.Repository{System: r.System, Path: r.Path, Commit: r.Commit})
 	}
 
-	pushedStarts(branch, snapshot.PushedCommits)
+	if err := pushedStarts(branch, snapshot.PushedCommits); err != nil {
+		return nil, err
+	}
 
 	return branch, nil
 }
@@ -106,12 +110,19 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, timeout time.Du
 // pushedStarts sets what the work item's record of pushed commits gives branch: Pushed,
 // per repository the newest commit of a run that a person did not cancel, and Cancelled,
 // every commit of a cancelled run. The entries come ordered by run number and then by push
-// order, so the last one of a repository is its newest.
-func pushedStarts(branch *preparation.WorkBranch, pushed []runapi.PushedEntry) {
+// order, so the last one of a repository is its newest. A commit that is not a full commit id
+// ends the read before git gets it: the run API returns these values, and none of them may be
+// a ref name or an option.
+func pushedStarts(branch *preparation.WorkBranch, pushed []runapi.PushedEntry) error {
 	newest := map[[2]string]preparation.Landed{}
 	order := [][2]string{}
 
 	for _, entry := range pushed {
+		if !submission.CommitID(entry.Commit) {
+			return fmt.Errorf("Report this run to the instance admin of Qory Apiary, so the run did not start%s\n"+
+				"  The list of pushed commits has %s for a repository, which is not a full commit id.", codeUsed, shownText(entry.Commit))
+		}
+
 		landed := preparation.Landed{System: entry.System, Path: entry.Path, Commit: entry.Commit}
 		if entry.Cancelled {
 			branch.Cancelled = append(branch.Cancelled, landed)
@@ -130,6 +141,8 @@ func pushedStarts(branch *preparation.WorkBranch, pushed []runapi.PushedEntry) {
 	for _, key := range order {
 		branch.Pushed = append(branch.Pushed, newest[key])
 	}
+
+	return nil
 }
 
 // featureOff reports whether err is a 404 with no error code, the error page of a server

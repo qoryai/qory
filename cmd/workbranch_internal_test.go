@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
 )
 
@@ -169,5 +170,27 @@ func TestChosenSubmissionStopsOnAnApprovedVersionOutsideTheIndex(t *testing.T) {
 	_, err := chosenSubmission(stageSnapshot(), approvedAs(branchIndex([2]string{"av_1", "st_a"}), "av_9"))
 	if err == nil || !strings.HasPrefix(err.Error(), "Report this run to the instance admin of Qory Apiary.") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// TestPushedStartsChecksEachCommit is a record of pushed commits with a ref name, an option, a
+// short id and a good id: the read ends before git gets any value that is not a full commit id,
+// and a good record sets the branch.
+func TestPushedStartsChecksEachCommit(t *testing.T) {
+	good := strings.Repeat("a", 40)
+
+	for _, commit := range []string{"refs/heads/main", "--upload-pack=x", "abc1234", strings.ToUpper(good)} {
+		branch := &preparation.WorkBranch{}
+		entries := []runapi.PushedEntry{{System: "git.example.com", Path: "acme/shop", Commit: good}, {System: "git.example.com", Path: "acme/lib", Commit: commit, Cancelled: true}}
+
+		err := pushedStarts(branch, entries)
+		if err == nil || !strings.HasPrefix(err.Error(), "Report this run to the instance admin of Qory Apiary, so the run did not start") || !strings.Contains(err.Error(), commit) {
+			t.Errorf("commit %q: err = %v", commit, err)
+		}
+	}
+
+	branch := &preparation.WorkBranch{}
+	if err := pushedStarts(branch, []runapi.PushedEntry{{System: "git.example.com", Path: "acme/shop", Commit: good}}); err != nil || len(branch.Pushed) != 1 || branch.Pushed[0].Commit != good {
+		t.Errorf("good id: err = %v, pushed = %v", err, branch.Pushed)
 	}
 }
