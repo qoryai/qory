@@ -305,7 +305,7 @@ func TestSearchInFilesKeepsToItsLimit(t *testing.T) {
 	}
 }
 
-func TestEveryToolRefusesAPathOutsideTheCopy(t *testing.T) {
+func TestEveryToolReturnsAnErrorForAPathOutsideTheCopy(t *testing.T) {
 	root := copyRoot(t)
 	paths := map[string]string{
 		"/etc/passwd":               "is absolute",
