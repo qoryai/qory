@@ -872,7 +872,9 @@ recorded. The session's events are not.
 Every run of Claude Code, the runtime `claude`, and of Codex, the runtime `codex`,
 walled or not, installs the runtime's program on the machine before its session starts:
 after the compose, and before the image step. A run of another runtime installs nothing.
-The agent image contains no runtime.
+The agent image contains no runtime. A run of several sessions installs each runtime once,
+before the first session that runs it (see [A run of several
+sessions](#a-run-of-several-sessions)).
 
 The session starts the installed program, `<runtimes>/<runtime>/<version>/bin/<runtime>`,
 such as `<runtimes>/claude/2.1.320/bin/claude`. Behind a wall, Forager mounts the
@@ -1290,9 +1292,9 @@ separate gateway gets that gateway's limits.
 
 `gateway.stack_hosts` in `forager.yaml` lists the hosts that each run's stack proxy
 reaches. The stack proxy is a proxy of each run on the gateway, apart from the run's
-proxy, and is open until the run's session starts. A run with a run key or a run code
+proxy, and is open until the run's first session starts. A run with a run key or a run code
 fetches every git source of its harness through it: the stack, its modules, and the
-modules of the checkout's file.
+modules of the checkout's file. A later session of the run fetches nothing.
 
 ```yaml
 # ~/.config/qory/forager.yaml
@@ -2748,7 +2750,7 @@ link: the session's number, the state the session ended in, and its reason. qory
 request after a session that paused, that a stop ended, that did not join, or whose push step
 failed or found the run ended; the run closes as that session ended.
 
-Qory Apiary answers with the end of the run or with the next session: its workflow, its
+The next-session answer is the end of the run or the next session: its workflow, its
 runtime and model settings, its model key (`model_credential`), its time limit, `full_suite`
 and its inputs. For the end, qory prints `qory run: Qory Apiary starts no session after
 session <n>, so the run ends` and closes the run as the last session ended. For a session,
@@ -2775,7 +2777,7 @@ with `take the work item in again in Qory Apiary: a container of the session may
 and write the working folder, so qory pushed nothing`.
 
 qory sends the next-session request again after no response, a refusal of the gateway's, a
-status with no refusal of Qory Apiary's, and Qory Apiary's `rate_limited` (429) and
+status of 500 or above or 429 with no refusal, and Qory Apiary's `rate_limited` (429) and
 `unavailable` (503). The first wait is 1 s, and each wait doubles up to 1 minute, for 10
 minutes in all. The link has no `Retry-After`, so every wait doubles. Then:
 
@@ -2783,9 +2785,13 @@ minutes in all. The link has no `Retry-After`, so every wait doubles. Then:
   Apiary ended this run, so qory pushes nothing more and no later session starts.`, or the
   line of the gateway's end (see [The push step of a write
   run](#the-push-step-of-a-write-run)), and closes the run as the session ended.
-- Every other refusal of Qory Apiary's, no answer after 10 minutes, or an answer outside
-  `next-session-answer.schema.json`: the run closes `failed`, exit 1, with a line that starts
-  with its fix.
+- Every other refusal of Qory Apiary's, a status below 500 with no refusal, other than 429,
+  no answer after 10 minutes, or an answer outside `next-session-answer.schema.json`: the
+  run closes `failed`, exit 1, with a line that starts with its fix, such as `qory run:
+  Contact support: the next-session request after session <n> failed.`, then `Qory Apiary
+  returned <status>: <message or code>`.
+- A stop while qory waits to send the request again, or during the steps before the next
+  session: the run closes `cancelled` with the reason `interrupted`, exit 1.
 - A runtime qory does not run, a workflow whose access differs from session 1's, a harness
   that is the checkout's file, which the branch may have changed, or a step before the
   session that fails, such as the runtime's install: the run closes `failed`, exit 1, with
@@ -2799,8 +2805,8 @@ A write run of a work item ends with a push step: qory commits what the agent le
 it to the branch `qory/<work item id>`, and stores a new version of the artifact `branch`.
 The next run in the same stage starts at that commit. A run of another stage starts at the
 version a gate approved when its stage lists `branch` as an input, and at that commit
-otherwise. The step runs after the run's session, once the agent exited, and before the
-run closes. A setup container is gone by then: qory removes it before the step, in the wall step `remove the setup
+otherwise. The step runs after each session of the run, once the agent exited, and before the
+next session or the run's close. A setup container is gone by then: qory removes it before the step, in the wall step `remove the setup
 container`, so no process in it writes the working folder after the check. Its kind is `push` and its name is `push qory/<work item
 id> to <system>/<path>`, followed by ` and 1 further repository` or ` and <n> further
 repositories` for a run with more repositories.
@@ -2886,7 +2892,7 @@ seconds. A first signal, before or during the step, cuts the step to at most 15 
 second signal ends the step at once. A step that one of these ended has the state
 `cancelled`, and the commits it made stay in the working folder.
 
-The run closes as its session ended, whatever the step did:
+The run closes as its last session ended, whatever the step did:
 
 - A session that timed out closes `cancelled` with the reason `timeout`, exit 124.
 - A session that paused because the model provider rejected its model key, while another
