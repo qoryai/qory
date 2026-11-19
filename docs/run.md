@@ -1045,7 +1045,7 @@ registry's `newest` nor npm's dist-tags:
 
 - From the registry, it reads `shared/runtimes/<runtime>:<version>`, then the manifest of
   the machine's platform by its digest, then the layer, with the same checks. The
-  registry returns 503 while it fetches a version it does not hold yet, and `qory run`
+  registry returns 503 while it fetches a version it does not have yet, and `qory run`
   waits for it as for `newest`.
 - From npm, it reads `/@anthropic-ai/claude-code-linux-x64/<version>`, or
   `/@openai/codex/<version>-linux-x64`, or the `-arm64` builds, then the tarball, with

@@ -59,7 +59,7 @@ func TestOnlyTheCheckoutsFilePinsARuntime(t *testing.T) {
 }
 
 // TestDiscoverStackRefusesAnAncestorsPin is a checkout with no document under an ancestor
-// whose qory.yaml pins a runtime and holds no stack: DiscoverStack refuses the pin, the fix
+// whose qory.yaml pins a runtime and defines no stack: DiscoverStack refuses the pin, the fix
 // first and the file last, before any compose reads the ancestor's file.
 func TestDiscoverStackRefusesAnAncestorsPin(t *testing.T) {
 	isolated(t)
