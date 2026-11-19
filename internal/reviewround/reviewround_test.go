@@ -475,6 +475,47 @@ func TestOpenFindingsFitTheHarnessRead(t *testing.T) {
 	}
 }
 
+// TestTheCutKeepsAFileOfTheLimit is the edge of the cut: the harness's findings open reads
+// a file of at most MaxOpenBytes, so a file of exactly that size stays whole, and one byte
+// more cuts it.
+func TestTheCutKeepsAFileOfTheLimit(t *testing.T) {
+	sized := func(size int) OpenFindings {
+		o := OpenFindings{Round: 1, Reviewers: []ReviewerFindings{{Reviewer: "code-reviewer", Findings: []Finding{
+			{ID: "f1", Severity: NonBlocking, Point: "p", Problem: "a"},
+		}}}}
+		data, err := o.JSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		o.Reviewers[0].Findings[0].Problem = strings.Repeat("a", 1+size-len(data))
+		if data, _ := o.JSON(); len(data) != size {
+			t.Fatalf("the file has %d bytes, not %d", len(data), size)
+		}
+		return o
+	}
+	whole := sized(MaxOpenBytes)
+	got, err := cutToFit(whole, newNumbering(2, nil))
+	if err != nil || fmt.Sprint(got) != fmt.Sprint(whole) {
+		t.Errorf("a file of %d bytes is cut: %v", MaxOpenBytes, err)
+	}
+	got, err = cutToFit(sized(MaxOpenBytes+1), newNumbering(2, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := got.Reviewers[0].Findings; len(f) != 1 || f[0].ID != "f2" ||
+		f[0].Point != "The review has 1 more open finding of code-reviewer than this file lists." {
+		t.Errorf("a file of %d bytes is cut to %+v", MaxOpenBytes+1, f)
+	}
+}
+
+func TestMoreFindingsIsSingularForOne(t *testing.T) {
+	for n, want := range map[int]string{1: "1 more open finding", 2: "2 more open findings", 81: "81 more open findings"} {
+		if got := moreFindings(n); got != want {
+			t.Errorf("%d: %q, want %q", n, got, want)
+		}
+	}
+}
+
 func TestReadOpenFindingsChecksTheFile(t *testing.T) {
 	for _, c := range []struct{ text, want string }{
 		{`{"round":0,"reviewers":[]}`, "has no round"},

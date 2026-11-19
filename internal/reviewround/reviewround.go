@@ -81,8 +81,8 @@ const (
 	textSuiteNotRun = "The full suite did not run."
 	textNoSuite     = "The full suite has no result for the reviewed commit."
 	textNoPoint     = "A finding of %s has a point with no readable text."
-	textMore        = "The review has %d more open findings than these points list."
-	textCut         = "The review has %d more open findings of %s than this file lists."
+	textMore        = "The review has %s than these points list."
+	textCut         = "The review has %s of %s than this file lists."
 	textBlankPoint  = "at '/findings/%d/point': the point has no character that is not a space"
 )
 
@@ -327,7 +327,7 @@ func keep(open OpenFindings, kept []place) OpenFindings {
 			}
 		}
 		if out > 0 {
-			findings = append(findings, Finding{ID: measureID, Severity: severity, Point: fmt.Sprintf(textCut, out, entry.Reviewer)})
+			findings = append(findings, Finding{ID: measureID, Severity: severity, Point: fmt.Sprintf(textCut, moreFindings(out), entry.Reviewer)})
 		}
 		cut.Reviewers = append(cut.Reviewers, ReviewerFindings{Reviewer: entry.Reviewer, Findings: findings})
 	}
@@ -478,9 +478,17 @@ func points(open OpenFindings) []runapi.Point {
 	all := append(first, later...)
 	if len(all) > maxPoints {
 		more := len(all) - (maxPoints - 1)
-		all = append(all[:maxPoints-1], runapi.Point{Text: fmt.Sprintf(textMore, more), Action: runapi.ActionRunAgain})
+		all = append(all[:maxPoints-1], runapi.Point{Text: fmt.Sprintf(textMore, moreFindings(more)), Action: runapi.ActionRunAgain})
 	}
 	return all
+}
+
+// moreFindings is n more open findings, in the singular for 1.
+func moreFindings(n int) string {
+	if n == 1 {
+		return "1 more open finding"
+	}
+	return fmt.Sprintf("%d more open findings", n)
 }
 
 // numbering gives the round's findings their ids: an id of the round before that a reviewer
