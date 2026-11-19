@@ -1042,7 +1042,7 @@ format ([review-report.schema.json](review-report.schema.json)):
 | `problem` | what is wrong, 1 to 2000 characters. Required |
 | `fix` | what the next session changes, 1 to 2000 characters. Required |
 | `proof` | `failing check: `, `failing input: ` or `broken rule: `, then the evidence, at most 1000 characters. A blocking finding has a failing check or a failing input. Required |
-| `point` | the finding in one line, 1 to 500 characters, with at least one character that is not a space. qory trims the spaces at its ends. Required |
+| `point` | the finding in one line, 1 to 500 characters, with at least one character that is not a space. qory trims the spaces at its ends, and reads a point of spaces and characters that show nothing, such as U+200B, as a report that does not match the format. Required |
 | `file` | the path of the file that the finding is about, 1 to 500 characters. Optional |
 | `line` | the line of `file`, a whole number from 1. Optional |
 
