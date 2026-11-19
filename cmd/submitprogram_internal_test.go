@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/qoryai/integrations/contracts"
 	"github.com/qoryai/qory/internal/submission"
 )
 
@@ -279,81 +278,6 @@ func TestTheProgramsErrorLinesHideASecret(t *testing.T) {
 	_ = got
 	if strings.Contains(printed, "ghp_abcdefghijklmnopqrstuvwxyz0123456789") {
 		t.Errorf("the step printed a token: %q", printed)
-	}
-}
-
-// missing is the reason of each of the n draft lines that are there when one of the five is
-// not.
-func missing(key string, n int) []string {
-	var out []string
-	for range n {
-		out = append(out, "the draft needs five lines, and "+key+" is missing; the line is left out")
-	}
-	return out
-}
-
-// around is the reasons for a draft whose line at position (1 to 5) is wrong for reason: the
-// reason in its place, and the other four lines left out.
-func around(key string, position int, reason string) []string {
-	out := missing(key, 4)
-	return append(out[:position-1], append([]string{reason}, out[position-1:]...)...)
-}
-
-// TestParseSubmitLines is the contract's rules for the lines of the program: a whole draft, an
-// address for a commit that qory gave, and the lines that qory leaves out with the reason.
-func TestParseSubmitLines(t *testing.T) {
-	commits := []string{baseID, headID}
-	good := "draft_number 34\ndraft_url https://git.example.com/acme/shop/pull/34\ndraft_title A title\ndraft_state open\ndraft_action kept\n"
-	for _, c := range []struct {
-		name, out string
-		draft     bool
-		urls      int
-		reasons   []string
-	}{
-		{"whole", good + "commit_url " + headID + " https://git.example.com/acme/shop/commit/" + headID + "\n", true, 1, nil},
-		{"blank line", "\n" + good, true, 0, nil},
-		{"a draft key twice", good + "draft_state draft\n", true, 0, []string{"the key is there already"}},
-		{"four draft keys", strings.Replace(good, "draft_action kept\n", "", 1), false, 0, missing("draft_action", 4)},
-		{"no line feed at the end", good + "commit_url " + headID, true, 0, []string{"the line has no line feed at its end"}},
-		{"control character", "draft_title a\tb\n", false, 0, []string{"the line has a control character"}},
-		{"no value", "draft_url\n", false, 0, []string{"the line is not a key and a value"}},
-		{"unknown key", "other 1\n", false, 0, []string{"the key is not one of the contract's"}},
-		{"unknown commit", "commit_url " + middleID + " https://git.example.com/a/b\n", false, 0, []string{"the commit is not one that qory gave the program"}},
-		{"commit twice", "commit_url " + headID + " https://git.example.com/a/b\ncommit_url " + headID + " https://git.example.com/a/c\n", false, 1, []string{"the commit has an address already"}},
-		{"no address", "commit_url " + headID + "\n", false, 0, []string{"the line has no address"}},
-		{"http", "draft_url http://git.example.com/a/b\n", false, 0, []string{"the address is not an https URL as definitions.schema.json describes it"}},
-		{"port", "draft_url https://git.example.com:8443/a/b\n", false, 0, []string{"the address has a port"}},
-		{"user", "draft_url https://u@git.example.com/a/b\n", false, 0, []string{"the address is not an https URL as definitions.schema.json describes it"}},
-		{"query", "draft_url https://git.example.com/a/b?x=1\n", false, 0, []string{"the address has a query or a fragment"}},
-		{"no path", "draft_url https://git.example.com/\n", false, 0, []string{"the address has no path"}},
-		{"state", "draft_state archived\n", false, 0, []string{"the state is none of draft, open, closed and merged"}},
-		{"a draft line alone", "draft_state draft\n", false, 0, []string{"the draft needs five lines, and draft_number, draft_url, draft_title, draft_action is missing; the line is left out"}},
-		{"closed with the action updated", strings.Replace(strings.Replace(good, "draft_state open", "draft_state closed", 1), "draft_action kept", "draft_action updated", 1), false, 0, []string{"a draft that is closed or merged has the action kept"}},
-		{"merged and kept", strings.Replace(good, "draft_state open", "draft_state merged", 1), true, 0, nil},
-		{"carriage returns", strings.ReplaceAll(good, "\n", "\r\n"), true, 0, nil},
-		{"a title of spaces", strings.Replace(good, "A title", "\u00a0 \u3000", 1), false, 0, around("draft_title", 3, "the title has a control, bidirectional or invisible character, or only spaces")},
-		{"a title with a bidirectional control", strings.Replace(good, "A title", "A\u202etitle", 1), false, 0, around("draft_title", 3, "the title has a control, bidirectional or invisible character, or only spaces")},
-		{"a title that is not UTF-8", strings.Replace(good, "A title", "A\xfftitle", 1), false, 0, around("draft_title", 3, "the title is not UTF-8")},
-		{"an upper-case scheme", strings.Replace(good, "https://git", "HTTPS://git", 1), false, 0, around("draft_url", 2, "the address is not an https URL as definitions.schema.json describes it")},
-		{"a quote in an address", "commit_url " + headID + " https://git.example.com/acme/shop/commit/\"x\n", false, 0, []string{"the address is not an https URL as definitions.schema.json describes it"}},
-		{"a non-ASCII address", "commit_url " + headID + " https://git.example.com/acme/shop/commit/\u00e9\n", false, 0, []string{"the address is not an https URL as definitions.schema.json describes it"}},
-		{"action", "draft_action closed\n", false, 0, []string{"the action is none of opened, updated and kept"}},
-		{"number with a zero", "draft_number 07\n", false, 0, []string{"the number is not a whole number of 1 to 9 digits, 1 or more"}},
-		{"number of 10 digits", "draft_number 1234567890\n", false, 0, []string{"the number is not a whole number of 1 to 9 digits, 1 or more"}},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			got := parseSubmitLines(c.out, "git.example.com", contracts.DraftOpen, commits)
-			if (got.Draft != nil) != c.draft || len(got.CommitURLs) != c.urls {
-				t.Errorf("draft %v and %d addresses, want %v and %d", got.Draft, len(got.CommitURLs), c.draft, c.urls)
-			}
-			var reasons []string
-			for _, bad := range got.Invalid {
-				reasons = append(reasons, bad.Reason)
-			}
-			if strings.Join(reasons, "|") != strings.Join(c.reasons, "|") {
-				t.Errorf("the lines left out are %q, want %q", reasons, c.reasons)
-			}
-		})
 	}
 }
 

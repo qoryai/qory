@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/preparation"
@@ -134,10 +135,11 @@ const (
 	maxDroppedSteps        = 5
 )
 
-// controlAt is the 1-based position of the first character of title that the draft's title
-// refuses, as [plainTitle] has it: a control character (U+0000 to U+001F, U+007F to U+009F), a
-// bidirectional control or invisible format character, or a line or paragraph separator; 0 for
-// none. A title that passes is one that the program's draft_title line may carry back.
+// controlAt is the 1-based position of the first character of title that a draft title may not
+// have (rule $defs.draft_title of the contract's definitions.schema.json): a control character
+// (U+0000 to U+001F, U+007F to U+009F), a bidirectional control or invisible format character,
+// or a line or paragraph separator; 0 for none. A title that passes is one that the program's
+// draft_title line may return.
 func controlAt(title string) int {
 	i := 0
 	for _, r := range title {
@@ -255,6 +257,16 @@ func (h *handoff) limit() {
 		h.dropped = append(h.dropped, fmt.Sprintf(textDroppedFurther, len(over)-maxDroppedSteps, maxStep))
 	}
 }
+
+// refusedInTitle reports whether a title may not have the character r: a control character, a
+// bidirectional control or other invisible format character, or a line or paragraph separator.
+func refusedInTitle(r rune) bool {
+	return unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
+}
+
+// titleSpaces are the characters that do not count as a character of a title.
+var titleSpaces = []rune{' ', '\u00a0', '\u1680', '\u2000', '\u2001', '\u2002', '\u2003', '\u2004', '\u2005',
+	'\u2006', '\u2007', '\u2008', '\u2009', '\u200a', '\u202f', '\u205f', '\u3000'}
 
 // visibleTitle reports whether title has a character that is not a space of [titleSpaces].
 func visibleTitle(title string) bool {

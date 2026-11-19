@@ -21,12 +21,9 @@ func TestTheSubmitContractNamesAreThePinnedOnes(t *testing.T) {
 		name      string
 		got, want int
 	}{
-		// The next three are copies of the contract's limits (100 commits, 256 characters, 2048
-		// characters): the pinned package does not export them, so a pin that changes one is read
-		// in the README's tables, not here.
+		// The limit of commits is a copy of the contract's 100: the pinned package does not
+		// export it, so a pin that changes it is read in the README's table, not here.
 		{"commits", maxSubmitCommits, 100},
-		{"title", maxSubmitTitle, 256},
-		{"address", maxSubmitURL, 2048},
 		{"printed lines", maxProgramLines, contracts.SubmitPrintedLines},
 		{"time limit seconds", int(programLimit.Seconds()), int(contracts.SubmitTimeLimit.Seconds())},
 	} {

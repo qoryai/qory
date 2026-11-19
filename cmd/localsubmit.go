@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/qoryai/integrations/contracts"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runcopy"
 	"github.com/qoryai/qory/internal/submission"
@@ -182,13 +183,13 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 
 // draftAddress is the address of the draft that the program returned for the one repository of
 // document, "" for none: a draft of none, a program that failed, or one whose lines were not all
-// valid. The address is the value that [parseSubmitLines] accepted: https, on the repository's
-// system, of the characters that RFC 3986 allows, so it has no control character.
+// valid. The address is the value that [contracts.ParseSubmitLines] accepted: https, on the
+// repository's system, of the characters that RFC 3986 allows, so it has no control character.
 func draftAddress(document *submission.Submission) string {
 	if len(document.Repositories) != 1 {
 		return ""
 	}
-	var draft pullRequest
+	var draft contracts.SubmittedDraft
 	if json.Unmarshal(document.Repositories[0].Draft, &draft) != nil || draft.Number == 0 {
 		return ""
 	}

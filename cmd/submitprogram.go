@@ -126,54 +126,51 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 		return r, ctx.Err()
 	}
 	printProgramLines(w, end.stderr)
-	// The lines count after a finished program and after one that reports a failed call or a
-	// bad input; for any other end they record nothing.
-	var lines submitLines
-	if end.startErr == "" && !end.timedOut && (end.exit == contracts.SubmitExitDone || end.exit == contracts.SubmitExitForge || end.exit == contracts.SubmitExitInput) {
-		lines = parseSubmitLines(end.stdout, r.System, input.Draft, append([]string{r.Base.Commit}, commits...))
-		for i, bad := range lines.Invalid {
-			if i == maxLeftOut {
-				break
-			}
-			fmt.Fprintf(w, textProgramLeftOut+"\n", bad.N, bad.Reason)
+	rec := contracts.ReadSubmitRun(contracts.SubmitEnd{Started: end.startErr == "", TimedOut: end.timedOut, Exit: end.exit},
+		end.stdout, r.System, input.Draft, append([]string{r.Base.Commit}, commits...))
+	for i, bad := range rec.Invalid {
+		if i == maxLeftOut {
+			break
 		}
+		fmt.Fprintf(w, textProgramLeftOut+"\n", bad.Line, bad.Reason)
 	}
-	r.CommitURL = lines.CommitURLs[r.Commit]
-	r.Base = &submission.Base{Commit: r.Base.Commit, Branch: r.Base.Branch, CommitURL: lines.CommitURLs[r.Base.Commit]}
+	r.CommitURL = rec.CommitURLs[r.Commit]
+	r.Base = &submission.Base{Commit: r.Base.Commit, Branch: r.Base.Branch, CommitURL: rec.CommitURLs[r.Base.Commit]}
 	r.Commits = slices.Clone(r.Commits)
 	for i, c := range r.Commits {
-		r.Commits[i].CommitURL = lines.CommitURLs[c.Commit]
+		r.Commits[i].CommitURL = rec.CommitURLs[c.Commit]
 	}
 	if !bytes.Equal(r.Draft, placeholder) {
 		return r, nil
 	}
+	if rec.Failed == nil {
+		if rec.Draft != nil {
+			draft, err := json.Marshal(rec.Draft)
+			if err != nil {
+				return r, err
+			}
+			r.Draft = draft
+		}
+		return r, nil
+	}
+	exit := 0
+	if rec.Failed.Exit != nil {
+		exit = *rec.Failed.Exit
+	}
 	switch {
-	case end.timedOut:
+	case rec.Failed.Reason == contracts.SubmitProgramTimeout:
 		fmt.Fprintf(w, textProgramTimeout+"\n", p.limitOrDefault())
-		r.Draft = submission.None(submission.NoneProgramTimeout, 0)
-	case end.startErr != "":
-		fmt.Fprintf(w, textProgramNoStart+"\n", shownText(end.startErr))
-		r.Draft = submission.None(submission.NoneProgramFailed, contracts.SubmitExitForge)
-	case end.exit == contracts.SubmitExitLogin:
+	case rec.Failed.Reason == contracts.SubmitLoginNeeded:
 		// The program printed the login command as the first line of its standard error, which
 		// the step has printed above. The branch stays pushed.
-		r.Draft = submission.None(submission.NoneLoginNeeded, contracts.SubmitExitLogin)
-	case end.exit < contracts.SubmitExitDone || end.exit > contracts.SubmitExitInput:
-		fmt.Fprintf(w, textProgramFailed+"\n", end.exit)
-		r.Draft = submission.None(submission.NoneProgramFailed, contracts.SubmitExitForge)
-	case lines.Draft != nil:
-		draft, err := json.Marshal(lines.Draft)
-		if err != nil {
-			return r, err
-		}
-		r.Draft = draft
+	case end.startErr != "":
+		fmt.Fprintf(w, textProgramNoStart+"\n", shownText(end.startErr))
 	case end.exit == contracts.SubmitExitDone:
 		fmt.Fprintf(w, textProgramNoDraft+"\n", end.exit)
-		r.Draft = submission.None(submission.NoneProgramFailed, contracts.SubmitExitDone)
 	default:
 		fmt.Fprintf(w, textProgramFailed+"\n", end.exit)
-		r.Draft = submission.None(submission.NoneProgramFailed, end.exit)
 	}
+	r.Draft = submission.None(rec.Failed.Reason, exit)
 	return r, nil
 }
 
@@ -196,15 +193,6 @@ func (p *submitProgram) input(document *submission.Submission, r submission.Repo
 	}
 	in.DescriptionFile = file
 	return in, nil
-}
-
-// pullRequest is the draft pull request of a repository, as the submission format has it.
-type pullRequest struct {
-	Number int    `json:"number"`
-	URL    string `json:"url"`
-	Title  string `json:"title"`
-	State  string `json:"state"`
-	Action string `json:"action"`
 }
 
 // run starts the program in dir, outside the wall, with the person's environment and the
