@@ -580,7 +580,9 @@ release may change what an existing document does, and states it under Upgrading
   without one.` A git source that is not https in a run from a control plane stops with
   the fix alone on line 1, `use an https URL for <source> in <file>.`; the example URL
   and the cause follow on lines 2 and 3, and for ssh the cause is `ssh would sign in
-  with your private keys in ~/.ssh, outside the gateway.` The help of `qory access-key
+  with your private keys in ~/.ssh, outside the gateway.` With a hidden harness, line 1
+  is `use an https URL for <source>, then take the work item in again.` and line 2 the
+  cause. The help of `qory access-key
   enrol` says "this machine's access key", and that enrol stops with an error when
   `access-key-secret` exists. `docs/run.md`, `docs/harness.md` and the harness contract
   README call the harness keys of a machine's `qory.yaml` "machine harness settings".

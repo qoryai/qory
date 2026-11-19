@@ -2507,8 +2507,9 @@ phrase:
 - `set the ref of <source> to a branch, tag or commit its repository has, then take the
   work item in again in Qory Apiary: the repository of <source> has no branch or tag by
   the ref it is set to; the code is used`, exit 2
-- `use an https URL for <source>, then take the work item in again in Qory Apiary: a run
-  from a control plane fetches git sources only over https; the code is used`, exit 2
+- `use an https URL for <source>, then take the work item in again.` on line 1, and
+  `A run from a control plane fetches git sources only over https; the code is used` on
+  line 2, exit 2
 - `correct exports.dir in the qory.yaml of <source>, or set <source> to a ref whose
   repository has the folder of <export>, then take the work item in again in Qory Apiary:
   <source> exports <export> at a folder that is not there; the code is used`, exit 2
