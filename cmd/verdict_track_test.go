@@ -195,6 +195,54 @@ func TestRunVerdictShowsTheValueOfAWrongTrackID(t *testing.T) {
 	}
 }
 
+// TestRunVerdictMasksAKeyInAWrongTrackID shows a wrong id with a run key's prefix as a
+// phrase on line 2, so no part of the key reaches the output or the error, and a plain
+// wrong id quoted.
+func TestRunVerdictMasksAKeyInAWrongTrackID(t *testing.T) {
+	// A fake run key for the test: qrk_ and 40 letters.
+	const letters = "abcdefghijklmnopqrstuvwxyzabcdefghijklmn"
+	const runKey = "qrk_" + letters
+	const line1 = "Set --track to lower-case words joined by hyphens, such as small-change, at most 40 characters.\n"
+
+	for name, c := range map[string]struct{ id, want string }{
+		"run key":   {runKey, line1 + "  The value is (a value that contains a run key)."},
+		"plain bad": {"Small-change", line1 + `  The value is "Small-change".`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			inCheckout(t)
+			server := startRunAPI(t)
+
+			out, err := run(t, "run", "verdict", "passed", "--track", c.id, "--track-reason", trackReason)
+			wantExit(t, err, cmd.ExitInput, c.want)
+
+			if err == nil || err.Error() != c.want {
+				t.Errorf("err = %v, want %q", err, c.want)
+			}
+
+			if len(server.verdicts) != 0 {
+				t.Errorf("sent %q", server.verdicts)
+			}
+
+			if c.id != runKey {
+				return
+			}
+
+			// out is stdout and stderr together, and qory prints err on stderr.
+			for _, text := range []string{out, fmt.Sprint(err)} {
+				if strings.Contains(strings.ToLower(text), "qrk_") {
+					t.Errorf("the text has the key's prefix: %q", text)
+				}
+
+				for i := 0; i+6 <= len(letters); i++ {
+					if strings.Contains(text, letters[i:i+6]) {
+						t.Errorf("the text has %q of the key: %q", letters[i:i+6], text)
+					}
+				}
+			}
+		})
+	}
+}
+
 // TestRunVerdictExitsWith4ForARefusedVerdict gives each 422 invalid_artifact of the verdict
 // exit 4, with line 1 of at most 98 characters that has the fix, then Qory Apiary's text
 // on an indented line. Every other error keeps its status.
