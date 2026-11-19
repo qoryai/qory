@@ -19,17 +19,17 @@ release may change what an existing document does, and states it under Upgrading
 ### Added
 
 - `qory run` from a run code whose documents set `shared_run` runs one session after another,
-  until Qory Apiary ends the run. After each session, once the result of its full suite is
-  posted and its push step passed, qory sends the next-session request, and joins the next session with its workflow,
-  runtime, model settings, model key and time limit. Each session's harness is composed from
-  the run's sources at session 1's commits; a runtime is installed once per run; a Codex
-  session gets a new Codex home. The route to qory serves the session that runs, and the
-  harness report lists each session's runtime and tiers in `sessions`. qory sends the request
-  again for 10 minutes after no response, a refusal of the gateway's, Qory Apiary's
-  refusals with a status of 500 or above, and `rate_limited`; any other refusal of Qory
-  Apiary's closes the run `failed`. The steps before a later session need a wall and no
-  container of the run kept, and past the setup's limit they close the run `cancelled`
-  with `timeout`, exit 124.
+  until Qory Apiary ends the run. After each session, once the suite's result is posted and
+  the push step passed, qory sends the next-session request, and joins the next session with
+  its workflow, runtime, model settings, model key and time limit. Each session's harness is
+  composed from the run's sources at session 1's commits; a runtime is installed once per
+  run; a Codex session gets a new Codex home. The route to qory serves the session that runs,
+  and the harness report lists each session's runtime and tiers in `sessions`. qory sends
+  the request again for 10 minutes after no response, a refusal of the gateway's, Qory
+  Apiary's refusals with a status of 500 or above, and `rate_limited`; any other refusal of
+  Qory Apiary's closes the run `failed`. The steps before a later session need a wall and no
+  container of the run kept, and past the setup's limit they close the run `cancelled` with
+  `timeout`, exit 124.
 - A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
   the type whose launch version sets what the workflow's session may push. A module
   declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: one

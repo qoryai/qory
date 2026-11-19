@@ -2744,11 +2744,11 @@ limits. Each error starts with its fix:
 #### A run of several sessions
 
 A run whose documents set `shared_run` to `true` runs one session after another on its
-checkout and its branch, until Qory Apiary ends it. After each session, once the result of
-the session's full suite is posted and its push step passed, qory sends the next-session request over the gateway's
-link: the session's number, the state the session ended in, and its reason. qory sends no
-request after a session that paused, that a stop ended, that did not join, or whose push step
-failed or found the run ended; the run closes as that session ended.
+checkout and its branch, until Qory Apiary ends it. After each session, once the suite's
+result is posted and the push step passed, qory sends the next-session request over the
+gateway's link: the session's number, the state the session ended in, and its reason. qory
+sends no request after a session that paused, that a stop ended, that did not join, or whose
+push step failed or found the run ended; the run closes as that session ended.
 
 The next-session answer is the end of the run or the next session: its workflow, its
 runtime and model settings, its model key (`model_credential`), its time limit, `full_suite`
@@ -2769,30 +2769,29 @@ qory prints `qory run: session <n> starts the workflow <workflow> on <runtime>`,
 
 The steps before a later session have the setup's limit of 30 minutes from their start. A
 later session's steps past that limit close the run `cancelled` with the reason `timeout`,
-exit 124, as session 1's setup does.
-The report beside the home, `<home>-report.json`, lists each session's number, runtime and
-tier map in `sessions`.
+exit 124, as session 1's setup does. The report beside the home, `<home>-report.json`,
+lists each session's number, runtime and tier map in `sessions`.
 
 qory composes, installs and runs git for the next session only with proof that the session's
 processes stopped: the run has a wall, and no container of the run is kept. Without that
 proof the run closes `failed` before the next session, a run without a push step too, with
 a line that ends `so session <n> does not start; the code is used`. A read run with no wall
 has no such proof, so it ends after session 1 when Qory Apiary starts a session 2. A push
-between two sessions needs the same proof; without it the push step fails
-with `take the work item in again in Qory Apiary: a container of the session may still run
+between two sessions needs the same proof; without it the push step fails with `take the
+work item in again in Qory Apiary: a container of the session may still run
 and write the working folder, so qory pushed nothing`.
 
 qory sends the next-session request again after no response, a refusal of the gateway's, a
 status of 500 or above or 429 with no refusal, any refusal of Qory Apiary's with a status of
-500 or above, and Qory Apiary's `rate_limited` (429). The first wait is 1 s, and each wait doubles up to 1 minute, for 10
-minutes in all. The link has no `Retry-After`, so every wait doubles. Then:
+500 or above, and Qory Apiary's `rate_limited` (429). The first wait is 1 s, and each wait
+doubles up to 1 minute, for 10 minutes in all. The link has no `Retry-After`, so every wait
+doubles. Then:
 
 - Qory Apiary's `run_ended`, or a run that is already closed: qory prints `qory run: Qory
   Apiary ended this run, so qory pushes nothing more and no later session starts.`, or the
   line of the gateway's end (see [The push step of a write
   run](#the-push-step-of-a-write-run)), and closes the run as the session ended.
-- Every other refusal of Qory Apiary's, below 500 and other than `rate_limited`, a status
-  below 500 with no refusal, other than 429,
+- Every other refusal of Qory Apiary's, a status below 500 other than 429 with no refusal,
   no answer after 10 minutes, or an answer outside `next-session-answer.schema.json`: the
   run closes `failed`, exit 1, with a line that starts with its fix, such as `qory run:
   Contact support: the next-session request after session <n> failed.`, then `Qory Apiary

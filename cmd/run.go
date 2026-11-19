@@ -1504,8 +1504,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// run's first join, one more than the last session's after it. The route serves that
 			// number during the join. qory predicts it: Forager gives a session's number only in
 			// its join's result, once the session ended. A session the gateway numbered
-			// otherwise ends the run after its join, see [textSessionNumber], so its requests
-			// got 503 from the route.
+			// otherwise got 503 from the route for its requests, and ends the run failed after
+			// its join, see [textSessionNumber].
 			number := 1
 			var res *session.Result
 			var out session.Outcome

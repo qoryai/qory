@@ -52,8 +52,8 @@ type nextSender func(ctx context.Context, body []byte) ([]byte, error)
 //     Apiary's, an answer outside its schema, or no answer after nextSessionLimit. The run
 //     then closes failed.
 //
-// A request with no response, a refusal of the gateway's, and Qory Apiary's rate_limited and
-// unavailable are sent again, see [retryNext].
+// A request with no response, a refusal of the gateway's, and a refusal of Qory Apiary's
+// with a status of 500 or above or the code rate_limited are sent again, see [retryNext].
 func askNextSession(ctx context.Context, send nextSender, session int, out session.Outcome) (contracts.NextSessionAnswer, string, error) {
 	body, err := provisioner.NextSessionBody(session, out.State, out.Reason)
 	if err != nil {
@@ -98,8 +98,9 @@ func unreadAnswer(err error) string {
 }
 
 // nextRetried are the codes of Qory Apiary's refusals of the next-session request that
-// qory sends again: rate_limited, a 429, and unavailable, a 503 for a step Qory Apiary did
-// not store. Every other code of Qory Apiary's ends the run, see [nextRefused].
+// qory sends again at any status: rate_limited, a 429, and unavailable, a 503 for a step Qory
+// Apiary did not store. A refusal below 500 with any other code ends the run, see
+// [nextRefused].
 //
 // shortcut: code strings match next-session-refusal.schema.json at integrations e4bf534a; add
 // a schema check after the repin.
@@ -107,12 +108,12 @@ var nextRetried = []string{"rate_limited", "unavailable"}
 
 // retryNext reports whether the next-session request is sent again after err, the one place
 // that reads a refusal's code: a refusal of Qory Apiary's with a status of 500 or above,
-// whatever its code, or with a code of [nextRetried]; and,
-// as a transport error, every refusal of the gateway's and a request with no response. A
-// status with no coded refusal, a [*server.StatusError], is sent again as [retryPushed] has
-// it: a status of 500 or above, such as the gateway's 503 while it reopens the run, and
-// 429. Any other such status ends the run. An error that wraps [session.ErrRunClosed] is
-// not sent again: the run sent nothing and is closed, which [runEndedLine] reads first.
+// whatever its code, or with a code of [nextRetried]; and, as a transport error, every
+// refusal of the gateway's and a request with no response. A status with no coded refusal,
+// a [*server.StatusError], is sent again as [retryPushed] has it: a status of 500 or above,
+// such as the gateway's 503 while it reopens the run, and 429. Any other such status ends
+// the run. An error that wraps [session.ErrRunClosed] is not sent again: the run sent
+// nothing and is closed, which [runEndedLine] reads first.
 func retryNext(err error) bool {
 	var refusal *accesskey.Refusal
 	if errors.As(err, &refusal) && refusal.Status != 0 {
