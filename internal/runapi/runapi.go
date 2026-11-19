@@ -249,13 +249,15 @@ type Approval struct {
 	At        string  `json:"at"`
 }
 
-// Push is the body of a new version of an artifact. Name and Note are left out of the
-// request when they are empty, and the run API then uses the name `main`. Withdraw
-// makes the version a withdrawal, which has no Files.
+// Push is the body of a new version of an artifact. Name, Note and Decision are left out
+// of the request when they are empty, and the run API then uses the name `main`.
+// Decision is the id of the person's note on the work item that asked for the version.
+// Withdraw makes the version a withdrawal, which has no Files.
 type Push struct {
 	Type     string     `json:"type"`
 	Name     string     `json:"name,omitempty"`
 	Note     string     `json:"note,omitempty"`
+	Decision string     `json:"decision,omitempty"`
 	Withdraw bool       `json:"withdraw,omitempty"`
 	Files    []PushFile `json:"files"`
 }

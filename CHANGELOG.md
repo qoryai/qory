@@ -38,6 +38,10 @@ release may change what an existing document does, and states it under Upgrading
   module of the checkout's `qory.yaml`, 1 for a module of its base stack). With no note it
   is `{"notes": []}`. It is not the `notes.json` of a push check. See "Notes" in
   `docs/harness.md`.
+- `qory artifact push --decision <note id>` sends the id of the person's note that asked
+  for the version, such as a request for changes, a move or an escalation, as `decision`
+  in `POST artifacts`. A withdrawal takes it too. `qory artifact push` exits 4 for a 422
+  `unknown_decision`, with the fix on line 1. Outside a run, the store keeps no decision.
 - `qory run verdict` proposes a track for the work item: `--track <id>` is the id of a
   track that the gate of the run's stage offers, and `--track-reason <text>` is the
   reason, one sentence on one line of 1 to 300 characters. Pass both or neither. A track's
