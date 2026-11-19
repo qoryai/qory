@@ -52,9 +52,10 @@ release may change what an existing document does, and states it under Upgrading
   phrase in its place, as for `--decision`. Outside a run, the kept `verdict.json` has
   the track. `qory run verdict` exits 4 for every 422 `invalid_artifact` from Qory
   Apiary, such as a track that the gate does not offer, a point about a question that is
-  not open, or a verdict that breaks the schema. Line 1 of the error is the fix, with at most 98 characters, and
-  Qory Apiary's text follows on line 2. `qory artifact push` still exits 1 for
-  `invalid_artifact`. See The verdict format in `contracts/harness/v1/README.md`.
+  not open, or a verdict that breaks the schema. Line 1 of the error is the fix, with at
+  most 98 characters, and Qory Apiary's text follows on line 2. `qory artifact push`
+  still exits 1 for `invalid_artifact`. See The verdict format in
+  `contracts/harness/v1/README.md`.
 - After each push of its push step, qory reports the repositories the push moved to Qory
   Apiary, one entry for each repository with `system`, `path` and the full head commit, in
   push order, at most 64 in a call and at most 65536 bytes in a body. qory sends the report
