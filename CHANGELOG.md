@@ -779,6 +779,10 @@ release may change what an existing document does, and states it under Upgrading
   cancelled gets no folder. The start commit of a run skips a cancelled version of the
   artifact `branch` too. Before, all three took the newest version, cancelled or not. An
   index without the field `cancelled` reads as no version cancelled.
+- qory builds with Forager 5e9ca86d and integrations ed99eedd. In a run configuration
+  from a control plane, the run's model key is `default_model_provider_credential_name`,
+  which was `model_credential`, and each API credential has a `group`. In the
+  next-session answer, a session's model key is `model_provider_credential_name`.
 - qory builds with Forager 92ccf768. The gateway does not start when a machine
   credential in `forager.yaml` has a path in `paths` that matches no request, such as a
   path with a `.` or `..` segment, and its line has the path. A run that the gateway
