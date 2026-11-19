@@ -35,9 +35,9 @@ release may change what an existing document does, and states it under Upgrading
   the stack.` and an `escalate` verdict. The other texts of a suite that did not start name the
   plan type, such as `the work item has no usable <type>`, not the build plan. A run whose
   documents set `full_suite` and whose workflow has `write-no-push` access stops before the
-  join with `Remove full_suite from the run settings of workflow <name>, or give the stack a plan
-  for its full suite.` and `The run did not start: <name> has write-no-push access and no plan to
-  read the full suite from, and the code is used.`
+  join with `Remove full_suite from the run settings, or add a full-suite plan to the stack.` and
+  `The run did not start: <name> has write-no-push access and no plan to read the full suite
+  from, and the code is used.`
 - A skill with the frontmatter keys `notes_for` (a role or a list of roles) and `paths` (one
   glob or more from the checkout root) is a note. The compose exits 2, with the fix as
   line 1, for a note with any of these:

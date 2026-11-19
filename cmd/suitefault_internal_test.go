@@ -10,9 +10,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // launchFaultRun opens the suite of a walled write run with full_suite true, whose build plan is
@@ -335,5 +337,25 @@ func TestAnUnreadableStatusFileUnderTheCapIsNotStarted(t *testing.T) {
 	want := `{"verdict":"escalate","points":[{"text":"The full suite did not start: the after step used its 7 minutes before the command.","action":"run_again"}]}`
 	if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != want {
 		t.Errorf("posted %q, want %s", posted, want)
+	}
+}
+
+// TestTheFullSuiteRefusalHasAFixLineThatNoNameLengthens: line 1 of the refusal of full_suite on
+// a write-no-push workflow is the fix and has no workflow name, so with the mark "✗ " it has 81
+// characters for a workflow of 24 characters and for one of 64; line 2 has the name.
+func TestTheFullSuiteRefusalHasAFixLineThatNoNameLengthens(t *testing.T) {
+	for _, name := range []string{"a", strings.Repeat("w", 24), strings.Repeat("w", 64)} {
+		workflows := map[string]stack.Workflow{name: {Access: stack.AccessWriteNoPush}}
+		err := fullSuiteNoPlan(&codeRun{workflow: name, fullSuite: true}, workflows)
+		if err == nil {
+			t.Fatalf("the workflow %q is not refused", name)
+		}
+		line1, line2, _ := strings.Cut(err.Error(), "\n")
+		if got := utf8.RuneCountInString("✗ " + line1); got != 81 || got > 100 {
+			t.Errorf("line 1 with the mark has %d characters, want 81: %q", got, line1)
+		}
+		if want := "  The run did not start: " + name + " has write-no-push access and no plan to read the full suite from, and the code is used."; line2 != want {
+			t.Errorf("line 2 is %q, want %q", line2, want)
+		}
 	}
 }
