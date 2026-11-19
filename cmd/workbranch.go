@@ -25,8 +25,9 @@ const (
 // before the fetch: nil with no branch step, for a run that is not from a run code, has
 // no work item, or has no target version on the system of its repositories, and for a
 // server with the feature workflow_model off. Each error ends with [codeUsed]. It sets
-// r.runNumber from the work item snapshot.
-func (r *codeRun) readBranch(ctx context.Context, run openedRun, timeout time.Duration, opened time.Time) (*preparation.WorkBranch, error) {
+// r.runNumber from the work item snapshot. The reads end at deadline, the run's time
+// limit, and have no such end when deadline is zero.
+func (r *codeRun) readBranch(ctx context.Context, run openedRun, deadline time.Time) (*preparation.WorkBranch, error) {
 	if r == nil || r.workItem == "" || r.target.Version == "" || r.target.System != run.System() {
 		return nil, nil
 	}
@@ -44,10 +45,10 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, timeout time.Du
 	ctx, cancel := context.WithTimeout(ctx, runAPITimeout)
 	defer cancel()
 
-	if timeout > 0 {
+	if !deadline.IsZero() {
 		var stop context.CancelFunc
 
-		ctx, stop = context.WithDeadline(ctx, opened.Add(timeout))
+		ctx, stop = context.WithDeadline(ctx, deadline)
 		defer stop()
 	}
 

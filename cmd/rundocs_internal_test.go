@@ -752,3 +752,25 @@ func TestFullSuiteOfTheDocumentsIsTheRunsFullSuite(t *testing.T) {
 		}
 	}
 }
+
+// TestALaterSessionStartGivesALaterDeadline is [sessionDeadline] for session 1, whose clock
+// starts at the run's open, and for a later session, whose clock starts when it starts:
+// each deadline is its start plus its limit, so a later start gives a later deadline. A
+// limit of 0 gives no deadline.
+func TestALaterSessionStartGivesALaterDeadline(t *testing.T) {
+	opened := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
+	first := sessionDeadline(opened, 30*time.Minute)
+	if want := opened.Add(30 * time.Minute); !first.Equal(want) {
+		t.Errorf("session 1 ends at %v, want %v", first, want)
+	}
+	second := sessionDeadline(first.Add(5*time.Minute), 60*time.Minute)
+	if want := opened.Add(95 * time.Minute); !second.Equal(want) {
+		t.Errorf("session 2 ends at %v, want %v", second, want)
+	}
+	if !second.After(first) {
+		t.Errorf("session 2 ends at %v, not after session 1 at %v", second, first)
+	}
+	if got := sessionDeadline(opened, 0); !got.IsZero() {
+		t.Errorf("a session with no limit ends at %v, want no deadline", got)
+	}
+}

@@ -717,7 +717,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				writeMachineStep(run, machineSteps, said)
 			}
 			// The run's time limit counts from its open: the compose and the session.
+			// deadline is session 1's, whose clock starts at the open, see [sessionDeadline].
 			opened := time.Now()
+			deadline := sessionDeadline(opened, timeout)
 			// closeRun closes the run with out, and returns what the close came to, nil when
 			// it failed, which Forager's line says.
 			closeRun := func(out session.Outcome) *session.Closed {
@@ -903,7 +905,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			// stopped reports whether qory run was stopped or ran out of time.
 			stopped := func() bool {
-				return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
+				return ctx.Err() != nil || timeout > 0 && !time.Now().Before(deadline)
 			}
 			// branch is the branch of the run's work item, set by hostWork, nil for none.
 			var branch *preparation.WorkBranch
@@ -920,7 +922,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			makeCopy := func() error {
 				copyCtx, cancel := ctx, func() {}
 				if timeout > 0 {
-					copyCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+					copyCtx, cancel = context.WithDeadline(ctx, deadline)
 				}
 				defer cancel()
 				ref := ""
@@ -946,7 +948,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			installWork := func() error {
 				installCtx, cancel := ctx, func() {}
 				if timeout > 0 {
-					installCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+					installCtx, cancel = context.WithDeadline(ctx, deadline)
 				}
 				defer cancel()
 				var machine runtimeinstall.Machine
@@ -992,7 +994,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			hostWork := func() error {
 				if run.Repositories() != "" {
 					var err error
-					if branch, err = fromCode.readBranch(ctx, run, timeout, opened); err != nil {
+					if branch, err = fromCode.readBranch(ctx, run, deadline); err != nil {
 						return &runLineError{err}
 					}
 					err = inStep(run, streams.errOut, event.StepFetch, fetchStepNameOn(branch, fromCode, runValues(run)), stopped, func(w io.Writer) error {
@@ -1005,7 +1007,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						defer h.close()
 						fetchCtx, cancel := ctx, func() {}
 						if timeout > 0 {
-							fetchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+							fetchCtx, cancel = context.WithDeadline(ctx, deadline)
 						}
 						defer cancel()
 						target := fromCode.fetchTarget()
@@ -1077,7 +1079,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if walled {
 					loadCtx, cancel := ctx, func() {}
 					if timeout > 0 {
-						loadCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+						loadCtx, cancel = context.WithDeadline(ctx, deadline)
 					}
 					done, err := checks.load(loadCtx, run, at.home, spec.RunID, &spec, remote || server != nil && !local)
 					cancel()
@@ -1100,7 +1102,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if branch != nil {
 					switchCtx, cancel := ctx, func() {}
 					if timeout > 0 {
-						switchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+						switchCtx, cancel = context.WithDeadline(ctx, deadline)
 					}
 					defer cancel()
 					if err := preparation.Switch(switchCtx, cwd, os.Environ(), branch, stderr); err != nil {
@@ -1133,7 +1135,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			setupWork := func() error {
 				setupCtx, cancel := ctx, func() {}
 				if timeout > 0 {
-					setupCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+					setupCtx, cancel = context.WithDeadline(ctx, deadline)
 				}
 				defer cancel()
 				err := runSetup(setupCtx, run, &spec, copied != nil && !copied.plain && !copied.readOnly)
@@ -1162,7 +1164,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			removeSetupWork := func() error {
 				removeCtx, cancel := ctx, func() {}
 				if timeout > 0 {
-					removeCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+					removeCtx, cancel = context.WithDeadline(ctx, deadline)
 				}
 				defer cancel()
 				return removeSetup(removeCtx, run)
@@ -1175,7 +1177,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			imageWork := func() error {
 				imageCtx, cancel := ctx, func() {}
 				if timeout > 0 {
-					imageCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+					imageCtx, cancel = context.WithDeadline(ctx, deadline)
 				}
 				defer cancel()
 				return withEngineLock(imageCtx, spec.engineProxyFile, code != nil, func() error {
@@ -1189,7 +1191,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			recordSetupWork := func() error {
 				recordCtx, cancel := ctx, func() {}
 				if timeout > 0 {
-					recordCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+					recordCtx, cancel = context.WithDeadline(ctx, deadline)
 				}
 				defer cancel()
 				if copied == nil {
@@ -1205,7 +1207,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			// A run stopped or out of time before its session joins prepares nothing more.
 			var prepErr error
-			if ctx.Err() == nil && (timeout == 0 || time.Since(opened) < timeout) {
+			if ctx.Err() == nil && (timeout == 0 || time.Now().Before(deadline)) {
 				prepErr = hostWork()
 				if prepErr == nil && walled {
 					prepErr = imageWork()
@@ -1229,7 +1231,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			left := time.Duration(0)
 			if timeout > 0 {
-				left = timeout - time.Since(opened)
+				left = time.Until(deadline)
 			}
 			switch {
 			case ctx.Err() != nil:
@@ -1300,7 +1302,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			out := sessionOutcome(res, err)
 			var suiteLimit time.Time
 			if timeout > 0 {
-				suiteLimit = opened.Add(timeout)
+				suiteLimit = deadline
 			}
 			out, suiteErr := suites.after(ctx, again, suiteLimit, res, out)
 			// pushWork is the push step of a run with an agent session that may write, see
@@ -1374,7 +1376,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if pushes {
 				var limit time.Time
 				if timeout > 0 {
-					limit = opened.Add(timeout)
+					limit = deadline
 				}
 				push := &sessionPush{
 					ctx: ctx, again: again, limit: limit, stopNow: stopNow,

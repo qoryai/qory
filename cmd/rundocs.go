@@ -481,6 +481,17 @@ func (r *codeRun) timedOutLine(limit time.Duration, runtime string) string {
 const textTimedOutFromCode = "set a longer Time limit for the run's workflow on the Workflows page in Qory Apiary\n" +
 	"the run of the workflow %s was cancelled at its time limit of %s, before %s started"
 
+// sessionDeadline is the time at which a session whose clock starts at start reaches its
+// time limit, limit, and the zero time for a limit of 0, no limit. Session 1's clock
+// starts at the run's open, so its compose counts. A later session's clock starts when
+// that session starts.
+func sessionDeadline(start time.Time, limit time.Duration) time.Time {
+	if limit <= 0 {
+		return time.Time{}
+	}
+	return start.Add(limit)
+}
+
 // sessionMinute is a minute of the documents' time_limit_minutes; a test sets a shorter one.
 var sessionMinute = time.Minute
 
