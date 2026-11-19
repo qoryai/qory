@@ -539,11 +539,12 @@ func TestARegistryThatKeepsReturning503StopsAtTheSetupLimit(t *testing.T) {
 }
 
 // TestAnImageFetchPastTheSetupLimitEndsTheRun is a dispatched walled run whose image's
-// fetch waits until its context ends, with a setup limit of 1 second and a --timeout of
-// 1h: the fetch ends at the setup's limit, the run closes cancelled with timeout and 124,
-// no session joins, and the line is the cause alone, which names the image's fetch.
+// fetch waits until its context ends, with a setup limit of 5 seconds, which leaves the
+// steps before the fetch time under load, and a --timeout of 1h: the fetch ends at the
+// setup's limit, the run closes cancelled with timeout and 124, no session joins, and the
+// line is the cause alone, which names the image's fetch.
 func TestAnImageFetchPastTheSetupLimitEndsTheRun(t *testing.T) {
-	defer cmd.SetSetupLimit(time.Second)()
+	defer cmd.SetSetupLimit(5 * time.Second)()
 	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
 	reg.PublishPlain("2.1.320")
 	var cut error
@@ -560,7 +561,7 @@ func TestAnImageFetchPastTheSetupLimitEndsTheRun(t *testing.T) {
 	if !errors.Is(cut, context.DeadlineExceeded) {
 		t.Errorf("the image's fetch ended with %v, want the setup's deadline", cut)
 	}
-	wants(t, r.out, "✗ the run was cancelled during the fetch of the run's image:\n  the steps before claude starts may take at most 1s\nqory run: the record is in ")
+	wants(t, r.out, "✗ the run was cancelled during the fetch of the run's image:\n  the steps before claude starts may take at most 5s\nqory run: the record is in ")
 	lacks(t, r.out, "pull the run's image", "Qory Apiary")
 	if len(r.closes) != 1 || r.closes[0].State != event.StateCancelled || r.closes[0].Reason != event.ReasonTimeout || r.closes[0].ExitCode != 124 {
 		t.Errorf("the closes: %+v, want one cancelled with timeout and 124", r.closes)
