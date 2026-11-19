@@ -1718,6 +1718,9 @@ type openedRun interface {
 	// link of the run's gateway and returns the answer's body; see
 	// [session.Run.PushedCommits]. The run API's client does not reach this route.
 	PushedCommits(ctx context.Context, body []byte) ([]byte, error)
+	// NextSession sends the next-session request after a session, over the link of the
+	// run's gateway, and returns the answer's body; see [session.Run.NextSession].
+	NextSession(ctx context.Context, body []byte) ([]byte, error)
 	// Image is the image chosen at the run's open, the zero Image with no wall or when
 	// the gateway's run answer has no image; a walled run with no image fails at the open.
 	Image() session.Image
