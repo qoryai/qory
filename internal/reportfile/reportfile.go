@@ -92,12 +92,14 @@ func (e *Error) Unwrap() error { return e.Err }
 
 // Read reads the file at rel below root, of at most limit bytes. root is the folder that
 // qory made for the file, an absolute and clean path that the caller resolved when it made
-// the folder; rel is a clean path below it, with no "..". Read checks root and each folder
-// from root down to the file for a link, never resolves rel, and opens the file through
-// os.Root with no link followed: a link there is an [Error] with [Link]. A folder above root
-// may be a link, such as /var on macOS. A file with a second hard link is [HardLink]. A
-// file that is not regular is [NotRegular], also when it turns into one between the check
-// and the open, and the open does not wait on a FIFO.
+// the folder; rel is a clean path below it, with no "..". Read never resolves rel. With
+// Lstat, it checks root and each folder from root down to the file for a link, and a link
+// is an [Error] with [Link]. It opens the file through os.Root, which lets no link leave
+// root but follows one that stays inside it, so the guard is the Lstat before the open and
+// the SameFile check after it. A folder above root may be a link, such as /var on macOS.
+// A file with a second hard link is [HardLink]. A file that is not regular is
+// [NotRegular], also when it turns into one between the check and the open, and the open
+// does not wait on a FIFO.
 func Read(root, rel string, limit int64) ([]byte, error) {
 	fail := func(c Cause, err error) ([]byte, error) {
 		return nil, &Error{Path: root + string(filepath.Separator) + rel, Cause: c, Limit: limit, Err: err}
