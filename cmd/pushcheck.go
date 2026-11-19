@@ -175,6 +175,35 @@ func (p *runPushChecks) load(ctx context.Context, run openedRun, home, runID str
 	return func() { os.RemoveAll(checker.Dir) }, nil
 }
 
+// next makes the checks follow a later session of the run, whose home qory run composed
+// again at home, after [runPushChecks.load] and [runPushChecks.set] ran for session 1: the
+// checker reads the push checks of that home and the session's inputs.json, which
+// [runPushChecks.inputs] and [runPushChecks.inputsData] have by now. No session runs in
+// between, so no check reads the checker while it changes. A run whose session 1 loaded no
+// checker loads one and sets it here; the check that set turns on reads the checker of the
+// latest session.
+func (p *runPushChecks) next(ctx context.Context, run openedRun, home, runID string, spec *runSpec, controlPlane bool) (done func(), err error) {
+	c := p.current()
+	if c == nil {
+		if done, err = p.load(ctx, run, home, runID, spec, controlPlane); err != nil {
+			return done, err
+		}
+		return done, p.set(run)
+	}
+	checks, err := loadPushChecks(home)
+	var unread *pushcheck.UnreadError
+	if p.fromCode && errors.As(err, &unread) {
+		return func() {}, fmt.Errorf(textChecksUnreadFromCode, unread.File, unread.Cause)
+	}
+	if err != nil {
+		return func() {}, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	c.Checks, c.Inputs, c.InputsData = checks, p.inputs, p.inputsData
+	return func() {}, nil
+}
+
 // pushChecker is the checker of [runPushChecks.load], nil for a home with no push check
 // and for a run with no control plane, which has no run API and takes no push. fromCode
 // is a run from a run code, see [checksStop].

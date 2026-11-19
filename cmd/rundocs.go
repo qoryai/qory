@@ -108,11 +108,24 @@ type codeRun struct {
 	named    *source.Named
 	workflow string
 	inputs   []byte
-	// fullSuite is the documents' full_suite: whether session 1 runs the full suite.
+	// fullSuite is the documents' full_suite: whether session 1 runs the full suite, and
+	// for a later session, the full_suite of its next-session answer.
 	fullSuite bool
-	minutes   int
-	hidden    bool
-	target    preparation.Target
+	// harnessDoc is the documents' harness document, which [codeRun.next] writes again
+	// for the runtime of a later session; nil for none.
+	harnessDoc *contracts.HarnessDocument
+	// runSettings is the documents' run_settings, whose runtime a later session with no
+	// runtime of its own runs on.
+	runSettings *contracts.RunSettings
+	// shared is the documents' shared_run: qory sends the next-session request after each
+	// session and runs the session that the answer sets.
+	shared bool
+	// modelCredential is the model key the session joins with, the model_credential of a
+	// later session's next-session answer; "" for the run's start key, as session 1 has.
+	modelCredential string
+	minutes         int
+	hidden          bool
+	target          preparation.Target
 	// access is what the run may do on its target, from the documents' access: read,
 	// write, or write-no-push (a writable checkout with no push step). It is empty when
 	// the documents have no target.
@@ -186,28 +199,20 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if !slices.Contains(runRuntimes(), runtime) {
 		return nil, notRunRuntime(runtime)
 	}
-	var harness []byte
-	defines := doc.Harness != nil && doc.Harness.Harness.Extends == nil
 	if doc.Harness != nil {
 		if err := harnessChecked(doc.Harness, hidden); err != nil {
 			return nil, err
 		}
-		section := withoutTimeLimits(doc.Harness.Harness)
-		var written any = contracts.HarnessDocument{Harness: section}
-		if defines {
-			written = definedHarness{Harness: definedSection{HarnessSection: section, Target: definedTarget{Runtime: runtime}}}
-		}
-		var err error
-		if harness, err = json.MarshalIndent(written, "", "  "); err != nil {
-			return nil, fmt.Errorf("update qory: qory could not write the harness of the response to the run code: %v%s", err, codeUsed)
-		}
-		harness = append(harness, '\n')
+	}
+	harness, err := harnessFor(doc.Harness, runtime)
+	if err != nil {
+		return nil, err
 	}
 	target := preparation.Target{FromCode: true}
 	if doc.Target != nil {
 		target.System, target.Path, target.Version = doc.Target.System, doc.Target.Path, doc.TargetVersion
 	}
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: doc.FullSuite, hidden: hidden, target: target, access: doc.Access}
+	r := &codeRun{runtime: runtime, settings: settings, harness: harness, harnessDoc: doc.Harness, runSettings: doc.RunSettings, shared: doc.SharedRun, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: doc.FullSuite, hidden: hidden, target: target, access: doc.Access}
 	if doc.WorkItem != nil {
 		r.workItem = doc.WorkItem.ID
 	}
@@ -216,6 +221,48 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	}
 	r.submit = doc.Submit
 	return r, nil
+}
+
+// harnessFor is h, the documents' harness document, as qory writes it for a session of
+// runtime, nil for no document: its workflows with no time_limit, and, for a section that
+// defines a stack, target.runtime set to runtime.
+func harnessFor(h *contracts.HarnessDocument, runtime string) ([]byte, error) {
+	if h == nil {
+		return nil, nil
+	}
+	section := withoutTimeLimits(h.Harness)
+	var written any = contracts.HarnessDocument{Harness: section}
+	if section.Extends == nil {
+		written = definedHarness{Harness: definedSection{HarnessSection: section, Target: definedTarget{Runtime: runtime}}}
+	}
+	harness, err := json.MarshalIndent(written, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("update qory: qory could not write the harness of the response to the run code: %v%s", err, codeUsed)
+	}
+	return append(harness, '\n'), nil
+}
+
+// next makes r the run of the session that a, a next-session answer of Qory Apiary's,
+// starts: its runtime and compose flags, from a's model choice, else the runtime of the
+// documents' run settings, see [provisioner.SettingsOf]; its model key, workflow,
+// inputs, time limit and full_suite; and the harness document written for its runtime.
+// A runtime that a run code does not run on, and inputs that [checkInputs] stops, stop
+// the session before anything of it starts.
+func (r *codeRun) next(a contracts.NextSessionAnswer) error {
+	runtime, settings := provisioner.SettingsOf(a.ModelChoice, r.runSettings)
+	if !slices.Contains(runRuntimes(), runtime) {
+		return notRunRuntime(runtime)
+	}
+	if err := checkInputs(a.Inputs); err != nil {
+		return err
+	}
+	harness, err := harnessFor(r.harnessDoc, runtime)
+	if err != nil {
+		return err
+	}
+	r.runtime, r.settings, r.harness, r.modelCredential = runtime, settings, harness, a.ModelCredential
+	r.workflow, r.inputs, r.minutes, r.fullSuite = a.Workflow, a.Inputs, a.TimeLimitMinutes, a.FullSuite
+	return nil
 }
 
 // writes reports whether the documents of the run r give it the access to write and push
@@ -376,6 +423,25 @@ func (r *codeRun) apply(cmd *cobra.Command) error {
 		}
 	}
 	return nil
+}
+
+// applyTo sets the compose flags of r on o for a later session of the run, as [codeRun.apply]
+// sets them on the command for session 1: each flag that r's settings do not set is
+// cleared, so no model, effort or tier of an earlier session carries over.
+func (r *codeRun) applyTo(o *composeOptions) {
+	o.model, o.effort, o.tiers, o.tierEfforts = "", "", nil, nil
+	for _, s := range r.settings {
+		switch s.Flag {
+		case "model":
+			o.model = s.Value
+		case "effort":
+			o.effort = s.Value
+		case "tier":
+			o.tiers = append(o.tiers, s.Value)
+		case "tier-effort":
+			o.tierEfforts = append(o.tierEfforts, s.Value)
+		}
+	}
 }
 
 // givenMount is a mount of a walled run that wall.mounts in forager.yaml or --mount

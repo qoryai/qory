@@ -190,6 +190,9 @@ type sessionPush struct {
 	// [preparation.Push]: true for a walled run.
 	agentStopped bool
 	checks       *runPushChecks
+	// shared is whether the run's documents set shared_run, so a later session may follow
+	// the push: the push then needs [agentStopProof].
+	shared bool
 	// ended is the line that says the report of pushed commits found the run over, Qory
 	// Apiary's run_ended or the gateway's 410, see [runEndedLine]: no later push and no later
 	// session of the run goes on. It is "" while the run goes on. A loop over the run's
@@ -208,6 +211,13 @@ type sessionPush struct {
 func (p *sessionPush) after(ending *pushEnding, out session.Outcome) (session.Outcome, error) {
 	if p.ended != "" {
 		return out, nil
+	}
+	if p.shared {
+		if err := agentStopProof(p.agentStopped, p.run.ContainerKept()); err != nil {
+			ending.noStep = true
+			ending.settle(p.stopNow())
+			return ending.outcome(err), err
+		}
 	}
 	ctx, cancel := pushContext(p.ctx, p.again, p.limit, pushTimes.limit, pushTimes.signal)
 	defer cancel()

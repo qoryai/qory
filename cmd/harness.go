@@ -528,6 +528,11 @@ type composeOptions struct {
 	// fromCode is set for the compose of a run from a run code: a line of
 	// [pushChecksWritable] ends with [codeUsed].
 	fromCode bool
+	// memo, when set, is the memo of the compose's git sources, which qory run shares
+	// between the composes of a run's sessions: sealed after the first, it makes a later
+	// compose read the run's cache at the first compose's commits, see [source.Memo.Seal].
+	// nil makes a memo for this compose alone.
+	memo *source.Memo
 }
 
 // named is the harness o composes with no address shown, see [source.Named]; nil for any
@@ -919,7 +924,10 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 			update = *o.update
 		}
 	}
-	memo := source.NewMemo()
+	memo := o.memo
+	if memo == nil {
+		memo = source.NewMemo()
+	}
 	var p *stack.Stack
 	var fetched source.Resolved
 	if byRef {
