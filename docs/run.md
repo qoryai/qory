@@ -4095,7 +4095,7 @@ The agent never holds its secrets, or the token it mints.
 
 Both are declared and checked the same way. The rules a program follows are the
 [integration
-contract](https://github.com/qoryai/integrations/tree/main/contracts/integration/v1).
+contract](https://github.com/qoryai/integrations/tree/b5ae1a43582ee58a490f17edb0fce2e4c19a6c6d/contracts/integration/v1).
 
 Declare an integration in `forager.yaml`, under `gateway.integrations`, with its `program`
 and its `settings`. A run's policy selects its credential by the key, as
