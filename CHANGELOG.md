@@ -572,6 +572,13 @@ release may change what an existing document does, and states it under Upgrading
   nothing. If qory cannot post the verdict, the run closes `failed`. A stop of `qory run` during
   the suite closes the run `cancelled`, with the reason `interrupted`. See The full suite in
   `docs/run.md`.
+- Version 1 of the review report format, `contracts/harness/v1/review-report.schema.json`:
+  the `report.json` that one reviewer of a review round writes and qory's review round
+  reads. It has `reviewer`, the reviewer's agent name, and `findings`, each `blocking` or
+  `non-blocking`, with `quote`, `problem`, `fix`, `proof` and `point`, a line with at
+  least one character that is not a space. A blocking finding has a `failing check` or a
+  `failing input` as its proof. See The review report format in
+  `contracts/harness/v1/README.md`.
 
 ### Changed
 
