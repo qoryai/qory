@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"unicode/utf8"
 )
 
 // standIns is a folder with each program of the git session, and git as a script that prints
@@ -30,14 +29,7 @@ func standIns(t *testing.T, version string) string {
 // and returns what it printed on stdout, on stderr, and its exit status.
 func checkOn(t *testing.T, shell, dir string) (string, string, int) {
 	t.Helper()
-	return checkSettingsOn(t, shell, dir, "")
-}
-
-// checkSettingsOn is [checkOn] for the script of a Codex run, with settings in place of
-// /etc/codex.
-func checkSettingsOn(t *testing.T, shell, dir, settings string) (string, string, int) {
-	t.Helper()
-	c := exec.Command(shell, "-c", sessionCheckScript(dir, settings))
+	c := exec.Command(shell, "-c", sessionCheckScript(dir))
 	c.Env = []string{}
 	var stdout, stderr strings.Builder
 	c.Stdout, c.Stderr = &stdout, &stderr
@@ -169,8 +161,6 @@ func TestSessionCheckLine(t *testing.T) {
 	old := sessionGitOld("/usr/bin/git", "git version 2.24.0")
 	for line, want := range map[string]bool{
 		noSessionGit():                          true,
-		noCodexSettings():                       true,
-		noCodexSettings() + " ":                 false,
 		noSessionTool("tr", toolWhy(t, "tr")):   true,
 		old:                                     true,
 		sessionGitOld("/usr/local/bin/git", ""): true,
@@ -214,7 +204,7 @@ func toolWhy(t *testing.T, name string) string {
 // TestSessionCheckFixesKeepsAtMostOnePerCheck is more lines than the script can print.
 func TestSessionCheckFixesKeepsAtMostOnePerCheck(t *testing.T) {
 	got := SessionCheckFixes(strings.Repeat(noSessionGit()+"\nanother line\n", 1000))
-	if want := len(sessionTools) + 2; len(got) != want {
+	if want := len(sessionTools) + 1; len(got) != want {
 		t.Errorf("%d lines, want %d", len(got), want)
 	}
 }
@@ -251,133 +241,5 @@ func TestTheSessionCheckGoesPastAFileThatDoesNotRun(t *testing.T) {
 		if _, errOut, code := checkOn(t, shell, dirs); errOut != "" || code != 0 {
 			t.Errorf("%s: %q, exit %d", shell, errOut, code)
 		}
-	}
-}
-
-// etcCodexPlaces makes, in a new temp folder, what an image can have at /etc/codex: the
-// paths of a link that leads nowhere and of a link to a folder, which the checks of a Codex
-// run stop, and of a file, a folder and nothing, which they pass.
-func etcCodexPlaces(t *testing.T) (links, others []string) {
-	t.Helper()
-	base := t.TempDir()
-	file, folder := filepath.Join(base, "file"), filepath.Join(base, "folder")
-	nowhere, toFolder := filepath.Join(base, "link-nowhere"), filepath.Join(base, "link-folder")
-	if err := os.WriteFile(file, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(folder, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(base, "absent"), nowhere); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(folder, toFolder); err != nil {
-		t.Fatal(err)
-	}
-	return []string{nowhere, toFolder}, []string{file, folder, filepath.Join(base, "absent")}
-}
-
-// TestTheCodexCheckStopsALinkAtEtcCodex is the script of a Codex run on an image with every
-// program: with a link at the place of /etc/codex, one that leads nowhere or one to a folder,
-// it prints the line for /etc/codex, the fix first, and exits 1; with a file, a folder or
-// nothing there it passes and prints nothing. CodexSessionCheckScript checks /etc/codex
-// itself.
-func TestTheCodexCheckStopsALinkAtEtcCodex(t *testing.T) {
-	for _, shell := range shells(t) {
-		dir := standIns(t, "git version 2.47.3")
-		links, others := etcCodexPlaces(t)
-		for _, at := range links {
-			out, errOut, code := checkSettingsOn(t, shell, dir, at)
-			if want := noCodexSettings() + "\n"; out != "" || errOut != want || code != 1 {
-				t.Errorf("%s, %s: %q, %q, exit %d, want %q", shell, at, out, errOut, code, want)
-			}
-		}
-		for _, at := range others {
-			if out, errOut, code := checkSettingsOn(t, shell, dir, at); out != "" || errOut != "" || code != 0 {
-				t.Errorf("%s, %s: %q, %q, exit %d, want a pass", shell, at, out, errOut, code)
-			}
-		}
-	}
-	if want := sessionCheckScript(strings.Join(gitSessionDirs, ":"), "/etc/codex"); CodexSessionCheckScript() != want {
-		t.Errorf("CodexSessionCheckScript checks another place:\n%s", CodexSessionCheckScript())
-	}
-}
-
-// TestTheLineForALinkAtEtcCodex is the line qory prints for an image with a link at
-// /etc/codex: the fix first, and at most 100 characters after "qory run: ".
-func TestTheLineForALinkAtEtcCodex(t *testing.T) {
-	want := "Use an image with no link at /etc/codex: qory's bind of the Codex hooks follows a link."
-	if got := noCodexSettings(); got != want || CodexSettingsFix() != want {
-		t.Errorf("the line: %q and %q, want %q", got, CodexSettingsFix(), want)
-	}
-	if n := utf8.RuneCountInString("qory run: " + want); n > 100 {
-		t.Errorf("the line has %d characters after qory run:, want at most 100", n)
-	}
-}
-
-// TestTheCodexSettingsCheckAlone is the step of a Codex run with no git session, with an
-// empty PATH: with a link at the place of /etc/codex, the line for /etc/codex and exit 1;
-// with a file, a folder or nothing there, no output and exit 0.
-// CodexSettingsCheckScript checks /etc/codex itself.
-func TestTheCodexSettingsCheckAlone(t *testing.T) {
-	links, others := etcCodexPlaces(t)
-	run := func(shell, settings string) (string, string, int) {
-		c := exec.Command(shell, "-c", codexSettingsCheckScript(settings))
-		c.Env = []string{}
-		var stdout, stderr strings.Builder
-		c.Stdout, c.Stderr = &stdout, &stderr
-		err := c.Run()
-		if _, exited := err.(*exec.ExitError); err != nil && !exited {
-			t.Fatal(err)
-		}
-		return stdout.String(), stderr.String(), c.ProcessState.ExitCode()
-	}
-	for _, shell := range shells(t) {
-		for _, at := range links {
-			out, errOut, code := run(shell, at)
-			if want := noCodexSettings() + "\n"; out != "" || errOut != want || code != 1 {
-				t.Errorf("%s, %s: %q, %q, exit %d, want %q", shell, at, out, errOut, code, want)
-			}
-		}
-		for _, at := range others {
-			if out, errOut, code := run(shell, at); out != "" || errOut != "" || code != 0 {
-				t.Errorf("%s, %s: %q, %q, exit %d, want a pass", shell, at, out, errOut, code)
-			}
-		}
-	}
-	if CodexSettingsCheckScript() != codexSettingsCheckScript("/etc/codex") {
-		t.Errorf("CodexSettingsCheckScript checks another place:\n%s", CodexSettingsCheckScript())
-	}
-}
-
-// TestTheCodexSettingsCheckInside is the step a walled Codex run with no setup runs in
-// the agent's container: with a link at the place of /etc/codex, no output and exit
-// [CodexSettingsInsideExit]; with a file, a folder or nothing there, no output and exit 0.
-// CodexSettingsInsideScript checks /etc/codex itself.
-func TestTheCodexSettingsCheckInside(t *testing.T) {
-	links, others := etcCodexPlaces(t)
-	run := func(shell, settings string) (string, int) {
-		c := exec.Command(shell, "-c", codexSettingsInsideScript(settings))
-		c.Env = []string{}
-		out, err := c.CombinedOutput()
-		if _, exited := err.(*exec.ExitError); err != nil && !exited {
-			t.Fatal(err)
-		}
-		return string(out), c.ProcessState.ExitCode()
-	}
-	for _, shell := range shells(t) {
-		for _, at := range links {
-			if out, code := run(shell, at); out != "" || code != CodexSettingsInsideExit {
-				t.Errorf("%s, %s: %q, exit %d", shell, at, out, code)
-			}
-		}
-		for _, at := range others {
-			if out, code := run(shell, at); out != "" || code != 0 {
-				t.Errorf("%s, %s: %q, exit %d, want a pass", shell, at, out, code)
-			}
-		}
-	}
-	if CodexSettingsInsideScript() != codexSettingsInsideScript("/etc/codex") {
-		t.Errorf("CodexSettingsInsideScript checks another place:\n%s", CodexSettingsInsideScript())
 	}
 }

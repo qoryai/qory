@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -245,84 +244,17 @@ func SessionShellFix() string {
 	return "install sh in " + strings.Join(gitSessionDirs, ", ") + ": the setup of a walled run runs sh from these folders, to run its script"
 }
 
-// CodexSettings is where Codex 0.169.0 on Linux reads its system settings and hooks, and
-// where a walled Codex run binds qory's folder of the harness's Codex hooks read-only. A file
-// or a folder of the image there is hidden by the bind. A link is not: Docker 29.8.2 resolves
-// the bind's target through the image's link, and keeps the link. With a link to
-// /var/lib/qory-codex-home, /etc/codex shows the run's writable Codex home, in either order of
-// the two binds, so Codex reads none of the harness's hooks there.
-const CodexSettings = "/etc/codex"
-
-// noCodexSettings is the fix for an image with a link at [CodexSettings].
-func noCodexSettings() string {
-	return "Use an image with no link at " + CodexSettings + ": qory's bind of the Codex hooks follows a link."
-}
-
-// codexSettingsTest is the sh test that settings is a link, one that leads nowhere
-// included: the image has a link there.
-func codexSettingsTest(settings string) string {
-	return "test -h " + shellQuoted(settings)
-}
-
 // SessionCheckScript is the sh script of a walled write run's setup step that checks, before the
 // agent, what [Probe.git] checks of the image: each of [sessionTools] and git 2.25 or later, on
 // the PATH of the git session. It prints nothing and exits 0 when all of it is there. Otherwise it
 // prints the line of [Probe.git] for each failure on stderr, the fix first, and exits 1. It runs
 // only the shell's builtins and git, under dash and busybox ash as well.
 func SessionCheckScript() string {
-	return sessionCheckScript(strings.Join(gitSessionDirs, ":"), "")
+	return sessionCheckScript(strings.Join(gitSessionDirs, ":"))
 }
 
-// CodexSessionCheckScript is [SessionCheckScript] for a walled run of Codex: it also fails
-// with its line when the image has a link at [CodexSettings].
-func CodexSessionCheckScript() string {
-	return sessionCheckScript(strings.Join(gitSessionDirs, ":"), CodexSettings)
-}
-
-// CodexSettingsCheckScript is the sh script of the setup step of a walled Codex run that
-// has no git session: it prints the line of [CodexSessionCheckScript] for [CodexSettings]
-// on stderr and exits 1 when the image has a link there, and prints nothing and exits 0
-// otherwise. It runs only the shell's builtins.
-func CodexSettingsCheckScript() string { return codexSettingsCheckScript(CodexSettings) }
-
-// codexSettingsCheckScript is [CodexSettingsCheckScript] with settings in place of
-// [CodexSettings].
-func codexSettingsCheckScript(settings string) string {
-	return "if " + codexSettingsTest(settings) + "; then\n" +
-		"\tprintf '%s\\n' " + shellQuoted(noCodexSettings()) + " >&2\n" +
-		"\texit 1\n" +
-		"fi\n"
-}
-
-// CodexSettingsFix is the line qory prints for an image with a link at [CodexSettings].
-func CodexSettingsFix() string { return noCodexSettings() }
-
-// CodexSettingsInsideExit is the exit status of [CodexSettingsInsideScript] for an image
-// with a link at [CodexSettings]. No other part of the step exits with it: sh exits
-// 2 on a script it cannot read, and the setup runner 125 or 127 on a command it cannot
-// start.
-const CodexSettingsInsideExit = 3
-
-// CodexSettingsInsideScript is the sh script of the step that a walled Codex run with no
-// setup runs in the agent's container before Codex starts: it prints nothing, since the
-// session writes each line of the step to the terminal and qory prints
-// [CodexSettingsFix] itself, and exits [CodexSettingsInsideExit] when the image has a
-// link at [CodexSettings], 0 otherwise. The bind of qory's folder at [CodexSettings] leaves
-// the image's link in place, so the test finds it in the agent's container too. It runs
-// only the shell's builtins.
-func CodexSettingsInsideScript() string { return codexSettingsInsideScript(CodexSettings) }
-
-// codexSettingsInsideScript is [CodexSettingsInsideScript] with settings in place of
-// [CodexSettings].
-func codexSettingsInsideScript(settings string) string {
-	return "if " + codexSettingsTest(settings) + "; then\n" +
-		"\texit " + strconv.Itoa(CodexSettingsInsideExit) + "\n" +
-		"fi\n"
-}
-
-// sessionCheckScript is [SessionCheckScript] with path as the session's PATH, and with the
-// check of [CodexSettings] at settings when settings is not empty.
-func sessionCheckScript(path, settings string) string {
+// sessionCheckScript is [SessionCheckScript] with path as the session's PATH.
+func sessionCheckScript(path string) string {
 	var b strings.Builder
 	b.WriteString("PATH=" + shellQuoted(path) + "\nexport PATH\nfailed=0\n")
 	b.WriteString(sessionCheckFunctions)
@@ -338,11 +270,6 @@ func sessionCheckScript(path, settings string) string {
 	b.WriteString("\tfi\nelse\n")
 	b.WriteString("\tfail " + shellQuoted(noSessionGit()) + "\n")
 	b.WriteString("fi\n")
-	if settings != "" {
-		b.WriteString("if " + codexSettingsTest(settings) + "; then\n")
-		b.WriteString("\tfail " + shellQuoted(noCodexSettings()) + "\n")
-		b.WriteString("fi\n")
-	}
 	b.WriteString("exit \"$failed\"\n")
 	return b.String()
 }
@@ -402,14 +329,13 @@ func shellQuoted(s string) string {
 // line for git version 2.24.0 in /usr/local/bin has 151 bytes.
 const maxSessionGitLine = 200
 
-// SessionCheckLine is line, one line of what [SessionCheckScript] or
-// [CodexSessionCheckScript] printed, as qory prints it, and whether the script can print it.
-// The image runs the script, so the line can contain anything: a line about a program or
-// about [CodexSettings] is one of the fixed lines, and a line about git's version has one of
-// the script's forms, at most [maxSessionGitLine] bytes of valid UTF-8 with no control or
-// format character.
+// SessionCheckLine is line, one line of what [SessionCheckScript] printed, as qory prints it,
+// and whether the script can print it. The image runs the script, so the line can contain
+// anything: a line about a program is one of the fixed lines, and a line about git's version
+// has one of the script's forms, at most [maxSessionGitLine] bytes of valid UTF-8 with no
+// control or format character.
 func SessionCheckLine(line string) (string, bool) {
-	if line == noSessionGit() || line == noCodexSettings() {
+	if line == noSessionGit() {
 		return line, true
 	}
 	for _, tool := range sessionTools {
@@ -432,15 +358,15 @@ func SessionCheckLine(line string) (string, bool) {
 	return "", false
 }
 
-// SessionCheckFixes is what qory prints of text, the output of [SessionCheckScript] or
-// [CodexSessionCheckScript]: each line [SessionCheckLine] takes, and at most as many as the
-// script can print, one per tool, one for git and one for [CodexSettings].
+// SessionCheckFixes is what qory prints of text, the output of [SessionCheckScript]: each line
+// [SessionCheckLine] takes, and at most as many as the script can print, one per tool and one
+// for git.
 func SessionCheckFixes(text string) []string {
 	var fixes []string
 	for line := range strings.Lines(text) {
 		if fix, ok := SessionCheckLine(strings.TrimRight(line, "\n")); ok {
 			fixes = append(fixes, fix)
-			if len(fixes) == len(sessionTools)+2 {
+			if len(fixes) == len(sessionTools)+1 {
 				break
 			}
 		}

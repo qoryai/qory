@@ -4647,15 +4647,21 @@ each module's file and stops with ``Fix `hooks.<event>[<group>].hooks[<hook>]` i
 qory checks the composed files again before it writes the hooks, and stops the run with the same
 line for such a hook, without the module and numbered in the composed file. The bind hides a
 file or a folder that the image has at `/etc/codex`, such as one with a `config.toml` or a
-`requirements.toml`, so the image may have that folder. It does not hide a link: Docker binds the
-folder at the link's target, so a link to `/var/lib/qory-codex-home` shows the writable home at
-`/etc/codex` in place of qory's folder. A link there stops the run before Codex starts: in the
-setup step `Check tools`, see [A run that may write works in a copy](#a-run-that-may-write-works-in-a-copy),
-or, on a walled read run that lists no repositories, which has no setup step, when Forager reads
-the image before it starts the agent's container. The folder has mode 0755
-and `hooks.json` mode 0644. qory writes both as your user, so the container can show them with
-an owner other than root. The bind is read-only, so a write, a rename or a replacement of
+`requirements.toml`, so the image may have that folder. The folder has mode 0755 and
+`hooks.json` mode 0644. qory writes both as your user, so the container can show them with an
+owner other than root. The bind is read-only, so a write, a rename or a replacement of
 `hooks.json` fails, and so does a new file in the folder.
+
+A bind does not hide a link: Docker binds the folder at the link's target, so a link from
+`/etc/codex` to `/var/lib/qory-codex-home` would show the writable home there in place of qory's
+folder. Forager stops such a run before Codex starts. Before it starts the agent's container, it
+reads the target of each bind in the image, `/etc/codex` among them, and on a link there the run
+closes as failed and qory run exits with 1. This holds for every walled Codex run, with
+repositories or without. Forager prints:
+
+```text
+✗ wall docker: make "/etc/codex" a directory or file in the image, not a symbolic link: "/etc/codex" is a symbolic link in the image, which the engine follows, so the bind could resolve over another mount or over /qory
+```
 
 `config.toml` marks the checkout untrusted, at its path in the container and at
 `/workspace`, so Codex reads no hook, rule or setting of the repository's `.codex`. It
@@ -4822,31 +4828,8 @@ program, such as:
 qory run: install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has
 ```
 
-A walled Codex run that lists repositories also has the step `Check tools`, with a test for a
-link at `/etc/codex`, where qory binds the folder of the harness's Codex hooks. A write run in a
-copy runs both tests in that one step; any other such run, such as a read run, runs the test for
-the link alone. A file or a folder at `/etc/codex` passes, since the bind hides it. When the image
-has a link there, the step fails with:
-
-```text
-qory run: Use an image with no link at /etc/codex: qory's bind of the Codex hooks follows a link.
-```
-
-A walled Codex run that lists no repositories, such as a person's walled run, runs the test for
-the link in the agent's container, in a setup step named `Check tools`, before Codex starts. The
-step prints nothing. When the image has a link at `/etc/codex`, qory prints the same line, the
-run closes as failed, and qory run exits with 1. Claude Code runs and unwalled runs have no such
-step.
-
-A walled read run that lists no repositories has no setup step: its workspace is mounted
-read-only, and Forager runs no setup step beside a read-only workspace. Before Forager starts the
-agent's container, it reads the target of each bind in the image, `/etc/codex` among them. On a
-link there, the run closes as failed, qory run exits with 1, and Codex does not start. Forager
-prints:
-
-```text
-✗ wall docker: make "/etc/codex" a directory or file in the image, not a symbolic link: "/etc/codex" is a symbolic link in the image, which the engine follows, so the bind could resolve over another mount or over /qory
-```
+The step has no test for a link at `/etc/codex` on a walled Codex run: Forager stops an image
+with one before the agent's container starts, see [Codex behind a wall](#codex-behind-a-wall).
 
 If the step exits 127 with no such line, which is what docker does for an image with no `/bin/sh`,
 qory prints:

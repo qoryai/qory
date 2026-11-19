@@ -834,7 +834,7 @@ release may change what an existing document does, and states it under Upgrading
   home. qory writes the harness's Codex hooks, those of `settings/codex/hooks.json` and
   then those of `settings/codex/config.toml`, into `hooks.json` of the folder
   `codex-fixed/etc-codex`, mode 0755, and binds that folder read-only at `/etc/codex`, in
-  place of a file or a folder the image has there. Codex 0.169.0 runs those hooks as managed: with
+  place of anything the image has there. Codex 0.169.0 runs those hooks as managed: with
   no stored hash, and also when a `hooks.state` setting turns them off. A walled Codex run
   copies the composed home's `skills/`, `rules/` and `agents/`
   with every link replaced by the file or folder it leads to, since Codex 0.167.2 passes
@@ -1387,20 +1387,12 @@ release may change what an existing document does, and states it under Upgrading
   unwalled run passed every argument unchanged.
 - A refusal of a walled Codex run's arguments writes each control character of the key
   or feature it repeats as an escape, such as `\n`.
-- On a walled Codex run that lists repositories, the `Check tools` setup step fails when
-  the image has a link at `/etc/codex`, with ``Use an image with no link at /etc/codex:
-  qory's bind of the Codex hooks follows a link.`` Docker binds qory's folder at the link's
-  target, so a link to `/var/lib/qory-codex-home` shows the writable home there. A file or
-  a folder at `/etc/codex` passes. A write run in a copy runs this test in the step it
-  has; any other such run, such as a read run, gets the step with this test alone. The
-  step of a Claude Code run is unchanged.
-- A walled Codex run that lists no repositories, except a read run, tests for a link at
-  `/etc/codex` in a `Check tools` setup step in the agent's container before Codex starts.
-  When the image has a link there, qory prints the same line, the run closes as failed,
-  and qory run exits with 1.
-  A walled read run that lists no repositories has no setup step: Forager stops it before
-  the agent's container starts, with ``wall docker: make "/etc/codex" a directory or file
-  in the image, not a symbolic link``, and qory run exits with 1.
+- A walled Codex run on an image with a link at `/etc/codex` stops before Codex starts.
+  Docker binds qory's folder at the link's target, so a link to `/var/lib/qory-codex-home`
+  would show the writable home there. Forager reads the target of each bind in the image
+  before it starts the agent's container and stops the run with ``wall docker: make
+  "/etc/codex" a directory or file in the image, not a symbolic link``; the run closes as
+  failed and qory run exits with 1. A file or a folder at `/etc/codex` passes.
 - The line for an image with no `sh` reads ``the setup of a walled run runs sh from these
   folders``, in place of ``the git session of a walled run``.
 - Compose accepts `settings/codex/read-access.rules`, Codex execpolicy rules for a run
