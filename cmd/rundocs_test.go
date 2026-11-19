@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qoryai/forager/gateway"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 	"github.com/qoryai/integrations/contracts"
@@ -41,6 +42,11 @@ func codeDocuments(t *testing.T, change func(map[string]any)) json.RawMessage {
 		t.Fatal(err)
 	}
 	doc["access"] = "write"
+	// Qory Apiary sends the runtime of the workspace or of the workflow's settings; the
+	// fixture has none, and a document with none is refused.
+	if _, ok := doc["run_settings"]; !ok {
+		doc["run_settings"] = map[string]any{"runtime": "claude"}
+	}
 	if change != nil {
 		change(doc)
 	}
@@ -95,11 +101,13 @@ func TestARunCodeTakesNoStackRuntimeOrArguments(t *testing.T) {
 // TestARunCodeWhoseAnswerQoryDoesNotRunStops is a redemption whose documents qory does
 // not run: none, documents that break the schema, a stack or a stack_reference, which
 // the schema does not allow, a step other than explore and prebuild, a prebuild on a
-// machine whose forager.yaml has no wall, no workflow, a runtime with no headless start,
-// and a runtime qory does not render.
+// machine whose forager.yaml has no wall, no workflow, no runtime (no run settings, null
+// run settings, run settings with no runtime, an empty one, or a null one), a runtime
+// with no descriptor in Forager and no install in qory, a runtime with no headless
+// start, and a runtime qory does not render.
 // Each stops the run after the one redemption, before it opens, with a line that starts
-// with its fix and ends "; the code is used": exit 2 for an answer with no documents,
-// which Forager refuses, and exit 1 for the rest.
+// with its fix and ends "; the code is used", on line 1 for no runtime: exit 2 for an
+// answer with no documents, which Forager refuses, and exit 1 for the rest.
 func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 	const checks = "update qory, or ask Qory Apiary's instance admin: the response to the run code does not pass qory's checks: "
 	const broken = checks + "it breaks documents.schema.json; the code is used"
@@ -130,10 +138,22 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 		{"a stack reference", codeDocuments(t, func(d map[string]any) {
 			d["stack"], d["stack_reference"] = "core", "https://code.example.com/team/stacks#release-7:core"
 		}), broken},
+		{"no run settings", codeDocuments(t, func(d map[string]any) { delete(d, "run_settings") }),
+			"The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of " + headlessRuntimes + "."},
+		{"null run settings", codeDocuments(t, func(d map[string]any) { d["run_settings"] = nil }),
+			"The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of " + headlessRuntimes + "."},
+		{"run settings with no runtime", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"model": "opus"} }),
+			"The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of " + headlessRuntimes + "."},
+		{"run settings with an empty runtime", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": ""} }),
+			"The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of " + headlessRuntimes + "."},
+		{"run settings with a null runtime", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": nil} }),
+			"The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of " + headlessRuntimes + "."},
+		{"a runtime with no descriptor and no install", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "gemini"} }),
+			"qory runs a run code's workflow on one of " + headlessRuntimes + ",\n  and not on gemini; the code is used"},
 		{"a runtime with no headless start", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "goose"} }),
-			"set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for goose; the code is used"},
+			"qory runs a run code's workflow on one of " + headlessRuntimes + ",\n  and not on goose; the code is used"},
 		{"a runtime qory does not render", codeDocuments(t, func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "example"} }),
-			"set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for example; the code is used"},
+			"qory runs a run code's workflow on one of " + headlessRuntimes + ",\n  and not on example; the code is used"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root := runKeyCheckout(t)
@@ -159,6 +179,11 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 		})
 	}
 }
+
+// headlessRuntimes is the list of runtimes that a run from a run code runs on, as the
+// refusal of documents with no runtime has it: those with a descriptor in Forager's
+// runtimes.json and an install in qory.
+const headlessRuntimes = "claude and codex"
 
 // codeRun is what a run from a run code came to, opened nowhere: its output and error,
 // the run's spec at the open, the session's spec at the join, the inputs.json and the
@@ -196,6 +221,14 @@ var codeAtGateway bool
 
 // codeRunAPI, when set, is the base URL of the run API of each run that [runFromCodeGiven] opens.
 var codeRunAPI string
+
+// codeGatewayServer is the control plane of the gateway of [codeAtGateway], as
+// [cmd.Nowhere] GatewayServer is; nil starts that gateway with none. A test sets it.
+var codeGatewayServer *gateway.Server
+
+// codeGatewayAllow is the allow list of the policy of the gateway of [codeAtGateway], as
+// [cmd.Nowhere] GatewayAllow is; nil starts that gateway with none. A test sets it.
+var codeGatewayAllow []string
 
 // codePolicyImage is the image the policy of each run [runFromCodeGiven] opens selects,
 // as [cmd.Nowhere] PolicyImage is; "" selects none. A test sets it.
@@ -283,15 +316,17 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 		System: proxygittest.Host, Repositories: codeRepositories,
 		Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
 		StackProxy: h.server.Proxy.URL, StackCABundle: h.server.Proxy.CABundle,
-		OnOpen:      func(s session.OpenSpec) { r.open = s },
-		FetchImage:  codeFetchImage,
-		Setup:       codeSetup,
-		RemoveSetup: codeRemoveSetup,
-		Real:        codeReal,
-		AtGateway:   codeAtGateway,
-		PolicyImage: codePolicyImage,
-		OnImage:     func(i session.Image) { r.image = i },
-		RunAPI:      codeRunAPI,
+		OnOpen:        func(s session.OpenSpec) { r.open = s },
+		FetchImage:    codeFetchImage,
+		Setup:         codeSetup,
+		RemoveSetup:   codeRemoveSetup,
+		Real:          codeReal,
+		AtGateway:     codeAtGateway,
+		GatewayServer: codeGatewayServer,
+		GatewayAllow:  codeGatewayAllow,
+		PolicyImage:   codePolicyImage,
+		OnImage:       func(i session.Image) { r.image = i },
+		RunAPI:        codeRunAPI,
 	})
 	defer restore()
 	if given == nil {

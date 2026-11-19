@@ -10,8 +10,9 @@
 // tarball with the same checksum made it, and opens no tarball then. Otherwise it takes
 // the version's install lock, so that a second run that needs the same version waits and
 // then uses the folder, reads the tarball into a temporary file, checks its checksum, and
-// extracts only package/<runtime> to bin/<runtime> in a temporary folder, which it then
-// renames to the version's folder: a folder at that path is always a complete install.
+// extracts into a temporary folder either the program's entry, [Release.Program], to
+// bin/<runtime>, or the release's folder, [Release.Folder], whole. It then renames that
+// folder to the version's folder: a folder at that path is always a complete install.
 package runtimeinstall
 
 import (
@@ -24,6 +25,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -69,9 +71,43 @@ type Release struct {
 	// digest in base64.
 	Integrity string
 	// Open opens the tarball, npm's gzip tar archive of the package for the machine's
-	// platform, whose program is package/<runtime>. Install calls it at most once, and
+	// platform, whose program is the entry Program. Install calls it at most once, and
 	// only when the version's folder is not complete.
 	Open func(ctx context.Context) (io.ReadCloser, error)
+	// Program is the entry of the program in the tarball, see [layout]; "" stands for
+	// package/<runtime>. Install extracts only this entry, to bin/<runtime>.
+	Program string
+	// Signed is the package and version that npm signs, <package>@<version>, such as
+	// @openai/codex@0.170.0-linux-x64, and Signatures are npm's signatures of
+	// <Signed>:<Integrity>. Install checks them before it uses the release.
+	Signed     string
+	Signatures []Signature
+	// Folder, when it is set, is a folder of the tarball, ending in /, see [layout].
+	// Install extracts it whole, in its layout, as the version's folder, in place of
+	// Program: the folder's bin/<runtime> is the program.
+	Folder string
+}
+
+// folderFiles are the files beside bin/<runtime> that a runtime's folder, see [layout],
+// must contain, by their paths in the folder: the program runs them, so an install
+// without one would fail later, in the session.
+var folderFiles = map[string][]string{
+	"codex": {"codex-resources/bwrap", "codex-path/rg", "bin/codex-code-mode-host"},
+}
+
+// layout is where runtime's program is in the npm tarball of its build for linux/arch,
+// as a [Release] has it. Codex's build is the folder package/vendor/<x86_64 or
+// aarch64>-unknown-linux-musl/: its codex-package.json sets bin/codex as the entry point
+// and codex-resources and codex-path as the folders of its helpers, such as
+// codex-resources/bwrap and codex-path/rg, and bin/codex-code-mode-host is beside
+// bin/codex. Install extracts that folder whole. Any other runtime's program is the one
+// entry package/<runtime>, such as package/claude for Claude Code.
+func layout(runtime, arch string) (program, folder string) {
+	if runtime == "codex" {
+		triple := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[arch]
+		return "", "package/vendor/" + triple + "-unknown-linux-musl/"
+	}
+	return "package/" + runtime, ""
 }
 
 // Fetch returns the newest release of the runtime. Every error's text starts with what
@@ -94,6 +130,9 @@ type Options struct {
 	// Progress, when set, gets a line, with no prefix, when a registry fetch waits for
 	// the registry: at the first retry, and every five minutes after that.
 	Progress func(line string)
+	// Keys are the keys that npm signs with; nil stands for [NpmKeys], the keys built
+	// into qory.
+	Keys []SigningKey
 }
 
 // Installed is a runtime that [Install] installed, or found installed.
@@ -136,7 +175,7 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 			"%q is not a runtime's name, which has 1 to 64 characters.", o.Runtime)
 	}
 	if !filepath.IsAbs(o.Folder) {
-		return Installed{}, fmt.Errorf("Keep runtimes in an absolute folder\n%q is not one.", o.Folder)
+		return Installed{}, fmt.Errorf("Keep runtimes in an absolute folder\nThe folder for runtimes is not an absolute path:\n  %q", o.Folder)
 	}
 	if o.Progress != nil {
 		ctx = context.WithValue(ctx, progressKey{}, o.Progress)
@@ -151,6 +190,15 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 	sum, err := sha512Of(rel.Integrity)
 	if err != nil {
 		return Installed{}, fmt.Errorf(textRelease+"The checksum of %s %s is not sha512- and 64 bytes in base64", o.Runtime, rel.Version)
+	}
+	keys := o.Keys
+	if keys == nil {
+		if keys, err = NpmKeys(); err != nil {
+			return Installed{}, fmt.Errorf("Update qory.\n%w", err)
+		}
+	}
+	if err := verify(rel, keys, time.Now(), o.Runtime+" "+rel.Version); err != nil {
+		return Installed{}, err
 	}
 	f := folder{base: filepath.Join(o.Folder, o.Runtime), runtime: o.Runtime}
 	if o.Mounted != nil {
@@ -170,7 +218,7 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 		return in, nil
 	case rel.Open == nil:
 		in.Release()
-		return Installed{}, errors.New(textRelease + "It returned no tarball")
+		return Installed{}, fmt.Errorf(textRelease+"The source of the runtime's releases returned no tarball\n  of %s %s", o.Runtime, rel.Version)
 	}
 	// A second run that needs the version waits here for the run that reads its tarball,
 	// and then finds the folder.

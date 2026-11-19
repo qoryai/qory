@@ -80,10 +80,49 @@ func (n *counter) add() error {
 	return nil
 }
 
+// The refusals of a copy of a module that may lie anywhere, with the module's name: past
+// [maxEntries] entries, past [maxModuleBytes] bytes, and for a file at a path past
+// [maxFileBytes], with the path and the limit in MiB twice.
+const (
+	textTooMany      = "Ship fewer files in module %s.\n  The module contains more than 10,000 files, directories and links, the most qory copies into the home."
+	textTooManyBytes = "Ship fewer files in module %s.\n  The module's files add up to more than 1 GiB, the most qory copies into the home."
+	textTooLarge     = "Ship %[2]s of module %[1]s under %[3]d MiB.\n  The file is larger than %[4]d MiB, the most qory copies into the home."
+)
+
+// CopyLimit is what one copy of a module's entry may write, and the refusal past each
+// limit, as [copyEntry] refuses an entry of a module that may lie anywhere.
+type CopyLimit struct {
+	// Entries is the most files, folders and links below the entry.
+	Entries int
+	// Bytes is the most bytes the copy writes in all.
+	Bytes int64
+	// FileBytes is the largest file the copy takes.
+	FileBytes int64
+	// TooMany is the refusal past Entries, and TooManyBytes the one past Bytes.
+	TooMany, TooManyBytes error
+	// TooLarge is the refusal of the file at path past FileBytes.
+	TooLarge func(path string) error
+}
+
+// LimitFor is the [CopyLimit] of one copy of an entry of the module named name.
+func LimitFor(name string) CopyLimit {
+	shown := accesskey.ShownName(name, false)
+	return CopyLimit{
+		Entries:      maxEntries,
+		Bytes:        maxModuleBytes,
+		FileBytes:    maxFileBytes,
+		TooMany:      fmt.Errorf(textTooMany, shown),
+		TooManyBytes: fmt.Errorf(textTooManyBytes, shown),
+		TooLarge: func(path string) error {
+			return fmt.Errorf(textTooLarge, shown, exports.HidePath(filepath.ToSlash(path)), maxFileBytes>>20, maxFileBytes>>20)
+		},
+	}
+}
+
 // tooMany is the refusal of a module whose copy passes [maxEntries].
 func (c *copier) tooMany() error {
 	if c.anywhere {
-		return fmt.Errorf("module %s: Ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home.", c.name)
+		return fmt.Errorf(textTooMany, c.name)
 	}
 	return fmt.Errorf("module %s: Move the module out of the checkout, or ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home.", c.name)
 }
@@ -160,7 +199,7 @@ type budget struct {
 // budget is a full budget for one copy of the module.
 func (c *copier) budget() *budget {
 	if c.anywhere {
-		return &budget{left: maxModuleBytes, refuse: fmt.Errorf("module %s: Ship fewer files. Its files add up to more than 1 GiB, the most qory copies into the home.", c.name)}
+		return &budget{left: maxModuleBytes, refuse: fmt.Errorf(textTooManyBytes, c.name)}
 	}
 	return &budget{left: maxModuleBytes, refuse: fmt.Errorf("module %s: Move the module out of the checkout, or ship fewer files. Its files add up to more than 1 GiB, the most qory copies into the home.", c.name)}
 }
@@ -284,7 +323,7 @@ func (c *copier) readAll(rel string, f *os.File, info fs.FileInfo) ([]byte, erro
 // tooLarge is the refusal of a file at rel larger than [maxFileBytes].
 func (c *copier) tooLarge(rel string) error {
 	if c.anywhere {
-		return fmt.Errorf("module %s: Ship %s under %d MiB. It is larger than %d MiB, the most qory copies into the home.", c.name, exports.HidePath(filepath.ToSlash(rel)), maxFileBytes>>20, maxFileBytes>>20)
+		return fmt.Errorf(textTooLarge, c.name, exports.HidePath(filepath.ToSlash(rel)), maxFileBytes>>20, maxFileBytes>>20)
 	}
 	return fmt.Errorf("module %s: Move the module out of the checkout, or ship %s under %d MiB. It is larger than %d MiB, the most qory copies into the home.", c.name, exports.HidePath(filepath.ToSlash(rel)), maxFileBytes>>20, maxFileBytes>>20)
 }
@@ -480,18 +519,18 @@ func (c *copier) inner(rel string) (string, bool) {
 	return inner, true
 }
 
-// fileMode is the mode of the copy of a file of mode m: m's permission bits without write
+// FileMode is the mode of the copy of a file of mode m: m's permission bits without write
 // for group and others. The setuid, setgid and sticky bits are not permission bits, so
 // the copy has none of them.
-func fileMode(m fs.FileMode) fs.FileMode { return m.Perm() &^ 0o022 }
+func FileMode(m fs.FileMode) fs.FileMode { return m.Perm() &^ 0o022 }
 
-// dirMode is the mode of the copy of a directory of mode m: [fileMode] with read, write
+// dirMode is the mode of the copy of a directory of mode m: [FileMode] with read, write
 // and search for the owner, so qory can write the copy into it and remove the home on
 // the next compose.
-func dirMode(m fs.FileMode) fs.FileMode { return fileMode(m) | 0o700 }
+func dirMode(m fs.FileMode) fs.FileMode { return FileMode(m) | 0o700 }
 
 // copyFile writes the bytes of f, the file at rel, to the path to in out, a new file with
-// one name and the mode [fileMode] gives. A Markdown file's bytes go through the rules'
+// one name and the mode [FileMode] gives. A Markdown file's bytes go through the rules'
 // edit first, when it is not nil; any other file is copied as it is read. A file larger
 // than [maxFileBytes] is refused, and so is a write past the copy's budget.
 func (c *copier) copyFile(rel string, f *os.File, info fs.FileInfo, out *os.Root, to string, r *copyRules) error {
@@ -508,7 +547,7 @@ func (c *copier) copyFile(rel string, f *os.File, info fs.FileInfo, out *os.Root
 	} else if info.Size() > r.bytes.left {
 		return r.bytes.refuse
 	}
-	mode := fileMode(info.Mode())
+	mode := FileMode(info.Mode())
 	w, err := out.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		return err

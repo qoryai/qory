@@ -392,6 +392,83 @@ func TestNewStaysOutOfKeptFolders(t *testing.T) {
 	}
 }
 
+// TestNewCodexHomeNamesTheCodexHome is each error of NewCodexHome: a run id that is no
+// folder name, a failed lookup of the cache folder, a folder that overlaps a kept folder,
+// and a folder that exists. Each starts with its fix and names the Codex home, not a
+// copy.
+func TestNewCodexHomeNamesTheCodexHome(t *testing.T) {
+	isolate(t)
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(cache, "qory", "runs", "run-1")
+	keep := filepath.Join(root, "state")
+	_, err = NewCodexHome("a b")
+	want := "give a run id of letters, digits, . - and _ that starts with a letter or a digit\n  A walled Codex run writes its Codex home in a folder named after the id, and " + shown("a b") + " is not such a name"
+	if err == nil || err.Error() != want {
+		t.Errorf("run id: %v, want %q", err, want)
+	}
+	_, err = NewCodexHome("run-1", keep)
+	want = "set XDG_STATE_HOME to a folder outside the user's cache folder\n  A walled Codex run writes its Codex home in " + shown(root) + ", in the cache folder " + shown(cache) + ", and that folder overlaps " + shown(keep) + ", which no walled run may write"
+	if err == nil || err.Error() != want {
+		t.Errorf("overlap: %v, want %q", err, want)
+	}
+	d, err := NewCodexHome("run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewCodexHome("run-1")
+	want = "remove the run's folder, or start the run again with another id\n  A walled Codex run writes its Codex home in a new folder, " + shown(root) + ", and that folder exists"
+	if err == nil || err.Error() != want {
+		t.Errorf("a folder that exists: %v, want %q", err, want)
+	}
+	if err := d.Remove(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+	_, err = NewCodexHome("run-1")
+	hasPrefix(t, "no cache folder", err, "set HOME\n  A walled Codex run writes its Codex home under the user's cache folder, and the lookup of that folder failed: ")
+}
+
+// TestRemoveFolderDeletesFoldersWithNoWriteOrReadBit is a folder whose first removal
+// fails, since folders below it have no write or no read bit: RemoveFolder sets them to
+// 0700 and removes the folder in a second pass, and follows no link.
+func TestRemoveFolderDeletesFoldersWithNoWriteOrReadBit(t *testing.T) {
+	isolate(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root writes every folder")
+	}
+	dir := filepath.Join(t.TempDir(), "codex-home")
+	write(t, dir, "sessions/locked/file.txt", "x\n")
+	write(t, dir, "sessions/locked/closed/file.txt", "x\n")
+	outside := t.TempDir()
+	if err := os.Chmod(outside, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(outside, 0o700) })
+	link(t, dir, "sessions/locked/out", outside)
+	if err := os.Chmod(filepath.Join(dir, "sessions", "locked", "closed"), 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(dir, "sessions", "locked"), 0o500); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(dir); err == nil {
+		t.Fatal("the first removal passed, so the second pass is not tested")
+	}
+	if err := RemoveFolder(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(dir); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the folder is still there: %v", err)
+	}
+	if info, err := os.Stat(outside); err != nil || info.Mode().Perm() != 0o500 {
+		t.Errorf("RemoveFolder followed a link: %v, %v", info, err)
+	}
+}
+
 // inodes is the device and inode of each file under dir.
 func inodes(t *testing.T, dir string) map[[2]uint64]string {
 	t.Helper()

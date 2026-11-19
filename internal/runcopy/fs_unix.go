@@ -94,20 +94,27 @@ func (d Dir) Remove() error {
 	if d.root == "" {
 		return nil
 	}
-	if err := os.RemoveAll(d.root); err == nil {
+	return RemoveFolder(d.root)
+}
+
+// RemoveFolder deletes the folder at path, which a run could write, as [Dir.Remove] deletes
+// a run's folder: when the first pass fails, it sets each folder below path to mode 0700 and
+// deletes again. It follows no link.
+func RemoveFolder(path string) error {
+	if err := os.RemoveAll(path); err == nil {
 		return nil
 	}
-	fd, err := unix.Open(d.root, dirFlags, 0)
+	fd, err := unix.Open(path, dirFlags, 0)
 	if err != nil {
-		return fileErr(d.root, err)
+		return fileErr(path, err)
 	}
-	err = writable(fd, d.root, 0)
+	err = writable(fd, path, 0)
 	unix.Close(fd)
 	if err != nil {
 		return err
 	}
-	if err := os.RemoveAll(d.root); err != nil {
-		return fileErr(d.root, err)
+	if err := os.RemoveAll(path); err != nil {
+		return fileErr(path, err)
 	}
 	return nil
 }

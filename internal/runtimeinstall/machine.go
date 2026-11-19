@@ -97,25 +97,25 @@ func ParseMachine(lines []string) (m Machine, ok bool) {
 
 // CheckHost returns nil when host is a registry's host, as pool.registry and a run
 // code's file have it: letters, digits, . and -, with an optional port from 1 to 65535.
-// Its error starts with the fix, and the host is on the second line.
+// Its error starts with the fix, and the host is at the end of the cause.
 func CheckHost(host string) error {
 	if validHost(host) {
 		return nil
 	}
-	return fmt.Errorf("Set pool.registry to an image name on a host of letters, digits, . and -\nThe host is %q; a port, if any, is from 1 to 65535.", host)
+	return fmt.Errorf("Set pool.registry to an image name on a host of letters, digits, . and -\nThe registry's host is not a host of letters, digits, . and -\n  with an optional port from 1 to 65535: %q", host)
 }
 
 // CheckInstance returns nil when address is the address of a Qory Apiary instance as a
 // run code's file has it: https, or http when the host is on loopback, then a host that
 // [CheckHost] takes, and no user, path, query or fragment. Its error starts with the fix,
-// and the address is on the second line.
+// and the address is on the last line.
 func CheckInstance(address string) error {
 	u, err := url.Parse(address)
 	if err == nil && (u.Scheme == "https" || u.Scheme == "http" && loopback(u.Hostname())) && u.Host != "" &&
 		CheckHost(u.Host) == nil && u.User == nil && u.Path == "" && u.Opaque == "" && !strings.ContainsAny(address, "?#") {
 		return nil
 	}
-	return fmt.Errorf("Set gateway.server.url in forager.yaml to an https URL of a host and an optional port alone\nThe address is %q.", address)
+	return fmt.Errorf("Set gateway.server.url in forager.yaml to an https URL of a host and an optional port alone\nThe address of Qory Apiary is not an https URL of a host and an optional port alone:\n  %q", address)
 }
 
 // RegistryOf is the registry of image, an image name such as pool.registry: its first

@@ -23,6 +23,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/checkout"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/verdictformat"
@@ -97,9 +98,9 @@ type noWorkItemError struct{}
 // Error returns the line for the person.
 func (noWorkItemError) Error() string { return noWorkItemText }
 
-// artifactRefused reports whether err is a run API error for a type or a limit, for a
-// push check that did not pass, a refused withdrawal ([withdrawRefusedError]), or a
-// refused verdict ([verdictRefusedError]).
+// artifactRefused reports whether err is a run API error for a type, a limit or a
+// decision ([decisionRefusedError]), for a push check that did not pass, a refused
+// withdrawal ([withdrawRefusedError]), or a refused verdict ([verdictRefusedError]).
 // [ExitCode] maps it to [ExitArtifactRefused].
 func artifactRefused(err error) bool {
 	var refused withdrawRefusedError
@@ -110,7 +111,7 @@ func artifactRefused(err error) bool {
 
 	for _, code := range []string{
 		runapi.CodeUnknownType, runapi.CodeTooManyFiles, runapi.CodeTooLarge,
-		runapi.CodePayloadTooLarge, runapi.CodePushCheckFailed,
+		runapi.CodePayloadTooLarge, runapi.CodePushCheckFailed, runapi.CodeUnknownDecision,
 	} {
 		if runapi.HasCode(err, code) {
 			return true
@@ -338,7 +339,7 @@ func pullArtifacts(c *cobra.Command, client *runapi.Client, artifactType string,
 
 	if version != 0 && !found {
 		return input(fmt.Errorf("Choose a version that %s lists. %s has no version %d.",
-			store.shown(filepath.Join(store.dir, indexFile)), artifactType, version))
+			store.shown(filepath.Join(store.dir, indexFile)), exports.Value(artifactType, false), version))
 	}
 
 	_, err = fmt.Fprintln(c.OutOrStdout(), store.shown(store.dir)+string(filepath.Separator))
@@ -472,7 +473,7 @@ func withdrawn(artifact runapi.Artifact) bool {
 }
 
 func newArtifactPush() *cobra.Command {
-	var name, note string
+	var name, note, decision string
 
 	var withdraw bool
 
@@ -504,14 +505,21 @@ that push, Qory Apiary reads the template's artifact types and refuses it with 4
 qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with that refusal. Outside a run, qory refuses those types itself, reads the
 template from the factory modules that the checkout exports, and has no approvals to read.
 
+--decision sends the id of the person's note that asked for this version, such as
+gd_01jc4t9…, from the notes that qory work-item show prints: a request for changes, a move
+or an escalation. Later runs read this version in place of the approved one, and the next
+approval by a person lists it. A withdrawal takes --decision too. qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with a
+fix line when the id is not the id of a person's note on the run's work item.
+
 Outside a run, qory keeps the files, or the record of a withdrawal, in .qory/artifacts and
-sends nothing.
+sends nothing. The store keeps no note and no decision.
 
 --verbose adds nothing here.
 
 More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-item`,
 		Example: `  qory artifact push screenshot shots/checkout.png --name checkout --note "After the fix."
   qory artifact push walkthrough -               # read one file from standard input
+  qory artifact push screenshot shots/checkout.png --name checkout --decision gd_01jc4t9k2m8x5q7w
   qory artifact push demo-script --name scenario-2 --withdraw --note "demo-scenarios v3 removed scenario-2."`,
 		Args: func(c *cobra.Command, args []string) error {
 			if withdraw {
@@ -536,7 +544,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 			}
 
 			if withdraw {
-				return withdrawArtifact(c, runapi.Push{Type: artifactType, Name: name, Note: note, Withdraw: true}, files)
+				return withdrawArtifact(c, runapi.Push{Type: artifactType, Name: name, Note: note, Decision: decision, Withdraw: true}, files)
 			}
 
 			sources, err := readPushSources(c, files)
@@ -553,11 +561,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 				return keepPush(c, artifactType, name, sources)
 			}
 
-			return sendPush(c, client, runapi.Push{Type: artifactType, Name: name, Note: note}, sources)
+			return sendPush(c, client, runapi.Push{Type: artifactType, Name: name, Note: note, Decision: decision}, sources)
 		},
 	}
 	c.Flags().StringVar(&name, "name", "", "the artifact's name, for several artifacts of one type (default main; in a run, only main for questions and review-comments)")
 	c.Flags().StringVar(&note, "note", "", "a note on this version, for a person to read")
+	c.Flags().StringVar(&decision, "decision", "", "the id of the person's note that asked for this version, from qory work-item show")
 	c.Flags().BoolVar(&withdraw, "withdraw", false, "store a version of <type>/<name> with no files, which withdraws the name")
 
 	return c
@@ -596,18 +605,18 @@ func readPushSources(c *cobra.Command, files []string) ([]pushSource, error) {
 		} else {
 			info, err := os.Stat(file)
 			if err != nil {
-				return nil, input(fmt.Errorf("Pass a file that exists. %w", err))
+				return nil, input(fmt.Errorf("Pass a file that exists. %w", exports.HideValueError(err, file)))
 			}
 
 			if !info.Mode().IsRegular() {
-				return nil, input(fmt.Errorf("Pass a file, not a directory or a device. %s is neither a file nor a link to one.", file))
+				return nil, input(fmt.Errorf("Pass a file, not a directory or a device. %s is neither a file nor a link to one.", exports.Value(file, false)))
 			}
 
 			source = pushSource{filename: filepath.Base(file), path: file, size: info.Size()}
 		}
 
 		if seen["name:"+source.filename] {
-			return nil, input(fmt.Errorf("Rename one of the files named %s. The files of one version have different names.", source.filename))
+			return nil, input(fmt.Errorf("Rename one of the files named %s. The files of one version have different names.", exports.Value(source.filename, false)))
 		}
 
 		seen["name:"+source.filename] = true
@@ -655,7 +664,7 @@ func (s pushSource) copyTo(w io.Writer) error {
 
 	file, err := os.Open(s.path)
 	if err != nil {
-		return fmt.Errorf("Check %s. Reading it failed: %w", s.path, err)
+		return fmt.Errorf("Check %s. Reading it failed: %w", exports.Value(s.path, false), exports.HideValueError(err, s.path))
 	}
 	defer file.Close()
 
@@ -672,7 +681,7 @@ func (s pushSource) bytesOf() ([]byte, error) {
 
 	content, err := os.ReadFile(s.path)
 	if err != nil {
-		return nil, fmt.Errorf("Check %s. Reading it failed: %w", s.path, err)
+		return nil, fmt.Errorf("Check %s. Reading it failed: %w", exports.Value(s.path, false), exports.HideValueError(err, s.path))
 	}
 
 	return content, nil
@@ -725,7 +734,7 @@ func sendPush(c *cobra.Command, client *runapi.Client, push runapi.Push, sources
 }
 
 // postVersion sends push to the run API. A run API with no work item for the run is
-// [noWorkItemInRunText].
+// [noWorkItemInRunText], and a 422 unknown_decision is a [decisionRefusedError].
 func postVersion(ctx context.Context, client *runapi.Client, push runapi.Push) (*runapi.Pushed, error) {
 	pushed, err := client.PushArtifact(ctx, push)
 	// A not_found with a message comes from the gateway's route, and never reached Qory Apiary.
@@ -734,8 +743,31 @@ func postVersion(ctx context.Context, client *runapi.Client, push runapi.Push) (
 		return nil, errors.New(noWorkItemInRunText)
 	}
 
+	if errors.As(err, &apiError) && apiError.Code == runapi.CodeUnknownDecision {
+		return nil, decisionRefusedError{fmt.Sprintf(textDecisionRefused, shownOrShort(push.Decision)), err}
+	}
+
 	return pushed, err
 }
+
+// textDecisionRefused is the text of a push for which the run API returns 422
+// unknown_decision, with the value of --decision. The run API's line names the request's
+// member, not the flag, so qory words the text itself.
+const textDecisionRefused = "Set --decision to the id of a person's note on this work item, or drop the flag.\n" +
+	"  %s is not such an id. qory work-item show prints the open notes with their ids."
+
+// decisionRefusedError is a push for which the run API returns 422 unknown_decision.
+// [ExitCode] gives it [ExitArtifactRefused]. It unwraps to the run API's error.
+type decisionRefusedError struct {
+	text string
+	err  error
+}
+
+// Error returns the line for the person.
+func (e decisionRefusedError) Error() string { return e.text }
+
+// Unwrap returns the run API's error.
+func (e decisionRefusedError) Unwrap() error { return e.err }
 
 // keepPush keeps the version in the store, outside a run. Standard input has no limit
 // there, but qory reads it only up to [runapi.MaxBody], so longer input stops the push.
@@ -807,7 +839,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 			}
 
 			if !slices.Contains([]string{runapi.VerdictPassed, runapi.VerdictChangesRequested, runapi.VerdictEscalate}, args[0]) {
-				return input(fmt.Errorf("Pass passed, changes-requested or escalate. The verdict is %q.", args[0]))
+				return input(fmt.Errorf("Pass passed, changes-requested or escalate. The verdict is %s.", exports.Value(args[0], true)))
 			}
 
 			return nil
@@ -919,7 +951,7 @@ func readTrack(c *cobra.Command) (*runapi.Track, error) {
 		return nil, input(errors.New("Pass --track <id> with --track-reason: a reason needs the track it is for."))
 	case !verdictformat.ValidTrackID(id):
 		return nil, input(fmt.Errorf("Set --track to lower-case words joined by hyphens, such as small-change, at most %d characters.\n"+
-			"  The value is %s.", verdictformat.MaxTrackID, shortValue(id)))
+			"  The value is %s.", verdictformat.MaxTrackID, shownOrShort(id)))
 	}
 
 	if err := checkLine("--track-reason", "reason", "one sentence on one line", reason, verdictformat.MaxReason); err != nil {
@@ -969,6 +1001,16 @@ func shortValue(value string) string {
 	return strconv.Quote(value)
 }
 
+// shownOrShort is value as an error prints it: the phrase [exports.Value] prints for a
+// value that contains a key or a code, such as qrk_, and [shortValue] for any other.
+func shownOrShort(value string) string {
+	if shown := exports.Value(value, false); shown != value {
+		return shown
+	}
+
+	return shortValue(value)
+}
+
 // readPoints returns the points of verdict from path, the file of --points; given is true
 // when the command line has --points. escalate needs the file, and the other verdicts
 // take none.
@@ -987,27 +1029,27 @@ func readPoints(verdict, path string, given bool) ([]runapi.Point, error) {
 
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, input(fmt.Errorf("Pass a file that exists to --points. %w", err))
+		return nil, input(fmt.Errorf("Pass a file that exists to --points. %w", exports.HideValueError(err, path)))
 	}
 	defer file.Close()
 
 	data, err := io.ReadAll(io.LimitReader(file, maxPointsFile+1))
 	if err != nil {
-		return nil, input(fmt.Errorf("Check the file of --points. Reading it failed: %w", err))
+		return nil, input(fmt.Errorf("Check the file of --points. Reading it failed: %w", exports.HideValueError(err, path)))
 	}
 
 	if len(data) > maxPointsFile {
-		return nil, input(fmt.Errorf("Shorten %s to at most %d bytes. The file is larger.", path, maxPointsFile))
+		return nil, input(fmt.Errorf("Shorten %s to at most %d bytes. The file is larger.", exports.Value(path, false), maxPointsFile))
 	}
 
 	points, err := verdictformat.Points(data)
 	switch {
 	case errors.Is(err, verdictformat.ErrByteOrderMark):
-		return nil, input(fmt.Errorf("Save %s without a byte order mark.", path))
+		return nil, input(fmt.Errorf("Save %s without a byte order mark.", exports.Value(path, false)))
 	case errors.Is(err, verdictformat.ErrNotUTF8):
-		return nil, input(fmt.Errorf("Save %s as UTF-8.", path))
+		return nil, input(fmt.Errorf("Save %s as UTF-8.", exports.Value(path, false)))
 	case errors.Is(err, verdictformat.ErrLoneSurrogate):
-		return nil, input(fmt.Errorf("Remove the escape of a lone surrogate, such as \\ud800, from %s.", path))
+		return nil, input(fmt.Errorf("Remove the escape of a lone surrogate, such as \\ud800, from %s.", exports.Value(path, false)))
 	case err != nil:
 		return nil, input(err)
 	}
@@ -1047,7 +1089,7 @@ func keepVerdict(c *cobra.Command, verdict string, points []runapi.Point, track 
 // has the run API's form. The form also makes value safe as a directory name.
 func artifactNameError(what, value string) error {
 	if !runapi.ArtifactName(value) {
-		return fmt.Errorf("Set the %s to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is %q.", what, value)
+		return fmt.Errorf("Set the %s to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is %s.", what, exports.Value(value, true))
 	}
 
 	return nil

@@ -24,7 +24,7 @@ func newFromNpm(t *testing.T) *fromNpm {
 }
 
 func (f *fromNpm) install(client *http.Client, arch string) (runtimeinstall.Installed, error) {
-	return runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	return runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch: runtimeinstall.NpmFetch(client, f.npm.URL(), arch), Runtime: "claude", Folder: f.folder,
 	})
 }
@@ -107,7 +107,7 @@ func TestTheNpmFetchRefuses(t *testing.T) {
 				n.PublishWith("x64", "2.1.320", rt.PlainTarball(t, "2.1.320"), rt.Integrity(other), "")
 				n.SetLatest("2.1.320")
 			},
-			want:     "Check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum " + rt.Integrity(other),
+			want:     "Check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum\n  " + rt.Integrity(other),
 			tarballs: 1,
 		},
 		{
@@ -132,7 +132,7 @@ func TestTheNpmFetchRefuses(t *testing.T) {
 		{
 			name: "registry over http off loopback",
 			base: "http://registry.example",
-			want: "Set the npm registry to an https URL: \"http://registry.example\" is not one",
+			want: "Set the npm registry to an https URL\nThe npm registry's address is not an https URL:\n  \"http://registry.example\"",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -144,7 +144,7 @@ func TestTheNpmFetchRefuses(t *testing.T) {
 			if c.base != "" {
 				base = c.base
 			}
-			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 				Fetch: runtimeinstall.NpmFetch(http.DefaultClient, base, "amd64"), Runtime: "claude", Folder: f.folder,
 			})
 			if err == nil || !strings.HasPrefix(err.Error(), c.want) {
@@ -175,7 +175,7 @@ func TestAWalledRunWithNoRegistryAndNoNpmInItsPolicyStartsWithTheFix(t *testing.
 				t.Fatal(err)
 			}
 			folder := t.TempDir()
-			_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+			_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 				Fetch: runtimeinstall.NpmFetch(client, runtimeinstall.NpmRegistry, "amd64"), Runtime: "claude", Folder: folder,
 			})
 			want := "Set up the instance's registry for this machine, or allow registry.npmjs.org in the run's policy.\n" +

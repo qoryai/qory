@@ -376,29 +376,32 @@ func TestARunCodeComposesTheWorkspacesHarnessThroughTheStackProxy(t *testing.T) 
 // TestARunCodeComposesAHarnessDocumentThatDefinesAStack is a run from a run code whose
 // documents contain a harness document with no extends, which defines a stack of the
 // module hello and its workflow hello, with a time_limit of 4h, which the run contract
-// still allows there. qory composes it for run_settings.runtime, or for claude, the
-// default runtime, when the documents have no run settings, though the document has no
-// target. The documents' time_limit_minutes, 45, is the session's time limit, not the
-// workflow's time_limit, and no text shows an address.
+// still allows there, once with run_settings naming claude and once naming codex. qory
+// composes it for that runtime, though the document has no target, and starts that
+// runtime's program. The documents' time_limit_minutes, 45, is the session's time limit,
+// not the workflow's time_limit, and no text shows an address.
 func TestARunCodeComposesAHarnessDocumentThatDefinesAStack(t *testing.T) {
-	for name, settings := range map[string]any{"run settings": map[string]any{"runtime": "claude"}, "no run settings": nil} {
-		t.Run(name, func(t *testing.T) {
+	for _, runtime := range []string{"claude", "codex"} {
+		t.Run(runtime, func(t *testing.T) {
 			r := codeHarness{
 				defines: map[string]any{"hello": map[string]any{"time_limit": "4h", "access": "write"}},
+				// Codex starts a workflow by its skill, and the module hello ships a command.
+				files: map[string]string{"examples/hello/modules/hello/skills/workflow-hello/SKILL.md": "---\nname: workflow-hello\ndescription: Say hello.\n---\n\nSay hello.\n"},
 				change: func(d map[string]any) {
 					d["time_limit_minutes"] = 45
-					if settings != nil {
-						d["run_settings"] = settings
-					}
+					d["run_settings"] = map[string]any{"runtime": runtime}
 				},
 			}.run(t)
 			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}
 			wants(t, r.out,
-				"qory run: the run "+keyRunID+" starts the workflow hello of "+workspaceHarness+" on claude\n",
+				"qory run: the run "+keyRunID+" starts the workflow hello of "+workspaceHarness+" on "+runtime+"\n",
 				"qory run: fetched the module hello at "+r.commit[:12]+" in ",
 				"qory run: composed ")
+			if program := r.spec.Command + " " + strings.Join(r.spec.Args, " "); !strings.Contains(program, "/"+runtime+" ") && !strings.HasPrefix(program, runtime+" ") {
+				t.Errorf("the session starts %q, want %s", program, runtime)
+			}
 			if want := []session.HarnessSource{{Source: "module hello", Commit: r.commit}}; !slices.Equal(r.spec.Harness, want) {
 				t.Errorf("the harness list is %+v, want %+v", r.spec.Harness, want)
 			}

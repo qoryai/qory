@@ -62,7 +62,7 @@ func (f folder) lockInstall(ctx context.Context, version string) (*os.File, erro
 			select {
 			case <-ctx.Done():
 				l.Close()
-				return nil, fmt.Errorf("Run again with more time\nThe run ended while another run installed %s %s: %w", f.runtime, version, ctx.Err())
+				return nil, fmt.Errorf("Run again with more time\nThe run ended while another run installed %s %s:\n  %w", f.runtime, version, ctx.Err())
 			case <-time.After(installPoll):
 			}
 		}

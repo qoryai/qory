@@ -271,7 +271,7 @@ func TestAWriteRunFromARunCodeGetsNoCheckOfTheGitSessionsTools(t *testing.T) {
 func TestAMissingShellReachesThePerson(t *testing.T) {
 	h := newHostFetch(t, "", "main")
 	r := runSetUp(t, h, "", "acme/shop", &session.SetupError{Name: "Check tools", Step: 3, ExitCode: 127})
-	wants(t, r.out, "qory run: install sh in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs sh from these folders, to run its script\n")
+	wants(t, r.out, "qory run: install sh in /usr/local/bin, /usr/bin, /bin: the setup of a walled run runs sh from these folders, to run its script\n")
 	if strings.Contains(r.out, "Fix Check tools") {
 		t.Errorf("the output has the step's exit status:\n%s", r.out)
 	}

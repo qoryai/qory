@@ -188,7 +188,9 @@ More: ` + gatewayDocs,
 			if err != nil {
 				var op *net.OpError
 				if errors.As(err, &op) && op.Op == "listen" {
-					return fmt.Errorf("listen on %s: %w", exports.Value(addr, false), op.Err)
+					// op.Err, such as a failed lookup, prints the host as written.
+					host, _, _ := net.SplitHostPort(addr)
+					return fmt.Errorf("listen on %s: %w", exports.Value(addr, false), exports.HideValueError(op.Err, host))
 				}
 				return explain(err, id)
 			}

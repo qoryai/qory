@@ -171,10 +171,10 @@ func TestCopyOfAModuleStopsAt10000Entries(t *testing.T) {
 	wantError(t, err, "module app: Move the module out of the checkout, or ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home.")
 	m.Walled = true
 	err = render.CopyModule(m, filepath.Join(t.TempDir(), "app"))
-	wantError(t, err, "module app: Ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home.")
+	wantError(t, err, "Ship fewer files in module app.\n  The module contains more than 10,000 files, directories and links, the most qory copies into the home.")
 	m.Walled, m.Hidden = false, true
 	err = render.CopyModule(m, filepath.Join(t.TempDir(), "app"))
-	wantError(t, err, "module app: Ship fewer files. It contains more than 10,000 files, directories and links, the most qory copies into the home.")
+	wantError(t, err, "Ship fewer files in module app.\n  The module contains more than 10,000 files, directories and links, the most qory copies into the home.")
 	m.Hidden = false
 
 	if err := os.Remove(filepath.Join(m.Dir, "data", "f00000")); err != nil {
@@ -513,7 +513,7 @@ func TestCopyRefusesAFileOver64MiB(t *testing.T) {
 		"module app: Move the module out of the checkout, or ship scripts/big.bin under 64 MiB. It is larger than 64 MiB, the most qory copies into the home.")
 	m.Walled = true
 	wantError(t, render.CopyModule(m, filepath.Join(t.TempDir(), "app")),
-		"module app: Ship scripts/big.bin under 64 MiB. It is larger than 64 MiB, the most qory copies into the home.")
+		"Ship scripts/big.bin of module app under 64 MiB.\n  The file is larger than 64 MiB, the most qory copies into the home.")
 
 	m = appModule(t)
 	sparse(t, filepath.Join(m.Dir, "skills", "deploy", "notes.md"), 64<<20+1)
@@ -583,7 +583,7 @@ func TestCopyStopsAtTheModulesTotal(t *testing.T) {
 		t.Errorf("the copy of the entry wrote %d bytes", n)
 	}
 	m.Walled = true
-	wantError(t, render.CopyModule(m, filepath.Join(t.TempDir(), "app")), "module app: Ship fewer files. Its files add up to more than 1 GiB, the most qory copies into the home.")
+	wantError(t, render.CopyModule(m, filepath.Join(t.TempDir(), "app")), "Ship fewer files in module app.\n  The module's files add up to more than 1 GiB, the most qory copies into the home.")
 
 	m = appModule(t)
 	write(t, filepath.Join(m.Dir, "skills", "deploy", "a.bin"), strings.Repeat("x", 900<<10))
