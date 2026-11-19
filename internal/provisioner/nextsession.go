@@ -81,7 +81,7 @@ func ReadNextSessionAnswer(body []byte) (contracts.NextSessionAnswer, error) {
 	}
 	if c := a.ModelChoice; c != nil {
 		rs := &contracts.RunSettings{Runtime: c.Runtime, Model: c.Model, Effort: c.Effort, ProviderModels: c.ProviderModels, Tiers: c.Tiers}
-		if err := checkRunSettings(nextSessionAnswerSchema, StepExplore, rs); err != nil {
+		if err := checkRunSettings(nextSessionAnswerSchema, rs); err != nil {
 			return contracts.NextSessionAnswer{}, err
 		}
 	}
