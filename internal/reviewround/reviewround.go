@@ -58,6 +58,15 @@ const (
 	maxCause = 300
 )
 
+// MaxOpenBytes is the most bytes of open-findings.json, as [OpenFindings.JSON] writes it:
+// the harness's findings open reads no more of the file than 256 KiB.
+const MaxOpenBytes = 256 << 10
+
+// measureID is the id that a finding of qory's has while [Decide] measures
+// open-findings.json: as long as the longest id, so that no real id makes the file larger,
+// and of another form, so that no finding of a reviewer has it.
+const measureID = "x999999"
+
 // The points of the findings that qory writes. Each is one line.
 const (
 	textFailed      = "Reviewer %s wrote no report: its session failed."
@@ -73,6 +82,8 @@ const (
 	textNoSuite     = "The full suite has no result for the reviewed commit."
 	textNoPoint     = "A finding of %s has a point with no readable text."
 	textMore        = "The review has %d more open findings than these points list."
+	textCut         = "The review has %d more open findings of %s than this file lists."
+	textBlankPoint  = "at '/findings/%d/point': the point has no character that is not a space"
 )
 
 // Finding is one finding of a reviewer, as its report has it and open-findings.json carries
@@ -174,24 +185,31 @@ var nameForm = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 // idForm is the form of a finding's id: f and a number from 1, at most 6 digits.
 var idForm = regexp.MustCompile(`^f[1-9][0-9]{0,5}$`)
 
-// Decide decides r. The error is for a round that a caller made wrong: a number below 1, a
-// reviewer with a name of another form, a name twice, or an ending that is none of
-// [Finished], [Failed] and [TimedOut]. A report that is missing or invalid is a finding,
-// never an error.
+// Decide decides r. The error is for a round that a caller made wrong: a number below 1, no
+// reviewer, a reviewer with a name of another form or the name full-suite, a name twice, or
+// an ending that is none of [Finished], [Failed] and [TimedOut]. A report that is missing or
+// invalid is a finding, never an error. The decision's open findings make an
+// open-findings.json of at most [MaxOpenBytes]: past that, the findings that come last in
+// the order of the verdict's points stay out of the file, and each reviewer that has fewer
+// findings in the file has one more finding of qory's, with how many of its findings are
+// out. The verdict's points come from every finding of the round.
 func Decide(r Round) (Decision, error) {
 	if r.Number < 1 {
 		return Decision{}, fmt.Errorf("Number the round from 1: the round's number is %d.", r.Number)
 	}
+	if len(r.Reviewers) == 0 {
+		return Decision{}, errors.New("Give the round at least one reviewer: the round has none.")
+	}
 	seen := map[string]bool{}
 	for _, one := range r.Reviewers {
 		if !nameForm.MatchString(one.Name) || one.Name == SuiteEntry {
-			return Decision{}, fmt.Errorf("Name each reviewer with lower-case letters, digits and hyphens.\nThe reviewer %s has another name.", strconv.Quote(one.Name))
+			return Decision{}, fmt.Errorf("Name each reviewer with lower-case letters, digits and hyphens, not %s.\nThe reviewer %s has another name.", SuiteEntry, strconv.Quote(one.Name))
 		}
 		if seen[one.Name] {
-			return Decision{}, fmt.Errorf("List each reviewer once: %s is in the round twice.", one.Name)
+			return Decision{}, fmt.Errorf("List each reviewer once.\nThe reviewer %s is in the round twice.", one.Name)
 		}
 		if one.Ended < Finished || one.Ended > TimedOut {
-			return Decision{}, fmt.Errorf("Set how the session of reviewer %s ended: its ending is %d.", one.Name, one.Ended)
+			return Decision{}, fmt.Errorf("Set how the session of each reviewer ended.\nThe ending of reviewer %s is %d.", one.Name, one.Ended)
 		}
 		seen[one.Name] = true
 	}
@@ -205,11 +223,11 @@ func Decide(r Round) (Decision, error) {
 	for _, one := range r.Reviewers {
 		open.Reviewers = append(open.Reviewers, ReviewerFindings{Reviewer: one.Name, Findings: reviewerFindings(one, ids)})
 	}
-	d := Decision{Open: open, NextID: ids.next}
 	blocking := false
 	for _, entry := range open.Reviewers {
 		blocking = blocking || slices.ContainsFunc(entry.Findings, func(f Finding) bool { return f.Severity == Blocking })
 	}
+	d := Decision{}
 	switch {
 	case escalate:
 		d.Verdict = Escalate
@@ -217,10 +235,102 @@ func Decide(r Round) (Decision, error) {
 		d.Verdict = ChangesRequested
 	default:
 		d.Verdict = Passed
-		return d, nil
 	}
-	d.Points = points(open)
+	if d.Verdict != Passed {
+		d.Points = points(open)
+	}
+	cut, err := cutToFit(open, ids)
+	if err != nil {
+		return Decision{}, err
+	}
+	d.Open, d.NextID = cut, ids.next
 	return d, nil
+}
+
+// place is the place of a finding in [OpenFindings]: the entry and the finding's index.
+type place struct{ entry, finding int }
+
+// cutToFit is open with as many findings as an open-findings.json of at most
+// [MaxOpenBytes] has room for, with the findings in the order of the verdict's points, the
+// blocking ones first. Each entry that has fewer findings gets one more finding of qory's,
+// blocking when a blocking finding of the entry is out, with an id from ids.
+func cutToFit(open OpenFindings, ids *numbering) (OpenFindings, error) {
+	var first, later []place
+	for e, entry := range open.Reviewers {
+		for i, f := range entry.Findings {
+			if f.Severity == Blocking {
+				first = append(first, place{e, i})
+			} else {
+				later = append(later, place{e, i})
+			}
+		}
+	}
+	order := append(first, later...)
+	fits := func(o OpenFindings) (bool, error) {
+		data, err := o.JSON()
+		return len(data) <= MaxOpenBytes, err
+	}
+	if ok, err := fits(open); ok || err != nil {
+		return open, err
+	}
+	low, high := 0, len(order)
+	if ok, err := fits(keep(open, order[:low])); !ok || err != nil {
+		if err == nil {
+			err = fmt.Errorf("Give the round fewer reviewers: open-findings.json for %d reviewers has more than %d bytes.", len(open.Reviewers), MaxOpenBytes)
+		}
+		return OpenFindings{}, err
+	}
+	for high-low > 1 {
+		mid := (low + high) / 2
+		ok, err := fits(keep(open, order[:mid]))
+		if err != nil {
+			return OpenFindings{}, err
+		}
+		if ok {
+			low = mid
+		} else {
+			high = mid
+		}
+	}
+	cut := keep(open, order[:low])
+	for e := range cut.Reviewers {
+		for i := range cut.Reviewers[e].Findings {
+			if cut.Reviewers[e].Findings[i].ID == measureID {
+				cut.Reviewers[e].Findings[i].ID = ids.fresh()
+			}
+		}
+	}
+	return cut, nil
+}
+
+// keep is open with only the findings at kept, each in its entry's order, and for each entry
+// with fewer findings the finding of qory's that states how many are out, with the id
+// [measureID].
+func keep(open OpenFindings, kept []place) OpenFindings {
+	in := map[place]bool{}
+	for _, p := range kept {
+		in[p] = true
+	}
+	cut := OpenFindings{Round: open.Round, Reviewers: make([]ReviewerFindings, 0, len(open.Reviewers))}
+	for e, entry := range open.Reviewers {
+		findings := []Finding{}
+		out, severity := 0, NonBlocking
+		for i, f := range entry.Findings {
+			if in[place{e, i}] {
+				findings = append(findings, f)
+				continue
+			}
+			out++
+			if f.Severity == Blocking {
+				severity = Blocking
+			}
+		}
+		if out > 0 {
+			findings = append(findings, Finding{ID: measureID, Severity: severity, Point: fmt.Sprintf(textCut, out, entry.Reviewer)})
+		}
+		cut.Reviewers = append(cut.Reviewers, ReviewerFindings{Reviewer: entry.Reviewer, Findings: findings})
+	}
+	return cut
 }
 
 // suiteOutcome is the finding for s, nil for a suite that passed, and whether the verdict
@@ -319,6 +429,14 @@ func parseReport(name string, data []byte) (report, string) {
 	}
 	if r.Reviewer != name {
 		return report{}, fmt.Sprintf(textOtherName, name, r.Reviewer)
+	}
+	// The format's \S excludes only the spaces of ASCII. strings.TrimSpace, which
+	// ReadOpenFindings uses, also removes a space of Unicode, such as U+00A0.
+	for i := range r.Findings {
+		r.Findings[i].Point = strings.TrimSpace(r.Findings[i].Point)
+		if r.Findings[i].Point == "" {
+			return report{}, fmt.Sprintf(textNotSchema, name, fmt.Sprintf(textBlankPoint, i))
+		}
 	}
 	return r, ""
 }
@@ -473,11 +591,11 @@ func ReadOpenFindings(data []byte) (OpenFindings, error) {
 	return o, nil
 }
 
-// reportFormat is the report format of a reviewer: a copy, byte for byte, of the harness's
-// scripts/testdata/review-report.schema.json, the draft that C-7's report.json (689, 694)
-// fixes. go:embed does not reach a file outside the package.
+// reportFormat is the report format of a reviewer: a copy of
+// contracts/harness/v1/review-report.schema.json, byte for byte, which a test checks:
+// go:embed does not reach a file above the package.
 //
-//go:embed report.schema.json
+//go:embed review-report.schema.json
 var reportFormat []byte
 
 // reportSchemaURL is the URL that the report format compiles under.

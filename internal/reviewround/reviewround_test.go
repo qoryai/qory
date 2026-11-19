@@ -83,6 +83,9 @@ func decide(t *testing.T, r Round) Decision {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(data) > MaxOpenBytes {
+		t.Errorf("open-findings.json has %d bytes, more than %d", len(data), MaxOpenBytes)
+	}
 	back, err := ReadOpenFindings(data)
 	if err != nil {
 		t.Errorf("open-findings.json does not read back: %v\n%s", err, data)
@@ -345,13 +348,16 @@ func TestMoreThanTwentyFindingsKeepTheVerdictValid(t *testing.T) {
 }
 
 func TestDecideStopsOnARoundMadeWrong(t *testing.T) {
-	good := Reviewer{Name: "code-reviewer", Ended: Finished, Report: "/r/report.json"}
+	// A name of 64 characters, the most, so that line 1 of each error stays within 100.
+	long := strings.Repeat("r", 64)
+	good := Reviewer{Name: long, Ended: Finished, Report: "/r/report.json"}
 	for name, r := range map[string]Round{
 		"round 0":       {Number: 0, Suite: green},
+		"no reviewer":   {Number: 1, Suite: green},
 		"a bad name":    {Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "Code Reviewer", Ended: Finished}}},
 		"the suite's":   {Number: 1, Suite: green, Reviewers: []Reviewer{{Name: SuiteEntry, Ended: Finished}}},
 		"a name twice":  {Number: 1, Suite: green, Reviewers: []Reviewer{good, good}},
-		"no ending set": {Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer"}}},
+		"no ending set": {Number: 1, Suite: green, Reviewers: []Reviewer{{Name: long}}},
 	} {
 		_, err := Decide(r)
 		if err == nil {
@@ -361,6 +367,111 @@ func TestDecideStopsOnARoundMadeWrong(t *testing.T) {
 		if first := strings.SplitN(err.Error(), "\n", 2)[0]; len(first) > 100 {
 			t.Errorf("%s: line 1 has %d characters: %q", name, len(first), first)
 		}
+	}
+}
+
+func TestAPointOfSpacesIsNoValidReport(t *testing.T) {
+	// The format stops a point of ASCII spaces, and Decide one of Unicode spaces.
+	const format, trimmed = "does not match pattern", "the point has no character that is not a space"
+	for name, c := range map[string]struct{ point, cause string }{
+		"a space": {" ", format}, "a tab": {"\t", format}, "U+00A0": {"\u00a0", trimmed}, "U+00A0 and a space": {"\u00a0 ", trimmed},
+	} {
+		point := c.point
+		t.Run(name, func(t *testing.T) {
+			finding, err := json.Marshal(map[string]string{"severity": "non-blocking", "quote": "q", "problem": "p",
+				"fix": "f", "proof": "broken rule: r", "point": point})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := reportAt(t, `{"reviewer":"code-reviewer","findings":[`+string(finding)+`]}`)
+			d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Report: report}}})
+			got := d.Open.Reviewers[0].Findings
+			want := "Reviewer code-reviewer wrote a report that does not match the report format: at '/findings/0/point'"
+			if d.Verdict != ChangesRequested || len(got) != 1 || got[0].Severity != Blocking ||
+				!strings.HasPrefix(got[0].Point, want) || !strings.Contains(got[0].Point, c.cause) {
+				t.Errorf("the verdict is %s with %+v", d.Verdict, got)
+			}
+		})
+	}
+	// The spaces around a point's text go.
+	finding := `{"severity":"non-blocking","quote":"q","problem":"p","fix":"f","proof":"broken rule: r","point":"\u00a0 one point\t"}`
+	report := reportAt(t, `{"reviewer":"code-reviewer","findings":[`+finding+`]}`)
+	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Report: report}}})
+	if got := d.Open.Reviewers[0].Findings; len(got) != 1 || got[0].Point != "one point" {
+		t.Errorf("the findings are %+v", got)
+	}
+}
+
+// bigFinding is a finding of a report with each text at its most characters, each of two
+// bytes in UTF-8.
+func bigFinding(t *testing.T, severity string, number int) string {
+	t.Helper()
+	long := func(n int) string { return strings.Repeat("ü", n) }
+	proof := "failing input: " + long(985)
+	data, err := json.Marshal(map[string]string{"severity": severity, "quote": long(2000), "problem": long(2000),
+		"fix": long(2000), "proof": proof, "point": fmt.Sprintf("point %d %s", number, long(480))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestOpenFindingsFitTheHarnessRead(t *testing.T) {
+	// code-reviewer has 2 blocking findings and 58 non-blocking ones, and security-reviewer
+	// 40 blocking ones: about 1.5 MB of findings, for a file of at most 256 KiB.
+	var code, security []string
+	for i := range 60 {
+		severity := NonBlocking
+		if i == 0 || i == 35 {
+			severity = Blocking
+		}
+		code = append(code, bigFinding(t, severity, i+1))
+	}
+	for i := range 40 {
+		security = append(security, bigFinding(t, Blocking, 61+i))
+	}
+	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{
+		{Name: "code-reviewer", Ended: Finished, Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[`+strings.Join(code, ",")+`]}`)},
+		{Name: "security-reviewer", Ended: Finished, Report: reportAt(t, `{"reviewer":"security-reviewer","findings":[`+strings.Join(security, ",")+`]}`)},
+	}})
+	// The verdict's points count every finding: 42 blocking, then 58 non-blocking.
+	if d.Verdict != ChangesRequested || len(d.Points) != 20 ||
+		d.Points[19].Text != "The review has 81 more open findings than these points list." {
+		t.Fatalf("the verdict is %s with %d points", d.Verdict, len(d.Points))
+	}
+	data, err := d.Open.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) < MaxOpenBytes/2 {
+		t.Errorf("open-findings.json has %d bytes, far below %d", len(data), MaxOpenBytes)
+	}
+	// The blocking findings stay first: code-reviewer's 2, then security-reviewer's. Each
+	// entry ends with the finding of qory's that states how many of its findings are out,
+	// blocking where a blocking finding is out.
+	codeKept, securityKept := d.Open.Reviewers[0].Findings, d.Open.Reviewers[1].Findings
+	if len(codeKept) != 3 || codeKept[0].ID != "f1" || codeKept[1].ID != "f36" {
+		t.Fatalf("code-reviewer's findings are %v", ids(d.Open)["code-reviewer"])
+	}
+	kept := len(securityKept) - 1
+	if kept < 5 {
+		t.Fatalf("security-reviewer has %d findings in the file", kept)
+	}
+	for _, c := range []struct {
+		last     Finding
+		severity string
+		point    string
+	}{
+		{codeKept[2], NonBlocking, "The review has 58 more open findings of code-reviewer than this file lists."},
+		{securityKept[kept], Blocking, fmt.Sprintf("The review has %d more open findings of security-reviewer than this file lists.", 40-kept)},
+	} {
+		if c.last.Severity != c.severity || c.last.Point != c.point || c.last.Quote != "" {
+			t.Errorf("the last finding is %+v, want %s %q", c.last, c.severity, c.point)
+		}
+	}
+	// The findings out keep their ids, so the findings of qory's come after them.
+	if codeKept[2].ID != "f101" || securityKept[kept].ID != "f102" || d.NextID != 103 {
+		t.Errorf("the ids of qory's findings are %s and %s, next id %d", codeKept[2].ID, securityKept[kept].ID, d.NextID)
 	}
 }
 
@@ -384,6 +495,26 @@ func TestReadOpenFindingsChecksTheFile(t *testing.T) {
 		if !strings.HasPrefix(err.Error(), "Give the open-findings.json that qory wrote for the round before.\n") {
 			t.Errorf("%s: the error does not start with its fix: %v", c.text, err)
 		}
+	}
+}
+
+// TestEmbeddedSchemaIsTheContract keeps the package's copy of the report format equal to
+// the contract's file, byte for byte.
+func TestEmbeddedSchemaIsTheContract(t *testing.T) {
+	const contract = "../../contracts/harness/v1/review-report.schema.json"
+	want, err := os.ReadFile(contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile("review-report.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("internal/reviewround/review-report.schema.json differs from %s", contract)
+	}
+	if !bytes.Contains(want, []byte(`"$id": "`+reportSchemaURL+`"`)) {
+		t.Errorf("%s has no $id %s", contract, reportSchemaURL)
 	}
 }
 

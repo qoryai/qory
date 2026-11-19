@@ -1,7 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Report of a reviewer of a change",
-  "description": "Test fixture: the draft of qory's report schema for a review round, written from the review-round contract (report.json with a reviewer and findings, severity blocking or non-blocking, no result word). Replace it with qory's contracts/harness/v1 schema when that lands.",
+  "$id": "https://qory.dev/contracts/harness/v1/review-report.schema.json",
+  "title": "The review report format, version 1",
+  "description": "The report.json of one reviewer of a review round: the reviewer's name and its findings. Each finding is blocking or non-blocking, and has the quote, the problem, the fix, the proof and a point: one line with at least one character that is not a space. A finding that repeats one of the round before may have its id. A blocking finding has a failing check or a failing input as its proof. qory decides the round from the reports and the full suite. No object has a member this schema does not define.",
   "type": "object",
   "required": [
     "reviewer",
@@ -67,7 +68,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 500,
-          "pattern": "^[^\\n\\r]+$"
+          "pattern": "^[^\\n\\r]*\\S[^\\n\\r]*$"
         },
         "file": {
           "type": "string",
