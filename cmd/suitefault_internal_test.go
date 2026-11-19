@@ -343,29 +343,23 @@ func TestAnUnreadableStatusFileUnderTheCapIsNotStarted(t *testing.T) {
 }
 
 // TestTheFullSuiteRefusalIsFixFirstAsPrinted: the refusal of full_suite on a write-no-push workflow,
-// as [ui.UI.Fail] prints it, has the fix as line 1 and the cause, which ends with the code used, as
-// line 2. Line 1 has the workflow's name, so with its mark it has 56 characters for a workflow of 1,
-// 79 for one of 24, and 119 for one of 64, which the stack allows.
+// as [ui.UI.Fail] prints it, has the fix as line 1 and the cause, which ends with the code used and
+// has the workflow's name, as line 2. Line 1 has no name, so with its mark it has 42 characters
+// for a workflow of 1, 24 and 64 characters.
 func TestTheFullSuiteRefusalIsFixFirstAsPrinted(t *testing.T) {
-	for _, c := range []struct {
-		name  string
-		runes int
-	}{{"a", 56}, {strings.Repeat("w", 24), 79}, {strings.Repeat("w", 64), 119}} {
-		workflows := map[string]stack.Workflow{c.name: {Access: stack.AccessWriteNoPush}}
-		err := fullSuiteNoPlan(&codeRun{workflow: c.name, fullSuite: true}, workflows)
+	for _, name := range []string{"a", strings.Repeat("w", 24), strings.Repeat("w", 64)} {
+		workflows := map[string]stack.Workflow{name: {Access: stack.AccessWriteNoPush}}
+		err := fullSuiteNoPlan(&codeRun{workflow: name, fullSuite: true}, workflows)
 		if err == nil {
-			t.Fatalf("the workflow %q is not refused", c.name)
+			t.Fatalf("the workflow %q is not refused", name)
 		}
 		var buf bytes.Buffer
 		ui.New(&buf).Fail(err)
 		line1, line2, _ := strings.Cut(strings.TrimSuffix(buf.String(), "\n"), "\n")
-		if want := "✗ Remove full_suite from the run settings of workflow " + c.name + "."; line1 != want {
-			t.Errorf("line 1 as printed is %q, want %q", line1, want)
+		if want := "✗ Remove full_suite from the run settings."; line1 != want || utf8.RuneCountInString(line1) != 42 {
+			t.Errorf("line 1 as printed is %q with %d characters, want %q with 42", line1, utf8.RuneCountInString(line1), want)
 		}
-		if got := utf8.RuneCountInString(line1); got != c.runes {
-			t.Errorf("line 1 as printed has %d characters, want %d", got, c.runes)
-		}
-		if want := "    The run did not start: " + c.name + " has write-no-push access, so it has no plan to read the full suite from; the code is used"; line2 != want {
+		if want := "    The run did not start: " + name + " has write-no-push access, so it has no plan to read the full suite from; the code is used"; line2 != want {
 			t.Errorf("line 2 as printed is %q, want %q", line2, want)
 		}
 	}

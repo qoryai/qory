@@ -3532,17 +3532,17 @@ the plan type of the run's workflow, with a `full` row that has a command. A ses
 that does not move HEAD runs none.
 
 **Command.** The command is the `full` row of the table under `## Commands` in the plan of the
-artifact type set in `workflows.<name>.plan` for the run's workflow (see
-[The plan of a write workflow](#the-plan-of-a-write-workflow)), in the file `<type>.md`: the
-name `main`, or the one name the work item has, at its newest version that is not cancelled.
-For the Qory stack the type is `build-plan`, and the file is `build-plan.md`. qory reads no other
-plan type: a version of `build-plan` is not read when the workflow sets another plan type. qory
-reads the plan once, after the setup commands of `wall.setup: outside` (the default) and before the session joins, with one request for the
-artifact index and one to download the plan. A plan that the agent pushes during the session
-changes nothing. The row's `Result file` is a path below the repository, or `none`. A work item
-with no usable version of the plan type, or one with no `Commands` table or no `full` row, gets
-the line of the cause, such as `The full suite did not start: <type> has no full command.` and,
-for a cause that the agent can fix, the fix on the next line, and no after step. Once the session
+artifact type set in `workflows.<name>.plan` for the run's workflow (see [The plan of a write
+workflow](#the-plan-of-a-write-workflow)), in the file `<type>.md`: the name `main`, or the one name
+the work item has, at its newest version that is not cancelled. For the Qory stack the type is
+`build-plan`, and the file is `build-plan.md`. qory reads no other plan type: a version of
+`build-plan` is not read when the workflow sets another plan type. qory reads the plan once, after
+the setup commands of `wall.setup: outside` (the default) and before the session joins, with one
+request for the artifact index and one to download the plan. A plan that the agent pushes during the
+session changes nothing. The row's `Result file` is a path below the repository, or `none`. A work
+item with no usable version of the plan type, or one with no `Commands` table or no `full` row, gets
+the line of the cause, such as `The full suite did not start: <type> has no full command.` and, for
+a cause that the agent can fix, the fix on the next line, and no after step. Once the session
 succeeded, qory posts the cause as a verdict, see After the session.
 
 **A workflow with no plan type.** A write workflow whose stack entry has no `plan` has no
@@ -3551,12 +3551,12 @@ after step only checks whether HEAD moved. A session that left HEAD at the commi
 at is `skipped`, as above. For a session that moved HEAD, qory runs no suite, prints and posts
 `Set workflows.<name>.plan in the stack: the workflow has no plan.`, and posts
 `escalate`, since the agent cannot add a plan type to the stack. A workflow with
-`write-no-push` access cannot name a plan type, so a run of it whose documents set `full_suite`
-true stops after the compose, before the join, exit 1, with two lines: `Remove
-full_suite from the run settings of workflow <name>.` and `The run did not start: <name> has
-write-no-push access, so it has no plan to read the full suite from; the code is used`. The run
-closes `failed` with `no_session` (exit code -1). A run that only reads the checkout runs no suite
-and is not refused.
+`write-no-push` access cannot name a plan type, so a run of it whose run settings set
+`full_suite` true stops after the compose, before the join, exit 1, with two lines: `Remove
+full_suite from the run settings.` and `The run did not start: <name> has write-no-push access, so
+it has no plan to read the full suite from; the code is used`. The run closes `failed` with
+`no_session` (exit code -1). A run that only reads the checkout runs no suite and is not
+refused.
 
 **Where it runs.** After the agent's container is removed, Forager starts a new container of the run's
 image with the workspace mounted for writing, on the run's network, with the run's
@@ -3633,8 +3633,8 @@ A suite that did not start or did not run, with a cause the agent cannot fix: th
 could not run or the script ended before the command (exit 70, 71, 72 or another status, or -1), or the step
 reached its limit before the script wrote `ran <commit>`,
 the session's folder has no `.git` folder, qory could not read the plan or the start commit,
-qory cannot reach the run API, the workflow of a session that moved HEAD has no plan type in the stack,
-or the session succeeded and its after step did not run because the run closed.
+qory cannot reach the run API, the workflow of a session that moved HEAD has no plan type in
+the stack, or the session succeeded and its after step did not run because the run closed.
 
 | The agent's newest verdict in this run | What qory posts |
 |---|---|
@@ -3643,9 +3643,10 @@ or the session succeeded and its after step did not run because the run closed.
 | `changes-requested` | `escalate` with the agent's points and `track`, and that point added |
 | 20 points already | nothing: the verdict stands, and qory prints `the verdict of the agent has 20 points already, so qory adds none for the full suite` |
 
-A suite that did not start for a cause in the plan that the agent wrote (no usable version of the plan type, one over 1 MiB, no
-`Commands` table, no `full` row, no command in it, a command that is too long or has a NUL, a
-result file that is no path below the repository): qory knows it at the launch, keeps it, and
+A suite that did not start for a cause in the plan that the agent wrote (no usable version of
+the plan type, one over 1 MiB, no `Commands` table, no `full` row, no command in it, a command
+that is too long or has a NUL, a result file that is no path below the repository): qory knows
+it at the launch, keeps it, and
 judges it once the session succeeded. The point has the cause in `text` and what to change in
 `fix`, and the verdict is `changes-requested`.
 
@@ -3673,14 +3674,17 @@ order of preference:
 - For a session whose after step did not run, `The full suite did not run: the run closed before
   the after step.`
 - For a suite that did not start, `The full suite did not start: <cause>.` The causes at the launch
-  are `the work item has no usable <type>` (no version of the plan type, several names with none named `main`, or only
-  withdrawn versions), `the <type> is larger than 1 MiB`, `<type> has no full command` (no `Commands`
-  table, or no `full` row), `the full row of the <type> has no command`, `the command of the full
-  row is too long or has a NUL`, `the result file of the full row is no path below the repository`
-  (each with a `fix`), `qory could not read the <type>`, `qory cannot reach the run API`, `the session's folder has no .git
-  folder` and `qory could not read the commit the session started at`. For a script that ended before the command, the cause is `the script could not make a folder it
-  needs` (70), `git could not clone HEAD of the workspace` (71), `git could not read HEAD of the
-  workspace` (72) or `the image may lack sh or git` (127).
+  are `the work item has no usable <type>` (no version of the plan type, several names with
+  none named `main`, or only withdrawn versions), `the <type> is larger than 1 MiB`,
+  `<type> has no full command` (no `Commands` table, or no `full` row),
+  `the full row of the <type> has no command`, `the command of the full row is too long or has
+  a NUL`, `the result file of the full row is no path below the repository` (each with a
+  `fix`), `qory could not read the <type>`, `qory cannot reach the run API`,
+  `the session's folder has no .git folder` and
+  `qory could not read the commit the session started at`. For a script that ended before the
+  command, the cause is `the script could not make a folder it needs` (70),
+  `git could not clone HEAD of the workspace` (71), `git could not read HEAD of the workspace`
+  (72) or `the image may lack sh or git` (127).
 - For a session that moved HEAD and whose workflow has no plan type, `Set workflows.<name>.plan in
   the stack: the workflow has no plan.`, printed as it is, with no `The full suite did not start:`
   lead.
