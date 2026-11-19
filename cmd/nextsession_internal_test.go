@@ -133,9 +133,6 @@ func TestTheNextSessionRequestWaitsDoublingAndStopsAfterItsLimit(t *testing.T) {
 	if !strings.Contains(err.Error(), "after session 2 had no successful response within 400ms") || !strings.Contains(err.Error(), "The gateway returned 503") {
 		t.Errorf("the error is %q", err)
 	}
-	if got := inMinutes(10 * time.Minute); got != "10 minutes" {
-		t.Errorf("the limit of 10 minutes shows as %q", got)
-	}
 }
 
 // GatewayBusyErr is the gateway's 503 with no code, as the link returns it.

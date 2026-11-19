@@ -77,7 +77,7 @@ func askNextSession(ctx context.Context, send nextSender, session int, out sessi
 		// shortcut: the link of the pinned Forager passes no Retry-After on, so every wait
 		// doubles; read Retry-After here once Forager's link error has it.
 		if ctx.Err() != nil || branchWait(ctx, wait) != nil {
-			return contracts.NextSessionAnswer{}, "", fmt.Errorf(textNextNoAnswer, session, inMinutes(nextSessionLimit), nextDetail(err))
+			return contracts.NextSessionAnswer{}, "", fmt.Errorf(textNextNoAnswer, session, limitText(nextSessionLimit), nextDetail(err))
 		}
 		wait = min(2*wait, nextMaxWait)
 	}
@@ -95,15 +95,6 @@ func unreadAnswer(err error) string {
 		return "The answer does not match " + strings.TrimPrefix(err.Error(), "it breaks ")
 	}
 	return "The answer does not pass them: " + err.Error()
-}
-
-// inMinutes is d as a line shows a limit: "10 minutes", or d as Go writes it when it is not
-// a whole number of minutes, as a test's shorter limit is.
-func inMinutes(d time.Duration) string {
-	if d < time.Minute || d%time.Minute != 0 {
-		return d.String()
-	}
-	return fmt.Sprintf("%d minutes", d/time.Minute)
 }
 
 // nextRetried are the codes of Qory Apiary's refusals of the next-session request that
