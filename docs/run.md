@@ -3575,8 +3575,8 @@ before the copy step and the push step.
 `harness.extensions.software-factory.command_limits_minutes.full_suite`, a whole number from 1 to
 60; qory reads it from the harness composed at `target_version`, so a commit on the work item's
 branch does not change it. Any other value is read as 60. The limit is the time limit of the
-after step, which includes starting the step. The run's `--timeout` covers the agent's runtime
-alone, so a run can last `--timeout` plus the limit. A step past the limit is cut. When the
+after step, which includes starting the step. The session's time limit does not cover the after
+step, so a run can last that limit plus the suite's limit. A step past the limit is cut. When the
 script had written `ran <commit>`, the suite ends `timeout` and is red. When it had not, for
 example because a clone hung, the command never started, and the suite did not start.
 
