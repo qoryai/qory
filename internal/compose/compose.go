@@ -728,14 +728,7 @@ func addSubmitProgram(res *Result, dir string, root *os.Root, name string, progr
 	if !info.Mode().IsRegular() {
 		return exports.Errorf("Set the submit_program of module %s to a program file.\n  %s is not a file.", shown(name), shownProgram)
 	}
-	for _, e := range res.Excludes {
-		if e.Module != name || e.Path == "" {
-			continue
-		}
-		entry, err := filepath.Rel(dir, e.Path)
-		if err != nil || entry != path && !strings.HasPrefix(path, entry+string(filepath.Separator)) {
-			continue
-		}
+	if e, ok := excludedProgram(res, dir, name, path); ok {
 		return exports.Errorf("%s\n  The submit_program of module %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
 			altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), shown(name), e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
 	}
