@@ -493,7 +493,7 @@ func TestTheSuiteDoesNotFallBackToTheBuildPlan(t *testing.T) {
 	}
 }
 
-// TestAWriteWorkflowWithNoPlanAndHeadWhereItStartedIsSkipped: the stack names no plan type for the
+// TestAWriteWorkflowWithNoPlanAndHeadWhereItStartedIsSkipped: the stack has no plan type for the
 // workflow, and the session left HEAD at its start commit: no suite runs, qory posts nothing, and the
 // run succeeds, as with a plan.
 func TestAWriteWorkflowWithNoPlanAndHeadWhereItStartedIsSkipped(t *testing.T) {
@@ -509,7 +509,7 @@ func TestAWriteWorkflowWithNoPlanAndHeadWhereItStartedIsSkipped(t *testing.T) {
 }
 
 // TestAWriteWorkflowWithNoPlanAndHeadMovedPostsEscalate: the session moved HEAD: qory posts escalate
-// with the point that the workflow names no plan, which the agent cannot fix, and runs no suite
+// with the point that the workflow has no plan, which the agent cannot fix, and runs no suite
 // command.
 func TestAWriteWorkflowWithNoPlanAndHeadMovedPostsEscalate(t *testing.T) {
 	api := newSuiteAPI(t, http.StatusCreated)
@@ -517,9 +517,9 @@ func TestAWriteWorkflowWithNoPlanAndHeadMovedPostsEscalate(t *testing.T) {
 	if err != nil || closed.State != event.StateSucceeded {
 		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
 	}
-	const want = `{"verdict":"escalate","points":[{"text":"The full suite did not start: the workflow fix names no plan in the stack.","action":"run_again"}]}`
+	const want = `{"verdict":"escalate","points":[{"text":"The full suite did not start: the workflow fix has no plan in the stack.","action":"run_again"}]}`
 	if posted := api.posted(); len(posted) != 1 || posted[0] != want {
 		t.Errorf("posted %q, want %s", posted, want)
 	}
-	wants(t, out, "The full suite did not start: the workflow fix names no plan in the stack.")
+	wants(t, out, "The full suite did not start: the workflow fix has no plan in the stack.")
 }

@@ -57,7 +57,7 @@ const (
 	textFixBadFile    = "Write a relative path below the repository as the Result file, or none."
 	textFaultPlanRead = "The full suite did not start: qory could not read the %s."
 	textShownBadFile  = "The full suite did not start: the result file is no path below the repository."
-	textFaultNoPlanIn = "The full suite did not start: the workflow %s names no plan in the stack."
+	textFaultNoPlanIn = "The full suite did not start: the workflow %s has no plan in the stack."
 	textFaultNoRunAPI = "The full suite did not start: qory cannot reach the run API."
 	textFaultNoGit    = "The full suite did not start: the session's folder has no .git folder."
 	textFaultBadStart = "The full suite did not start: qory could not read the commit the session started at."
@@ -105,7 +105,7 @@ func noRunAPIFault() *suiteFault {
 	return &suiteFault{point: runapi.Point{Text: textFaultNoRunAPI, Action: "run_again"}}
 }
 
-// noPlanFault is the fault of a session whose workflow names no plan type in the stack, and whose
+// noPlanFault is the fault of a session whose workflow has no plan type in the stack, and whose
 // HEAD moved: the agent cannot add a plan type to the stack. A workflow with write-no-push access
 // cannot reach it: [fullSuiteNoPlan] stops that run first. A workflow with write access and no
 // plan type does.

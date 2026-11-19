@@ -29,7 +29,7 @@ const maxPlan = 1 << 20
 // planFile is the name of the file of a version of the plan type plan: the type and ".md".
 func planFile(plan string) string { return plan + ".md" }
 
-// noPlanCommand is the command of the after step of a session whose workflow names no plan
+// noPlanCommand is the command of the after step of a session whose workflow has no plan
 // type. The step still tells whether HEAD moved, which the script of [suite.Command] decides: a
 // session that left HEAD where it started is skipped, and the command of any other is not a
 // suite, see [suiteRun.noPlan].
@@ -122,7 +122,7 @@ type suiteRun struct {
 	minutes int
 	// fault is why no suite runs for this session, nil when the after step is set.
 	fault *suiteFault
-	// noPlan is set for a session whose workflow names no plan type: the fault that a session
+	// noPlan is set for a session whose workflow has no plan type: the fault that a session
 	// whose HEAD moved gets. A session whose HEAD did not move is skipped, as with a plan.
 	noPlan *suiteFault
 }
@@ -190,7 +190,7 @@ var planOf = func(c *codeRun, workflows map[string]stack.Workflow) (workflow, pl
 // textFullSuiteNoPlan is the refusal of a run whose run settings set full_suite and whose workflow
 // has write-no-push access: that access allows no plan, see [stack.Workflow], so no plan type
 // could give the suite its full command.
-const textFullSuiteNoPlan = "The run settings set full_suite for workflow %s, which has write-no-push access and no plan to read the full suite from, so the run did not start" + codeUsed + "."
+const textFullSuiteNoPlan = "Remove full_suite from the run settings of workflow %[1]s, or give the stack a plan for its full suite.\n  The run did not start: %[1]s has write-no-push access and no plan to read the full suite from, and the code is used."
 
 // fullSuiteNoPlan is the error of a run from a run code whose documents set full_suite and whose
 // workflow, in workflows, has write-no-push access, nil for any other run. A run that only reads

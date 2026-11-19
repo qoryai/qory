@@ -1109,7 +1109,7 @@ func TestAWorkflowWithNoPlanGetsTheAfterStepThatTellsIfHeadMoved(t *testing.T) {
 	if api.indexCalls != 0 {
 		t.Errorf("the run API was read %d times, want 0", api.indexCalls)
 	}
-	const text = "The full suite did not start: the workflow fix names no plan in the stack."
+	const text = "The full suite did not start: the workflow fix has no plan in the stack."
 	if r.noPlan.point.Text != text || r.noPlan.fixable || r.noPlan.point.Fix != "" || len(text) > 100 || !validPoint(r.noPlan.point) {
 		t.Errorf("fault %+v", r.noPlan)
 	}

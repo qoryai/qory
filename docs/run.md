@@ -3550,13 +3550,14 @@ succeeded, qory posts the cause as a verdict, see After the session.
 suite command, and a session of it that has `full_suite` true still gets a suite result. The
 after step only tells whether HEAD moved. A session that left HEAD at the commit it started
 at is `skipped`, as above. For a session that moved HEAD, qory runs no suite, prints and posts
-`The full suite did not start: the workflow <name> names no plan in the stack.`, and posts
+`The full suite did not start: the workflow <name> has no plan in the stack.`, and posts
 `escalate`, since the agent cannot add a plan type to the stack. A workflow with
 `write-no-push` access cannot name a plan type, so a run of it whose documents set `full_suite`
-true stops after the compose, before the join, exit 1, with `The run settings set full_suite for
-workflow <name>, which has write-no-push access and no plan to read the full suite from, so the
-run did not start; the code is used.` and closes `failed` with `no_session` (exit code -1). A
-run that only reads the checkout runs no suite and is not refused.
+true stops after the compose, before the join, exit 1, with two lines: `Remove
+full_suite from the run settings of workflow <name>, or give the stack a plan for its full suite.`
+and `The run did not start: <name> has write-no-push access and no plan to read the full suite
+from, and the code is used.` The run closes `failed` with `no_session` (exit code -1). A run that
+only reads the checkout runs no suite and is not refused.
 
 **Where it runs.** After the agent's container is removed, Forager starts a new container of the run's
 image with the workspace mounted for writing, on the run's network, with the run's
@@ -3633,7 +3634,7 @@ A suite that did not start or did not run, with a cause the agent cannot fix: th
 could not run or the script ended before the command (exit 70, 71, 72 or another status, or -1), or the step
 reached its limit before the script wrote `ran <commit>`,
 the session's folder has no `.git` folder, qory could not read the plan or the start commit,
-qory cannot reach the run API, the workflow of a session that moved HEAD names no plan type in the stack,
+qory cannot reach the run API, the workflow of a session that moved HEAD has no plan type in the stack,
 or the session succeeded and its after step did not run because the run closed.
 
 | The agent's newest verdict in this run | What qory posts |
@@ -3677,7 +3678,7 @@ order of preference:
   withdrawn versions), `the <type> is larger than 1 MiB`, `<type> has no full command` (no `Commands`
   table, or no `full` row), `the full row of the <type> has no command`, `the command of the full
   row is too long or has a NUL`, `the result file of the full row is no path below the repository`
-  (each with a `fix`), `qory could not read the <type>`, `qory cannot reach the run API`, `the workflow <name> names no
+  (each with a `fix`), `qory could not read the <type>`, `qory cannot reach the run API`, `the workflow <name> has no
   plan in the stack` (for a session that moved HEAD), `the session's folder has no .git
   folder` and `qory could not read the commit the session started at`. For a script that ended before the command, the cause is `the script could not make a folder it
   needs` (70), `git could not clone HEAD of the workspace` (71), `git could not read HEAD of the
