@@ -47,12 +47,15 @@ release may change what an existing document does, and states it under Upgrading
   reason, one sentence on one line of 1 to 300 characters. Pass both or neither. A track's
   id is lower-case words joined by hyphens, at most 40 characters. A track is the `id` and
   the `reason`. A mistake in the id, the reason or the pair exits 2, with the fix on line
-  1; nothing is sent or kept. Outside a run, the kept `verdict.json` has the track. `qory
-  run verdict` exits 4 for every 422 `invalid_artifact` from Qory Apiary, such as a track
-  that the gate does not offer, a point about a question that is not open, or a verdict
-  that breaks the schema. Line 1 of the error is the fix, with at most 98 characters, and
-  Qory Apiary's text follows on line 2. `qory artifact push` still exits 1 for
-  `invalid_artifact`. See The verdict format in `contracts/harness/v1/README.md`.
+  1; nothing is sent or kept. Line 2 of the error for a wrong id shows the id quoted and
+  cut to 40 characters, or, for an id that contains a key or a code, such as `qrk_`, a
+  phrase in its place, as for `--decision`. Outside a run, the kept `verdict.json` has
+  the track. `qory run verdict` exits 4 for every 422 `invalid_artifact` from Qory
+  Apiary, such as a track that the gate does not offer, a point about a question that is
+  not open, or a verdict that breaks the schema. Line 1 of the error is the fix, with at
+  most 98 characters, and Qory Apiary's text follows on line 2. `qory artifact push`
+  still exits 1 for `invalid_artifact`. See The verdict format in
+  `contracts/harness/v1/README.md`.
 - After each push of its push step, qory reports the repositories the push moved to Qory
   Apiary, one entry for each repository with `system`, `path` and the full head commit, in
   push order, at most 64 in a call and at most 65536 bytes in a body. qory sends the report
@@ -620,6 +623,13 @@ release may change what an existing document does, and states it under Upgrading
   provider all rejected ends with `✗ the run failed: the model provider rejected every
   model key` after the runtime's line, exit 1, and qory closes it `failed` with the reason
   `model_key_unauthorized` and the runtime's exit status. See `docs/run.md`.
+- Version 1 of the review report format, `contracts/harness/v1/review-report.schema.json`:
+  the `report.json` that one reviewer of a review round writes and qory's review round
+  reads. It has `reviewer`, the reviewer's agent name, and `findings`, each `blocking` or
+  `non-blocking`, with `quote`, `problem`, `fix`, `proof` and `point`, a line with at
+  least one character that is not a space. A blocking finding has a `failing check` or a
+  `failing input` as its proof. See The review report format in
+  `contracts/harness/v1/README.md`.
 
 ### Changed
 
