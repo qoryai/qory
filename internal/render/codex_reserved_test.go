@@ -105,7 +105,7 @@ func TestCodexRefusesABadHookNumber(t *testing.T) {
 	}
 }
 
-// TestCodexRefusesAHookCodexCannotRead is a Codex config.toml or hooks.json fragment with a
+// TestCodexStopsOnAHookCodexCannotRead is a Codex config.toml or hooks.json fragment with a
 // hook that Codex 0.169.0 cannot decode, after a good one: the compose's build fails with the
 // line that names the event and the hook's place, the fix first, and writes no config.toml.
 func TestCodexStopsOnAHookCodexCannotRead(t *testing.T) {

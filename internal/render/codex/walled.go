@@ -34,7 +34,8 @@ const HomeInWall = "/var/lib/qory-codex-home"
 // runs a hook of that folder as managed: with no stored hash, and also when a
 // hooks.state entry sets enabled = false (codex-rs/hooks/src/engine/discovery.rs,
 // hook_trust_status and hook_enabled). A walled run binds [SystemDir] there, read-only,
-// in place of whatever the image has at that path.
+// in place of a file or a folder the image has at that path. A link there stops the run,
+// see image.CodexSettings, since the bind goes to the link's target.
 const SystemInWall = "/etc/codex"
 
 // SystemDir is the folder of [WriteWalledHome] that a walled run binds at
