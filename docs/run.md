@@ -3551,9 +3551,9 @@ after step only checks whether HEAD moved. A session that left HEAD at the commi
 at is `skipped`, as above. For a session that moved HEAD, qory runs no suite, prints and posts
 `Set workflows.<name>.plan in the stack: the workflow has no plan.`, and posts
 `escalate`, since the agent cannot add a plan type to the stack. A workflow with
-`write-no-push` access cannot name a plan type, so a run of it whose run settings set
+`write-no-push` access cannot name a plan type, so a run of it whose run documents set
 `full_suite` true stops after the compose, before the join, exit 1, with two lines: `Remove
-full_suite from the run settings.` and `The run did not start: <name> has write-no-push access, so
+full_suite from the run documents.` and `The run did not start: <name> has write-no-push access, so
 it has no plan to read the full suite from; the code is used`. The run closes `failed` with
 `no_session` (exit code -1). A run that only reads the checkout runs no suite and is not
 refused.

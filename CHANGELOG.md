@@ -34,8 +34,8 @@ release may change what an existing document does, and states it under Upgrading
   skipped, and one that moved HEAD gets `Set workflows.<name>.plan in the stack: the workflow
   has no plan.` and an `escalate` verdict. The other texts of a suite that did not start name
   the plan type, such as `the work item has no usable <type>`, not the build plan. A run whose
-  run settings set `full_suite` and whose workflow has `write-no-push` access stops before the
-  join with `Remove full_suite from the run settings.` and `The run did not start: <name> has
+  run documents set `full_suite` and whose workflow has `write-no-push` access stops before the
+  join with `Remove full_suite from the run documents.` and `The run did not start: <name> has
   write-no-push access, so it has no plan to read the full suite from; the code is used`.
 - A skill with the frontmatter keys `notes_for` (a role or a list of roles) and `paths` (one
   glob or more from the checkout root) is a note. The compose exits 2, with the fix as

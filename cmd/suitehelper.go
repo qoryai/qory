@@ -188,12 +188,12 @@ var planOf = func(c *codeRun, workflows map[string]stack.Workflow) (workflow, pl
 	return c.workflow, workflows[c.workflow].Plan
 }
 
-// textFullSuiteNoPlan is the refusal of a run whose run settings set full_suite and whose workflow
+// textFullSuiteNoPlan is the refusal of a run whose run documents set full_suite and whose workflow
 // has write-no-push access: that access allows no plan, see [stack.Workflow], so no plan type
 // could give the suite its full command.
-const textFullSuiteNoPlan = "Remove full_suite from the run settings.\n  The run did not start: %s has write-no-push access, so it has no plan to read the full suite from" + codeUsed
+const textFullSuiteNoPlan = "Remove full_suite from the run documents.\n  The run did not start: %s has write-no-push access, so it has no plan to read the full suite from" + codeUsed
 
-// fullSuiteNoPlan is the error of a run from a run code whose run settings set full_suite and
+// fullSuiteNoPlan is the error of a run from a run code whose run documents set full_suite and
 // whose workflow, in workflows, has write-no-push access, nil for any other run. A run that only
 // reads the checkout runs no suite and is not refused. The error is exit 1 and closes the run
 // failed before the join.

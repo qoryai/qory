@@ -680,14 +680,14 @@ func TestARunCodeReadsThePlanTypeOfItsWorkflowFromTheComposedStack(t *testing.T)
 	}
 }
 
-// TestARunWithFullSuiteAndAWorkflowThatCannotPlanStops: a run whose run settings set full_suite
+// TestARunWithFullSuiteAndAWorkflowThatCannotPlanStops: a run whose run documents set full_suite
 // true and whose workflow has write-no-push access stops after the compose, before the image's
 // fetch, the setup and the join, exit 1, with the line that says the code is used, and closes
 // failed with no reason.
 // A workflow with write access, a run with full_suite false, a workflow that has write-no-push
 // access and a run that only reads the checkout are not refused.
 func TestARunWithFullSuiteAndAWorkflowThatCannotPlanStops(t *testing.T) {
-	const line = "Remove full_suite from the run settings.\n  The run did not start: hello has write-no-push access, so it has no plan to read the full suite from; the code is used"
+	const line = "Remove full_suite from the run documents.\n  The run did not start: hello has write-no-push access, so it has no plan to read the full suite from; the code is used"
 	suite := func(on bool) func(map[string]any) {
 		return func(d map[string]any) { d["full_suite"] = on }
 	}
