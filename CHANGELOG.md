@@ -111,9 +111,10 @@ release may change what an existing document does, and states it under Upgrading
   by the wall's engine program or else `docker`, and removes no version's folder when that
   program fails; a machine with no `docker` has no running container. Two runs that need
   one version read its tarball once. A 503 or 429 from the registry is retried until the
-  registry returns the file or the run ends, with its time limit, a cancel or SIGTERM. At
-  the first retry, and every 5 minutes after, `qory run` prints `<host> has not returned
-  Claude Code <version> (503); check pool.registry`, with `no response` in place of
+  registry returns the file or the run ends, with the limit of the steps before the
+  agent's start, a cancel or SIGTERM. At the first retry, and every 5 minutes after,
+  `qory run` prints `<host> has not returned Claude Code <version> (503); check
+  pool.registry`, with `no response` in place of
   the status when the request got none, and without the version while the run does not
   know it yet. A request waits at most 30 seconds to
   connect, 30 seconds for the TLS handshake, 60 seconds for the response's headers and
@@ -602,7 +603,8 @@ release may change what an existing document does, and states it under Upgrading
   qory stops a run whose documents have one. `time_limit_minutes` is the only time limit
   of the run's session: a stack's workflow sets none. When the run documents have no
   `time_limit_minutes`, qory sets no time limit for the session. Qory Apiary writes 180
-  minutes for a workflow with no Time limit. At the limit the session stops, and the
+  minutes for a workflow with no Time limit. The limit counts from the agent's start, as
+  `--timeout` does. At the limit the session stops, and the
   full suite's after step and the push step still run. The documents can
   also contain `shared_run` and `full_suite`. With `full_suite` true, the session runs the full
   test suite when it ends, as The full suite in `docs/run.md` describes; qory reads `shared_run`
@@ -965,10 +967,12 @@ release may change what an existing document does, and states it under Upgrading
   the image of `wall.prebuild_image`, on the host before a run; a missing prebuild image
   fails the prebuild with the engine's error for the pull. See The engine proxy in
   `docs/run.md`.
-- A run from a run code whose time limit came before the runtime started prints two
-  lines: `set a longer Time limit for the run's workflow on the Workflows page in Qory
-  Apiary`, then `the run of the workflow <workflow> was cancelled at its time limit of
-  <limit>, before <runtime> started`.
+- The steps of a run before the agent's start, from the fetch of its repositories to the
+  setup commands, may take 30 minutes together, and no setting changes that. A run past
+  the limit closes `cancelled` with the reason `timeout`, exits 124, and prints a fix for
+  the step that was running, then `the run was cancelled before <runtime> started, during
+  <step>:` and `the steps before the agent's start may take at most 30 minutes`. A run from
+  a control plane prints these two lines alone. See Time limits in `docs/run.md`.
 - A run with a run key or a run code fetches every git source of its harness through the
   run's stack proxy: the stack, its modules, and the modules of the checkout's file,
   also when the checkout's file is the whole harness. The run's host proxy, with the
@@ -1098,11 +1102,11 @@ release may change what an existing document does, and states it under Upgrading
   `qory run: composed <n> entries from <m> modules for <runtime>` on stderr. You no longer
   run `qory harness compose` before `qory run`.
 - `qory run` opens the run at its gateway before it composes the harness, and closes the
-  run with the run's outcome once the session ends. `--timeout` counts from the open, so
-  it covers the compose and the session. A compose that fails closes the run as failed
+  run with the run's outcome once the session ends. `--timeout` counts from the agent's
+  start, so it covers the session alone. A compose that fails closes the run as failed
   with no session started (`no_session`), and qory prints the path of the run's record
-  after the error line. A signal or the time limit before the agent starts cancels the
-  run, exit 1 or 124.
+  after the error line. A signal, or the limit of the steps before the agent's start,
+  cancels the run before the agent starts, exit 1 or 124.
 - The record's `dev.qory.session.started` lists the harness's git sources, each with the
   full commit the compose used.
 - Given a run key, `qory run` reads a module or a stack that a file in the checkout lists
@@ -1415,8 +1419,8 @@ release may change what an existing document does, and states it under Upgrading
   `wall.engine_proxy_file`, so the engine pulls each run's image through the run's
   gateway.
 - A walled run's image step holds an exclusive lock of `wall.engine_proxy_file`, waiting
-  for it within the run's time limit, so one run at a time pulls through the engine's
-  proxy. Replace the file only while no run is going.
+  for it within the limit of the steps before the agent's start, so one run at a time
+  pulls through the engine's proxy. Replace the file only while no run is going.
 - `qory run` prints `***` in place of a URL's `X-Amz-Signature`, `X-Amz-Security-Token`,
   `Signature`, `sig`, `token` or `access_token` value in its `qory run: fetched` lines,
   in the errors of a fetch and in the last error line. A run given a run key or a run
