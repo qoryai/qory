@@ -10,9 +10,11 @@
 // runs, and no file that the source's working tree has and the commit does not reaches the
 // copy. It checks that the commit's bytes have the commit's id, that the commit's file list
 // builds the commit's tree, and that each file of the copy has the bytes and the mode that
-// the list has. A link or a submodule of the commit stays out of the copy, so no read of
-// the copy follows a link; [Folder.Result] lists them. After the session, [Folder.Result]
-// reads what the script wrote.
+// the list has. It checks the base commit's bytes and the base's file list the same way,
+// and that each file that the diff reads from an object, of the base or a link of the
+// commit, has the bytes of its object id. A link or a submodule of the commit stays out of
+// the copy, so no read of the copy follows a link; [Folder.Result] lists them. After the
+// session, [Folder.Result] reads what the script wrote.
 package reviewcopy
 
 import (
@@ -242,6 +244,8 @@ read -r word tree < "$T/object"
 from=$empty
 if [ -n "$base" ]; then
 	checked "$base" || fail "the source has no base commit $base with the bytes of that id"
+	read -r word basetree < "$T/object"
+	[ "$word" = tree ] || fail "the base commit $base has no tree"
 	from=$base
 fi
 # The file list: ls-tree's lines, with a NUL in place of each line end. A path with a line
@@ -313,6 +317,28 @@ listing
 if [ -n "$(comm -3 "$T/want.s" "$T/got.s")" ]; then
 	fail "the files of the copy do not match the file list of the commit"
 fi
+if [ -n "$base" ]; then
+	# The base's file list builds the base's tree, in the index file base-index. git stops
+	# at a tree whose bytes do not have its id.
+	(
+		export GIT_INDEX_FILE="$G/base-index"
+		g ls-tree -r -z --full-tree "$base" > "$T/base.z" && g read-tree --empty &&
+			g update-index -z --index-info < "$T/base.z" && [ "$(g write-tree)" = "$basetree" ]
+	) || fail "the file list of the base commit does not build its tree"
+fi
+# The diff reads from its object each file of the base that it lists, and each link of the
+# commit; the check of the copy covers the commit's other files. Each has the bytes of its
+# object id. The mode 000000 stands for no file, and a submodule has no object here.
+g diff --raw --no-renames --no-abbrev "$from" "$commit" > "$T/raw"
+blob_checked() {
+	case $1 in 000000 | 160000) return 0 ;; esac
+	[ "$(g cat-file blob "$2" | g hash-object --no-filters --stdin)" = "$2" ]
+}
+while read -r frommode tomode fromid toid rest; do
+	case $tomode in 120000) ;; *) tomode=000000 ;; esac
+	blob_checked "${frommode#:}" "$fromid" && blob_checked "$tomode" "$toid" ||
+		fail "the diff has a file whose bytes do not have its object id"
+done < "$T/raw"
 g diff --no-ext-diff --no-textconv --no-color "$from" "$commit" > "$R/commit.diff"
 chmod -R a-w "$W"
 chmod a-w "$R/commit.diff"

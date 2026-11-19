@@ -2,7 +2,9 @@ package reviewcopy
 
 import (
 	"bytes"
+	"compress/zlib"
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -16,8 +18,8 @@ import (
 	"github.com/qoryai/qory/internal/image"
 )
 
-// testGit runs git in dir with no system or global configuration, and returns its output.
-func testGit(t *testing.T, dir string, args ...string) string {
+// gitCommand is git in dir with no system or global configuration.
+func gitCommand(t *testing.T, dir string, args ...string) *exec.Cmd {
 	t.Helper()
 	c := exec.Command("git", args...)
 	c.Dir = dir
@@ -26,6 +28,13 @@ func testGit(t *testing.T, dir string, args ...string) string {
 		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test",
 		"GIT_COMMITTER_EMAIL=test@example.com", "LC_ALL=C",
 	}
+	return c
+}
+
+// testGit runs git in dir with no system or global configuration, and returns its output.
+func testGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	c := gitCommand(t, dir, args...)
 	out, err := c.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -263,12 +272,7 @@ func TestTheCopyHasTheCommitAloneAndRunsNothingOfTheCheckout(t *testing.T) {
 
 func TestTheCopyWritesAgainAFileThatAttributesChanged(t *testing.T) {
 	sessionGit(t)
-	old := script
-	script = strings.Replace(script, "export GIT_ATTR_SOURCE=\"$empty\"\n", "", 1)
-	t.Cleanup(func() { script = old })
-	if script == old {
-		t.Fatal("the script has no export of GIT_ATTR_SOURCE")
-	}
+	withScript(t, noAttrSource...)
 	for _, shell := range shells(t) {
 		t.Run(shell, func(t *testing.T) { attributesWrittenAgain(t, shell) })
 	}
@@ -296,6 +300,142 @@ func attributesWrittenAgain(t *testing.T, shell string) {
 	diff, _ := os.ReadFile(f.Diff())
 	if !strings.Contains(string(diff), "+new line\n") || !strings.Contains(string(diff), "+line one\n") {
 		t.Errorf("the diff with no base lacks a file:\n%s", diff)
+	}
+}
+
+// withScript sets the script to old with each pair of from and to replaced, for the test.
+func withScript(t *testing.T, pairs ...string) {
+	t.Helper()
+	old := script
+	t.Cleanup(func() { script = old })
+	for i := 0; i < len(pairs); i += 2 {
+		if !strings.Contains(script, pairs[i]) {
+			t.Fatalf("the script has no %q", pairs[i])
+		}
+		script = strings.Replace(script, pairs[i], pairs[i+1], 1)
+	}
+}
+
+// Changes of the script for the tests: no GIT_ATTR_SOURCE, which git 2.25 to 2.39 do not
+// read, and the source's configuration in place of the empty one.
+var (
+	noAttrSource = []string{"export GIT_ATTR_SOURCE=\"$empty\"\n", ""}
+	sourceConfig = []string{": > \"$G/config\"\n", "cp \"$S/config\" \"$G/config\"\n"}
+)
+
+func TestTheCopyRunsNoFilterOfTheSourcesConfiguration(t *testing.T) {
+	sessionGit(t)
+	// As git before 2.40 does, the checkout reads the committed .gitattributes.
+	withScript(t, noAttrSource...)
+	for _, shell := range shells(t) {
+		t.Run(shell, func(t *testing.T) {
+			dir, commit, marker := filteredCheckout(t)
+			f, out, err := copyWith(t, shell, filepath.Join(dir, ".git"), commit, "")
+			if err != nil {
+				t.Fatalf("the copy session: %v\n%s", err, out)
+			}
+			if _, err := f.Result(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(marker); err == nil {
+				t.Error("the copy ran the filter of the source's configuration")
+			}
+			if got := files(t, f.Commit())["a.txt"]; got != "file: plain text\n" {
+				t.Errorf("a.txt has %q", got)
+			}
+		})
+	}
+	// The check of the test: a script that copies the source's configuration runs the filter.
+	withScript(t, sourceConfig...)
+	dir, commit, marker := filteredCheckout(t)
+	if _, out, err := copyOf(t, filepath.Join(dir, ".git"), commit, ""); err != nil {
+		t.Fatalf("the copy session with the source's configuration: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("a copy with the source's configuration ran no filter, so the test checks nothing: %v", err)
+	}
+}
+
+// filteredCheckout is a repository with a committed .gitattributes that sets the filter mark
+// on *.txt, and a configuration that defines mark as a program that writes the marker file.
+// It returns the folder, the commit and the marker's path.
+func filteredCheckout(t *testing.T) (string, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	testGit(t, dir, "init", "-q", "--object-format=sha1", "-b", "main")
+	write(t, dir, ".gitattributes", "*.txt filter=mark\n", 0o644)
+	write(t, dir, "a.txt", "plain text\n", 0o644)
+	testGit(t, dir, "add", "-A")
+	testGit(t, dir, "commit", "-q", "-m", "filtered")
+	marker := filepath.Join(t.TempDir(), "ran")
+	program := filepath.Join(t.TempDir(), "mark.sh")
+	write(t, filepath.Dir(program), "mark.sh", "#!/bin/sh\necho ran >> '"+marker+"'\ncat\n", 0o755)
+	testGit(t, dir, "config", "filter.mark.clean", program)
+	testGit(t, dir, "config", "filter.mark.smudge", program)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the set-up ran the filter")
+	}
+	return dir, testGit(t, dir, "rev-parse", "HEAD"), marker
+}
+
+// plant writes the loose object id of the git folder dir again, with the object of the given
+// kind and bytes in its place, as an agent that can write the git folder could.
+func plant(t *testing.T, dir, id, kind string, data []byte) {
+	t.Helper()
+	path := filepath.Join(dir, "objects", id[:2], id[2:])
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the object %s is no loose object: %v", id, err)
+	}
+	var b bytes.Buffer
+	w := zlib.NewWriter(&b)
+	fmt.Fprintf(w, "%s %d\x00", kind, len(data))
+	w.Write(data)
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b.Bytes(), 0o444); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTheCopyChecksTheBaseSideOfTheDiff(t *testing.T) {
+	sessionGit(t)
+	for name, tc := range map[string]struct {
+		plant func(t *testing.T, c checkout)
+		want  string
+	}{
+		"a base file with other bytes": {func(t *testing.T, c checkout) {
+			id := testGit(t, c.dir, "rev-parse", c.base+":README.md")
+			plant(t, filepath.Join(c.dir, ".git"), id, "blob", []byte("bad line\n"))
+		}, "the diff has a file whose bytes do not have its object id"},
+		"a link of the commit with other bytes": {func(t *testing.T, c checkout) {
+			id := testGit(t, c.dir, "rev-parse", c.head+":latest")
+			plant(t, filepath.Join(c.dir, ".git"), id, "blob", []byte("/etc/passwd"))
+		}, "the diff has a file whose bytes do not have its object id"},
+		"a base tree with other entries": {func(t *testing.T, c checkout) {
+			id := testGit(t, c.dir, "rev-parse", c.base+"^{tree}")
+			head := testGit(t, c.dir, "rev-parse", c.head+"^{tree}")
+			data, err := gitCommand(t, c.dir, "cat-file", "tree", head).Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			plant(t, filepath.Join(c.dir, ".git"), id, "tree", data)
+		}, "the file list of the base commit does not build its tree"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := newCheckout(t, "sha1")
+			tc.plant(t, c)
+			f, out, err := copyOf(t, filepath.Join(c.dir, ".git"), c.head, c.base)
+			if err == nil {
+				t.Fatal("the copy session ended with no error")
+			}
+			if _, err := f.Result(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("the result is %v, want %q\n%s", err, tc.want, out)
+			}
+		})
 	}
 }
 
