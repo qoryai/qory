@@ -478,8 +478,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				defer homeLock.Release()
 			}
 			// A run from a run code takes its harness, runtime, compose flags, inputs and
-			// time limit from the documents of the answer to the code; its workflow's
-			// time_limit is known once the harness is composed, see prepareLaunch.
+			// time limit from the documents of the answer to the code.
 			var fromCode *codeRun
 			var in string
 			if code != nil {
@@ -539,7 +538,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// reads to mask the harness's text in the session's log and events.
 				composing.hidden, spec.HarnessHidden = fromCode.hidden, fromCode.hidden
 				composing.fromCode = true
-				timeout = provisioner.TimeLimit(fromCode.minutes, 0)
+				timeout = fromCode.sessionLimit()
 				var remove func()
 				in, remove, err = fromCode.inputsDir()
 				defer remove()
@@ -805,8 +804,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if extra, err = fromCode.workflowArgs(name, rep, in, run.System()); err != nil {
 						return false, err
 					}
-					// The time limit counts from the open, so the compose's time is in it.
-					timeout = provisioner.TimeLimit(fromCode.minutes, workflows[fromCode.workflow].TimeLimit)
 				}
 				// The documents' submit is the run's at level write, and a different one in the
 				// harness gets a line.

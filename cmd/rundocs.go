@@ -84,16 +84,17 @@ func fromAnswerOnly(cmd *cobra.Command, runtime string, extra []string) error {
 	case len(extra) > 0:
 		return input(errors.New("leave out the arguments after --: a run from a run code starts its workflow with the arguments qory sets"))
 	case changed("timeout"):
-		return input(errors.New("leave out --timeout: a run from a run code takes its time limit from Qory Apiary's response to the code, else from its workflow"))
+		return input(errors.New("leave out --timeout: a run from a run code takes its time limit from Qory Apiary"))
 	}
 	return nil
 }
 
 // codeRun is what a run from a run code takes from the documents of the answer to the
 // code, checked: the runtime and the compose flags its run settings map to, the
-// harness document, the workflow, the inputs as the documents have them, the run
-// time_limit_minutes, 0 for none, and harness_hidden. named is set when
-// harness_hidden is true: no text of the run shows the address of a harness source.
+// harness document, the workflow, the inputs as the documents have them, the
+// documents' time_limit_minutes, the limit of session 1, 0 for none, and
+// harness_hidden. named is set when harness_hidden is true: no text of the run shows
+// the address of a harness source.
 // target is the documents' target and target_version, which the fetch uses for the
 // target's repository. workItem is the id of the documents' work item, "" for none.
 type codeRun struct {
@@ -101,10 +102,8 @@ type codeRun struct {
 	settings []provisioner.Setting
 	// harness is the documents' harness document as JSON, which qory composes in place of
 	// the checkout's file; nil when the documents contain none, and the run composes the
-	// checkout's qory.yaml or harness.yaml. defines is set when the harness section has
-	// no extends and defines a stack.
+	// checkout's qory.yaml or harness.yaml.
 	harness  []byte
-	defines  bool
 	named    *source.Named
 	workflow string
 	inputs   []byte
@@ -182,9 +181,10 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 		if err := harnessChecked(doc.Harness, hidden); err != nil {
 			return nil, err
 		}
-		var written any = doc.Harness
+		section := withoutTimeLimits(doc.Harness.Harness)
+		var written any = contracts.HarnessDocument{Harness: section}
 		if defines {
-			written = definedHarness{Harness: definedSection{HarnessSection: doc.Harness.Harness, Target: definedTarget{Runtime: runtime}}}
+			written = definedHarness{Harness: definedSection{HarnessSection: section, Target: definedTarget{Runtime: runtime}}}
 		}
 		var err error
 		if harness, err = json.MarshalIndent(written, "", "  "); err != nil {
@@ -196,7 +196,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Target != nil {
 		target.System, target.Path, target.Version = doc.Target.System, doc.Target.Path, doc.TargetVersion
 	}
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: doc.FullSuite, hidden: hidden, target: target, access: doc.Access}
+	r := &codeRun{runtime: runtime, settings: settings, harness: harness, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: doc.FullSuite, hidden: hidden, target: target, access: doc.Access}
 	if doc.WorkItem != nil {
 		r.workItem = doc.WorkItem.ID
 	}
@@ -213,6 +213,22 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 // whose documents have no target.
 func (r *codeRun) writes() bool {
 	return r != nil && r.access == stack.AccessWrite
+}
+
+// withoutTimeLimits is s with no time_limit in its workflows. The run contract still
+// allows one there, and a stack has no such key: a run's time limit comes only from the
+// documents' time_limit_minutes.
+func withoutTimeLimits(s contracts.HarnessSection) contracts.HarnessSection {
+	if len(s.Workflows) == 0 {
+		return s
+	}
+	workflows := make(map[string]contracts.HarnessWorkflow, len(s.Workflows))
+	for name, w := range s.Workflows {
+		w.TimeLimit = ""
+		workflows[name] = w
+	}
+	s.Workflows = workflows
+	return s
 }
 
 // definedHarness is a harness document whose section defines a stack, as qory writes it
@@ -454,19 +470,26 @@ func (r *codeRun) fetchTarget() preparation.Target {
 }
 
 // timedOutLine is the line of a run from a run code whose time limit, limit, came before
-// the runtime started: [timedOutBeforeJoin] for a run that cannot take --timeout. The
-// workflows are in the stack the harness defines, or in the base it extends: a harness
-// document does one of the two, and defines is set when it defines a stack. The
-// checkout's file may do either, so its line lists both.
+// the runtime started: [timedOutBeforeJoin] for a run that cannot take --timeout. Line 1
+// is the fix, the same for every workflow, so it stays within 100 characters.
 func (r *codeRun) timedOutLine(limit time.Duration, runtime string) string {
-	where := "the base of " + r.phrase()
-	switch {
-	case r.harness == nil:
-		where = r.phrase() + " or the base it extends"
-	case r.defines:
-		where = r.phrase()
-	}
-	return fmt.Sprintf("set a longer Time limit for the workflow %s on the Workflows page in Qory Apiary, or a longer workflows.%s.time_limit in %s: the run was cancelled at its time limit of %s, before %s started", r.workflow, r.workflow, where, limit, agentName(runtime))
+	return fmt.Sprintf(textTimedOutFromCode, r.workflow, limit, agentName(runtime))
+}
+
+// textTimedOutFromCode is the line of [codeRun.timedOutLine]: the workflow, the limit
+// and the runtime.
+const textTimedOutFromCode = "set a longer Time limit for the run's workflow on the Workflows page in Qory Apiary\n" +
+	"the run of the workflow %s was cancelled at its time limit of %s, before %s started"
+
+// sessionMinute is a minute of the documents' time_limit_minutes; a test sets a shorter one.
+var sessionMinute = time.Minute
+
+// sessionLimit is the time limit of session 1 of the run r: the documents'
+// time_limit_minutes, and 0, no limit, when the documents set none. qory sets no
+// default: Qory Apiary writes a limit for each workflow, 180 minutes when the workspace
+// stores none. The limit counts from the run's open, so the compose's time is in it.
+func (r *codeRun) sessionLimit() time.Duration {
+	return time.Duration(r.minutes) * sessionMinute
 }
 
 // startLine is the line qory run prints once the answer to the run code is read.

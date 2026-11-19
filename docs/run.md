@@ -401,13 +401,9 @@ When the run ends, qory says how, and its exit status goes with it:
   line contains `the agent` in place of `<runtime>` when the limit came during the fetch
   of the run's repositories, and when the compose failed after the limit.
   A run from a run code, which takes no `--timeout`, prints `✗ set a longer Time limit
-  for the workflow <workflow> on the Workflows page in Qory Apiary, or a longer
-  workflows.<workflow>.time_limit in the
-  base of the workspace's harness: the run was cancelled at its time limit of <d>, before
-  <runtime> started` instead. The line contains `the workspace's harness` for a harness
-  that defines a stack, and `the checkout's harness or the base it extends` for a run
-  whose documents contain no harness (see [What the run takes from the
-  response](#what-the-run-takes-from-the-response)).
+  for the run's workflow on the Workflows page in Qory Apiary` instead, and `the run of
+  the workflow <workflow> was cancelled at its time limit of <d>, before <runtime>
+  started` on the next line.
 - `✗ the run failed: its events could not be recorded, and <runtime> was stopped`: the
   gateway could not take an event the session sent, exit 1.
 - `✗ the run was lost: it lost contact with the gateway for 1m30s, and <runtime> was
@@ -1087,12 +1083,16 @@ its files take on disk, at most 60 minutes.
 
 `--timeout 0` lifts the limit `forager.yaml` sets.
 
-A run from a run code takes its limit from elsewhere, in this order:
-`time_limit_minutes` in the run's documents, then
-`workflows.<name>.time_limit` of the run's workflow in the stack that the harness
-defines, or in the `qory-stack.yaml` of the stack that it extends, then 3 hours.
-`--timeout` stops it with exit 2, and `session.run.timeout` does not
-apply to it (see [The run key from a run code](#the-run-key-from-a-run-code)).
+A run from a run code takes the time limit of its session only from `time_limit_minutes`
+in the run's documents, counted from the run's open as for any run. Qory Apiary writes it
+from the Time limit of the run's workflow on the Workflows page, and writes 180 minutes for
+a workflow with no Time limit. Documents with no `time_limit_minutes` give the session no
+time limit: qory sets none, and a stack sets none. At the limit the session stops as
+any run stops at its limit, and the steps after the agent's exit still run: the full
+suite's after step (see [The full suite](#the-full-suite)) and the push step of a write run
+(see [The push step of a write run](#the-push-step-of-a-write-run)). `--timeout` stops the
+run with exit 2, and `session.run.timeout` does not apply to it (see [The run key from a run
+code](#the-run-key-from-a-run-code)).
 
 ### How the runtime is stopped
 
@@ -2278,8 +2278,7 @@ Each of these errors stops the run before the code is sent, exit 2:
   from Qory Apiary's response to the code`
 - `leave out the arguments after --: a run from a run code starts its workflow with the
   arguments qory sets`
-- `leave out --timeout: a run from a run code takes its time limit from Qory Apiary's
-  response to the code, else from its workflow`
+- `leave out --timeout: a run from a run code takes its time limit from Qory Apiary`
 
 These stop it after the redemption, exit 1. The code is used, so each needs a new one:
 

@@ -8,5 +8,4 @@ harness:
   workflows:
     fix:
       access: write
-      time_limit: 45m
     review: {}

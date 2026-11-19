@@ -687,6 +687,44 @@ func TestASessionThatDidNotSucceedPushes(t *testing.T) {
 	}
 }
 
+// TestASessionPastItsLimitStopsAndThePushStepRuns is a write run whose documents set
+// time_limit_minutes 15, which lasts 1.5s here, and whose agent leaves changes and runs
+// past that limit. The session gets what is left of the documents' limit, and ends as a
+// run ends at its time limit: cancelled with the reason timeout, exit 124, and the line of
+// the time limit. The step after the agent's exit, the push step, then runs, and pushes
+// what the agent left with that end in its commit.
+func TestASessionPastItsLimitStopsAndThePushStepRuns(t *testing.T) {
+	defer cmd.SetSessionMinute(100 * time.Millisecond)()
+	const limit = 1500 * time.Millisecond
+	p := newPushRepo(t, "write")
+	p.change = func(d map[string]any) { d["time_limit_minutes"] = 15 }
+	var left time.Duration
+	p.mountsOf = func(spec session.SessionSpec) { left = spec.Timeout }
+	r := p.run(t, writesAndCommits(t), func() (*session.Result, error) {
+		// The agent is still running at the limit, where Forager stops it.
+		time.Sleep(left)
+		return &session.Result{State: event.StateCancelled, TimedOut: true, ExitCode: 124}, nil
+	})
+	if left <= 0 || left > limit {
+		t.Errorf("the session's time limit is %v, want what is left of %v", left, limit)
+	}
+	r.wantsClose(t, event.StateCancelled, 124)
+	if got := r.closes[0]; got.Reason != event.ReasonTimeout {
+		t.Errorf("the run closed with %+v, want the reason timeout", got)
+	}
+	wants(t, r.out, "the run was cancelled: it reached the time limit of 1.5s, and claude was stopped")
+	if name, state := r.step(); name == "" || state != event.StateSucceeded {
+		t.Errorf("the push step %q ended %q, want succeeded\n%s", name, state, r.out)
+	}
+	head := p.branchHead(t)
+	if head == "" {
+		t.Fatalf("the forge has no branch\n%s", r.out)
+	}
+	if got, want := proxygittest.Git(t, p.bare, "log", "-1", "--format=%B", head), changesLeft+"\n\nThe run ended cancelled: timeout."; got != want {
+		t.Errorf("the commit's message is %q, want %q", got, want)
+	}
+}
+
 // TestTheCommitHasTheRunNumberAndNotTheRunID is the subject of the commit of what the agent
 // left: the number from the work item, in place of the run's id.
 func TestTheCommitHasTheRunNumberAndNotTheRunID(t *testing.T) {
@@ -1793,19 +1831,20 @@ func TestAStopAfterThePushShowsBothWaysOut(t *testing.T) {
 		return &session.Result{State: event.StateCancelled, TimedOut: true, ExitCode: 124}, nil
 	}
 	for name, c := range map[string]struct {
-		result     func() (*session.Result, error)
-		limit      string
+		result func() (*session.Result, error)
+		// limited is whether the documents set time_limit_minutes 15, which lasts 3s here.
+		limited    bool
 		signals    int
 		state, why string
 		code       int
 		cause      string
 	}{
 		"the run's time limit": {
-			limit: "\n    time_limit: 3s", state: event.StateCancelled, why: event.ReasonTimeout, code: 124,
+			limited: true, state: event.StateCancelled, why: event.ReasonTimeout, code: 124,
 			cause: "the run reached its time limit of 3s",
 		},
 		"past a session that timed out": {
-			result: timedOut, limit: "\n    time_limit: 3s", state: event.StateCancelled, why: event.ReasonTimeout, code: 124,
+			result: timedOut, limited: true, state: event.StateCancelled, why: event.ReasonTimeout, code: 124,
 			cause: "the step reached its limit of 200ms",
 		},
 		"a signal": {
@@ -1818,7 +1857,11 @@ func TestAStopAfterThePushShowsBothWaysOut(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			p := newPushRepo(t, "write"+c.limit)
+			p := newPushRepo(t, "write")
+			if c.limited {
+				p.change = func(d map[string]any) { d["time_limit_minutes"] = 15 }
+				defer cmd.SetSessionMinute(200 * time.Millisecond)()
+			}
 			defer cmd.SetPushTimes(200*time.Millisecond, 400*time.Millisecond)()
 			hangingPost(t, p, func() {
 				for range c.signals {

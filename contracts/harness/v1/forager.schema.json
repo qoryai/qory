@@ -423,7 +423,7 @@
           "additionalProperties": false,
           "properties": {
             "timeout": {
-              "description": "How long a runtime may run, as a duration: 5h30m. At the limit Forager stops it and dev.qory.run.exited reports the limit as the reason. Default no limit. --timeout sets another for one run. A run from a run code does not use it: it takes its time limit from Qory Apiary's response to the code, else from its workflow, else 3 hours.",
+              "description": "How long a runtime may run, as a duration: 5h30m. At the limit Forager stops it and dev.qory.run.exited reports the limit as the reason. Default no limit. --timeout sets another for one run. A run from a run code does not use it: it takes its time limit from Qory Apiary's response to the code, and has none when the response sets none.",
               "type": "string",
               "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
             },

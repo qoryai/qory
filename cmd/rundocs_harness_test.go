@@ -316,14 +316,15 @@ func (r harnessRun) noHarnessFile(t *testing.T) {
 // fetches the base and the module through the run's stack proxy, which it closes before
 // the join, and opens no host proxy. Every line, step event and spec shows the names,
 // never an address, a ref or a path in the run's sources, and the harness list for the
-// session's start line has the names with their commits. The base's
-// workflows.hello.time_limit is the session's time limit.
+// session's start line has the names with their commits. The documents'
+// time_limit_minutes, 300, is the session's time limit.
 func TestARunCodeComposesTheWorkspacesHarnessThroughTheStackProxy(t *testing.T) {
 	r := codeHarness{
 		stack: func(s string) string {
-			return withTools(toolsURL, toolsRef)(s) + "workflows:\n  hello:\n    time_limit: 5h\n    access: write\n"
+			return withTools(toolsURL, toolsRef)(s) + "workflows:\n  hello:\n    access: write\n"
 		},
-		tools: toolsModule(),
+		change: func(d map[string]any) { d["time_limit_minutes"] = 300 },
+		tools:  toolsModule(),
 		before: func() []string {
 			writeFile(t, "qory.yaml", "harness:\n  modules:\n    - name: other\n      source: {path: ./nowhere}\n")
 			return nil
@@ -374,16 +375,18 @@ func TestARunCodeComposesTheWorkspacesHarnessThroughTheStackProxy(t *testing.T) 
 
 // TestARunCodeComposesAHarnessDocumentThatDefinesAStack is a run from a run code whose
 // documents contain a harness document with no extends, which defines a stack of the
-// module hello and its workflow hello, with a time_limit of 4h. qory composes it for
-// run_settings.runtime, or for claude, the default runtime, when the documents have no
-// run settings, though the document has no target. The workflow's time_limit is the
-// session's time limit, and no text shows an address.
+// module hello and its workflow hello, with a time_limit of 4h, which the run contract
+// still allows there. qory composes it for run_settings.runtime, or for claude, the
+// default runtime, when the documents have no run settings, though the document has no
+// target. The documents' time_limit_minutes, 45, is the session's time limit, not the
+// workflow's time_limit, and no text shows an address.
 func TestARunCodeComposesAHarnessDocumentThatDefinesAStack(t *testing.T) {
 	for name, settings := range map[string]any{"run settings": map[string]any{"runtime": "claude"}, "no run settings": nil} {
 		t.Run(name, func(t *testing.T) {
 			r := codeHarness{
 				defines: map[string]any{"hello": map[string]any{"time_limit": "4h", "access": "write"}},
 				change: func(d map[string]any) {
+					d["time_limit_minutes"] = 45
 					if settings != nil {
 						d["run_settings"] = settings
 					}
@@ -399,8 +402,8 @@ func TestARunCodeComposesAHarnessDocumentThatDefinesAStack(t *testing.T) {
 			if want := []session.HarnessSource{{Source: "module hello", Commit: r.commit}}; !slices.Equal(r.spec.Harness, want) {
 				t.Errorf("the harness list is %+v, want %+v", r.spec.Harness, want)
 			}
-			if r.spec.Timeout <= 4*time.Hour-time.Minute || r.spec.Timeout > 4*time.Hour {
-				t.Errorf("the time limit left is %v, want 4h less the time before the join", r.spec.Timeout)
+			if r.spec.Timeout <= 45*time.Minute-time.Minute || r.spec.Timeout > 45*time.Minute {
+				t.Errorf("the time limit left is %v, want 45m less the time before the join", r.spec.Timeout)
 			}
 			r.noAddress(t)
 		})
@@ -594,15 +597,16 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 
 // TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile is a run from a run code
 // whose documents contain no harness document, in a checkout whose qory.yaml extends a
-// stack of another repository, which sets the workflow's time limit: qory composes the
-// checkout's file, fetches the base through the run's stack proxy, which it closes
-// before the join, opens no host proxy and writes no harness.yaml. With the harness
-// hidden, every line, event and spec shows the base by its name; with it shown, the
-// fetch line shows the URL and the ref.
+// stack of another repository: qory composes the checkout's file, fetches the base
+// through the run's stack proxy, which it closes before the join, opens no host proxy
+// and writes no harness.yaml. The documents' time_limit_minutes, 300, is the session's
+// time limit. With the harness hidden, every line, event and spec shows the base by its
+// name; with it shown, the fetch line shows the URL and the ref.
 func TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile(t *testing.T) {
 	for _, shown := range []bool{false, true} {
 		t.Run(fmt.Sprintf("shown %v", shown), func(t *testing.T) {
-			r := codeHarness{checkout: true, shown: shown, stack: func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 5h\n    access: write\n" }}.run(t)
+			r := codeHarness{checkout: true, shown: shown, stack: func(s string) string { return s + "workflows:\n  hello:\n    access: write\n" },
+				change: func(d map[string]any) { d["time_limit_minutes"] = 300 }}.run(t)
 			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}

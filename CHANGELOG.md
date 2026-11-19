@@ -290,10 +290,6 @@ release may change what an existing document does, and states it under Upgrading
   consecutive lines or 200 characters of a harness file, in the session's log and
   events. A link that leads out of a module stops the run, exit 1. See A hidden harness
   in `docs/run.md` for what is not masked and Forager's limits.
-- Give a workflow of a stack a time limit with `workflows.<name>.time_limit` in its
-  `qory-stack.yaml`, such as `workflows: {example: {time_limit: 45m}}`. A run from a run
-  code takes its time limit from the `time_limit_minutes` of its documents, else from its
-  workflow's `time_limit`, else 3 hours.
 - Declare a workflow's access level with `workflows.<name>.access` in its
   `qory-stack.yaml`, `read` or `write`, and `read` when left out. qory stops on any
   other value.
@@ -397,14 +393,14 @@ release may change what an existing document does, and states it under Upgrading
   does not serve by its id. A target on another system, or a run with no
   `QORY_RUN_SYSTEM`, does not use `target_version`.
 - The harness section of a `qory.yaml` that defines a stack, without `extends`, may list
-  `workflows`, with the keys and checks of a `qory-stack.yaml`: `time_limit` and
-  `access`. A section that extends a stack takes the base's workflows, and one that also
+  `workflows`, with the keys and checks of a `qory-stack.yaml`, such as `access`. A
+  section that extends a stack takes the base's workflows, and one that also
   lists `workflows` stops with exit 2, `remove workflows or extends: a harness section
   that extends a stack takes the workflows of its base`.
 - A run from a run code composes a harness document with no `extends`, which defines a
   stack, for the run's runtime: `run_settings.runtime`, or `claude` when the documents
-  have no run settings. The `workflows.<name>.time_limit` of that stack applies to the
-  run, as a base's does.
+  have no run settings. qory leaves out a `time_limit` of a workflow there, which the run
+  documents allow and a stack does not have.
 - `QORY_STATUS_FD=<n>` makes `qory run` also write qory's lines, masked, to the open
   descriptor `<n>`: the `✓`, `✗` and `⚠` lines, every `qory run:` line, Forager's lines
   among them, and the last error line, an error of the flags included, each only when
@@ -603,8 +599,11 @@ release may change what an existing document does, and states it under Upgrading
   refuses `fast` as it refuses any name that is not a tier, with the list of the tiers.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
-  qory stops a run whose documents have one. A run whose documents set no
-  `time_limit_minutes` keeps the limit of its workflow, else 3 hours. The documents can
+  qory stops a run whose documents have one. `time_limit_minutes` is the time limit of
+  the run's session, and its only one: a stack's workflow sets none, qory sets no
+  default, and documents without it give the session no limit. Qory Apiary writes 180
+  minutes for a workflow with no Time limit. At the limit the session stops, and the
+  full suite's after step and the push step still run. The documents can
   also contain `shared_run` and `full_suite`. With `full_suite` true, the session runs the full
   test suite when it ends, as The full suite in `docs/run.md` describes; qory reads `shared_run`
   and changes nothing for it.

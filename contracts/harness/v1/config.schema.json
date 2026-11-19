@@ -129,12 +129,6 @@
             "if": {"required": ["plan"]},
             "then": {"required": ["access"], "properties": {"access": {"const": "write"}}},
             "properties": {
-              "time_limit": {
-                "description": "How long a dispatched run of the workflow may run, counted from the run's open, as a duration: 7h or 45m. The time_limit_minutes in the run's documents, when they set it, applies instead. A workflow without it runs for at most 3 hours.",
-                "type": "string",
-                "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$",
-                "not": {"pattern": "^([0.]+(ns|us|ms|s|m|h))+$"}
-              },
               "access": {
                 "description": "The access level the workflow declares for what a dispatched run of it works on: read, write-no-push, or write. Left out, it is read. A run takes the lower of this access and access in the run's documents, in the order read, write-no-push, write; documents with no target have no access, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is read, and on Claude Code its settings deny Edit, Write and NotebookEdit; such a run with no wall, with wall.setup: inside, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A write-no-push run has a writable checkout, no push step, no submit, and no version of the artifact branch. At write the checkout is writable and qory pushes what the agent left.",
                 "enum": ["read", "write-no-push", "write"]

@@ -19,28 +19,23 @@ import (
 )
 
 // TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet is the line of a run from a run code
-// whose time limit came before the runtime started: its fix is a longer limit in Qory
-// Apiary or in the workflows of the harness, never --timeout, which such a run does not
-// take. The workflows are in the base of a harness document with extends, in a harness
-// document that defines a stack, and in the checkout's harness or its base for a run
-// without a harness document.
+// whose time limit came before the runtime started: its fix is a longer Time limit in Qory
+// Apiary, never --timeout, which such a run does not take, nor a workflow of the harness.
+// Line 1 is the same for every workflow and has at most 100 characters with "qory run: ".
 func TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet(t *testing.T) {
-	const line = "set a longer Time limit for the workflow example on the Workflows page in Qory Apiary, or a longer workflows.example.time_limit in %s: the run was cancelled at its time limit of 45m0s, before claude started"
-	for _, c := range []struct {
-		harness string
-		defines bool
-		where   string
-	}{
-		{"{}\n", false, "the base of the workspace's harness"},
-		{"{}\n", true, "the workspace's harness"},
-		{"", false, "the checkout's harness or the base it extends"},
-	} {
-		r := &codeRun{workflow: "example", defines: c.defines}
-		if c.harness != "" {
-			r.harness = []byte(c.harness)
+	const want = "set a longer Time limit for the run's workflow on the Workflows page in Qory Apiary\n" +
+		"the run of the workflow example was cancelled at its time limit of 45m0s, before claude started"
+	for _, harness := range []string{"{}\n", ""} {
+		r := &codeRun{workflow: "example"}
+		if harness != "" {
+			r.harness = []byte(harness)
 		}
-		if got, want := r.timedOutLine(45*time.Minute, "claude"), fmt.Sprintf(line, c.where); got != want {
+		got := r.timedOutLine(45*time.Minute, "claude")
+		if got != want {
 			t.Errorf("got  %q\nwant %q", got, want)
+		}
+		if first, _, _ := strings.Cut(got, "\n"); len("qory run: "+first) > 100 {
+			t.Errorf("line 1 has %d characters with qory run: %q", len("qory run: "+first), first)
 		}
 	}
 }
@@ -546,7 +541,8 @@ func TestAHarnessDocumentWithASourceQoryDoesNotFetchStops(t *testing.T) {
 // with no extends, whose section defines a stack with workflows: harnessChecked checks
 // its modules and no base, and qory writes it with target.runtime set to the run's
 // runtime, run_settings.runtime or the default runtime when the documents have no run
-// settings, the workflows as the documents have them.
+// settings, the workflows as the documents have them but for time_limit, which qory leaves
+// out: a run's time limit is the documents' time_limit_minutes alone.
 func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing.T) {
 	defined := func(git string) *contracts.HarnessDocument {
 		return &contracts.HarnessDocument{Harness: contracts.HarnessSection{
@@ -577,13 +573,19 @@ func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing
 			t.Fatal(err)
 		}
 		h := doc.Harness
-		if !r.defines || h.Extends != nil || h.Target.Runtime != "claude" || len(h.Modules) != 1 || h.Workflows["example"] != (contracts.HarnessWorkflow{Access: "write", TimeLimit: "45m"}) {
-			t.Errorf("run settings %+v: defines %v, harness.yaml has:\n%s", settings, r.defines, r.harness)
+		if h.Extends != nil || h.Target.Runtime != "claude" || len(h.Modules) != 1 || h.Workflows["example"] != (contracts.HarnessWorkflow{Access: "write"}) {
+			t.Errorf("run settings %+v: harness.yaml has:\n%s", settings, r.harness)
+		}
+		if strings.Contains(string(r.harness), "time_limit") {
+			t.Errorf("harness.yaml has a time_limit:\n%s", r.harness)
 		}
 	}
 	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}, Workflow: "example"})
-	if err != nil || r.defines || strings.Contains(string(r.harness), "target") {
-		t.Errorf("a document with extends: %v, defines %v, harness.yaml has:\n%s", err, r != nil && r.defines, r.harness)
+	if err != nil {
+		t.Fatalf("a document with extends: %v", err)
+	}
+	if strings.Contains(string(r.harness), "target") {
+		t.Errorf("a document with extends: harness.yaml has:\n%s", r.harness)
 	}
 }
 

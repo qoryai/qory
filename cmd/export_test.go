@@ -284,6 +284,14 @@ func SetCopyStepLimit(limit time.Duration) func() {
 	return func() { copyStepLimit = before }
 }
 
+// SetSessionMinute makes a minute of the documents' time_limit_minutes last d, so a
+// test gives a session a limit of seconds, and returns the function that undoes it.
+func SetSessionMinute(d time.Duration) func() {
+	before := sessionMinute
+	sessionMinute = d
+	return func() { sessionMinute = before }
+}
+
 // SetPushTimes sets the time the push step has past a run's limit and after a signal, and
 // returns what restores the defaults.
 func SetPushTimes(limit, signal time.Duration) func() {
