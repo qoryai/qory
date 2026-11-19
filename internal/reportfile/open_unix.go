@@ -4,6 +4,7 @@ package reportfile
 
 import (
 	"errors"
+	"io/fs"
 	"syscall"
 )
 
@@ -13,3 +14,11 @@ const openFlags = syscall.O_NOFOLLOW | syscall.O_NONBLOCK | syscall.O_NOCTTY
 
 // isLink reports whether err is the error of an open with O_NOFOLLOW at a link.
 func isLink(err error) bool { return errors.Is(err, syscall.ELOOP) }
+
+// hardLinks is the number of hard links of the file of info, 1 when info has none.
+func hardLinks(info fs.FileInfo) uint64 {
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		return uint64(st.Nlink)
+	}
+	return 1
+}

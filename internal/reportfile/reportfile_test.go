@@ -25,7 +25,7 @@ func causeOf(t *testing.T, err error) Cause {
 }
 
 func TestReadReadsARegularFile(t *testing.T) {
-	dir := t.TempDir()
+	dir := realTempDir(t)
 	path := filepath.Join(dir, "report.json")
 	if err := os.WriteFile(path, []byte(`{"reviewer":"code-reviewer","findings":[]}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestReadReadsARegularFile(t *testing.T) {
 }
 
 func TestReadReadsNoLink(t *testing.T) {
-	dir := t.TempDir()
+	dir := realTempDir(t)
 	target := filepath.Join(dir, "target.json")
 	if err := os.WriteFile(target, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestReadReadsNoLink(t *testing.T) {
 }
 
 func TestReadDoesNotWaitOnAFIFO(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "report.json")
+	path := filepath.Join(realTempDir(t), "report.json")
 	if err := syscall.Mkfifo(path, 0o600); err != nil {
 		t.Skipf("mkfifo: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestReadDoesNotWaitOnAFIFO(t *testing.T) {
 }
 
 func TestReadReadsNoOversizeFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "report.json")
+	path := filepath.Join(realTempDir(t), "report.json")
 	if err := os.WriteFile(path, []byte(strings.Repeat("x", 11)), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestReadReadsNoOversizeFile(t *testing.T) {
 }
 
 func TestReadNamesAMissingFile(t *testing.T) {
-	dir := t.TempDir()
+	dir := realTempDir(t)
 	if got := causeOf(t, second(Read(filepath.Join(dir, "report.json"), MaxBytes))); got != Missing {
 		t.Errorf("a missing file: cause %d", got)
 	}
@@ -119,7 +119,7 @@ func TestErrorStartsWithItsFix(t *testing.T) {
 	if lines[0] != "Write the report as one regular file of at most 1048576 bytes." || len(lines[0]) > 100 {
 		t.Errorf("line 1 is %q", lines[0])
 	}
-	if lines[1] != `"/reports/report.json" is a link, or is in a folder that is a link.` {
+	if lines[1] != `"/reports/report.json" is a link, or is below a folder that is a link.` {
 		t.Errorf("line 2 is %q", lines[1])
 	}
 	unreadable := &Error{Path: "/r", Cause: Unreadable, Err: errors.New("permission denied\nmore")}
@@ -130,6 +130,55 @@ func TestErrorStartsWithItsFix(t *testing.T) {
 	if withPath.What() != "cannot be read: permission denied" {
 		t.Errorf("an unreadable file has the path in its cause: %q", withPath.What())
 	}
+}
+
+func TestReadReadsNoFileBelowALinkedFolder(t *testing.T) {
+	dir := realTempDir(t)
+	if err := os.MkdirAll(filepath.Join(dir, "real", "round"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "real", "round", "report.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "real"), filepath.Join(dir, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	// The report's folder is no link, but the folder above it is.
+	if got := causeOf(t, second(Read(filepath.Join(dir, "linked", "round", "report.json"), MaxBytes))); got != Link {
+		t.Errorf("a file below a linked folder: cause %d", got)
+	}
+	if _, err := Read(filepath.Join(dir, "real", "round", "report.json"), MaxBytes); err != nil {
+		t.Errorf("the file at its path with no link: %v", err)
+	}
+}
+
+func TestReadReadsNoFileWithASecondHardLink(t *testing.T) {
+	dir := realTempDir(t)
+	path := filepath.Join(dir, "report.json")
+	if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(path, filepath.Join(dir, "other.json")); err != nil {
+		t.Skipf("link: %v", err)
+	}
+	err := second(Read(path, MaxBytes))
+	if got := causeOf(t, err); got != HardLink {
+		t.Fatalf("a file with a second hard link: cause %d", got)
+	}
+	if !strings.HasSuffix(err.Error(), "has another hard link.") {
+		t.Errorf("the error is %q", err)
+	}
+}
+
+// realTempDir is a new folder at a path with no link, as Read needs: on macOS the default
+// temporary folder is below /var, a link to /private/var.
+func realTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 // second is the error of a call that returns data and an error.

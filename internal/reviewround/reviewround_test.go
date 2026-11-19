@@ -37,11 +37,22 @@ func fixture(t *testing.T, name string) string {
 // reportAt writes text as a report file in a new folder and returns its path.
 func reportAt(t *testing.T, text string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "report.json")
+	path := filepath.Join(realTempDir(t), "report.json")
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// realTempDir is a new folder at a path with no link, as reportfile.Read needs: on macOS
+// the default temporary folder is below /var, a link to /private/var.
+func realTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 // previous is the open findings of testdata/previous.json.
@@ -199,7 +210,7 @@ func TestOnlyNonBlockingFindingsPass(t *testing.T) {
 }
 
 func TestAReviewerWithNoValidReportIsABlockingFinding(t *testing.T) {
-	dir := t.TempDir()
+	dir := realTempDir(t)
 	link := filepath.Join(dir, "report.json")
 	if err := os.Symlink(fixture(t, codeReport), link); err != nil {
 		t.Fatal(err)
@@ -213,7 +224,7 @@ func TestAReviewerWithNoValidReportIsABlockingFinding(t *testing.T) {
 		{"failed", Reviewer{Ended: Failed, Report: fixture(t, codeReport)}, "Reviewer code-reviewer wrote no report: its session failed."},
 		{"timed out", Reviewer{Ended: TimedOut}, "Reviewer code-reviewer wrote no report: its session reached its time limit."},
 		{"missing", Reviewer{Report: filepath.Join(dir, "none.json")}, "Reviewer code-reviewer wrote no report."},
-		{"link", Reviewer{Report: link}, "Reviewer code-reviewer wrote no valid report: the report file is a link, or is in a folder that is a link."},
+		{"link", Reviewer{Report: link}, "Reviewer code-reviewer wrote no valid report: the report file is a link, or is below a folder that is a link."},
 		{"folder", Reviewer{Report: dir}, "Reviewer code-reviewer wrote no valid report: the report file is no regular file."},
 		{"not JSON", Reviewer{Report: reportAt(t, `{"reviewer":`)}, "Reviewer code-reviewer wrote a report that is not one JSON object: unexpected EOF."},
 		{"two values", Reviewer{Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]} {}`)}, "Reviewer code-reviewer wrote a report that is not one JSON object: the file continues after the JSON value."},

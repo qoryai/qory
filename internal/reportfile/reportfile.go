@@ -1,8 +1,8 @@
 // Package reportfile reads a file that a session wrote for qory, such as a reviewer's
-// report, after that session ended: as a regular file, at most a given size, and without
-// following a link at the file's path or at its folder. A link, a FIFO, a folder, a device
-// and an oversize file are each an [Error] with its [Cause], so the caller can state why
-// it read nothing.
+// report, after that session ended: as a regular file with one hard link, at most a given
+// size, and without following a link at the file's path or at any folder above it. A link,
+// a second hard link, a FIFO, a folder, a device and an oversize file are each an [Error]
+// with its [Cause], so the caller can state why it read nothing.
 package reportfile
 
 import (
@@ -25,7 +25,7 @@ type Cause int
 const (
 	// Missing is a path with no file.
 	Missing Cause = iota + 1
-	// Link is a symbolic link at the path, or at its folder.
+	// Link is a symbolic link at the path, or at a folder above it.
 	Link
 	// NotRegular is a FIFO, a folder, a socket or a device at the path.
 	NotRegular
@@ -35,6 +35,8 @@ const (
 	Unreadable
 	// BadPath is a path that is not absolute and clean.
 	BadPath
+	// HardLink is a regular file with more than one hard link.
+	HardLink
 )
 
 // Error is why [Read] read no file: its path, its cause and, for [Unreadable], the error of
@@ -52,13 +54,15 @@ func (e *Error) What() string {
 	case Missing:
 		return "is missing"
 	case Link:
-		return "is a link, or is in a folder that is a link"
+		return "is a link, or is below a folder that is a link"
 	case NotRegular:
 		return "is no regular file"
 	case TooLarge:
 		return "has more than " + strconv.FormatInt(e.Limit, 10) + " bytes"
 	case BadPath:
 		return "is no absolute, clean path"
+	case HardLink:
+		return "has another hard link"
 	default:
 		if e.Err != nil {
 			// The cause alone: a *fs.PathError's text has the path, which a point that
@@ -84,9 +88,11 @@ func (e *Error) Error() string {
 func (e *Error) Unwrap() error { return e.Err }
 
 // Read reads the file at path, an absolute and clean path, of at most limit bytes. It
-// follows no link: a link at path, or a folder of path's parent that is a link, is an
-// [Error] with [Link]. A file that is not regular is [NotRegular], also when it turns into
-// one between the check and the open, and the open does not wait on a FIFO.
+// follows no link: a link at path, or at any folder from path's folder up to the root, is
+// an [Error] with [Link], so the caller gives a path with no link in it, such as one that
+// filepath.EvalSymlinks returns. A file with a second hard link is [HardLink]. A file that
+// is not regular is [NotRegular], also when it turns into one between the check and the
+// open, and the open does not wait on a FIFO.
 func Read(path string, limit int64) ([]byte, error) {
 	fail := func(c Cause, err error) ([]byte, error) {
 		return nil, &Error{Path: path, Cause: c, Limit: limit, Err: err}
@@ -94,8 +100,13 @@ func Read(path string, limit int64) ([]byte, error) {
 	if path == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return fail(BadPath, nil)
 	}
-	if dir, err := os.Lstat(filepath.Dir(path)); err == nil && dir.Mode()&fs.ModeSymlink != 0 {
-		return fail(Link, nil)
+	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
+		if info, err := os.Lstat(dir); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+			return fail(Link, nil)
+		}
+		if dir == filepath.Dir(dir) {
+			break
+		}
 	}
 	info, err := os.Lstat(path)
 	switch {
@@ -107,6 +118,8 @@ func Read(path string, limit int64) ([]byte, error) {
 		return fail(Link, nil)
 	case !info.Mode().IsRegular():
 		return fail(NotRegular, nil)
+	case hardLinks(info) != 1:
+		return fail(HardLink, nil)
 	case info.Size() > limit:
 		return fail(TooLarge, nil)
 	}
@@ -127,6 +140,9 @@ func Read(path string, limit int64) ([]byte, error) {
 	}
 	if !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
 		return fail(NotRegular, nil)
+	}
+	if hardLinks(opened) != 1 {
+		return fail(HardLink, nil)
 	}
 	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {

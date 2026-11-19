@@ -140,7 +140,13 @@ func shells(t *testing.T) []string {
 // copyWith is [copyOf] with the script run by shell, "" for the session's command.
 func copyWith(t *testing.T, shell, source, commit, base string) (Folder, string, error) {
 	t.Helper()
-	f, err := New(filepath.Join(t.TempDir(), "review"))
+	// A path with no link, as Result reads the state files: on macOS the default temporary
+	// folder is below /var, a link to /private/var.
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := New(filepath.Join(dir, "review"))
 	if err != nil {
 		t.Fatal(err)
 	}

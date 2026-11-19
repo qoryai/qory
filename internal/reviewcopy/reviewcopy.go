@@ -55,7 +55,8 @@ var commitID = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 type Folder struct{ root string }
 
 // New makes the folder of a reviewer copy at root, an absolute and clean path whose folder
-// does not exist yet, and returns it.
+// does not exist yet, and returns it. [Folder.Result] reads the script's files with
+// reportfile.Read, so root has no link in it.
 func New(root string) (Folder, error) {
 	if !filepath.IsAbs(root) || filepath.Clean(root) != root || strings.ContainsAny(root, "\n\r\x00") {
 		return Folder{}, fmt.Errorf("Give the reviewer copy an absolute, clean path on one line.\nThe path is %s.", strconv.Quote(root))
