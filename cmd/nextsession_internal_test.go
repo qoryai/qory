@@ -167,11 +167,12 @@ func TestAnEndedRunGetsOneNextSessionRequest(t *testing.T) {
 }
 
 // TestEachRefusalCodeOfTheNextSessionRequest is a request whose first send gets each code of
-// next-session-refusal.schema.json from Qory Apiary, a refusal of the gateway's and a failure
-// with no response, and whose second send gets the end. rate_limited, unavailable, the
-// gateway's refusal and no response are sent again after 1 s; run_ended is one send and the
-// end line; every other code of Qory Apiary's is one send and an error with the fix first and
-// Qory Apiary's status and code.
+// next-session-refusal.schema.json from Qory Apiary, a refusal of the gateway's, a status with
+// no coded refusal, as the link returns it ([server.StatusError]), and a failure with no
+// response, and whose second send gets the end. rate_limited, unavailable, the gateway's
+// refusals, an uncoded 503 or 429 and no response are sent again after 1 s; run_ended is one
+// send and the end line; every other code of Qory Apiary's, and an uncoded 400, is one send
+// and an error with the fix first and the status and code.
 func TestEachRefusalCodeOfTheNextSessionRequest(t *testing.T) {
 	apiary := func(status int, code string) error {
 		return &accesskey.Refusal{Status: status, Code: code, From: accesskey.FromApiary}
@@ -180,6 +181,8 @@ func TestEachRefusalCodeOfTheNextSessionRequest(t *testing.T) {
 		err     error
 		retried bool
 		ended   string
+		// detail is the error's second line, for a status the gateway returned.
+		detail string
 	}{
 		"bad_request":                  {err: apiary(http.StatusBadRequest, "bad_request")},
 		"unsupported_contract_version": {err: apiary(http.StatusBadRequest, "unsupported_contract_version")},
@@ -193,6 +196,8 @@ func TestEachRefusalCodeOfTheNextSessionRequest(t *testing.T) {
 		"gateway refusal":              {err: &accesskey.Refusal{Status: http.StatusBadGateway, Code: "control_plane_unavailable", From: accesskey.FromGateway}, retried: true},
 		"gateway 413":                  {err: &accesskey.Refusal{Status: http.StatusRequestEntityTooLarge, Code: "payload_too_large", From: accesskey.FromGateway}, retried: true},
 		"uncoded 503":                  {err: GatewayBusyErr(), retried: true},
+		"uncoded 429":                  {err: &server.StatusError{What: "the next-session request", Status: http.StatusTooManyRequests}, retried: true},
+		"uncoded 400":                  {err: &server.StatusError{What: "the next-session request", Status: http.StatusBadRequest}, detail: "The gateway returned 400: Bad Request"},
 		"no response":                  {err: errors.New("dial tcp: connection refused"), retried: true},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -218,9 +223,12 @@ func TestEachRefusalCodeOfTheNextSessionRequest(t *testing.T) {
 					t.Errorf("askNextSession: %q, %v, want %q", ended, err, c.ended)
 				}
 			default:
+				detail := c.detail
 				var r *accesskey.Refusal
-				errors.As(c.err, &r)
-				want := fmt.Sprintf("qory run: Contact support: Qory Apiary refused the next-session request after session 1.\n  Qory Apiary returned %d: %s", r.Status, r.Code)
+				if errors.As(c.err, &r) {
+					detail = fmt.Sprintf("Qory Apiary returned %d: %s", r.Status, r.Code)
+				}
+				want := "qory run: Contact support: the next-session request after session 1 failed.\n  " + detail
 				if ended != "" || err == nil || err.Error() != want {
 					t.Errorf("askNextSession: %q, %v, want the error %q", ended, err, want)
 				}

@@ -20,7 +20,7 @@ import (
 // documents set shared_run, see [askNextSession]. Each starts with "qory run: " and its fix.
 const (
 	textNextNoAnswer = "qory run: Check the gateway's connection to Qory Apiary, then take the work item in again.\n  The next-session request after session %d got no answer in %s.\n  %s"
-	textNextRefused  = "qory run: Contact support: Qory Apiary refused the next-session request after session %d.\n  %s"
+	textNextRefused  = "qory run: Contact support: the next-session request after session %d failed.\n  %s"
 	textNextUnread   = "qory run: Update qory: the answer to the next-session request after session %d does not pass qory's checks.\n  The answer %s."
 	textNextNoBody   = "qory run: Update qory: qory could not write the next-session request after session %d.\n  %s"
 )
@@ -96,23 +96,24 @@ var nextRetried = []string{"rate_limited", "unavailable"}
 
 // retryNext reports whether the next-session request is sent again after err, the one place
 // that reads a refusal's code: a refusal of Qory Apiary's with a code of [nextRetried]; and,
-// as a transport error, a refusal of the gateway's, a status with no refusal of Qory
-// Apiary's, such as the gateway's 503 while it reopens the run, and a request with no
-// response. An error that wraps [session.ErrRunClosed] is not sent again: the run sent
-// nothing and is closed, which [runEndedLine] reads first.
+// as a transport error, every refusal of the gateway's and a request with no response. A
+// status with no coded refusal, a [*server.StatusError], is sent again as [retryPushed] has
+// it: a status of 500 or above, such as the gateway's 503 while it reopens the run, and
+// 429. Any other such status ends the run. An error that wraps [session.ErrRunClosed] is
+// not sent again: the run sent nothing and is closed, which [runEndedLine] reads first.
 func retryNext(err error) bool {
-	if errors.Is(err, session.ErrRunClosed) {
-		return false
-	}
 	var refusal *accesskey.Refusal
-	if errors.As(err, &refusal) && refusal.Status != 0 && refusal.From == accesskey.FromApiary {
-		return slices.Contains(nextRetried, refusal.Code)
+	if errors.As(err, &refusal) && refusal.Status != 0 {
+		if refusal.From == accesskey.FromApiary {
+			return slices.Contains(nextRetried, refusal.Code)
+		}
+		return true
 	}
-	return true
+	return retryPushed(err)
 }
 
-// nextRefused is the error of a refusal of Qory Apiary's that ends the run and is not sent
-// again, see [retryNext]: the fix first, then Qory Apiary's status and text.
+// nextRefused is the error of a response that ends the run and is not sent again, see
+// [retryNext]: the fix first, then the status and the text of Qory Apiary or the gateway.
 func nextRefused(session int, err error) error {
 	return fmt.Errorf(textNextRefused, session, nextDetail(err))
 }
