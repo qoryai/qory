@@ -4639,7 +4639,7 @@ run's copy, or, for a run with no copy, a new folder at that path:
 The harness's Codex hooks are in neither folder's `config.toml` or `hooks.json`. qory writes
 them, the hooks of `settings/codex/hooks.json` and then those of `settings/codex/config.toml`,
 into `hooks.json` in a third folder, `codex-fixed/etc-codex`, and binds that folder read-only at
-`/etc/codex`. Codex 0.169.0 runs a hook from `/etc/codex` as a managed hook: it needs no stored
+`/etc/codex`. Codex 0.170.0 runs a hook from `/etc/codex` as a managed hook: it needs no stored
 hash, and a `hooks.state` setting with `enabled = false` does not turn it off. Codex reads no hook
 of a `hooks.json` with one hook it cannot decode. The compose checks each group and hook of
 each module's file and stops with ``Fix `hooks.<event>[<group>].hooks[<hook>]` in

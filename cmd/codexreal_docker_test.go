@@ -86,17 +86,9 @@ var realCodexSums = map[string]string{
 	"arm64": "9892e6e5e89afc672e902ad17d51276150f974e5c613b726a5df5d27f8b191288a89fcc300f686abcdd9126c15864dcfc5b7533d448b4699d765029b352e47a0",
 }
 
-// hooksCodexVersion is the Codex of [TestARealWalledCodexRunsAHookOfEtcCodexTurnedOff]:
-// 0.169.0, the version whose code the run's managed hooks were checked against
-// (codex-rs/hooks/src/engine/discovery.rs at rust-v0.169.0). hooksCodexSums are npm's
-// dist.integrity of its native builds, @openai/codex 0.169.0-linux-x64 and
-// 0.169.0-linux-arm64, read on 2026-11-19, sha512 in hex.
-const hooksCodexVersion = "0.169.0"
-
-var hooksCodexSums = map[string]string{
-	"amd64": "a34e4dc803820f28123d1a35ca29f3c6f91149d9ac672043f44ee66e99a345a9d27ccf25ca9a96b50804a385df364c21b82476685bbc9a518eb101855d56d5c3",
-	"arm64": "359fc36905297109b19aa79eed9f6e0b5af3c371a149ba286b071a4ded4b379624f969629d42867535c98029514fff6881010433d4d6c58cefc4f7e3e46ff116",
-}
+// systemSkillsLine is the text of the error that Codex 0.170.0 logs when it fails to
+// install the system skills: "failed to install system skills: <cause>".
+const systemSkillsLine = "install system skills"
 
 // realCodexImage builds an image on alpine with git, Codex, and [codexScan] with mark at
 // /usr/local/bin/codex-scan. Codex is npm's native build of @openai/codex for this
@@ -537,6 +529,10 @@ func TestARealWalledCodexRunReachesTheModelThroughTheGateway(t *testing.T) {
 				"scan: rollout "+codex.HomeInWall+"/sessions/", "scan: no file has the key\n", `"text":"Hi"`)
 			wants(t, r.out, "scan: no variable has the key\n")
 			lacks(t, r.out, `"type":"error"`, "scan: a variable has the key", "scan: wrote config.toml", "scan: a file has the key", "scan: grep failed")
+			// Codex logs this error when it fails to write its system skills into the home,
+			// which it tries only with skills.bundled.enabled on
+			// (codex-rs/ext/skills/src/host_service.rs:164, :293 and :504 at rust-v0.170.0).
+			lacks(t, r.out, systemSkillsLine)
 			log := u.log(t)[before:]
 			mention := "[$workflow-hello](" + codex.HomeInWall + "/skills/workflow-hello/SKILL.md)"
 			if !slices.ContainsFunc(log, func(e upstreamEntry) bool {

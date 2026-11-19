@@ -31,7 +31,7 @@ const (
 )
 
 // stopHookOff is the hooks.state table that turns off the first hook of the first Stop
-// group of /etc/codex/hooks.json. Codex 0.169.0 keys a hook's state as
+// group of /etc/codex/hooks.json. Codex 0.170.0 keys a hook's state as
 // <file>:<event>:<group>:<hook>, the file being the hooks.json it read the hook from and the
 // event in snake case (codex-rs/hooks/src/lib.rs, hook_key and hook_event_key_label;
 // codex-rs/hooks/src/engine/discovery.rs, key_source), and reads hooks.state from the
@@ -43,7 +43,7 @@ func stopHook(command string) map[string]any {
 	return map[string]any{"type": "command", "command": command, "timeout": 30}
 }
 
-// codexHookHash is the hash by which Codex 0.169.0 trusts a hook that is not managed, in
+// codexHookHash is the hash by which Codex 0.170.0 trusts a hook that is not managed, in
 // hooks.state's trusted_hash: the SHA-256 of the JSON of the hook's identity, with sorted
 // keys and no spaces, the event in snake case and the hook in the group alone, with its
 // defaults filled in (codex-rs/hooks/src/engine/discovery.rs, hook_hash;
@@ -65,7 +65,7 @@ func codexHookHash(t *testing.T, event, command string) string {
 }
 
 // TestARealWalledCodexRunsAHookOfEtcCodexTurnedOff is a walled Codex run from a run code
-// that only reads, behind a real wall on this machine's engine, with Codex 0.169.0 in the
+// that only reads, behind a real wall on this machine's engine, with Codex 0.170.0 in the
 // image, at a gateway of Forager's in this process whose control plane has a fake API key
 // for a stub of the Responses API in a container. The harness's module has one Stop hook,
 // which writes a file in the writable home; qory writes it into hooks.json of the folder
@@ -75,8 +75,9 @@ func codexHookHash(t *testing.T, event, command string) string {
 // table. The home's hooks.json, written through the same seam, has two Stop hooks that
 // are not managed, each trusted by its hash in hooks.state, the second also with
 // enabled = false: Codex runs the first and not the second, so the same state does turn
-// off a hook outside /etc/codex. It runs only with QORY_TEST_DOCKER=1 and docker on the PATH, in a separate test
-// binary, and needs an engine whose containers this machine reaches at the containers'
+// off a hook outside /etc/codex. Codex logs no failed install of its system skills. It
+// runs only with QORY_TEST_DOCKER=1 and docker on the PATH, in a separate test binary,
+// and needs an engine whose containers this machine reaches at the containers'
 // addresses, as [TestARealWalledCodexRunReachesTheModelThroughTheGateway] does.
 func TestARealWalledCodexRunsAHookOfEtcCodexTurnedOff(t *testing.T) {
 	if os.Getenv("QORY_TEST_DOCKER") != "1" {
@@ -86,7 +87,7 @@ func TestARealWalledCodexRunsAHookOfEtcCodexTurnedOff(t *testing.T) {
 		t.Skip("no docker command")
 	}
 	if os.Getenv(envRealCodexChild) == "" {
-		runRealCodexChild(t, hooksCodexVersion, hooksCodexSums)
+		runRealCodexChild(t, realCodexVersion, realCodexSums)
 		return
 	}
 	var setup realCodexSetup
@@ -166,7 +167,7 @@ func TestARealWalledCodexRunsAHookOfEtcCodexTurnedOff(t *testing.T) {
 	}
 	wants(t, r.out, "scan: file "+hookMarker+"\n", "scan: file "+homeHookOn+"\n")
 	lacks(t, r.out, "scan: file "+homeHookOff+"\n")
-	lacks(t, r.out, `"type":"error"`)
+	lacks(t, r.out, `"type":"error"`, systemSkillsLine)
 }
 
 // writeInPlace writes text into the file at path, opened write-only with flag, os.O_APPEND

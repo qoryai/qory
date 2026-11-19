@@ -834,7 +834,7 @@ release may change what an existing document does, and states it under Upgrading
   home. qory writes the harness's Codex hooks, those of `settings/codex/hooks.json` and
   then those of `settings/codex/config.toml`, into `hooks.json` of the folder
   `codex-fixed/etc-codex`, mode 0755, and binds that folder read-only at `/etc/codex`, in
-  place of anything the image has there. Codex 0.169.0 runs those hooks as managed: with
+  place of anything the image has there. Codex 0.170.0 runs those hooks as managed: with
   no stored hash, and also when a `hooks.state` setting turns them off. A walled Codex run
   copies the composed home's `skills/`, `rules/` and `agents/`
   with every link replaced by the file or folder it leads to, since Codex 0.167.2 passes
