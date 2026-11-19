@@ -90,8 +90,8 @@ type suiteEnd struct {
 	extensions string
 	// noFullSuite is whether the run documents have full_suite false.
 	noFullSuite bool
-	// plan is the plan type that the stack names for the run's workflow fix, build-plan when
-	// "". noPlan is whether the workflow names none.
+	// plan is the plan type set in workflows.<name>.plan for the run's workflow fix, build-plan when
+	// "". noPlan is whether the workflow sets none.
 	plan   string
 	noPlan bool
 	// after, when not nil, is the end of the after step in place of the script's.
@@ -517,9 +517,9 @@ func TestAWriteWorkflowWithNoPlanAndHeadMovedPostsEscalate(t *testing.T) {
 	if err != nil || closed.State != event.StateSucceeded {
 		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
 	}
-	const want = `{"verdict":"escalate","points":[{"text":"The full suite did not start: the workflow fix has no plan in the stack.","action":"run_again"}]}`
+	const want = `{"verdict":"escalate","points":[{"text":"Set workflows.fix.plan in the stack: the workflow fix has no plan in the stack.","action":"run_again"}]}`
 	if posted := api.posted(); len(posted) != 1 || posted[0] != want {
 		t.Errorf("posted %q, want %s", posted, want)
 	}
-	wants(t, out, "The full suite did not start: the workflow fix has no plan in the stack.")
+	wants(t, out, "Set workflows.fix.plan in the stack: the workflow fix has no plan in the stack.")
 }

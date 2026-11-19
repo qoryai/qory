@@ -636,7 +636,7 @@ func TestARunCodeStartsTheWorkflowsPrefixedSkill(t *testing.T) {
 // real stack, with no [cmd.SetPlan]: the base stack's workflow hello has access write and the plan
 // type change-plan, and its module declares the scope check for it. The suite command is the full
 // row of the work item's change-plan. A workflow with access write and no plan gets the after step
-// that only tells whether HEAD moved, and a workflow that only reads gets no after step.
+// that only checks whether HEAD moved, and a workflow that only reads gets no after step.
 func TestARunCodeReadsThePlanTypeOfItsWorkflowFromTheComposedStack(t *testing.T) {
 	const manifest = "apiVersion: qory.dev/v1alpha1\nname: hello\nscope_checks:\n  change-plan: [checks/check.js, scope, --plan]\n"
 	fullSuite := func(d map[string]any) { d["full_suite"] = true }
@@ -686,7 +686,7 @@ func TestARunCodeReadsThePlanTypeOfItsWorkflowFromTheComposedStack(t *testing.T)
 // A workflow with write access, a run with full_suite false, a workflow that has write-no-push
 // access and a run that only reads the checkout are not refused.
 func TestARunWithFullSuiteAndAWorkflowThatCannotPlanStops(t *testing.T) {
-	const line = "Remove full_suite from the run settings, or add a full-suite plan to the stack.\n  The run did not start: hello has write-no-push access and no plan to read the full suite from, and the code is used."
+	const line = "Remove full_suite from the run settings of workflow hello.\n  The run did not start: hello has write-no-push access, so it has no plan to read the full suite from; the code is used."
 	suite := func(on bool) func(map[string]any) {
 		return func(d map[string]any) { d["full_suite"] = on }
 	}

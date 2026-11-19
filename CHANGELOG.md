@@ -26,18 +26,18 @@ release may change what an existing document does, and states it under Upgrading
   than `write`, and when no module of the base stack declares a scope check for the type
   of a `plan`. A module that a checkout adds to the base declares none that counts.
   `qory run` does not read `scope_checks`.
-- The full suite of a session runs the `full` row of the plan type that the stack names in
-  `plan` for the run's workflow, from the file `<type>.md` of the launch version, no longer
+- The full suite of a session runs the `full` row of the plan type set in
+  `workflows.<name>.plan` for the run's workflow, from the file `<type>.md` of the launch version, no longer
   the `build-plan` by name. A plan type with no `Commands` table or no `full` row stops the
   suite with `The full suite did not start: <type> has no full command.` A write workflow with
   no `plan` has no suite command: a session that left HEAD where it started is skipped, and
-  one that moved HEAD gets `The full suite did not start: the workflow <name> has no plan in
-  the stack.` and an `escalate` verdict. The other texts of a suite that did not start name the
+  one that moved HEAD gets `Set workflows.<name>.plan in the stack: the workflow <name> has no plan
+  in the stack.` and an `escalate` verdict. The other texts of a suite that did not start name the
   plan type, such as `the work item has no usable <type>`, not the build plan. A run whose
   documents set `full_suite` and whose workflow has `write-no-push` access stops before the
-  join with `Remove full_suite from the run settings, or add a full-suite plan to the stack.` and
-  `The run did not start: <name> has write-no-push access and no plan to read the full suite
-  from, and the code is used.`
+  join with `Remove full_suite from the run settings of workflow <name>.` and `The run did not
+  start: <name> has write-no-push access, so it has no plan to read the full suite from; the
+  code is used.`
 - A skill with the frontmatter keys `notes_for` (a role or a list of roles) and `paths` (one
   glob or more from the checkout root) is a note. The compose exits 2, with the fix as
   line 1, for a note with any of these:
@@ -566,7 +566,7 @@ release may change what an existing document does, and states it under Upgrading
   route to qory in `docs/run.md`.
 - A session runs the repository's full test suite when the run documents have `full_suite`
   true. Forager's after step runs it after the agent's container is removed: when HEAD moved,
-  the `full` command of the plan type that the stack names for the run's workflow, in the
+  the `full` command of the plan type set in `workflows.<name>.plan` for the run's workflow, in the
   version that the work item had at the launch, runs in a fresh clone of HEAD, in a container
   of the run's image on the run's network, so the run's egress policy applies. A session that
   left HEAD where it started runs no suite. The limit is

@@ -30,7 +30,7 @@ const maxPlan = 1 << 20
 func planFile(plan string) string { return plan + ".md" }
 
 // noPlanCommand is the command of the after step of a session whose workflow has no plan
-// type. The step still tells whether HEAD moved, which the script of [suite.Command] decides: a
+// type. The step still checks whether HEAD moved, which the script of [suite.Command] decides: a
 // session that left HEAD where it started is skipped, and the command of any other is not a
 // suite, see [suiteRun.noPlan].
 const noPlanCommand = "true"
@@ -103,8 +103,8 @@ type suiteSetup struct {
 	readOnly bool
 	// fullSuite is the run documents' full_suite: whether the session runs the full suite.
 	fullSuite bool
-	// workflow is the workflow of the run, and plan the plan type that the stack names for it,
-	// "" for a workflow that names none.
+	// workflow is the workflow of the run, and plan the plan type set in
+	// workflows.<name>.plan for it, "" for a workflow that sets none.
 	workflow, plan string
 	// extensions is the harness extensions of the report that the run composed.
 	extensions map[string]any
@@ -135,7 +135,7 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 	}
 	r := &suiteRun{run: s.run, runID: s.runID, said: s.said, dir: s.spec.Dir, minutes: suite.LimitMinutes(s.extensions)}
 	if s.plan == "" {
-		// No version of a plan type sets a command, so the after step only tells whether HEAD
+		// No version of a plan type sets a command, so the after step only checks whether HEAD
 		// moved.
 		r.full, r.noPlan = suite.Full{Command: noPlanCommand}, noPlanFault(s.workflow)
 	} else {
@@ -178,8 +178,9 @@ func afterLimit(minutes int) time.Duration { return time.Duration(minutes) * sui
 // documents' full_suite, false for a run with no run code.
 var fullSuiteOf = func(c *codeRun) bool { return c != nil && c.fullSuite }
 
-// planOf is the workflow of a run from Qory Apiary and the plan type that the stack names for it,
-// "" for each when the run has no run code and "" for the type of a workflow that names none.
+// planOf is the workflow of a run from Qory Apiary and the plan type set in
+// workflows.<name>.plan for it, "" for each when the run has no run code and "" for the type of a
+// workflow that sets none.
 var planOf = func(c *codeRun, workflows map[string]stack.Workflow) (workflow, plan string) {
 	if c == nil {
 		return "", ""
@@ -190,7 +191,7 @@ var planOf = func(c *codeRun, workflows map[string]stack.Workflow) (workflow, pl
 // textFullSuiteNoPlan is the refusal of a run whose run settings set full_suite and whose workflow
 // has write-no-push access: that access allows no plan, see [stack.Workflow], so no plan type
 // could give the suite its full command.
-const textFullSuiteNoPlan = "Remove full_suite from the run settings, or add a full-suite plan to the stack.\n  The run did not start: %s has write-no-push access and no plan to read the full suite from, and the code is used."
+const textFullSuiteNoPlan = "Remove full_suite from the run settings of workflow %[1]s.\n  The run did not start: %[1]s has write-no-push access, so it has no plan to read the full suite from" + codeUsed + "."
 
 // fullSuiteNoPlan is the error of a run from a run code whose documents set full_suite and whose
 // workflow, in workflows, has write-no-push access, nil for any other run. A run that only reads

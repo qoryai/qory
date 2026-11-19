@@ -747,7 +747,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var level string
 			// extensions is the composed harness report's extensions, which the suite's time limit reads.
 			var extensions map[string]any
-			// planWorkflow is the run's workflow, and planType the plan type that the stack names
+			// planWorkflow is the run's workflow, and planType the plan type set in workflows.<name>.plan
 			// for it, "" for none.
 			var planWorkflow, planType string
 			// link is the transcript link of a run whose agent starts on a fresh home, see
