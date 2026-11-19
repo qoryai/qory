@@ -867,7 +867,8 @@ func TestASignalDuringTheSetupContainersRemovalEndsAsInASetup(t *testing.T) {
 
 // TestAWalledCodexReadRunWithNoRepositoriesHasNoSetup is a walled Codex run from a run code
 // that only reads and lists no repositories: its workspace is bound read-only, and Forager
-// runs no setup step beside it, so its session joins with no setup.
+// runs no setup step beside it, so its session joins with no setup, not even the test of
+// /etc/codex.
 func TestAWalledCodexReadRunWithNoRepositoriesHasNoSetup(t *testing.T) {
 	r := runFromCodeLinks(t, func(string) []string {
 		docker, _ := fakeDocker(t)

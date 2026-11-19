@@ -1349,6 +1349,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					onVariables(a)
 				}
 			}
+			// A walled Codex run with no setup container tests for a link at /etc/codex in
+			// the agent's container before Codex starts. A run whose workspace is bound
+			// read-only cannot: Forager runs no session's setup beside it.
+			insideCheck := walled && name == codex.Runtime && run.Repositories() == "" && !spec.WorkspaceReadOnly
+			if insideCheck {
+				withCodexSettingsCheck(&spec)
+			}
 			// The agent's session is the run's first join, so the gateway numbers it 1.
 			suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, fullSuite: fullSuiteOf(fromCode), extensions: extensions, said: said})
 			closeRoute := route.open(1)
@@ -1360,6 +1367,17 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				suiteLimit = opened.Add(timeout)
 			}
 			out, suiteErr := suites.after(ctx, again, suiteLimit, res, out)
+			// The test found a link at /etc/codex, so Codex never started: qory closes the
+			// run as failed, as a failed Check tools step does, prints the line and exits 1.
+			if insideCheck && err == nil && res != nil && etcCodexLinked(res.Dir) {
+				closeRun(session.Outcome{State: event.StateFailed, ExitCode: -1})
+				lines.done(nil)
+				said(image.CodexSettingsFix())
+				if recorded(record) {
+					said("the record is in " + record)
+				}
+				return reported(&exitError{code: 1})
+			}
 			// pushWork is the push step of a run with an agent session that may write, see
 			// [keepsWork], before the close: Qory Apiary takes no version of a run that ended.
 			// The step runs under [pushContext], since a stop has ended ctx or spent the time
@@ -3606,13 +3624,69 @@ const checkToolsStep = "Check tools"
 // run's repository and then runs the start commands of the repository's development
 // container configuration. With gitSession set, for a run that has a git session after the
 // agent, the step [checkToolsStep] comes first, so an image with no program of that session
-// stops the run before the agent.
-func setupCommands(gitSession bool) []session.SetupCommand {
+// stops the run before the agent. On a run of the runtime named runtime codex, the step also
+// stops an image with a link at /etc/codex, see [image.CodexSessionCheckScript], and a Codex
+// run with no git session gets the step with that check alone, see
+// [image.CodexSettingsCheckScript].
+func setupCommands(gitSession bool, runtime string) []session.SetupCommand {
+	var script string
+	switch {
+	case gitSession && runtime == codex.Runtime:
+		script = image.CodexSessionCheckScript()
+	case gitSession:
+		script = image.SessionCheckScript()
+	case runtime == codex.Runtime:
+		script = image.CodexSettingsCheckScript()
+	}
 	var commands []session.SetupCommand
-	if gitSession {
-		commands = append(commands, session.SetupCommand{Name: checkToolsStep, Args: []string{"/bin/sh", "-c", image.SessionCheckScript()}})
+	if script != "" {
+		commands = append(commands, session.SetupCommand{Name: checkToolsStep, Args: []string{"/bin/sh", "-c", script}})
 	}
 	return append(commands, session.SetupCommand{Name: setupStep, Args: append([]string{wall.HelperPath}, prepareArgs...)})
+}
+
+// withCodexSettingsCheck puts the step [checkToolsStep] with
+// [image.CodexSettingsInsideScript] first in the session's setup of spec, before any
+// command the setup has, and sets the setup runner when the spec has none.
+func withCodexSettingsCheck(spec *runSpec) {
+	check := session.SetupCommand{Name: checkToolsStep, Args: []string{"/bin/sh", "-c", image.CodexSettingsInsideScript()}}
+	spec.SessionSpec.Setup = append([]session.SetupCommand{check}, spec.SessionSpec.Setup...)
+	if len(spec.SetupRunner) == 0 {
+		spec.SetupRunner = append([]string{wall.HelperPath}, setupCommandArgs...)
+	}
+}
+
+// etcCodexLinked reports whether the record in dir, session.jsonl, has the last
+// setup step named [checkToolsStep] ending with [image.CodexSettingsInsideExit]: the test
+// that [withCodexSettingsCheck] adds found a link at /etc/codex. A record that cannot be
+// read has no such step.
+func etcCodexLinked(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "session.jsonl"))
+	if err != nil {
+		return false
+	}
+	step, code := 0, -1
+	for line := range bytes.Lines(data) {
+		var ev struct {
+			Type string `json:"type"`
+			Data struct {
+				Step     int    `json:"step"`
+				Kind     string `json:"kind"`
+				Name     string `json:"name"`
+				ExitCode *int   `json:"exit_code"`
+			} `json:"data"`
+		}
+		if json.Unmarshal(line, &ev) != nil {
+			continue
+		}
+		switch {
+		case ev.Type == event.StepStarted && ev.Data.Kind == event.StepSetup && ev.Data.Name == checkToolsStep:
+			step, code = ev.Data.Step, -1
+		case ev.Type == event.StepExited && step > 0 && ev.Data.Step == step && ev.Data.ExitCode != nil:
+			code = *ev.Data.ExitCode
+		}
+	}
+	return code == image.CodexSettingsInsideExit
 }
 
 // toolFixes is what a person reads of err, a step [checkToolsStep] of the run with the record
@@ -3664,10 +3738,14 @@ func toolFixes(dir string, err error) []string {
 // the run's image on the wall's network, which runs until the run closes, or on a read
 // run until [removeSetup]. The setup container is checked and limited as the session is: it gets the session's working
 // folder, ForagerFiles, Written and Limits, and the agent's variables, see [setupEnv].
-// Inside, the setup commands get the agent's environment. gitSession is what
-// [setupCommands] takes.
+// Inside, the setup commands get the agent's environment. gitSession and the name of the
+// spec's runtime are what [setupCommands] takes.
 func runSetup(ctx context.Context, run openedRun, spec *runSpec, gitSession bool) error {
-	commands := setupCommands(gitSession)
+	runtime := ""
+	if spec.Runtime != nil {
+		runtime = spec.Runtime.Name()
+	}
+	commands := setupCommands(gitSession, runtime)
 	if spec.setupWhere == config.SetupInside {
 		spec.SessionSpec.Setup = commands
 		spec.SetupRunner = append([]string{wall.HelperPath}, setupCommandArgs...)
