@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -441,16 +442,31 @@ func (s *server) readFile(rel string, start, end *int) (string, error) {
 	if end == nil || last > len(lines) {
 		last = len(lines)
 	}
-	var b strings.Builder
+	rows := make([]string, 0, last-first+1)
+	size := 0
 	for n := first; n <= last; n++ {
-		text := strings.TrimSuffix(lines[n-1], "\n")
-		row := strconv.Itoa(n) + "\t" + text + "\n"
-		if b.Len()+len(row) > MaxReadBytes {
+		row := strconv.Itoa(n) + "\t" + strings.TrimSuffix(lines[n-1], "\n") + "\n"
+		rows = append(rows, row)
+		size += len(row)
+	}
+	if size <= MaxReadBytes {
+		return strings.Join(rows, ""), nil
+	}
+	// The rows and the note of the cut make at most MaxReadBytes: the room for the rows
+	// leaves space for a note with the largest line number.
+	note := func(n int) string {
+		return fmt.Sprintf("[cut at %d bytes: read on with start_line %d]\n", MaxReadBytes, n)
+	}
+	room := MaxReadBytes - len(note(math.MaxInt64))
+	var b strings.Builder
+	for i, row := range rows {
+		n := first + i
+		if b.Len()+len(row) > room {
 			if b.Len() == 0 {
-				b.WriteString(cutBytes(row, MaxReadBytes) + "\n")
+				b.WriteString(cutBytes(row, room-1) + "\n")
 				n++
 			}
-			fmt.Fprintf(&b, "[cut at %d bytes: read on with start_line %d]\n", MaxReadBytes, n)
+			b.WriteString(note(n))
 			break
 		}
 		b.WriteString(row)

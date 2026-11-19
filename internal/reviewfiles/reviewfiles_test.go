@@ -234,12 +234,34 @@ func TestReadFileKeepsToItsLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	text, bad := call(t, root, "read_file", map[string]any{"path": "long.txt"})
-	if bad || len(text) > MaxReadBytes+100 {
+	if bad || len(text) > MaxReadBytes {
 		t.Fatalf("a long file: %v, %d bytes", bad, len(text))
 	}
 	last := text[strings.LastIndex(strings.TrimSuffix(text, "\n"), "\n")+1:]
 	if !strings.HasPrefix(last, fmt.Sprintf("[cut at %d bytes: read on with start_line ", MaxReadBytes)) {
 		t.Errorf("the last line is %q", last)
+	}
+}
+
+// TestReadFileReturnsAtMostTheLimit is the edge of read_file's limit: a line of exactly
+// MaxReadBytes with its number is returned whole, and one byte more is cut to at most
+// MaxReadBytes with the note of the cut.
+func TestReadFileReturnsAtMostTheLimit(t *testing.T) {
+	root := copyRoot(t)
+	line := strings.Repeat("x", MaxReadBytes-len("1\t\n"))
+	for name, text := range map[string]string{"edge.txt": line + "\n", "over.txt": line + "x\n"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	text, bad := call(t, root, "read_file", map[string]any{"path": "edge.txt"})
+	if bad || text != "1\t"+line+"\n" {
+		t.Errorf("a read of %d bytes: %v, %d bytes", MaxReadBytes, bad, len(text))
+	}
+	text, bad = call(t, root, "read_file", map[string]any{"path": "over.txt"})
+	note := fmt.Sprintf("[cut at %d bytes: read on with start_line 2]\n", MaxReadBytes)
+	if bad || len(text) > MaxReadBytes || !strings.HasSuffix(text, note) || !strings.HasPrefix(text, "1\txxx") {
+		t.Errorf("a read of %d bytes: %v, %d bytes, ending %q", MaxReadBytes+1, bad, len(text), text[max(0, len(text)-80):])
 	}
 }
 
