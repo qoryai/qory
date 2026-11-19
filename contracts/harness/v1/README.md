@@ -2015,7 +2015,7 @@ Per runtime, the files written into its directory:
   `additionalContextLimit` is negative or fractional, such as 2.0, fails the compose with
   ``Set `<key>` of the `<event>` hook to a whole number of 0 or more.`` and the next line
   ``The hook is in the harness's `settings/codex/<file>`, and Codex ignores the whole file
-  otherwise.`` A hook group or a hook there that Codex 0.169.0 cannot decode, such as a
+  otherwise.`` A hook group or a hook there that Codex 0.170.0 cannot decode, such as a
   `command` hook with no `command` text or a `type` other than `command`, `mcp_tool`,
   `prompt` and `agent`, fails the compose with ``Fix `hooks.<event>[<group>].hooks[<hook>]`
   in `settings/codex/<file>`.``, the indexes counted from 0, and the next line ``<cause>,

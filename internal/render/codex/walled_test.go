@@ -144,7 +144,7 @@ func TestWalledConfigTurnsOffTheSystemSkills(t *testing.T) {
 }
 
 // TestWalledHooksStopsAHookCodexCannotRead is a composed hooks.json or config.toml with one
-// group or hook that Codex 0.169.0 cannot decode, after a good group: WalledHooks fails with
+// group or hook that Codex 0.170.0 cannot decode, after a good group: WalledHooks fails with
 // the line that names the event, the group's index and the hook's index, the fix first, and
 // writes nothing.
 func TestWalledHooksStopsAHookCodexCannotRead(t *testing.T) {
@@ -202,7 +202,7 @@ func TestWalledHooksStopsAHookCodexCannotRead(t *testing.T) {
 // TestWalledHooksTakesWhatCodexReads is a composed hooks.json with each type of hook, keys
 // Codex does not know, optional keys set to null, a matcher of null, a group with no hooks
 // and an event Codex does not know, whose value is a list of anything: WalledHooks passes
-// it, as Codex 0.169.0 decodes it.
+// it, as Codex 0.170.0 decodes it.
 func TestWalledHooksTakesWhatCodexReads(t *testing.T) {
 	hooksJSON := `{"hooks": {"PreToolUse": [{"matcher": null, "other": 1, "hooks": [
 		{"type": "command", "command": "/bin/x", "timeout": 0, "async": true, "statusMessage": null, "commandWindows": "x.cmd", "additionalContextLimit": 2500, "extra": [null]},

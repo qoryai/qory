@@ -344,7 +344,7 @@ func checkHookNumbers(file string, m map[string]any) error {
 	return nil
 }
 
-// hookEvents are the hook events that Codex 0.169.0 reads from a hooks table
+// hookEvents are the hook events that Codex 0.170.0 reads from a hooks table
 // (codex-rs/protocol/src/hooks.rs, HookEventsToml). It ignores a key of any other name.
 var hookEvents = []string{
 	"PreModelRequest", "PostModelRequest", "PreToolUse", "PermissionRequest", "PostToolUse",
@@ -381,7 +381,7 @@ func hookError(file, module, cause string, fix func(at string) string) error {
 
 // checkHookShapes fails on hooks, the hooks table of the harness's config.toml or
 // hooks.json, file, when a group or a hook of one of [hookEvents] does not decode as Codex
-// 0.169.0 decodes it (codex-rs/protocol/src/hooks.rs, MatcherGroup and
+// 0.170.0 decodes it (codex-rs/protocol/src/hooks.rs, MatcherGroup and
 // HookHandlerConfig): Codex then reads no hook of the file
 // (codex-rs/hooks/src/engine/discovery.rs, load_hooks_json and
 // load_toml_hooks_from_layer). An event's value is a list of groups; a group is a table
@@ -452,7 +452,7 @@ func listOf(v any) ([]any, bool) {
 	return nil, false
 }
 
-// hookFault is why Codex 0.169.0 cannot decode h, one hook of a group, see
+// hookFault is why Codex 0.170.0 cannot decode h, one hook of a group, see
 // [checkHookShapes]; "" when it can. A key that Codex reads as optional may be null.
 func hookFault(h any) string {
 	hook, ok := h.(map[string]any)
@@ -533,7 +533,7 @@ func unsigned(v any) bool {
 }
 
 // inTOML reports whether v, the input of an mcp_tool hook, has no null and no whole
-// number above 2^63-1 at any depth: Codex 0.169.0 fails to decode such an input, since
+// number above 2^63-1 at any depth: Codex 0.170.0 fails to decode such an input, since
 // TOML has neither (codex-rs/protocol/src/hooks.rs, deserialize_mcp_tool_input).
 func inTOML(v any) bool {
 	switch x := v.(type) {

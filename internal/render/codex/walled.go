@@ -28,7 +28,7 @@ import (
 // (codex-rs/arg0/src/lib.rs).
 const HomeInWall = "/var/lib/qory-codex-home"
 
-// SystemInWall is the folder in the wall where Codex 0.169.0 on Linux reads its system
+// SystemInWall is the folder in the wall where Codex 0.170.0 on Linux reads its system
 // settings, config.toml and hooks.json (codex-rs/config/src/loader/mod.rs,
 // SYSTEM_CONFIG_TOML_FILE_UNIX; codex-rs/config/src/state.rs, config_folder). Codex
 // runs a hook of that folder as managed: with no stored hash, and also when a
@@ -271,7 +271,7 @@ func hookGroupsError(file, module, event string) error {
 // WalledHooks is the hooks.json that a walled Codex run binds in [SystemDir], from
 // hooksJSON and config, the hooks.json and the config.toml of the composed home, either
 // nil when the home has none: the key hooks alone, with each event's groups of hooksJSON
-// and then those of config's hooks table, the order in which Codex 0.169.0 loads the two
+// and then those of config's hooks table, the order in which Codex 0.170.0 loads the two
 // files of one folder (codex-rs/hooks/src/engine/discovery.rs, discover_handlers). Each
 // group is as the compose wrote it, numbers as written. config's hooks.state is left
 // out, since Codex keeps no state of a managed hook. Codex reads no hook of a hooks.json
@@ -784,9 +784,9 @@ func WalledConfig(config []byte, projects, disabled, disabledPaths []string) ([]
 	if skills == nil {
 		skills = map[string]any{}
 	}
-	// skills.bundled.enabled = false is the setting that keeps Codex 0.169.0 from installing
+	// skills.bundled.enabled = false is the setting that keeps Codex 0.170.0 from installing
 	// its system skills into the writable home: it installs them only when bundled skills
-	// are on (codex-rs/ext/skills/src/host_service.rs:164 and :293 at rust-v0.169.0, see
+	// are on (codex-rs/ext/skills/src/host_service.rs:164 and :293 at rust-v0.170.0, see
 	// bundled_skills_enabled_from_stack). A home whose config.toml has no skills table
 	// installs them.
 	skills["bundled"] = map[string]any{"enabled": false}

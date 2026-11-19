@@ -1406,7 +1406,7 @@ release may change what an existing document does, and states it under Upgrading
   `settings/claude/settings.json` allows: each skill in the home and in the checkout's
   `.codex/skills` and `.agents/skills`, and every skill of the checkout by its path,
   whatever its name. `Skill(harness:*)` allows every skill of the harness. It turns off
-  the skills Codex ships with `skills.bundled.enabled = false`, so Codex 0.169.0 installs
+  the skills Codex ships with `skills.bundled.enabled = false`, so Codex 0.170.0 installs
   no system skills into the writable home, and a cloud's skills. See the codex entry
   in `contracts/harness/v1/README.md`.
 - Compose refuses a Codex `settings/codex/config.toml` or `settings/codex/hooks.json` with
@@ -1417,7 +1417,7 @@ release may change what an existing document does, and states it under Upgrading
   number, and drops every hook of a `hooks.json` that has one. A float such as 2.0 counts
   as fractional.
 - Compose stops on a Codex `settings/codex/config.toml` or `settings/codex/hooks.json` with
-  a hook group or a hook that Codex 0.169.0 cannot decode, such as a `command` hook with no
+  a hook group or a hook that Codex 0.170.0 cannot decode, such as a `command` hook with no
   `command` text, with ``Fix `hooks.<event>[<group>].hooks[<hook>]` in
   `settings/codex/<file>` of module <name>.`` and the next line ``<cause>, and Codex reads
   no hook of a file with such a hook.`` The group and the hook are numbered in that
