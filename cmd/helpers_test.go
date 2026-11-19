@@ -88,6 +88,16 @@ func TestMain(m *testing.M) {
 	if slices.Contains(os.Args, "-test.run=^TestForagerRunKeepsThePushCredentialOnThePushProxyAlone$") {
 		realPush = os.Getenv("QORY_TEST_REAL_PUSH")
 	}
+	// The child of TestARealWalledCodexRunReachesTheModelThroughTheGateway, and of
+	// TestARealWalledCodexRunsAHookOfEtcCodexTurnedOff, keeps its setup,
+	// QORY_TEST_REAL_CODEX_CHILD, in the same way. Without it, the child starts another
+	// child binary, which does the same, until the time runs out.
+	realCodex := ""
+	for _, name := range []string{"TestARealWalledCodexRunReachesTheModelThroughTheGateway", "TestARealWalledCodexRunsAHookOfEtcCodexTurnedOff"} {
+		if slices.Contains(os.Args, "-test.run=^"+name+"$") {
+			realCodex = os.Getenv("QORY_TEST_REAL_CODEX_CHILD")
+		}
+	}
 	cmd.ShortenSocketGrace(10 * time.Millisecond)
 	// Forager joins no session of Claude Code without an installed folder, so the
 	// program that such a test's launch names is copied into one.
@@ -105,6 +115,9 @@ func TestMain(m *testing.M) {
 	if realPush != "" {
 		os.Setenv("QORY_TEST_REAL_PUSH", realPush)
 		os.Setenv("SSL_CERT_FILE", certFile)
+	}
+	if realCodex != "" {
+		os.Setenv("QORY_TEST_REAL_CODEX_CHILD", realCodex)
 	}
 	code := m.Run()
 	_ = os.RemoveAll(standIns)

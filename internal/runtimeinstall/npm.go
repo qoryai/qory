@@ -6,20 +6,58 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 )
 
-// NpmRegistry is the npm registry that publishes Claude Code.
+// NpmRegistry is the npm registry that publishes Claude Code and Codex.
 const NpmRegistry = "https://registry.npmjs.org"
 
-// npmPackages are the npm packages of each runtime that [NpmFetch] installs: the package
-// whose dist-tag latest is the newest version, and the prefix of the package of each
-// platform, which ends in x64 or arm64. The platform package's tarball has the program
-// at package/<runtime>.
-var npmPackages = map[string]struct{ tags, platform string }{
-	"claude": {tags: "@anthropic-ai/claude-code", platform: "@anthropic-ai/claude-code-linux-"},
+// npmPackage is where npm publishes a runtime: tags is the package whose dist-tag latest
+// is the newest version, and platform returns the package and the version of the
+// document of a version's build for cpu, x64 or arm64.
+type npmPackage struct {
+	tags     string
+	platform func(version, cpu string) (pkg, docVersion string)
+}
+
+// npmPackages are the npm packages of each runtime that [NpmFetch] installs. Claude Code
+// publishes each platform's build as a separate package,
+// @anthropic-ai/claude-code-linux-x64 and -arm64, at the same version. Codex publishes
+// it as a version of @openai/codex itself, <version>-linux-x64 and -linux-arm64.
+var npmPackages = map[string]npmPackage{
+	"claude": {tags: "@anthropic-ai/claude-code", platform: func(version, cpu string) (string, string) {
+		return "@anthropic-ai/claude-code-linux-" + cpu, version
+	}},
+	"codex": {tags: "@openai/codex", platform: func(version, cpu string) (string, string) {
+		return "@openai/codex", version + "-linux-" + cpu
+	}},
+}
+
+// Runtimes are the runtimes that [Install] installs, by Forager's descriptor names, in
+// alphabetical order: those of [npmPackages]. The runtime cache of a registry holds npm's
+// tarballs of the same runtimes.
+func Runtimes() []string {
+	return slices.Sorted(maps.Keys(npmPackages))
+}
+
+// npmCPU is npm's name of each architecture qory installs for.
+var npmCPU = map[string]string{"amd64": "x64", "arm64": "arm64"}
+
+// signedName is what npm signs for version of runtime's build for linux/arch,
+// <package>@<version>, see [npmPackages]; false for a runtime or an architecture that
+// qory does not install.
+func signedName(runtime, version, arch string) (string, bool) {
+	pkg, ok := npmPackages[runtime]
+	cpu, known := npmCPU[arch]
+	if !ok || !known {
+		return "", false
+	}
+	platform, docVersion := pkg.platform(version, cpu)
+	return platform + "@" + docVersion, true
 }
 
 // The most bytes of npm's documents that NpmFetch reads.
@@ -30,8 +68,8 @@ const (
 
 // NpmFetch is a [Fetch] from the npm registry at base, such as [NpmRegistry], through
 // client, for the platform linux/arch. It reads, in this order, the dist-tags of the
-// runtime's package, whose latest is the version; the document of that version of the
-// platform's package, whose dist.integrity is npm's sha512 checksum and whose
+// runtime's package, whose latest is the version; the document of that version's build
+// for the platform, see [npmPackages], whose dist.integrity is npm's sha512 checksum and whose
 // dist.tarball is the tarball; and the tarball, when Install opens it. The tarball must
 // be on base's host, and no request follows a redirect to another host. Install checks
 // the tarball against the checksum before it extracts anything.
@@ -39,15 +77,15 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 	return func(ctx context.Context, runtime string) (Release, error) {
 		pkg, ok := npmPackages[runtime]
 		if !ok {
-			return Release{}, fmt.Errorf("Install %s some other way: qory installs only claude from npm", runtime)
+			return Release{}, fmt.Errorf("Install %s some other way\nqory installs only %s from npm", runtime, strings.Join(Runtimes(), " and "))
 		}
-		cpu, ok := map[string]string{"amd64": "x64", "arm64": "arm64"}[arch]
+		cpu, ok := npmCPU[arch]
 		if !ok {
 			return Release{}, fmt.Errorf("Run on an amd64 or arm64 machine\nnpm has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
 		}
 		root, err := url.Parse(strings.TrimSuffix(base, "/"))
 		if err != nil || root.Host == "" || root.Scheme != "https" && !(root.Scheme == "http" && loopback(root.Hostname())) {
-			return Release{}, fmt.Errorf("Set the npm registry to an https URL: %q is not one", base)
+			return Release{}, fmt.Errorf("Set the npm registry to an https URL\nThe npm registry's address is not an https URL:\n  %q", base)
 		}
 		n := &npm{client: sameHost(client, root), root: root, runtime: runtime}
 		var tags map[string]string
@@ -58,28 +96,39 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 		if !versionShape.MatchString(version) {
 			return Release{}, fmt.Errorf(textRelease+"The dist-tag latest of %s is %q, and a version is 1 to 64 letters, digits, ., + or -, the first a letter or a digit", pkg.tags, version)
 		}
-		platform := pkg.platform + cpu
+		platform, docVersion := pkg.platform(version, cpu)
 		var doc struct {
 			Version string `json:"version"`
 			Dist    struct {
-				Integrity string `json:"integrity"`
-				Tarball   string `json:"tarball"`
+				Integrity  string          `json:"integrity"`
+				Tarball    string          `json:"tarball"`
+				Signatures json.RawMessage `json:"signatures"`
 			} `json:"dist"`
 		}
-		what := platform + " " + version
-		if err := n.document(ctx, "/"+platform+"/"+url.PathEscape(version), maxVersion, what, &doc); err != nil {
+		what := platform + " " + docVersion
+		if err := n.document(ctx, "/"+platform+"/"+url.PathEscape(docVersion), maxVersion, what, &doc); err != nil {
 			return Release{}, err
 		}
-		if doc.Version != version {
+		if doc.Version != docVersion {
 			return Release{}, fmt.Errorf(textRelease+"The document of %s has the version %q", what, doc.Version)
 		}
 		tarball, err := url.Parse(doc.Dist.Tarball)
 		if err != nil || tarball.Scheme != root.Scheme || tarball.Host != root.Host || tarball.User != nil {
 			return Release{}, fmt.Errorf(textRelease+"The tarball of %s is not on %s", what, root.Host)
 		}
-		return Release{
-			Version:   version,
-			Integrity: doc.Dist.Integrity,
+		// npm may add members to a signature, so the decode ignores them. Install refuses a
+		// document with no signatures.
+		var sigs []Signature
+		if len(doc.Dist.Signatures) > 0 && string(doc.Dist.Signatures) != "null" {
+			if sigs, err = decodeSignatures(doc.Dist.Signatures, false); err != nil {
+				return Release{}, fmt.Errorf(textRelease+"The dist.signatures of %s\n  are not npm's signatures: %v", what, err)
+			}
+		}
+		rel := Release{
+			Version:    version,
+			Integrity:  doc.Dist.Integrity,
+			Signed:     platform + "@" + docVersion,
+			Signatures: sigs,
 			Open: func(ctx context.Context) (io.ReadCloser, error) {
 				resp, err := n.get(ctx, tarball.String(), "", "the tarball of "+what)
 				if err != nil {
@@ -87,7 +136,9 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 				}
 				return resp.Body, nil
 			},
-		}, nil
+		}
+		rel.Program, rel.Folder = layout(runtime, arch)
+		return rel, nil
 	}
 }
 
@@ -107,7 +158,7 @@ func (n *npm) document(ctx context.Context, path string, limit int64, what strin
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return fmt.Errorf("Run again\nThe read of %s from %s stopped: %w", what, n.root.Host, err)
+		return fmt.Errorf("Run again\nThe read of %s from %s stopped:\n  %w", what, n.root.Host, err)
 	}
 	if int64(len(body)) > limit {
 		return fmt.Errorf(textRelease+"%s has more than %d bytes", upper(what), limit)
@@ -124,7 +175,7 @@ func (n *npm) document(ctx context.Context, path string, limit int64, what strin
 func (n *npm) get(ctx context.Context, u, accept, what string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, fmt.Errorf(textRelease+"%s has no URL qory can request: %w", upper(what), err)
+		return nil, fmt.Errorf(textRelease+"%s has no URL qory can request:\n  %w", upper(what), err)
 	}
 	if accept != "" {
 		req.Header.Set("Accept", accept)
@@ -132,11 +183,11 @@ func (n *npm) get(ctx context.Context, u, accept, what string) (*http.Response, 
 	resp, err := send(n.client, req)
 	switch {
 	case err != nil && ctx.Err() != nil:
-		return nil, fmt.Errorf("Run again with more time\nThe run ended before %s returned %s: %w", n.root.Host, what, err)
+		return nil, fmt.Errorf("Run again with more time\nThe run ended before %s returned\n  %s: %w", n.root.Host, what, err)
 	case refusedConnect(err):
 		return nil, n.noRegistry(connectRefusal(err))
 	case err != nil:
-		return nil, fmt.Errorf("Check that this machine reaches %s\nThe request of %s failed: %w", n.root.Host, what, err)
+		return nil, fmt.Errorf("Check that this machine reaches %s\nThe request of %s failed:\n  %w", n.root.Host, what, err)
 	case resp.StatusCode == http.StatusOK:
 		return resp, nil
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -48,23 +49,29 @@ type installSetup struct {
 	// noInstance leaves the run with no address of Qory Apiary; otherwise reg's
 	// instance is the run's.
 	noInstance bool
-	// runtime is the runtime of the run; empty means claude.
-	runtime string
+	// runtime is the runtime of the run; empty means claude. version is the version the
+	// image's fetch looks for in qory's state folder; empty means 2.1.320.
+	runtime, version string
 	// args are flags that follow the run key's.
 	args []string
 	// during, when set, runs in its own goroutine while the run goes on.
 	during func()
 	// before, when set, runs once the test's folders are made, before the run.
 	before func()
+	// caBundle is the host proxy's CA bundle; empty means none. proxyErr, when not nil,
+	// is the error of each opening of the host proxy.
+	caBundle string
+	proxyErr error
 }
 
-// runInstalling runs qory run claude with a run key as s sets it up, with no
-// repositories. The image's
-// fetch, which only a walled run has, records whether the program of claude 2.1.320 was
-// in qory's state folder by then, mode 0755.
+// runInstalling runs qory run claude, or s.runtime, with a run key as s sets it up, with
+// no repositories. The image's fetch, which only a walled run has, records whether the
+// program of claude 2.1.320, or of s.runtime at s.version, was in qory's state folder by
+// then, mode 0755.
 func runInstalling(t *testing.T, s installSetup) installRun {
 	t.Helper()
 	defer cmd.SetInstallRuntimes(true)()
+	defer cmd.SetRuntimeKeys(rt.Keys())()
 	npmURL := unreachableNpm
 	if s.npm != nil {
 		npmURL = s.npm.URL()
@@ -93,10 +100,10 @@ func runInstalling(t *testing.T, s installSetup) installRun {
 	args := []string{"run", runtime, "--home", t.TempDir(), "--run-key-fd", descriptor(t, mintRunKey(t, keyRunID, gw.url()))}
 	t.Setenv("QORY_RUN_KEY", "")
 	var r installRun
-	program := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "claude", "2.1.320", "bin", "claude")
+	program := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", runtime, cmp.Or(s.version, "2.1.320"), "bin", runtime)
 	defer cmd.SetJoinSession(func(s session.SessionSpec) { r.joins = append(r.joins, s) })()
 	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
-		System: proxygittest.Host, Proxy: s.proxy.URL(), Dir: h.runDir,
+		System: proxygittest.Host, Proxy: s.proxy.URL(), CABundle: s.caBundle, ProxyErr: s.proxyErr, Dir: h.runDir,
 		StackProxy: h.server.Stack.URL, StackCABundle: h.server.Stack.CABundle,
 		// A push proxy that takes no connection: the install reads through the host proxy.
 		PushProxy: "http://qory:nowhere@127.0.0.1:9",
@@ -180,31 +187,98 @@ func startedProgram(s session.SessionSpec) string {
 	return s.Command
 }
 
-// TestACodexSessionStartsFromTheImage has a run of codex join with no RuntimeInstall
-// and with the Command of its launch: qory installs no program of codex.
-func TestACodexSessionStartsFromTheImage(t *testing.T) {
-	r := runInstalling(t, installSetup{proxy: rt.StartProxy(t), walled: true, runtime: "codex"})
+// TestADispatchedCodexRunInstallsCodexAndRunsItBehindTheWall runs codex exec with a run
+// key behind the fake wall, with no pool.registry: qory installs codex 0.170.0 from npm
+// through the run's host proxy before the image's fetch, prints "qory run: installed
+// codex 0.170.0" once, and the session joins with the version's folder as
+// RuntimeInstall and the installed program as the program it starts, behind the wall:
+// Forager binds the folder read-only at /qory/runtime/codex. Codex runs as a walled run
+// starts it: on the home at /var/lib/qory-codex-home, with --sandbox danger-full-access
+// after exec. The version's folder is Codex's whole vendor folder of the tarball, with
+// bin/codex-code-mode-host, codex-resources/bwrap and codex-path/rg beside bin/codex.
+func TestADispatchedCodexRunInstallsCodexAndRunsItBehindTheWall(t *testing.T) {
+	npm, proxy := rt.StartCodexNpm(t), rt.StartProxy(t)
+	npm.Publish("0.170.0")
+	r := runInstalling(t, installSetup{npm: npm, proxy: proxy, walled: true, runtime: "codex", version: "0.170.0", args: []string{"--", "exec", "hi"}})
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || len(r.joins) != 1 {
 		t.Fatalf("%d joins, %v\n%s", len(r.joins), r.err, r.out)
 	}
-	if r.joins[0].RuntimeInstall != nil || strings.Contains(startedProgram(r.joins[0]), "runtimes") {
-		t.Fatalf("the session has RuntimeInstall %+v and Command %q, want none of the installed program", r.joins[0].RuntimeInstall, startedProgram(r.joins[0]))
+	if n := strings.Count(r.out, "qory run: installed codex 0.170.0\n"); n != 1 {
+		t.Fatalf("the run prints the install line %d times:\n%s", n, r.out)
+	}
+	if !r.installFirst {
+		t.Fatal("the run fetched its image before the program was installed, mode 0755")
+	}
+	if npm.TarballGets() != 1 || proxy.Passed() != 3 || proxy.Refusals() != 0 {
+		t.Fatalf("npm requests %q; the proxy passed %d and refused %d", npm.Paths(), proxy.Passed(), proxy.Refusals())
+	}
+	program := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "codex", "0.170.0", "bin", "codex")
+	if b, err := os.ReadFile(program); err != nil || string(b) != rt.CodexProgram("0.170.0 "+goruntime.GOARCH) {
+		t.Fatalf("the installed program is %q (%v)", b, err)
+	}
+	codexFolderIs(t, filepath.Dir(filepath.Dir(program)), "0.170.0 "+goruntime.GOARCH)
+	join := r.joins[0]
+	if in := join.RuntimeInstall; in == nil || in.Version != "0.170.0" || in.Dir != filepath.Dir(filepath.Dir(program)) {
+		t.Fatalf("the session's RuntimeInstall is %+v, want the folder of codex 0.170.0", in)
+	}
+	if got := startedProgram(join); got != program {
+		t.Fatalf("the session starts %q, want the installed program", got)
+	}
+	wants(t, strings.Join(join.Args, " "), "exec --sandbox danger-full-access hi")
+	wants(t, strings.Join(join.LaunchFixed, " "), "CODEX_HOME=/var/lib/qory-codex-home")
+	lacks(t, r.out, rt.ProxyPassword)
+}
+
+// TestADispatchedCodexRunInstallsCodexFromTheRegistry runs codex with a run key behind
+// the fake wall on a machine whose forager.yaml sets pool.registry: qory reads codex
+// 0.170.0 from shared/runtimes/codex of the registry through the run's host proxy, and
+// npm gets no request. The layer is npm's tarball: the version's folder is Codex's whole
+// vendor folder, and the session starts its bin/codex.
+func TestADispatchedCodexRunInstallsCodexFromTheRegistry(t *testing.T) {
+	reg, npm, proxy := rt.StartCodexRegistry(t), rt.StartCodexNpm(t), rt.StartProxy(t)
+	reg.PublishPlain("0.170.0")
+	r := runInstalling(t, installSetup{reg: reg, npm: npm, proxy: proxy, walled: true, runtime: "codex", version: "0.170.0"})
+	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || len(r.joins) != 1 {
+		t.Fatalf("%d joins, %v\n%s", len(r.joins), r.err, r.out)
+	}
+	wants(t, r.out, "qory run: installed codex 0.170.0\n")
+	if reg.BlobGets() != 1 || len(npm.Paths()) != 0 || !r.installFirst {
+		t.Fatalf("%d blobs, %d npm requests, installed first %v", reg.BlobGets(), len(npm.Paths()), r.installFirst)
+	}
+	dir := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "codex", "0.170.0")
+	codexFolderIs(t, dir, "0.170.0 "+goruntime.GOARCH)
+	if in := r.joins[0].RuntimeInstall; in == nil || in.Dir != dir {
+		t.Fatalf("the session's RuntimeInstall is %+v, want %s", in, dir)
+	}
+	if got := startedProgram(r.joins[0]); got != filepath.Join(dir, "bin", "codex") {
+		t.Fatalf("the session starts %q, want bin/codex of %s", got, dir)
 	}
 }
 
-// TestARuntimeTheRegistryNeverHeldEndsTheRunWithItsFix has an empty registry: the run
-// prints the fix first, closes failed with -1 before the image's fetch, no session
-// joins, and qory run exits 1.
-func TestARuntimeTheRegistryNeverHeldEndsTheRunWithItsFix(t *testing.T) {
+// codexFolderIs fails the test unless dir has each file of Codex's folder of version, as
+// [rt.CodexFolder] has it, with its body.
+func codexFolderIs(t *testing.T, dir, version string) {
+	t.Helper()
+	for _, f := range rt.CodexFolder(version) {
+		if b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(f.Name))); err != nil || string(b) != f.Body {
+			t.Errorf("%s of the installed folder is %q (%v), want %q", f.Name, b, err, f.Body)
+		}
+	}
+}
+
+// TestARuntimeTheRegistryNeverHeldEndsTheRunWithItsCause has an empty registry: the
+// run, a dispatched one, prints the cause with no fix line, closes failed with -1 before
+// the image's fetch, no session joins, and qory run exits 1.
+func TestARuntimeTheRegistryNeverHeldEndsTheRunWithItsCause(t *testing.T) {
 	r := runInstalling(t, installSetup{reg: rt.StartRegistry(t), proxy: rt.StartProxy(t), walled: true})
 	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
-	want := "qory run: Check that the instance's registry reaches the publisher of claude, then run again\n" +
-		"The registry has never held claude and could not fetch it: shared/runtimes/claude:newest returned 404.\n"
-	if !strings.Contains(r.out, want) {
-		t.Fatalf("the output has no fix-first line:\n%s", r.out)
+	want := "qory run: the registry has never held claude and could not fetch it:\n  shared/runtimes/claude:newest returned 404\n"
+	if !strings.Contains(r.out, want) || strings.Contains(r.out, "then run again") {
+		t.Fatalf("the output has no cause line, or has the fix line:\n%s", r.out)
 	}
+	runLinesFit(t, r.out)
 	for _, c := range r.calls {
 		if c == "fetch image" {
 			t.Errorf("the calls: %v, want no image fetch", r.calls)
@@ -252,6 +326,7 @@ func TestAnUnwalledRunInstallsFromNpmThroughTheHostProxy(t *testing.T) {
 // installed program, not the launch's.
 func TestARunWithNoControlPlaneInstallsFromNpmDirectly(t *testing.T) {
 	defer cmd.SetInstallRuntimes(true)()
+	defer cmd.SetRuntimeKeys(rt.Keys())()
 	npm := rt.StartNpm(t)
 	npm.Publish("2.1.320")
 	defer cmd.SetNpmRegistry(npm.URL())()
@@ -271,8 +346,9 @@ func TestARunWithNoControlPlaneInstallsFromNpmDirectly(t *testing.T) {
 }
 
 // TestATarballThatDoesNotMatchItsChecksumEndsTheRun publishes a tarball on npm whose
-// dist.integrity is another tarball's: the run stops with the checksum line, exit 1,
-// before any session, and no version's folder is written.
+// dist.integrity is another tarball's: the run, a dispatched one, stops with the
+// checksum line and no fix line, exit 1, before any session, and no version's folder is
+// written.
 func TestATarballThatDoesNotMatchItsChecksumEndsTheRun(t *testing.T) {
 	npm := rt.StartNpm(t)
 	other := rt.PlainTarball(t, "other")
@@ -284,10 +360,11 @@ func TestATarballThatDoesNotMatchItsChecksumEndsTheRun(t *testing.T) {
 	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
-	want := "qory run: Check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum " + rt.Integrity(other)
-	if !strings.Contains(r.out, want) {
+	want := "qory run: the tarball of claude 2.1.320 does not match the checksum\n  " + rt.Integrity(other) + "\n"
+	if !strings.Contains(r.out, want) || strings.Contains(r.out, "Check the source") {
 		t.Fatalf("the output has no checksum line:\n%s", r.out)
 	}
+	runLinesFit(t, r.out)
 	if _, err := os.Lstat(filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "claude", "2.1.320")); err == nil {
 		t.Fatal("the version's folder was written")
 	}
@@ -302,6 +379,7 @@ func TestATarballThatDoesNotMatchItsChecksumEndsTheRun(t *testing.T) {
 func runCodeInstalling(t *testing.T, lines string, proxy *rt.Proxy, server string) (string, error) {
 	t.Helper()
 	defer cmd.SetInstallRuntimes(true)()
+	defer cmd.SetRuntimeKeys(rt.Keys())()
 	if server != "" {
 		defer cmd.SetInstanceAddress(func(*config.Forager) string { return server })()
 	}
@@ -386,13 +464,12 @@ func TestARunCodeFileTakesTheMachineLines(t *testing.T) {
 // TestARunWithNoAddressOfQoryApiaryStopsAtTheRegistrysRealm runs from a run key, whose
 // run has no gateway.server in forager.yaml, with a pool.registry that returns a 401
 // challenge: qory has no address of Qory Apiary to check the realm against, so it takes
-// no realm, and the run's first line is the fix.
+// no realm, and the run, a dispatched one, prints the cause with no fix line.
 func TestARunWithNoAddressOfQoryApiaryStopsAtTheRegistrysRealm(t *testing.T) {
 	reg := rt.StartRegistry(t)
 	reg.PublishPlain("2.1.320")
 	r := runInstalling(t, installSetup{reg: reg, proxy: rt.StartProxy(t), walled: true, noInstance: true})
-	want := "qory run: Set gateway.server.url in forager.yaml to the address of Qory Apiary\n" +
-		"The realm is " + reg.Instance() + "/registry/token, and the run has no address of Qory Apiary to check it against.\n"
+	want := "qory run: the pool's forager.yaml sets no gateway.server.url,\n  so qory cannot check the registry's token realm " + reg.Instance() + "/registry/token\n"
 	if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 || !strings.Contains(r.out, want) || reg.BlobGets() != 0 {
 		t.Fatalf("%d joins, %v (exit %d), %d blobs\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), reg.BlobGets(), r.out)
 	}
@@ -401,13 +478,13 @@ func TestARunWithNoAddressOfQoryApiaryStopsAtTheRegistrysRealm(t *testing.T) {
 // TestARunCodeFileWithNoApiaryLineStopsAtTheRegistrysRealm runs from a run code file
 // whose lines are the registry and the runtimes folder, as a pool without an address of
 // Qory Apiary writes them: the run has no server in its forager.yaml, so the install
-// stops at the registry's realm with the fix first.
+// stops at the registry's realm with the cause, and no fix line.
 func TestARunCodeFileWithNoApiaryLineStopsAtTheRegistrysRealm(t *testing.T) {
 	reg, proxy := rt.StartRegistry(t), rt.StartProxy(t)
 	reg.PublishPlain("2.1.320")
 	lines := "registry " + reg.Host() + "\nruntimes " + filepath.Join(t.TempDir(), "runtimes") + "\n"
 	_, err := runCodeInstalling(t, lines, proxy, "")
-	if err == nil || !strings.HasPrefix(err.Error(), "Set gateway.server.url in forager.yaml to the address of Qory Apiary\n") || reg.BlobGets() != 0 {
+	if err == nil || err.Error() != "the pool's forager.yaml sets no gateway.server.url,\n  so qory cannot check the registry's token realm "+reg.Instance()+"/registry/token; the code is used" || reg.BlobGets() != 0 {
 		t.Fatalf("err = %v, %d blobs", err, reg.BlobGets())
 	}
 }
@@ -446,8 +523,19 @@ func TestTheApiaryLineOfARunCodeFileWinsOverTheServersURL(t *testing.T) {
 	}
 	t.Chdir(pkg)
 	_, err = runCodeInstalling(t, lines("http://127.0.0.1:1"), proxy, reg.Instance())
-	if err == nil || !strings.HasPrefix(err.Error(), "Ask Qory Apiary's instance admin to put the registry's token realm at http://127.0.0.1:1/registry/token\n") {
+	if err == nil || err.Error() != "the registry's token realm is\n  "+reg.Instance()+"/registry/token,\n  and the instance's token route is http://127.0.0.1:1/registry/token; the code is used" {
 		t.Fatalf("a wrong line: %v", err)
+	}
+}
+
+// runLinesFit fails the test when a line of out that starts with "qory run: " has more
+// than 100 characters.
+func runLinesFit(t *testing.T, out string) {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "qory run: ") && len(line) > 100 {
+			t.Errorf("the line has %d characters: %s", len(line), line)
+		}
 	}
 }
 
@@ -626,6 +714,118 @@ func TestAnOrphanContainerKeepsItsVersionWithNoWall(t *testing.T) {
 			if _, err := os.Lstat(old); (err == nil) != c.kept {
 				t.Errorf("1.0.0 is kept: %v, want %v (%v)", err == nil, c.kept, err)
 			}
+		})
+	}
+}
+
+// signatureCases are the npm signatures of claude 2.1.320 that stop an install, with the
+// cause of each, and the fix line that a person's run prints before it.
+var signatureCases = []struct {
+	name, fix, cause string
+	sign             func(signed, integrity string) any
+}{
+	{"no signature", "Check the source of the runtime's releases", "npm has no signature of claude 2.1.320",
+		func(string, string) any { return nil }},
+	{"a key qory does not have", "Update qory.", "npm signed claude 2.1.320 with a key that this qory does not have.\nThe key is SHA256:another.",
+		func(s, i string) any {
+			return []map[string]string{{"keyid": "SHA256:another", "sig": rt.Sign(s + ":" + i)}}
+		}},
+}
+
+// TestADispatchedRunShowsOnlyTheCauseOfAFailedInstall runs claude with a run key, whose
+// output Qory Apiary shows, on an npm whose signature of claude 2.1.320 stops the
+// install: qory run prints the cause, its first letter in lower case, with no fix line,
+// and exits 1 with no session.
+func TestADispatchedRunShowsOnlyTheCauseOfAFailedInstall(t *testing.T) {
+	for _, c := range signatureCases {
+		t.Run(c.name, func(t *testing.T) {
+			npm := rt.StartNpm(t)
+			npm.Publish("2.1.320")
+			npm.SignWith(c.sign)
+			r := runInstalling(t, installSetup{npm: npm, proxy: rt.StartProxy(t)})
+			if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
+				t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+			}
+			cause := strings.TrimSuffix(c.cause, ".")
+			wants(t, r.out, "qory run: "+strings.ToLower(cause[:1])+cause[1:]+"\n")
+			lacks(t, r.out, c.fix)
+		})
+	}
+}
+
+// TestADispatchedRunShowsTheCauseOfAOneLineInstallError runs claude with a run key on
+// installs that stop on a state folder qory cannot write, a host proxy's CA bundle with
+// no certificate, and a host proxy that does not open. Each error has a fix line and a
+// cause line, so qory run prints the cause alone, with no fix line. The error of the
+// state folder has the folder's path on its line, which is long in a test's folder.
+func TestADispatchedRunShowsTheCauseOfAOneLineInstallError(t *testing.T) {
+	state := func() string { return filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes") }
+	bundle := filepath.Join(t.TempDir(), "ca.pem")
+	writeFile(t, bundle, "no certificate\n")
+	for _, c := range []struct {
+		name string
+		s    installSetup
+		want func() string
+		fix  string
+		fits bool
+	}{
+		{"a state folder qory cannot write", installSetup{before: func() {
+			if err := os.MkdirAll(state(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(state(), 0o555); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.Chmod(state(), 0o755) })
+		}}, func() string { return "qory run: mkdir " + filepath.Join(state(), "claude") + ": permission denied\n" }, "Check that qory can write", false},
+		{"a CA bundle with no certificate", installSetup{caBundle: bundle},
+			func() string { return "qory run: the run's CA bundle\n  " + bundle + "\n  has no certificate\n" }, "Run again", true},
+		{"a host proxy that does not open", installSetup{proxyErr: errors.New("the run's session is joining")},
+			func() string {
+				return "qory run: the run's host proxy, through which qory installs claude, did not open:\n  the run's session is joining\n"
+			}, "Run again", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if c.s.before != nil && os.Geteuid() == 0 {
+				t.Skip("root writes a folder of mode 0555")
+			}
+			npm := rt.StartNpm(t)
+			npm.Publish("2.1.320")
+			c.s.npm, c.s.proxy = npm, rt.StartProxy(t)
+			r := runInstalling(t, c.s)
+			if len(r.joins) != 0 || cmd.ExitCode(r.err) != 1 {
+				t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+			}
+			wants(t, r.out, c.want())
+			lacks(t, r.out, c.fix)
+			if c.fits {
+				runLinesFit(t, r.out)
+			}
+		})
+	}
+}
+
+// TestAPersonsRunShowsTheFixAndTheCauseOfAFailedInstall runs claude in a checkout on a
+// person's machine, with no run key, on an npm whose signature of claude 2.1.320 stops
+// the install: qory run prints the fix line, then the cause.
+func TestAPersonsRunShowsTheFixAndTheCauseOfAFailedInstall(t *testing.T) {
+	for _, c := range signatureCases {
+		t.Run(c.name, func(t *testing.T) {
+			defer cmd.SetInstallRuntimes(true)()
+			defer cmd.SetRuntimeKeys(rt.Keys())()
+			npm := rt.StartNpm(t)
+			npm.Publish("2.1.320")
+			npm.SignWith(c.sign)
+			defer cmd.SetNpmRegistry(npm.URL())()
+			root := newCheckout(t)
+			copyFixture(t, "two-modules", root)
+			composedForFake(t, root, fakeRuntime(t))
+			t.Setenv("QORY_RUN_KEY", "")
+			out, err := run(t, "run", "claude", "--", "-p", "hi")
+			if err == nil || cmd.ExitCode(err) != 1 {
+				t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+			}
+			wants(t, out+err.Error(), c.fix+"\n"+c.cause)
 		})
 	}
 }

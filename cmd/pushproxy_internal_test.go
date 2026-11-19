@@ -17,7 +17,7 @@ import (
 // [noPushProxyWords] matches.
 func TestForagerNoPushProxyErrorIsTheOneQoryMatches(t *testing.T) {
 	ctx := context.Background()
-	at, err := openAtGateway(ctx, session.OpenSpec{RunID: event.NewRunID(), RunsDir: t.TempDir(), Report: func(string) {}}, "")
+	at, err := openAtGateway(ctx, session.OpenSpec{RunID: event.NewRunID(), RunsDir: t.TempDir(), Report: func(string) {}}, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
