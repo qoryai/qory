@@ -626,7 +626,9 @@ func closedAtRoot(path string) error {
 }
 
 // composeIn returns the one document dir holds for a compose, "" for none, and an error
-// for both. With owned, a file the current user does not own does not count. A qory.yaml
+// for both. With owned, dir is an ancestor's, a file the current user does not own does
+// not count, and a qory.yaml whose harness section pins a runtime is refused, as
+// [Config.apply] refuses it. A qory.yaml
 // that cannot be read is that error, so a mistake in it is reported where it is.
 func composeIn(dir string, owned bool) (string, error) {
 	var found []string
@@ -641,6 +643,9 @@ func composeIn(dir string, owned bool) (string, error) {
 		f, err := read(path)
 		if err != nil {
 			return "", err
+		}
+		if owned && f.Harness != nil && len(f.Harness.RuntimePins) > 0 {
+			return "", pinOutsideCheckout(path)
 		}
 		if f.Harness.composes() {
 			found = append(found, path)
@@ -765,6 +770,14 @@ func ownedFile(path string) bool {
 	return err == nil && stack.OwnedByCurrentUser(info)
 }
 
+// pinOutsideCheckout is the refusal of harness.runtimes in the file at path, the user's
+// file or an ancestor's: only the checkout root's file and the base stack pin a runtime.
+func pinOutsideCheckout(path string) error {
+	return exports.Refuse("Move runtimes to the checkout's "+FileName+" or to the base "+stack.FileName+".",
+		"Only the checkout's "+FileName+" and the base stack pin a runtime's version.",
+		"harness.runtimes is in "+exports.HidePath(path)+".")
+}
+
 // apply reads one file, sets the keys it names and returns the file as read. With
 // machine false, only the worktree section, the qory key and the tiers are taken: the
 // other harness keys, git and env are the machine's and left out. With root, the file is
@@ -788,9 +801,7 @@ func (c *Config) apply(path string, machine, root bool) (file, error) {
 		return f, err
 	}
 	if f.Harness != nil && len(f.Harness.RuntimePins) > 0 && !root {
-		return f, exports.Refuse("Move runtimes to the checkout's "+FileName+" or to the base "+stack.FileName+".",
-			"Only the checkout's "+FileName+" and the base stack pin a runtime's version.",
-			"harness.runtimes is in "+exports.HidePath(path)+".")
+		return f, pinOutsideCheckout(path)
 	}
 	if f.Harness != nil && f.Harness.Tiers != nil {
 		if err := c.applyTiers(path, f.Harness.Tiers, root); err != nil {

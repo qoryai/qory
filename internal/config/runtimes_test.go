@@ -57,3 +57,22 @@ func TestOnlyTheCheckoutsFilePinsARuntime(t *testing.T) {
 		}
 	}
 }
+
+// TestDiscoverStackRefusesAnAncestorsPin is a checkout with no document under an ancestor
+// whose qory.yaml pins a runtime and holds no stack: DiscoverStack refuses the pin, the fix
+// first and the file last, before any compose reads the ancestor's file.
+func TestDiscoverStackRefusesAnAncestorsPin(t *testing.T) {
+	isolated(t)
+	root := filepath.Join(t.TempDir(), "code", "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ancestor := filepath.Join(filepath.Dir(root), "qory.yaml")
+	write(t, ancestor, "harness:\n  runtimes:\n    claude:\n      version: 2.1.300\n")
+	want := "Move runtimes to the checkout's qory.yaml or to the base qory-stack.yaml.\n" +
+		"  Only the checkout's qory.yaml and the base stack pin a runtime's version.\n" +
+		"  harness.runtimes is in " + ancestor + "."
+	if found, err := config.DiscoverStack(root); err == nil || err.Error() != want {
+		t.Fatalf("DiscoverStack returned %q, %v\nwant:\n%s", found, err, want)
+	}
+}

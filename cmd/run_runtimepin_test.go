@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/config"
 	rt "github.com/qoryai/qory/internal/runtimeinstall/runtimeinstalltest"
 )
 
@@ -99,17 +100,20 @@ func TestAPinTheRegistryDoesNotHaveStopsADispatchedRun(t *testing.T) {
 }
 
 // TestAPinTheRegistryDoesNotHaveStopsAPersonsRun runs claude in a checkout on a person's
-// machine, with no run key, from npm, which has only claude 2.1.320. A pin of 9.9.9 in the
-// checkout's qory.yaml, and a pin of 2.1.300 in the base stack that the checkout's
+// machine, with no run key, from npm, or from the registry's runtime cache when
+// forager.yaml sets pool.registry, each of which has only claude 2.1.320. A pin of 9.9.9
+// in the checkout's qory.yaml, and a pin of 2.1.300 in the base stack that the checkout's
 // qory.yaml extends, each stop the run before the session: qory run prints the fix line,
 // with the name of the file that pins the version, then the cause.
 func TestAPinTheRegistryDoesNotHaveStopsAPersonsRun(t *testing.T) {
 	for _, c := range []struct {
 		name, fixture, version, file string
 		pin                          string
+		registry                     bool
 	}{
-		{"a pin in the checkout's qory.yaml", "two-modules", "9.9.9", "qory.yaml", "  runtimes:\n    claude:\n      version: 9.9.9\n"},
-		{"a pin in the base stack", "runtimes-nearer-layer-wins", "2.1.300", "qory-stack.yaml", ""},
+		{"a pin in the checkout's qory.yaml", "two-modules", "9.9.9", "qory.yaml", "  runtimes:\n    claude:\n      version: 9.9.9\n", false},
+		{"a pin in the base stack", "runtimes-nearer-layer-wins", "2.1.300", "qory-stack.yaml", "", false},
+		{"a pin the registry's cache does not have", "two-modules", "9.9.9", "qory.yaml", "  runtimes:\n    claude:\n      version: 9.9.9\n", true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			defer cmd.SetInstallRuntimes(true)()
@@ -119,6 +123,12 @@ func TestAPinTheRegistryDoesNotHaveStopsAPersonsRun(t *testing.T) {
 			defer cmd.SetNpmRegistry(npm.URL())()
 			root := newCheckout(t)
 			copyFixture(t, c.fixture, root)
+			if c.registry {
+				reg := rt.StartRegistry(t)
+				reg.PublishPlain("2.1.320")
+				defer cmd.SetInstanceAddress(func(*config.Forager) string { return reg.Instance() })()
+				writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "pool:\n  registry: "+reg.Host()+"/qory-env\n  run_config: "+t.TempDir()+"\n")
+			}
 			if c.pin != "" {
 				doc, err := os.ReadFile(filepath.Join(root, "qory.yaml"))
 				if err != nil {
@@ -139,6 +149,9 @@ func TestAPinTheRegistryDoesNotHaveStopsAPersonsRun(t *testing.T) {
 				t.Errorf("the fix line has %d characters with qory run:, over 100", len("qory run: "+first))
 			}
 			lacks(t, out, "hello from")
+			if c.registry && len(npm.Paths()) != 0 {
+				t.Errorf("npm got requests %q, want none", npm.Paths())
+			}
 		})
 	}
 }

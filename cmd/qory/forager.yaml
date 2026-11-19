@@ -1,0 +1,3 @@
+pool:
+  registry: 127.0.0.1:59712/qory-env
+  run_config: /var/folders/3q/1wqh28d147z37xn0dch_40kh0000gn/T/tmp.1FkdPGxLvJ/TestAPinTheRegistryDoesNotHaveStopsAPersonsRuna_pin_the_registr913701921/001
