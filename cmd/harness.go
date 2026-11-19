@@ -533,6 +533,10 @@ type composeOptions struct {
 	// compose read the run's cache at the first compose's commits, see [source.Memo.Seal].
 	// nil makes a memo for this compose alone.
 	memo *source.Memo
+	// sessions, when set, changes the report before the compose writes it, under the
+	// compose's lock: qory run adds the rows of a run of several sessions, see
+	// [report.Report.Sessions].
+	sessions func(*report.Report)
 }
 
 // named is the harness o composes with no address shown, see [source.Named]; nil for any
@@ -1414,6 +1418,9 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 		if takenBack, err = unlinkAll(at.root); err != nil {
 			return err
 		}
+	}
+	if o.sessions != nil {
+		o.sessions(&rep)
 	}
 	if err := report.Write(at.report, rep); err != nil {
 		return err
