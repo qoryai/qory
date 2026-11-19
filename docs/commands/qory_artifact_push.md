@@ -44,7 +44,7 @@ qory artifact push <type> [<file>...] [flags]
 
 ```
   qory artifact push screenshot shots/checkout.png --name checkout --note "After the fix."
-  qory artifact push explainer -                 # read one file from standard input
+  qory artifact push walkthrough -               # read one file from standard input
   qory artifact push demo-script --name scenario-2 --withdraw --note "demo-scenarios v3 removed scenario-2."
 ```
 
