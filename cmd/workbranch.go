@@ -119,8 +119,8 @@ func pushedStarts(branch *preparation.WorkBranch, pushed []runapi.PushedEntry) e
 
 	for _, entry := range pushed {
 		if !submission.CommitID(entry.Commit) {
-			return fmt.Errorf("Report this run to the instance admin of Qory Apiary, so the run did not start%s\n"+
-				"  The list of pushed commits has %s for a repository, which is not a full commit id.", codeUsed, shownText(entry.Commit))
+			return fmt.Errorf("Report this run to the instance admin of Qory Apiary%s\n"+
+				"  The list of pushed commits has %s, which is not a full commit id, so the run did not start.", codeUsed, shownText(entry.Commit))
 		}
 
 		landed := preparation.Landed{System: entry.System, Path: entry.Path, Commit: entry.Commit}

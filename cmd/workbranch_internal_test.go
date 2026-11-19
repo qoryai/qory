@@ -184,7 +184,7 @@ func TestPushedStartsChecksEachCommit(t *testing.T) {
 		entries := []runapi.PushedEntry{{System: "git.example.com", Path: "acme/shop", Commit: good}, {System: "git.example.com", Path: "acme/lib", Commit: commit, Cancelled: true}}
 
 		err := pushedStarts(branch, entries)
-		if err == nil || !strings.HasPrefix(err.Error(), "Report this run to the instance admin of Qory Apiary, so the run did not start") || !strings.Contains(err.Error(), commit) {
+		if err == nil || !strings.HasPrefix(err.Error(), "Report this run to the instance admin of Qory Apiary; the code is used\n") || !strings.Contains(err.Error(), commit) {
 			t.Errorf("commit %q: err = %v", commit, err)
 		}
 	}
