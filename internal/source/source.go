@@ -348,10 +348,11 @@ type SealedError struct {
 // Error has the source, by its name for a named stack's source; it is masked as
 // [FetchError.Error] is.
 func (e *SealedError) Error() string {
-	if e.Name != "" {
-		return e.Name + " is not in the run's cache: the run's first compose did not fetch it"
+	what := e.Name
+	if what == "" {
+		what = secretmask.Default().Replace(fmt.Sprintf("%s at %s", exports.URL(e.URL), exports.Value(e.Ref, false)))
 	}
-	return secretmask.Default().Replace(fmt.Sprintf("%s at %s is not in the run's cache: the run's first compose did not fetch it", exports.URL(e.URL), exports.Value(e.Ref, false)))
+	return "take the work item in again in Qory Apiary: " + what + " is not in the run's cache, since the run's first compose did not fetch it"
 }
 
 // put records what url at ref resolved to. A nil memo records nothing.
