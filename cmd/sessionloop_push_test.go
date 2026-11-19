@@ -173,8 +173,8 @@ func TestAFailureBeforeSession2KeepsThePushOfSession1(t *testing.T) {
 	}
 }
 
-// suiteServed gives the run API of p the build plan suitePlan beside the versions of the
-// branch, and POST verdict, which answers 201, or leaves the request with no response when
+// suiteServed adds to the run API of p the build plan suitePlan beside the versions of the
+// branch, and POST verdict, which returns 201, or leaves the request with no response when
 // hang returns true for the verdict's number, from 1. order is each verdict that arrived,
 // "verdict", and each next-session request, "next", in the order they arrived.
 func suiteServed(t *testing.T, p *pushRepo, hang func(n int) bool) (order func() []string) {

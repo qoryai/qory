@@ -1502,8 +1502,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			markJoined()
 			// number is the number the gateway gives the session that joins next: 1 for the
 			// run's first join, one more than the last session's after it. The route serves that
-			// number during the join. qory predicts it: Forager gives a session's number only in
-			// its join's result, once the session ended. A session the gateway numbered
+			// number during the join. qory predicts it: Forager returns a session's number only
+			// in its join's result, once the session ended. A session the gateway numbered
 			// otherwise got 503 from the route for its requests, and ends the run failed after
 			// its join, see [textSessionNumber].
 			number := 1
@@ -1638,6 +1638,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					push != nil && push.ended != "" {
 					break
 				}
+				// number is the prediction that the route served during the join; a session the
+				// gateway numbered otherwise ends the run failed.
 				if res.Session != number {
 					laterErr = &runLineError{fmt.Errorf(textSessionNumber, res.Session, number, codeUsed)}
 					break
