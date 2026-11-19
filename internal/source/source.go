@@ -352,7 +352,7 @@ func (e *SealedError) Error() string {
 	if what == "" {
 		what = secretmask.Default().Replace(fmt.Sprintf("%s at %s", exports.URL(e.URL), exports.Value(e.Ref, false)))
 	}
-	return "take the work item in again in Qory Apiary: " + what + " is not in the run's cache, since the run's first compose did not fetch it"
+	return "set the stage's workflows in Qory Apiary to runtimes whose harness modules session 1 fetched: " + what + " is not in the run's cache, since the run's first compose did not fetch it"
 }
 
 // put records what url at ref resolved to. A nil memo records nothing.

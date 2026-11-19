@@ -114,8 +114,8 @@ type codeRun struct {
 	// harnessDoc is the documents' harness document, which [codeRun.next] writes again
 	// for the runtime of a later session; nil for none.
 	harnessDoc *contracts.HarnessDocument
-	// runSettings is the documents' run_settings, whose runtime a later session with no
-	// runtime of its own runs on.
+	// runSettings is the documents' run_settings, whose runtime a later session runs on
+	// when its model choice has no runtime.
 	runSettings *contracts.RunSettings
 	// shared is the documents' shared_run: qory sends the next-session request after each
 	// session and runs the session that the answer sets.
