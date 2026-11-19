@@ -1,6 +1,6 @@
 package cmd
 
-import "errors"
+import "fmt"
 
 // The lines of the loop over the sessions of a run whose documents set shared_run. Each
 // line that ends a run starts with its fix, as qory run prints it after "qory run: ".
@@ -16,27 +16,31 @@ const (
 	// textSessionNumber has the gateway's number of the session, the number qory served on
 	// the session's route, and [codeUsed].
 	textSessionNumber = "update qory or Forager: the gateway numbered the session %d, and qory served session %d on its route%s"
-	textNoStopProof   = "run the stage behind a wall: without one, a process of the session could still write .git/config, so qory pushed nothing" + codeUsed
-	textContainerKept = "take the work item in again in Qory Apiary: a container of the session may still run and write the working folder, so qory pushed nothing" + codeUsed
+	// textNoStopProof and textContainerKept have what qory did not do, such as "qory pushed
+	// nothing", and [codeUsed].
+	textNoStopProof   = "run the stage behind a wall: without one, a process of the session could still write .git/config, so %s%s"
+	textContainerKept = "take the work item in again in Qory Apiary: a container of the session may still run and write the working folder, so %s%s"
 )
 
 // laterHarnessDir is the folder of the run directory that a later session's harness document
 // goes in, with the session's number.
 const laterHarnessDir = "harness-%d"
 
-// agentStopProof is the error of a push between two sessions of a run when no proof shows
-// that the session's processes stopped, as [preparation.Push] requires: a process left could
-// write .git/config, and the push and every later session would run its git settings. walled
+// agentStopProof is the error of a push between two sessions of a run, or of the steps
+// before a later session, when no proof shows that the session's processes stopped, as
+// [preparation.Push] requires: a process left could write .git/config or the working folder,
+// and the push, the next compose and every later session would read them. skipped is what
+// qory did not do, for the line. walled
 // is whether the run has a wall, whose join removes the agent's container; kept is
 // [openedRun.ContainerKept], whether a container of the run may still run. A run with no
 // wall has no proof. qory run stops a write run from a run code with no wall before its join,
 // so only a test reaches that branch.
-func agentStopProof(walled, kept bool) error {
+func agentStopProof(walled, kept bool, skipped string) error {
 	switch {
 	case !walled:
-		return &runLineError{errors.New(textNoStopProof)}
+		return &runLineError{fmt.Errorf(textNoStopProof, skipped, codeUsed)}
 	case kept:
-		return &runLineError{errors.New(textContainerKept)}
+		return &runLineError{fmt.Errorf(textContainerKept, skipped, codeUsed)}
 	}
 	return nil
 }

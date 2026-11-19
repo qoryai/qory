@@ -1050,8 +1050,8 @@ func SetSetupLimit(d time.Duration) func() {
 	return func() { setupBound = setupLimit }
 }
 
-// SetBeforeJoin makes qory run call f once the harness is composed, before the run's
-// session joins, and returns what restores the default.
+// SetBeforeJoin makes qory run call f once the harness is composed, before each session of
+// the run joins, and returns what restores the default.
 func SetBeforeJoin(f func()) func() {
 	beforeJoin = f
 	return func() { beforeJoin = nil }

@@ -99,7 +99,7 @@ func TestALaterSessionTakesItsAnswersRuntimeWorkflowAndKey(t *testing.T) {
 }
 
 // TestALaterSessionOnARuntimeQoryDoesNotRunStops is a next-session answer of the runtime
-// example-runtime: the run's session stays as it was and the error names the runtime.
+// example-runtime: the run's session stays as it was and the error contains the runtime.
 func TestALaterSessionOnARuntimeQoryDoesNotRunStops(t *testing.T) {
 	r := sharedCodeRun(t)
 	a := nextAnswerFixture(t, "session-runtime-only.json")
@@ -117,7 +117,7 @@ func TestALaterSessionOnARuntimeQoryDoesNotRunStops(t *testing.T) {
 // run of several sessions: a walled run with no container left passes; a run with no
 // wall and a run with a container kept get the line that starts with their fix.
 func TestAPushBetweenSessionsNeedsProofThatTheAgentStopped(t *testing.T) {
-	if err := agentStopProof(true, false); err != nil {
+	if err := agentStopProof(true, false, "qory pushed nothing"); err != nil {
 		t.Errorf("walled, nothing kept: %v", err)
 	}
 	for _, c := range []struct {
@@ -128,9 +128,9 @@ func TestAPushBetweenSessionsNeedsProofThatTheAgentStopped(t *testing.T) {
 		{false, true, "run the stage behind a wall: "},
 		{true, true, "take the work item in again in Qory Apiary: a container of the session may still run"},
 	} {
-		err := agentStopProof(c.walled, c.kept)
+		err := agentStopProof(c.walled, c.kept, "qory pushed nothing")
 		var line *runLineError
-		if !errors.As(err, &line) || !strings.HasPrefix(err.Error(), c.want) || !strings.HasSuffix(err.Error(), codeUsed) {
+		if !errors.As(err, &line) || !strings.HasPrefix(err.Error(), c.want) || !strings.HasSuffix(err.Error(), ", so qory pushed nothing"+codeUsed) {
 			t.Errorf("walled %v, kept %v: %v, want a line that starts %q", c.walled, c.kept, err, c.want)
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/event"
@@ -474,7 +475,7 @@ func TestACodexInstallThatFailsBeforeSession2EndsTheRun(t *testing.T) {
 // TestASignalWhileTheNextSessionRequestWaitsStopsTheRun is a run whose first next-session
 // request gets no response, and which gets SIGTERM during the wait before the second send:
 // the run closes cancelled with the reason interrupted, exit 1, with the line of a run
-// cancelled before its agent started, and no second session joins.
+// cancelled before session 2 started, and no second session joins.
 func TestASignalWhileTheNextSessionRequestWaitsStopsTheRun(t *testing.T) {
 	r := runLoop(t, loopSetup{nowhere: func(n *cmd.Nowhere) {
 		n.NextSession = func(context.Context, []byte) ([]byte, error) {
@@ -488,8 +489,100 @@ func TestASignalWhileTheNextSessionRequestWaitsStopsTheRun(t *testing.T) {
 	if len(r.closes) != 1 || r.closes[0].State != event.StateCancelled || r.closes[0].Reason != event.ReasonInterrupted {
 		t.Errorf("the run closed with %+v, want cancelled with interrupted", r.closes)
 	}
-	wants(t, r.out, "the run was cancelled: qory run got SIGTERM before claude started")
+	wants(t, r.out, "the run was cancelled: qory run got SIGTERM before session 2 started")
 	lacks(t, r.out, "Check the gateway's connection")
+	lacks(t, r.out, "before claude started")
+}
+
+// TestASignalDuringTheStepsBeforeALaterSessionStopsTheRun is a run that gets SIGTERM once
+// the steps before session 2 passed, before its join: the run closes cancelled with the
+// reason interrupted, exit 1, with the line of a run cancelled before session 2 started,
+// and session 2 does not join.
+func TestASignalDuringTheStepsBeforeALaterSessionStopsTheRun(t *testing.T) {
+	calls := 0
+	defer cmd.SetBeforeJoin(func() {
+		if calls++; calls == 2 {
+			syscall.Kill(os.Getpid(), syscall.SIGTERM)
+			time.Sleep(300 * time.Millisecond)
+		}
+	})()
+	r := runLoop(t, loopSetup{answers: []string{laterAnswer(2, "claude", "example-provider-2", 30)}})
+	if len(r.joins) != 1 || len(r.bodies) != 1 || cmd.ExitCode(r.err) != 1 {
+		t.Fatalf("%d joins and %d requests, %v (exit %d)\n%s", len(r.joins), len(r.bodies), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if len(r.closes) != 1 || r.closes[0].State != event.StateCancelled || r.closes[0].Reason != event.ReasonInterrupted {
+		t.Errorf("the run closed with %+v, want cancelled with interrupted", r.closes)
+	}
+	wants(t, r.out, "the run was cancelled: qory run got SIGTERM before session 2 started")
+}
+
+// TestTheStepsBeforeALaterSessionPastTheSetupLimitCloseTheRun is a run with a setup limit
+// of 5s whose steps before session 2 take longer: the run closes cancelled with the reason
+// timeout, exit 124, as a setup of session 1 past its limit does, and session 2 does not
+// join.
+func TestTheStepsBeforeALaterSessionPastTheSetupLimitCloseTheRun(t *testing.T) {
+	defer cmd.SetSetupLimit(5 * time.Second)()
+	calls := 0
+	defer cmd.SetBeforeJoin(func() {
+		if calls++; calls == 2 {
+			time.Sleep(5200 * time.Millisecond)
+		}
+	})()
+	r := runLoop(t, loopSetup{answers: []string{laterAnswer(2, "claude", "example-provider-2", 30)}})
+	if len(r.joins) != 1 || cmd.ExitCode(r.err) != 124 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if len(r.closes) != 1 || r.closes[0].State != event.StateCancelled || r.closes[0].Reason != event.ReasonTimeout {
+		t.Errorf("the run closed with %+v, want cancelled with timeout", r.closes)
+	}
+	wants(t, r.out, "the steps before claude starts may take at most 5s")
+}
+
+// TestALaterSessionNeedsProofThatTheSessionBeforeStopped is a read run, with no push step,
+// whose container of session 1 may still run: the run closes failed, exit 1, before it
+// sends the next-session request, with the line that starts with its fix, and session 2
+// does not join.
+func TestALaterSessionNeedsProofThatTheSessionBeforeStopped(t *testing.T) {
+	r := runLoop(t, loopSetup{
+		answers: []string{laterAnswer(2, "claude", "example-provider-2", 30)},
+		nowhere: func(n *cmd.Nowhere) { n.ContainerKept = true },
+	})
+	if len(r.joins) != 1 || len(r.bodies) != 0 || cmd.ExitCode(r.err) != 1 {
+		t.Fatalf("%d joins and %d requests, %v (exit %d)\n%s", len(r.joins), len(r.bodies), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if len(r.closes) != 1 || r.closes[0].State != event.StateFailed {
+		t.Errorf("the run closed with %+v, want failed", r.closes)
+	}
+	wants(t, r.out, "qory run: take the work item in again in Qory Apiary: a container of the session may still run and write the working folder, so session 2 does not start; the code is used\n")
+}
+
+// TestACodexHomeThatStaysEndsTheRunBeforeTheNextSession is a run of two Codex sessions
+// whose Codex home of session 1 cannot be removed: the run closes failed, exit 1, with the
+// line that starts with the removal by hand, and session 2 does not join.
+func TestACodexHomeThatStaysEndsTheRunBeforeTheNextSession(t *testing.T) {
+	r := runLoop(t, loopSetup{
+		answers: []string{laterAnswer(2, "codex", "example-provider-2", 30)},
+		change:  func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "codex"} },
+		joined: func(n int, spec session.SessionSpec) {
+			for _, m := range spec.Mounts {
+				if m.Target != "/var/lib/qory-codex-home" || n != 1 {
+					continue
+				}
+				root := filepath.Dir(m.Path)
+				if err := os.Chmod(root, 0o500); err != nil {
+					t.Error(err)
+				}
+				t.Cleanup(func() { os.Chmod(root, 0o700) })
+			}
+		},
+	})
+	if len(r.joins) != 1 || cmd.ExitCode(r.err) != 1 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if len(r.closes) != 1 || r.closes[0].State != event.StateFailed {
+		t.Errorf("the run closed with %+v, want failed", r.closes)
+	}
+	wants(t, r.out, "qory run: remove ", ", then take the work item in again: qory removes the Codex home of session 1 before session 2 starts; the code is used\n")
 }
 
 // TestALaterSessionComposesTheBaseOfTheHarnessFromTheRunsCache is a run whose harness

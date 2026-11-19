@@ -725,7 +725,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			opened := time.Now()
 			setupDeadline := opened.Add(setupBound)
 			setupCtx, cancelSetup := context.WithDeadline(ctx, setupDeadline)
-			defer cancelSetup()
+			defer func() { cancelSetup() }()
 			var step prepStep
 			// enter makes s the step that runs, unless setupCtx has ended: a step that ran on
 			// past the limit, as a compose does, stays the step that the line names, and the
@@ -1211,7 +1211,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				case copied != nil:
 					root := copied.dir.Root()
 					codexRoot = root
-					cleanups = append(cleanups, func() { removeCodexHome(root, said) })
+					cleanups = append(cleanups, func() { _ = removeCodexHome(root, said) })
 				default:
 					d, err := runcopy.NewCodexHome(spec.RunID, state, spec.RunsDir)
 					if err != nil {
@@ -1327,14 +1327,27 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return withRecord(streams.errOut, prepErr, record)
 			}
-			// stoppedBeforeJoin closes a run that a stop ended before its next session joined:
+			// stoppedBeforeJoin closes a run that a stop ended before session n joined:
 			// cancelled with interrupted, exit 1, also between two sessions.
-			stoppedBeforeJoin := func() error {
+			stoppedBeforeJoin := func(n int) error {
 				closeRun(session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1})
 				lines.done(nil)
-				u.Fail(errors.New(cancelledBeforeJoin(got(), name)))
+				line := cancelledBeforeJoin(got(), name)
+				if n > 1 {
+					line = cancelledBeforeSession(got(), n)
+				}
+				u.Fail(errors.New(line))
 				said("the record is in " + record)
 				return reported(&exitError{code: 1})
+			}
+			// setupTimedOut closes a run whose steps before a session passed setupDeadline. It
+			// ends as a session at its time limit does: cancelled with timeout, exit 124.
+			setupTimedOut := func() error {
+				closeRun(session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout})
+				lines.done(nil)
+				u.Fail(codeLine(setupPassed(step, name, setupBound, dispatched)))
+				said("the record is in " + record)
+				return reported(&exitError{code: exitTimeout})
 			}
 			// A run whose documents set shared_run shares the memo of session 1's compose with the
 			// composes of its later sessions, sealed once session 1's is done.
@@ -1372,15 +1385,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			composing.memo.Seal()
 			switch {
 			case ctx.Err() != nil:
-				return stoppedBeforeJoin()
+				return stoppedBeforeJoin(1)
 			case !time.Now().Before(setupDeadline):
-				// A setup past its limit ends as a session at its time limit does: cancelled
-				// with timeout, exit 124.
-				closeRun(session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout})
-				lines.done(nil)
-				u.Fail(codeLine(setupPassed(step, name, setupBound, dispatched)))
-				said("the record is in " + record)
-				return reported(&exitError{code: exitTimeout})
+				return setupTimedOut()
 			case prepErr != nil:
 				return noJoin(prepErr)
 			}
@@ -1393,13 +1400,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// of session 1's compose: Forager closed the stack proxy at the run's first join, and
 			// the sealed memo fetches nothing, see [source.Memo.Seal]. A run whose documents
 			// contain no harness document composed the checkout's file for session 1, which the
-			// branch may have changed since, so it stops here.
+			// branch may have changed since, so it stops here. The steps before a later session
+			// have the setup's limit, setupBound, from their start, as session 1's have from the
+			// run's open: setupCtx and setupDeadline are the later session's from here on.
 			prepareLater := func(n int) error {
-				// shortcut: the steps before a later session have the setup's limit, setupBound,
-				// from their start; replace it when the session loop's card sets a bound.
-				laterCtx, cancel := context.WithTimeout(ctx, setupBound)
-				defer cancel()
-				if !remote || fromCode.harness == nil {
+				cancelSetup()
+				setupDeadline = time.Now().Add(setupBound)
+				setupCtx, cancelSetup = context.WithDeadline(ctx, setupDeadline)
+				laterCtx := setupCtx
+				if fromCode.harness == nil {
 					return &runLineError{errors.New(textLaterCheckoutHarness + codeUsed)}
 				}
 				runtime = fromCode.runtime
@@ -1411,7 +1420,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// The Codex home of an earlier session goes, with its sessions' files, before
 				// the next join.
 				if codexRoot != "" {
-					removeCodexHome(codexRoot, said)
+					if err := removeCodexHome(codexRoot, func(string) {}); err != nil {
+						return &runLineError{fmt.Errorf("%w, then take the work item in again: qory removes the Codex home of session %d before session %d starts%s", err, n-1, n, codeUsed)}
+					}
 				}
 				// The session's inputs.json replaces the one before, in the inputs folder and in
 				// the home, which qory wrote and the compose would find.
@@ -1421,6 +1432,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 				}
 				var freshHome bool
+				enter(stepCompose)
 				cut := func() bool { return ctx.Err() != nil || laterCtx.Err() != nil }
 				err := inStep(run, streams.errOut, event.StepCompose, composeStepName(runtime), cut, func(w io.Writer) error {
 					if n := fromCode.named; n != nil {
@@ -1450,6 +1462,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 				if walled {
+					enter(stepPushChecks)
 					done, err := checks.next(laterCtx, run, at.home, spec.RunID, &spec, controlPlane)
 					cleanups = append(cleanups, done)
 					if err != nil {
@@ -1489,7 +1502,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			markJoined()
 			// number is the number the gateway gives the session that joins next: 1 for the
 			// run's first join, one more than the last session's after it. The route serves that
-			// number during the join, and a session the gateway numbers otherwise ends the run.
+			// number during the join. qory predicts it: Forager gives a session's number only in
+			// its join's result, once the session ended. A session the gateway numbered
+			// otherwise ends the run after its join, see [textSessionNumber], so its requests
+			// got 503 from the route.
 			number := 1
 			var res *session.Result
 			var out session.Outcome
@@ -1497,9 +1513,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var ending pushEnding
 			var returns, afterClose, returnFailed bool
 			var backCtx context.Context
+			// cancelBack ends the backCtx of the last pass: each pass ends the one before.
+			cancelBack := func() {}
+			defer func() { cancelBack() }()
 			stopNow := func() stopRead { return stopRead{ctx.Err() != nil, again.Err() != nil, got()} }
-			// laterErr is the error that ends the run between two sessions, nil when none did.
+			// laterErr is the error that ends the run between two sessions, nil when none did,
+			// and laterTimedOut whether the steps before the next session passed setupDeadline.
 			var laterErr error
+			var laterTimedOut bool
 		sessions:
 			for {
 				joined = false
@@ -1558,13 +1579,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if copied != nil {
 					copied.cutBy = func() string { return ending.cutLine(stopNow(), returnAfterSignal) }
 				}
-				var cancelBack func()
+				cancelBack()
 				backCtx, cancelBack = returnContext(ctx, again, func(wait time.Duration) {
 					if returns && again.Err() == nil {
 						said(fmt.Sprintf(textCopyWaiting, got(), wait))
 					}
 				})
-				defer cancelBack()
 				// afterClose is whether the git session runs after the close.
 				afterClose = returns && !copied.plain && (err != nil || res == nil || res.RunClosed)
 				// returnFailed is whether a part of the return failed before the close: qory run then
@@ -1609,9 +1629,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 					out, pushErr = pushAfterSession(push, &ending, out)
 				}
-				// A run whose documents set shared_run asks Qory Apiary for its next session
-				// after a session that joined, was not stopped and did not pause, once the
-				// session's suite and push step passed. Any other run has one session.
+				// A run whose documents set shared_run sends the next-session request after a
+				// session that joined, was not stopped and did not pause, once the session's
+				// suite result is posted and its push step passed. Any other run has one session.
 				if fromCode == nil || !fromCode.shared || err != nil || res == nil || res.RunClosed || returns ||
 					ctx.Err() != nil || asked.State == event.StatePaused || suiteErr != nil || pushErr != nil ||
 					push != nil && push.ended != "" {
@@ -1619,6 +1639,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				if res.Session != number {
 					laterErr = &runLineError{fmt.Errorf(textSessionNumber, res.Session, number, codeUsed)}
+					break
+				}
+				// From here on number is the session that joins next.
+				number = res.Session + 1
+				// No process of the session may run on when qory composes, installs or runs git
+				// on this machine for the next session, a run with no push step too.
+				if laterErr = agentStopProof(walled, run.ContainerKept(), fmt.Sprintf("session %d does not start", number)); laterErr != nil {
 					break
 				}
 				a, endLine, nextErr := askNextSession(ctx, run.NextSession, res.Session, asked)
@@ -1633,13 +1660,24 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					said(fmt.Sprintf(textLaterEnd, res.Session))
 					break sessions
 				}
-				number = res.Session + 1
 				if err := fromCode.next(a); err != nil {
 					laterErr = &runLineError{err}
 					break
 				}
 				said(fmt.Sprintf(textLaterStarts, number, fromCode.workflow, fromCode.runtime))
-				if laterErr = prepareLater(number); laterErr != nil {
+				laterErr = prepareLater(number)
+				if laterErr == nil && beforeJoin != nil {
+					beforeJoin()
+				}
+				// A stop during the steps before the session, or steps past their limit, start
+				// no session, also when the steps passed, as for session 1.
+				switch {
+				case ctx.Err() != nil:
+					laterErr = ctx.Err()
+				case !time.Now().Before(setupDeadline):
+					laterErr, laterTimedOut = context.DeadlineExceeded, true
+				}
+				if laterErr != nil {
 					break
 				}
 				timeout = fromCode.sessionLimit()
@@ -1647,7 +1685,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			switch {
 			case laterErr != nil && ctx.Err() != nil:
-				return stoppedBeforeJoin()
+				return stoppedBeforeJoin(number)
+			case laterTimedOut:
+				return setupTimedOut()
 			case laterErr != nil:
 				return noJoin(laterErr)
 			}
@@ -2029,8 +2069,8 @@ var (
 	}
 )
 
-// beforeJoin, when not nil, is called once the harness is composed, before the run's
-// session joins; a test sets it.
+// beforeJoin, when not nil, is called once the harness is composed, before each session of
+// the run joins; a test sets it.
 var beforeJoin func()
 
 // sessionOutcome is the run's outcome qory closes the run with once its one session
@@ -2063,6 +2103,15 @@ func sessionOutcome(res *session.Result, err error) session.Outcome {
 		return session.Outcome{State: event.StateSucceeded, ExitCode: res.ExitCode}
 	}
 	return session.Outcome{State: event.StateFailed, ExitCode: res.ExitCode}
+}
+
+// cancelledBeforeSession is the line of a run that a stop ended before session n, a later
+// session, started: got is the signal qory run got, "" for none.
+func cancelledBeforeSession(got string, n int) string {
+	if got == "" {
+		return fmt.Sprintf("the run was cancelled before session %d started", n)
+	}
+	return fmt.Sprintf("the run was cancelled: qory run got %s before session %d started", got, n)
 }
 
 // cancelledBeforeJoin is the line of a run that qory run's signal, got, stopped before
