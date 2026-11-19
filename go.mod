@@ -7,7 +7,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/term v0.2.1
 	github.com/qoryai/forager v0.7.1-0.20261118114010-92ccf76845ce
-	github.com/qoryai/integrations v0.3.1-0.20261118152526-5a005c9ca3b9
+	github.com/qoryai/integrations v0.3.1-0.20261118223505-b5ae1a43582e
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9

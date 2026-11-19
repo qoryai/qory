@@ -5,23 +5,27 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/qoryai/integrations/contracts"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/config"
 )
 
-// fixture is one of the integration contract's fixtures, the copy the integration
-// package tests against: github.json is what qory-github describe prints, and
-// acme-tracker.json the least a description of a machine's own holds.
+// fixture is one of the integration contract's fixtures, read from contracts.FS of the
+// github.com/qoryai/integrations module this one requires: github.json is what
+// qory-github describe prints, and acme-tracker.json the least a description of a
+// program on the machine contains.
 func fixture(t *testing.T, name string) string {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "integration", "testdata", "fixtures", name))
+	b, err := fs.ReadFile(contracts.FS, path.Join("fixtures", name))
 	if err != nil {
 		t.Fatal(err)
 	}

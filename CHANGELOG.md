@@ -1462,6 +1462,26 @@ release may change what an existing document does, and states it under Upgrading
   1024 entries, more than 4096 values, nesting deeper than 64 levels, or more than 256
   KiB, and a description that is not valid UTF-8, holds a `\u` escape of a lone
   surrogate or repeats a member.
+- Every qory command that describes an integration checks the description against the
+  integration contract of the `github.com/qoryai/integrations` commit qory is built with.
+  What changes for a description:
+  - `vendor`, `egress_hosts`, the `model_provider` role, and the `source` role's `apply`,
+    `item_noun`, `collection_noun`, `items`, `comments`, `submissions`, `targets`,
+    `guide`, `secrets` and `credential_scope` pass the check.
+  - A credential host that starts with `*.` fails the check.
+  - A `model_provider` role without the contract's shape fails the check. Before, any
+    object passed.
+  - A description with no `program_version` and a role other than `model_provider` fails
+    the check with `value must be 'model_provider'`, where it failed with `missing
+    property 'program_version'`. A data description, with no `program_version`, the one
+    role `model_provider` and no `writeOnly` setting, passes the check, and the command
+    then ends with an error, because it plays no role qory expands.
+  - A settings `$schema` that is not a URI fails the check with `is not valid uri`, where
+    qory printed `the settings schema is written in …`.
+  - A settings schema whose `$vocabulary` key, `patternProperties` key, `$id`, `$ref`,
+    `$dynamicRef` or `pattern` is not valid fails the check, where qory printed `the
+    settings schema does not compile`.
+  - Each rule of a failed check is cut at 200 characters, with `...` after it.
 - `qory run` given a run key starts Claude Code with `--setting-sources user`,
   `--strict-mcp-config`, and the harness's MCP list or an empty one. Behind a wall,
   Claude Code's `CLAUDE_CONFIG_DIR` is an empty folder qory makes after the commands the
