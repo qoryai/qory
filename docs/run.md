@@ -3255,7 +3255,8 @@ prints one of these, each with line 1 as the cause, then lines indented by two s
   <cause>`, `Draft of the repository: program-failed.`
 - `qory run: The submit program did not run, so a repository has no draft.`, `Cause:
   <cause>`, `Draft of the repository: program-failed.` The cause is a repository with more than
-  100 commits, or a folder or file that qory could not make.
+  100 commits, or a folder or file that qory could not make. The draft has `"exit": 1`, as for
+  a program that did not start.
 - `qory run: The submit program printed no whole draft, so a repository has no draft.`,
   `Exit code: <code>.`, `Draft of the repository: program-failed.`
 

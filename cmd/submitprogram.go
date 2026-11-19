@@ -108,7 +108,9 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 	}
 	if len(commits) > maxSubmitCommits {
 		fmt.Fprintf(w, textProgramTooMany+"\n", len(commits), maxSubmitCommits)
-		return fail(submission.NoneProgramFailed, contracts.SubmitExitInput), nil
+		// The program did not run, so its exit is 1, as the contract has it for a program that
+		// did not start.
+		return fail(submission.NoneProgramFailed, contracts.SubmitExitForge), nil
 	}
 	dir, err := os.MkdirTemp("", "qory-submit-")
 	if err != nil {

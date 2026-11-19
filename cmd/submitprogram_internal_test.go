@@ -255,7 +255,7 @@ func TestARepositoryWithTooManyCommitsGetsNoProgram(t *testing.T) {
 	if _, err := os.Stat(started); err == nil {
 		t.Error("the program started")
 	}
-	if string(got.Repositories[0].Draft) != `{"none":"program-failed","exit":2}` || !strings.Contains(printed, "the repository has 101 commits, and the program takes at most 100.") {
+	if string(got.Repositories[0].Draft) != `{"none":"program-failed","exit":1}` || !strings.Contains(printed, "the repository has 101 commits, and the program takes at most 100.") {
 		t.Errorf("the draft is %s and the step printed %q", got.Repositories[0].Draft, printed)
 	}
 }
