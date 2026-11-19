@@ -3,7 +3,10 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
+
+	"github.com/qoryai/qory/internal/runtimeinstall"
 )
 
 // setupLimit is how long the setup of a run may take: every step from the run's open to
@@ -55,7 +58,7 @@ var setupSteps = map[prepStep]struct{ name, fix string }{
 
 // installs reports whether the run's install step installs runtime, see [installRuntime].
 func installs(runtime string) bool {
-	return installRuntimes && runtime == installedRuntime
+	return installRuntimes && slices.Contains(runtimeinstall.Runtimes(), runtime)
 }
 
 // setupPassed is the error of a run whose setup passed its limit, limit, in step, before

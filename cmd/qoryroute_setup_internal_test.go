@@ -25,7 +25,7 @@ func TestTheSetupGetsNoRouteToQory(t *testing.T) {
 	}
 	ctx := t.Context()
 	route := newQoryRoute()
-	at, err := openAtGateway(ctx, session.OpenSpec{RunID: event.NewRunID(), RunsDir: t.TempDir(), Report: func(string) {}, QoryRoute: route}, "")
+	at, err := openAtGateway(ctx, session.OpenSpec{RunID: event.NewRunID(), RunsDir: t.TempDir(), Report: func(string) {}, QoryRoute: route}, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

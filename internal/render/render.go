@@ -98,6 +98,9 @@ type Reserved struct {
 	// one entry at a time, such as claude's "rules", where a module ships files below the
 	// path and not a file at it.
 	Exact bool
+	// Refusal, when set, is the whole refusal in place of the one Why ends, with the
+	// module's name for its %s.
+	Refusal string
 }
 
 // FilesKind is the entry kind of a file a module ships as it is, at
@@ -262,6 +265,16 @@ type Dispatcher interface {
 	DispatchedArgs(args []string) []string
 }
 
+// Walled is a [Launcher] whose launch arguments differ behind a wall, where the wall is
+// the limit of what the program may change. A runtime that does not implement it starts
+// a walled run with the launch's arguments.
+type Walled interface {
+	// WalledArgs are args, the launch's arguments, as a walled run passes them, or an
+	// error when args set what a walled run takes from qory and Forager alone; the run
+	// then stops before the launch. home is the composed harness home.
+	WalledArgs(args []string, home string) ([]string, error)
+}
+
 // SettingsInliner is a [Launcher] whose settings file a run passes to Forager as its
 // JSON, read from the home by qory, after the home's check: Forager reads no file of
 // the home. The flag takes a file or the JSON itself.
@@ -271,19 +284,19 @@ type SettingsInliner interface {
 }
 
 // AgentHomer is a [Launcher] whose program reads its configuration directory from a
-// variable. A dispatched walled run sets the variable to a new, empty folder inside the
-// container, so nothing the image has there reaches the agent.
+// variable. A walled run sets the variable to a new, empty folder inside the container,
+// so nothing the image has there reaches the agent.
 type AgentHomer interface {
 	// AgentHomeVariable is the variable, such as CLAUDE_CONFIG_DIR.
 	AgentHomeVariable() string
 }
 
 // TranscriptLinker is an [AgentHomer] whose program writes the transcripts of its
-// sessions in a folder of its configuration directory. On a dispatched walled run, qory
-// links that folder to the place where Forager binds the run's transcript folder, the
-// runtime descriptor's resume.prefix below the agent's HOME, so the transcripts reach
-// the machine and a continuation of a paused run resumes from them. A runtime that does
-// not implement it gets no link.
+// sessions in a folder of its configuration directory. On a walled run, qory links that
+// folder to the place where Forager binds the run's transcript folder, the runtime
+// descriptor's resume.prefix below the agent's HOME, so the transcripts reach the
+// machine and a continuation of a paused run resumes from them. A runtime that does not
+// implement it gets no link.
 type TranscriptLinker interface {
 	AgentHomer
 	// TranscriptFolder is the folder, relative to the configuration directory and with
@@ -1130,7 +1143,8 @@ func FileFor(e compose.Entry, runtime string) (string, bool) {
 //
 // The refusal states the module and the entry as it sits in the module,
 // files/<runtime>/<path>, and ends with the runtime's [Reserved] clause, or with the
-// runtimes qory renders when the first segment is none of them.
+// runtimes qory renders when the first segment is none of them. A [Reserved] with a
+// Refusal is refused with that text.
 func CheckFiles(res *compose.Result) error {
 	for _, e := range res.Entries {
 		if e.Kind != FilesKind {
@@ -1143,6 +1157,9 @@ func CheckFiles(res *compose.Result) error {
 		}
 		for _, r := range p.Reserved() {
 			if path == r.Path || !r.Exact && strings.HasPrefix(path, r.Path+"/") {
+				if r.Refusal != "" {
+					return fmt.Errorf(r.Refusal, accesskey.ShownName(e.Module, false))
+				}
 				return fmt.Errorf("module %s ships files/%s, and %s", accesskey.ShownName(e.Module, false), accesskey.ShownName(e.Name, false), r.Why)
 			}
 		}

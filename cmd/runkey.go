@@ -420,7 +420,7 @@ func gatewayEndedResend(res session.ResendResult, shown string) error {
 	}
 	ended := o.word()
 	if o.reason != "" && !o.noOutcome {
-		ended += ": " + o.reason
+		ended += ": " + o.because()
 	}
 	return fmt.Errorf("the run has ended (%s), so no more of its events are taken; they stay in %s", ended, shown)
 }

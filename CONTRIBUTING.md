@@ -131,7 +131,7 @@ at `/qory/qory`, mode 0555, for linux/amd64 and linux/arm64. The image is copied
 run. `scripts/build-image.sh [commit]` builds it from a commit of a clean tree into
 `dist/image/` and prints the digest of each platform's image and of the index. A push to
 the branch `prerelease` runs `.github/workflows/prerelease.yml`, which publishes the image
-of the pushed commit to the private package `ghcr.io/qoryai/qory-prerelease`, tagged
+of the pushed commit to the public package `ghcr.io/qoryai/qory-prerelease`, tagged
 `sha-<the commit's first 7 characters>`, and prints the index digest in the run's summary.
 To take the binary out of an image:
 
@@ -143,19 +143,20 @@ docker cp "$id:/qory/qory" ./qory
 The same run publishes three more images of the pushed commit, each tagged
 `sha-<the commit's first 7 characters>`, with its index digest in the run's summary:
 
-- `images/agent`, the image a walled run of Claude Code runs in, to the private package
+- `images/agent`, the image a walled run of Claude Code runs in, to the public package
   `ghcr.io/qoryai/qory-agent-prerelease`. Each platform's image is built on a runner of
   that platform and passes `qory image check`, with the qory of the same commit, before
   the tag.
-- `images/gateway`, which runs `qory gateway` as the user 65532, to the private package
+- `images/gateway`, which runs `qory gateway` as the user 65532, to the public package
   `ghcr.io/qoryai/qory-gateway-prerelease`. It is built FROM the image of qory's build, by
   digest.
-- `images/prebuild`, the image a pool's prebuild runs in, to
+- `images/prebuild`, the image a pool's prebuild runs in, to the public package
   `ghcr.io/qoryai/qory-prebuild-prerelease`. It is built FROM `images/agent-docker`, which
   is built FROM the agent image of the same run, by digest, and is not pushed. Each
   platform's image is built on a runner of that platform and passes `qory image check`,
   with the qory of the same commit, before the tag.
 
+The four packages are public, so `docker pull` and `docker create` need no login or token.
 Pull any by its index digest:
 
 ```sh

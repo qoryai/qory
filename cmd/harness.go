@@ -37,7 +37,7 @@ import (
 	_ "github.com/qoryai/qory/internal/render/amp"
 	_ "github.com/qoryai/qory/internal/render/any"
 	_ "github.com/qoryai/qory/internal/render/claude"
-	_ "github.com/qoryai/qory/internal/render/codex"
+	"github.com/qoryai/qory/internal/render/codex"
 	_ "github.com/qoryai/qory/internal/render/copilot"
 	_ "github.com/qoryai/qory/internal/render/cursor"
 	_ "github.com/qoryai/qory/internal/render/gemini"
@@ -688,6 +688,18 @@ type composed struct {
 	workflows map[string]stack.Workflow
 	// checkoutOnly is, per runtime composed for, what [render.CheckoutOnly] lists.
 	checkoutOnly map[string][]string
+	// codex is what a walled Codex run writes its Codex home from, see [codexParts].
+	codex codexParts
+}
+
+// codexParts are the parts of a compose that [codex.WriteWalledHome] reads besides the
+// composed home: the skills the run may load, [codex.AllowedSkills], the harness's
+// execpolicy rules for a read run, compose.Result.CodexReadRules, and the folders the
+// compose read its modules from, compose.Result.SourceDirs.
+type codexParts struct {
+	skills     []string
+	readRules  []byte
+	sourceDirs []string
 }
 
 // composeHome is [runCompose] returning what it composed; nil after a check or a dry
@@ -753,7 +765,8 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 	for _, rt := range targets {
 		checkoutOnly[rt.Name()] = render.CheckoutOnly(rt, res)
 	}
-	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, checkoutOnly: checkoutOnly}, nil
+	parts := codexParts{skills: codex.AllowedSkills(res), readRules: res.CodexReadRules, sourceDirs: res.SourceDirs()}
+	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, checkoutOnly: checkoutOnly, codex: parts}, nil
 }
 
 // pushChecksWritable stops a walled run before the home is written when a module
@@ -1609,9 +1622,9 @@ const (
 	// ExitNoWorkItem is qory work-item show with no work item, on a command that has no
 	// collision: the harness verbs use the same number for ExitCollision.
 	ExitNoWorkItem = 3
-	// ExitArtifactRefused is a push that failed the run API's check of its type or a
-	// limit, or a verdict that the run API refused with 422 invalid_artifact, on a command
-	// that has no foreign path: the harness verbs use the same number for ExitForeign.
+	// ExitArtifactRefused is a push that failed the run API's check of its type, a limit or
+	// its decision, or a verdict for which the run API returns 422 invalid_artifact, on a
+	// command that has no foreign path: the harness verbs use the same number for ExitForeign.
 	ExitArtifactRefused = 4
 )
 

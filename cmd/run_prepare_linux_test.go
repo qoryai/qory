@@ -9,7 +9,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/qoryai/forager/session/runtimes"
 
 	"github.com/qoryai/qory/internal/preparation"
 )
@@ -17,7 +20,7 @@ import (
 // agentHomeFree skips the test unless qory run agent-env can make the agent's home at
 // [preparation.AgentHome] on this machine: nothing is there yet, no folder above it is
 // a symbolic link, and Claude Code's managed settings are not at /etc/claude-code. It
-// sets CLAUDE_CONFIG_DIR to the agent's home, as a dispatched walled run of Claude Code
+// sets CLAUDE_CONFIG_DIR to the agent's home, as a walled run of Claude Code
 // has it, and removes the home once the test is over.
 func agentHomeFree(t *testing.T) {
 	t.Helper()
@@ -94,7 +97,7 @@ func agentEnvLinking(t *testing.T, link []string, env ...string) (string, string
 	return stdout.String(), stderr.String(), err
 }
 
-// TestAgentEnvMakesTheAgentHomeFirst is the agent of a dispatched walled run of Claude
+// TestAgentEnvMakesTheAgentHomeFirst is the agent of a walled run of Claude
 // Code started through qory run agent-env, after the setup commands: the verb makes the
 // agent's home, an empty folder of mode 0700, before the launch starts and finds it.
 func TestAgentEnvMakesTheAgentHomeFirst(t *testing.T) {
@@ -149,12 +152,49 @@ func TestAgentEnvRefusesAnAgentHomeTheSetupMade(t *testing.T) {
 				t.Fatal(err)
 			}
 			stdout, stderr, err := agentEnv(t)
-			want := "qory run agent-env: remove " + preparation.AgentHome + " from the image and from the setup commands: qory makes the agent's home only where nothing is, so a run given a run key does not start\n"
+			want := "qory run agent-env: remove " + preparation.AgentHome + " from the image and from the setup commands\n  qory makes the agent's home only where nothing is, so the run does not start\n"
 			if stderr != want || stdout != "" {
 				t.Errorf("printed %q and %q, want %q", stdout, stderr, want)
 			}
 			if err == nil {
 				t.Error("qory run agent-env exited 0")
+			}
+		})
+	}
+}
+
+// TestAgentEnvApprovesTheStandIn is the agent of a walled run of Claude Code started
+// through qory run agent-env, a person's run and a run given a run key alike, which
+// start the verb with the same words: with Forager's stand-in as the API key, the verb
+// writes .claude.json with the stand-in's approval, mode 0600, into the fresh home
+// before the launch starts and finds it; with a real key or none, it writes nothing.
+func TestAgentEnvApprovesTheStandIn(t *testing.T) {
+	for name, c := range map[string]struct {
+		env  []string
+		want string
+	}{
+		"a run with the stand-in": {[]string{"ANTHROPIC_API_KEY=" + runtimes.Placeholder}, ".claude.json\n"},
+		"a run with a real key":   {[]string{"ANTHROPIC_API_KEY=real-key-example"}, ""},
+		"a run with no key":       {nil, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			agentHomeFree(t)
+			stdout, stderr, err := agentEnvLinking(t, nil, c.env...)
+			if err != nil || stdout != c.want || stderr != "" {
+				t.Fatalf("%v, printed %q and %q, want %q", err, stdout, stderr, c.want)
+			}
+			if c.want == "" {
+				return
+			}
+			path := filepath.Join(preparation.AgentHome, ".claude.json")
+			data, err := os.ReadFile(path)
+			key := strings.TrimSpace(runtimes.Placeholder)
+			want := `{"customApiKeyResponses":{"approved":["` + key[len(key)-20:] + `"],"rejected":[]}}`
+			if err != nil || string(data) != want {
+				t.Errorf(".claude.json is %s (%v), want %s", data, err, want)
+			}
+			if fi, err := os.Lstat(path); err != nil || fi.Mode().Perm() != 0o600 {
+				t.Errorf(".claude.json is %v (%v), want mode 0600", fi, err)
 			}
 		})
 	}

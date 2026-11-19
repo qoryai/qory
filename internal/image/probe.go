@@ -237,14 +237,11 @@ func sessionGitOld(at, line string) string {
 	return "install git 2.25 or later in " + strings.Join(gitSessionDirs, ", ") + ": the git session of a walled run needs it, and " + at + " prints " + line
 }
 
-// SessionShellFix is the line for a setup step that could not start /bin/sh.
+// SessionShellFix is the line for a setup step that could not start /bin/sh. Any setup
+// step runs through /bin/sh, so the line is about the setup, where the check's line for
+// sh, see [noSessionTool], is about the git session.
 func SessionShellFix() string {
-	for _, tool := range sessionTools {
-		if tool.name == "sh" {
-			return noSessionTool(tool.name, tool.why)
-		}
-	}
-	return ""
+	return "install sh in " + strings.Join(gitSessionDirs, ", ") + ": the setup of a walled run runs sh from these folders, to run its script"
 }
 
 // SessionCheckScript is the sh script of a walled write run's setup step that checks, before the
@@ -272,7 +269,8 @@ func sessionCheckScript(path string) string {
 	b.WriteString("\t\tfail " + shellQuoted(sessionGitOld("@AT@", "@LINE@")) + "\n")
 	b.WriteString("\tfi\nelse\n")
 	b.WriteString("\tfail " + shellQuoted(noSessionGit()) + "\n")
-	b.WriteString("fi\nexit \"$failed\"\n")
+	b.WriteString("fi\n")
+	b.WriteString("exit \"$failed\"\n")
 	return b.String()
 }
 
@@ -331,11 +329,11 @@ func shellQuoted(s string) string {
 // line for git version 2.24.0 in /usr/local/bin has 151 bytes.
 const maxSessionGitLine = 200
 
-// SessionCheckLine is line, one line of what [SessionCheckScript] printed, as qory prints it, and
-// whether the script can print it. The image runs the script, so the line can contain anything: a
-// line about a program is one of the fixed lines, and a line about git's version has one of the
-// script's forms, at most [maxSessionGitLine] bytes of valid UTF-8 with no control or format
-// character.
+// SessionCheckLine is line, one line of what [SessionCheckScript] printed, as qory prints it,
+// and whether the script can print it. The image runs the script, so the line can contain
+// anything: a line about a program is one of the fixed lines, and a line about git's version
+// has one of the script's forms, at most [maxSessionGitLine] bytes of valid UTF-8 with no
+// control or format character.
 func SessionCheckLine(line string) (string, bool) {
 	if line == noSessionGit() {
 		return line, true
@@ -361,7 +359,8 @@ func SessionCheckLine(line string) (string, bool) {
 }
 
 // SessionCheckFixes is what qory prints of text, the output of [SessionCheckScript]: each line
-// [SessionCheckLine] takes, and at most as many as the script can print.
+// [SessionCheckLine] takes, and at most as many as the script can print, one per tool and one
+// for git.
 func SessionCheckFixes(text string) []string {
 	var fixes []string
 	for line := range strings.Lines(text) {
