@@ -380,14 +380,16 @@ Set hooks[0].timeout to whole seconds, 1s or more, such as 90s or 5m.
   /work/app/qory.yaml sets "500ms".
 ```
 
-A role, module or entry name of more than 24 characters in a first line that has more than
-98 characters is shortened to 20 characters, its first 9 and last 10 with `…` between them.
-When two names in the line would have the same short form, each keeps one more character
-at both ends, until the forms differ: the first 9 and last 10 characters become the first
-10 and last 11, then the first 11 and last 12, and so on. A name whose kept ends reach its
-whole length, such as one of two names that differ only in their middle, stays whole. A
-last line of the refusal has the whole name of each shortened name that no later line has:
-`The full name of <short> is <name>.`
+A name or a quoted value of more than 24 characters in a first line that has more than 98
+characters is shortened to 20 characters, its first 9 and last 10 with `…` between them;
+the keys in front of a dotted name, such as `bind.agents.`, stay whole, and a first line of
+at most 98 characters stays as it is. When two shortened names in the line would be equal,
+every shortened name in the line keeps one more character at each end, not only the two that
+are equal, and the round repeats until no two shortened names are equal: the first 9 and
+last 10 characters become the first 10 and last 11, then the first 11 and last 12, and so
+on. A name whose kept ends reach its whole length, such as one of two names that differ
+only in their middle, stays whole. A last line of the refusal has the whole name of each
+shortened name that no line after the first line has: `The full name of <short> is <name>.`
 
 Those rules are: both or neither of `run` and `agent`, a `review` hook with `run`, a
 kind other than the three, a missing `at` or `kind`, an empty value or null, a program path
