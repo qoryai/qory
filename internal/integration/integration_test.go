@@ -20,11 +20,11 @@ import (
 
 // The fixtures are contracts/integration/v1/fixtures of the github.com/qoryai/integrations
 // module this one requires, read from contracts.FS: the descriptions directly under it;
-// under invalid, those the schema refuses, three of them past the bounds of every value,
-// an array of 1025 entries, an object of 1025 members and a string of 16385 characters;
-// and the three under refused-by-reader, which the schema accepts once they are read and
-// a reader refuses on their raw bytes. unknown-role.json plays acme_role as the role qory
-// does not know.
+// under invalid, those that fail the schema check, three of them past the bounds of every
+// value, an array of 1025 entries, an object of 1025 members and a string of 16385
+// characters; and the three under refused-by-reader, which pass the schema check once
+// they are read and fail a reader's check of their raw bytes. unknown-role.json plays
+// acme_role as the role qory does not know.
 
 // fixture reads the contract's fixture at name, a path under fixtures.
 func fixture(t *testing.T, name string) []byte {
@@ -61,12 +61,12 @@ func program(t *testing.T, doc string) string {
 	return path
 }
 
-// TestDescribeReadsEveryValidFixtureAndRefusesEveryInvalidOne describes a program that
+// TestDescribeReadsEveryValidFixtureAndFailsOnEveryInvalidOne describes a program that
 // prints each of the contract's description fixtures byte for byte. Each valid one
 // passes every step of Describe, the scan, the bounds, the schema and read, with its
-// roles, and its credential role when it plays one. The contract's schema refuses each
-// one under invalid.
-func TestDescribeReadsEveryValidFixtureAndRefusesEveryInvalidOne(t *testing.T) {
+// roles, and its credential role when it plays one. Each one under invalid fails the
+// contract's schema check.
+func TestDescribeReadsEveryValidFixtureAndFailsOnEveryInvalidOne(t *testing.T) {
 	for _, f := range fixtures(t, "", "*.json") {
 		doc := fixture(t, f)
 		d, err := integration.Describe(context.Background(), printing(t, doc))
@@ -189,8 +189,9 @@ func TestASecretIsAPropertyOfTheSettingsThemselves(t *testing.T) {
 
 // TestTheSettingsSchemaIsDraft2020 takes a settings schema that names draft 2020-12,
 // with or without an empty fragment, or no draft, and refuses one that names another,
-// quoting it as a terminal takes it. The contract's schema refuses a $schema that is no
-// URI before read sees it, and quotes it with every escape written out.
+// quoting it as a terminal takes it. A $schema that is no URI fails the contract's
+// schema check before read sees it: the error writes every escape out and cuts the
+// rule at 200 runes.
 func TestTheSettingsSchemaIsDraft2020(t *testing.T) {
 	for _, settings := range []string{`{"type": "object"}`, `{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object"}`, `{"$schema": "https://json-schema.org/draft/2020-12/schema#", "type": "object"}`} {
 		if _, err := integration.Describe(context.Background(), program(t, withSettings(t, settings))); err != nil {
@@ -207,34 +208,41 @@ func TestTheSettingsSchemaIsDraft2020(t *testing.T) {
 	if _, err := integration.Describe(context.Background(), program(t, withSettings(t, settings))); err == nil || !strings.Contains(err.Error(), "written in "+long[:200]+"...;") {
 		t.Errorf("a long $schema: %v", err)
 	}
-	// An escape in the $schema is no URI, and the refusal writes it out as \x1b.
+	// An escape in the $schema is no URI, and the error writes it out as \x1b.
 	escape := string([]byte{0x5c}) + "u001b"
 	settings = `{"$schema": "` + escape + `[31mred", "type": "object"}`
 	_, err := integration.Describe(context.Background(), program(t, withSettings(t, settings)))
 	if err == nil || !strings.Contains(err.Error(), `a description the integration contract refuses: `) || !strings.Contains(err.Error(), `'\x1b[31mred' is not valid uri`) || strings.ContainsRune(err.Error(), 0x1b) {
 		t.Errorf("a $schema with an escape: %v", err)
 	}
+	// A $schema of 400 characters that is no URI is cut at 200 runes of its rule.
+	settings = `{"$schema": "` + escape + `[31mred` + strings.Repeat("x", 392) + `", "type": "object"}`
+	_, err = integration.Describe(context.Background(), program(t, withSettings(t, settings)))
+	rule := `at '/settings/$schema': '\x1b[31mred`
+	if err == nil || !strings.Contains(err.Error(), "; "+rule) {
+		t.Fatalf("a $schema of 400 characters: %v", err)
+	}
+	_, cut, _ := strings.Cut(err.Error(), "; "+rule)
+	cut, _, _ = strings.Cut(rule+cut, "; ")
+	if want := rule + strings.Repeat("x", 200-len(rule)) + "..."; cut != want {
+		t.Errorf("a $schema of 400 characters is %q, want %q", cut, want)
+	}
 }
 
-// TestADescriptionInTheDataFormIsRead describes a program that prints
-// descriptions/openai-subscription.json of github.com/qoryai/integrations at commit
-// b5ae1a43582ee58a490f17edb0fce2e4c19a6c6d, copied unchanged to testdata, since the module
-// does not export it: a description in the data form, with an oauth_device sign-in and
-// no program_version. The contract's schema accepts it, and it reads with no version and
-// its one role, model_provider.
+// TestADescriptionInTheDataFormIsRead describes a program that prints the contract's
+// fixture acme-subscription.json: a description in the data form, with an oauth_device
+// sign-in and no program_version. It passes the contract's schema check, and it reads
+// with no version and its one role, model_provider.
 func TestADescriptionInTheDataFormIsRead(t *testing.T) {
-	doc, err := os.ReadFile("testdata/openai-subscription.json")
-	if err != nil {
-		t.Fatal(err)
-	}
+	doc := fixture(t, "acme-subscription.json")
 	if !bytes.Contains(doc, []byte(`"oauth_device"`)) || bytes.Contains(doc, []byte(`"program_version"`)) {
-		t.Fatal("the copy is not a description with oauth_device and no program_version")
+		t.Fatal("acme-subscription.json is not a description with oauth_device and no program_version")
 	}
 	d, err := integration.Describe(context.Background(), printing(t, doc))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Name != "openai-subscription" || d.ProgramVersion != "" || strings.Join(d.Roles, " ") != "model_provider" || d.Credential != nil {
+	if d.Name != "acme-subscription" || d.ProgramVersion != "" || strings.Join(d.Roles, " ") != "model_provider" || d.Credential != nil {
 		t.Errorf("read as %+v", d)
 	}
 }

@@ -154,7 +154,7 @@ func Describe(ctx context.Context, program string) (*Description, error) {
 		return nil, err
 	}
 	if err := schema.Validate(doc); err != nil {
-		return nil, fmt.Errorf("%s describe printed a description the integration contract refuses: %s", shown, exports.HideValues(failures(err, true)))
+		return nil, fmt.Errorf("%s describe printed a description the integration contract refuses: %s", shown, failures(err, true))
 	}
 	d, err := read(doc.(map[string]any))
 	if err != nil {
@@ -589,7 +589,8 @@ func pointerToken(name string) string {
 // failures is a validation error on one line: each rule the document breaks, where.
 // With values false a rule is named by its keyword alone, since a settings document
 // may hold what is not to be printed; a description holds nothing of the kind, and the
-// library's own words, which quote it, are kept.
+// library's words, which quote it, are kept, each rule with exported values hidden and
+// as [Printable] has it, cut at 200 runes.
 func failures(err error, values bool) string {
 	var ve *jsonschema.ValidationError
 	if !errors.As(err, &ve) {
@@ -600,7 +601,7 @@ func failures(err error, values bool) string {
 		// The first line names the schema; each after it is one rule, indented by depth.
 		lines := strings.Split(ve.Error(), "\n")
 		for _, l := range lines[1:] {
-			out = append(out, strings.TrimPrefix(strings.TrimSpace(l), "- "))
+			out = append(out, Printable(exports.HideValues(strings.TrimPrefix(strings.TrimSpace(l), "- "))))
 		}
 		return strings.Join(out, "; ")
 	}
