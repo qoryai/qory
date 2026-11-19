@@ -775,6 +775,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// later is a session after the run's first.
 				later := n > 1
 				composing.writable, composing.ctx = nil, stepCtx
+				// The report of a run of several sessions has each session's runtime and tier
+				// map, which the compose writes with the rest of its report.
+				composing.sessions = nil
+				if fromCode != nil && fromCode.shared {
+					composing.sessions = func(rep *report.Report) {
+						rep.Sessions = append(slices.Clone(composedSessions), report.Session{Session: n, Runtime: runtime, Tiers: rep.Tiers})
+						composedSessions = rep.Sessions
+					}
+				}
 				for _, m := range spec.Mounts {
 					if !m.ReadOnly {
 						composing.writable = append(composing.writable, m.Path)
@@ -793,15 +802,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// The report on disk can be another run's by now, so the run reads what it composed.
 				rep, harness, workflows := c.rep, c.harness, c.workflows
 				extensions = rep.Extensions
-				// The report of a run of several sessions has each session's runtime and tier map,
-				// written after each session's compose.
-				if fromCode != nil && fromCode.shared {
-					composedSessions = append(composedSessions, report.Session{Session: n, Runtime: runtime, Tiers: rep.Tiers})
-					rep.Sessions = composedSessions
-					if err := report.Write(at.report, rep); err != nil {
-						return false, err
-					}
-				}
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
 					return false, err
@@ -1327,6 +1327,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return withRecord(streams.errOut, prepErr, record)
 			}
+			// stoppedBeforeJoin closes a run that a stop ended before its next session joined:
+			// cancelled with interrupted, exit 1, also between two sessions.
+			stoppedBeforeJoin := func() error {
+				closeRun(session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1})
+				lines.done(nil)
+				u.Fail(errors.New(cancelledBeforeJoin(got(), name)))
+				said("the record is in " + record)
+				return reported(&exitError{code: 1})
+			}
 			// A run whose documents set shared_run shares the memo of session 1's compose with the
 			// composes of its later sessions, sealed once session 1's is done.
 			if fromCode != nil && fromCode.shared {
@@ -1363,11 +1372,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			composing.memo.Seal()
 			switch {
 			case ctx.Err() != nil:
-				closeRun(session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1})
-				lines.done(nil)
-				u.Fail(errors.New(cancelledBeforeJoin(got(), name)))
-				said("the record is in " + record)
-				return reported(&exitError{code: 1})
+				return stoppedBeforeJoin()
 			case !time.Now().Before(setupDeadline):
 				// A setup past its limit ends as a session at its time limit does: cancelled
 				// with timeout, exit 124.
@@ -1640,7 +1645,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				timeout = fromCode.sessionLimit()
 				markJoined()
 			}
-			if laterErr != nil {
+			switch {
+			case laterErr != nil && ctx.Err() != nil:
+				return stoppedBeforeJoin()
+			case laterErr != nil:
 				return noJoin(laterErr)
 			}
 			closed := closeRun(out)
