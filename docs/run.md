@@ -411,7 +411,7 @@ When the run ends, qory says how, and its exit status goes with it:
   | the switch to the work item's branch | `check the disk that holds the checkout, then start the run again` |
   | the copy of the checkout | `make the checkout smaller, with less history, Git LFS content and .qory/artifacts` |
   | the fetch of the run's image | `pull the run's image on this machine before the run, or start fewer runs at once` |
-  | the setup commands | `move the slow part of the repository's postCreateCommand into the run's image` |
+  | the setup commands | `move slow work of the lifecycle commands in devcontainer.json into the run's image` |
   | the removal of the setup container | `check that this machine's container engine responds, then start the run again` |
   | the record of what the setup changed | `make the setup commands change fewer files in the checkout, then start the run again` |
 

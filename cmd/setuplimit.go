@@ -48,7 +48,7 @@ var setupSteps = map[prepStep]struct{ name, fix string }{
 	stepSwitch:        {"the switch to the work item's branch", "check the disk that holds the checkout, then start the run again"},
 	stepCopy:          {"the copy of the checkout", "make the checkout smaller, with less history, Git LFS content and .qory/artifacts"},
 	stepImage:         {"the fetch of the run's image", "pull the run's image on this machine before the run, or start fewer runs at once"},
-	stepSetupCommands: {"the setup commands", "move the slow part of the repository's postCreateCommand into the run's image"},
+	stepSetupCommands: {"the setup commands", "move slow work of the lifecycle commands in devcontainer.json into the run's image"},
 	stepSetupRemoval:  {"the removal of the setup container", "check that this machine's container engine responds, then start the run again"},
 	stepSetupRecord:   {"the record of what the setup changed", "make the setup commands change fewer files in the checkout, then start the run again"},
 }
