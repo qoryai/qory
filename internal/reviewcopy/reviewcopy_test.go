@@ -114,6 +114,23 @@ func newCheckout(t *testing.T, format string) checkout {
 // copy container.
 func copyOf(t *testing.T, source, commit, base string) (Folder, string, error) {
 	t.Helper()
+	return copyWith(t, "", source, commit, base)
+}
+
+// shells are the shells of this machine that the tests run the script with: /bin/sh, and
+// /bin/dash when the machine has it, as a Debian image's sh is.
+func shells(t *testing.T) []string {
+	t.Helper()
+	found := []string{"/bin/sh"}
+	if _, err := os.Stat("/bin/dash"); err == nil {
+		found = append(found, "/bin/dash")
+	}
+	return found
+}
+
+// copyWith is [copyOf] with the script run by shell, "" for the session's command.
+func copyWith(t *testing.T, shell, source, commit, base string) (Folder, string, error) {
+	t.Helper()
 	f, err := New(filepath.Join(t.TempDir(), "review"))
 	if err != nil {
 		t.Fatal(err)
@@ -127,6 +144,9 @@ func copyOf(t *testing.T, source, commit, base string) (Folder, string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	if shell != "" {
+		s.Command = shell
+	}
 	c := exec.CommandContext(ctx, s.Command, s.Args...)
 	c.Dir, c.Env = s.Dir, s.Env
 	var out bytes.Buffer
@@ -171,15 +191,21 @@ func files(t *testing.T, dir string) map[string]string {
 
 func TestTheCopyHasTheCommitAloneAndRunsNothingOfTheCheckout(t *testing.T) {
 	sessionGit(t)
-	for _, format := range []string{"sha1", "sha256"} {
-		t.Run(format, func(t *testing.T) {
+	for _, run := range []struct{ format, shell string }{
+		{"sha1", "/bin/sh"}, {"sha256", "/bin/sh"}, {"sha1", "/bin/dash"}, {"sha256", "/bin/dash"},
+	} {
+		if !slices.Contains(shells(t), run.shell) {
+			continue
+		}
+		format := run.format
+		t.Run(format+" "+run.shell, func(t *testing.T) {
 			c := newCheckout(t, format)
 			// The planted configuration runs its program for git in the checkout.
 			testGit(t, c.dir, "status", "--porcelain")
 			if err := os.Remove(c.marker); err != nil {
 				t.Fatalf("git status in the checkout ran no planted program: %v", err)
 			}
-			f, out, err := copyOf(t, filepath.Join(c.dir, ".git"), c.head, c.base)
+			f, out, err := copyWith(t, run.shell, filepath.Join(c.dir, ".git"), c.head, c.base)
 			if err != nil {
 				t.Fatalf("the copy session: %v\n%s", err, out)
 			}
@@ -243,8 +269,15 @@ func TestTheCopyWritesAgainAFileThatAttributesChanged(t *testing.T) {
 	if script == old {
 		t.Fatal("the script has no export of GIT_ATTR_SOURCE")
 	}
+	for _, shell := range shells(t) {
+		t.Run(shell, func(t *testing.T) { attributesWrittenAgain(t, shell) })
+	}
+}
+
+// attributesWrittenAgain is [TestTheCopyWritesAgainAFileThatAttributesChanged] with shell.
+func attributesWrittenAgain(t *testing.T, shell string) {
 	c := newCheckout(t, "sha1")
-	f, out, err := copyOf(t, filepath.Join(c.dir, ".git"), c.head, "")
+	f, out, err := copyWith(t, shell, filepath.Join(c.dir, ".git"), c.head, "")
 	if err != nil {
 		t.Fatalf("the copy session: %v\n%s", err, out)
 	}
@@ -280,7 +313,7 @@ func TestTheCopyStopsOnACommitTheSourceLacks(t *testing.T) {
 				t.Fatal("the copy session ended with no error")
 			}
 			_, err = f.Result()
-			if err == nil || !strings.HasPrefix(err.Error(), "Push the commit to a repository that has it, then copy it again: the copy stopped.\nthe source has no commit") {
+			if err == nil || !strings.HasPrefix(err.Error(), "Escalate the round: the reviewer copy stopped at a check.\nthe source has no commit") {
 				t.Errorf("the result is %v", err)
 			}
 		})

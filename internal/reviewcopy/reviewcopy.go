@@ -60,7 +60,7 @@ func New(root string) (Folder, error) {
 	}
 	if err := os.Mkdir(root, 0o755); err != nil {
 		if errors.Is(err, fs.ErrExist) {
-			return Folder{}, fmt.Errorf("Remove %s, or give the reviewer copy a new folder: the folder exists.", strconv.Quote(root))
+			return Folder{}, fmt.Errorf("Give the reviewer copy a folder that does not exist yet.\n%s exists.", strconv.Quote(root))
 		}
 		return Folder{}, fmt.Errorf("Make the folder of the reviewer copy writable.\n%s: %w", strconv.Quote(root), err)
 	}
@@ -139,8 +139,7 @@ type Entry struct {
 // left no copy or no diff.
 func (f Folder) Result() ([]Entry, error) {
 	if data, err := reportfile.Read(filepath.Join(f.state(), "failed"), maxStateFile); err == nil {
-		return nil, fmt.Errorf("Push the commit to a repository that has it, then copy it again: the copy stopped.\n%s",
-			strings.TrimSpace(string(data)))
+		return nil, fmt.Errorf("Escalate the round: the reviewer copy stopped at a check.\n%s", strings.TrimSpace(string(data)))
 	}
 	if _, err := reportfile.Read(filepath.Join(f.state(), "done"), maxStateFile); err != nil {
 		return nil, errors.New("Run the copy session again: it ended before the reviewer copy was complete.")
@@ -160,7 +159,7 @@ func (f Folder) Result() ([]Entry, error) {
 		line = strings.TrimSuffix(line, "\n")
 		meta, path, ok := strings.Cut(line, "\t")
 		if !ok {
-			return nil, fmt.Errorf("Run the copy session again: its list of the paths it left out has the line %s.", strconv.Quote(line))
+			return nil, fmt.Errorf("Run the copy session again: its list of the paths it left out has a bad line.\n%s", strconv.Quote(line))
 		}
 		mode, _, _ := strings.Cut(meta, " ")
 		out = append(out, Entry{Mode: mode, Path: path})
@@ -271,7 +270,10 @@ done < "$T/left-out" | tr '\n' '\000' > "$T/left-out.z"
 if [ -s "$T/left-out.z" ]; then
 	g update-index --force-remove -z --stdin < "$T/left-out.z"
 fi
-GIT_WORK_TREE=$W g checkout-index -a
+(
+	export GIT_WORK_TREE="$W"
+	g checkout-index -a
+)
 # listing writes to state/got a line per file of the copy in the form of ls-tree, with the
 # file's object id as git hashes its bytes, and stops at a link or a special file.
 listing() {
