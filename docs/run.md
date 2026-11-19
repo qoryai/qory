@@ -5031,6 +5031,42 @@ the copies of other runs:
 start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder <folder> is your home folder, and a write run from a run code binds it into the agent's container; the code is used
 ```
 
+### The plan of a write workflow
+
+A workflow of a stack with `access: write` may name a plan type, `workflows.<name>.plan`,
+an artifact type such as `build-plan`. The plan is the launch version of that type, and it
+sets what a session of the workflow may push. A module of the stack declares the scope
+check of the type in the `scope_checks` of its `qory-module.yaml`: one command for
+each plan type (see `scope_checks` in `contracts/harness/v1/README.md`).
+
+`qory harness compose` and `qory run` end with an error, before they start anything, in
+two cases:
+
+- The workflow has a `plan` and its access is `read`, `write-no-push` or left out:
+  `` Remove `plan` from <workflow>, or set its access to write. ``, then `Only a workflow
+  with access write has a plan, and the access of <workflow> is <access>.` and
+  `workflows.<workflow> is in <file>.` on the next two lines.
+- No module of the base stack declares a scope check for the type: `Add a scope check for
+  <type> to a module's scope_checks.`, then `` You can also remove `plan: <type>` from
+  <workflow> in the stack. `` on the next line, or both on one line when the first line
+  has at most 98 characters. Two lines follow: `No module of the stack declares a scope
+  check for <type>.` and `workflows.<workflow> is in <file>.`
+
+Only a module of the base stack counts. A module that the checkout's `qory.yaml` adds to
+the base can declare `scope_checks`, and the compose uses none of it: the repository under
+work cannot supply the check of its plan. `qory harness compose` and `qory run` end with
+an error when the program of a scope check is no file in the module, is a folder, or is in
+an entry that an `exclude` or an `only` of the module leaves out. Line 1 of each of these
+errors is the fix alone, and the module, the type and the path are on line 2. They also end
+with an error when two modules declare a scope check for one type: line 1 has the type
+and both modules when it has at most 98 characters, and otherwise line 2 has them.
+
+A stack in which no workflow has a `plan` needs no scope check: `qory harness compose`
+succeeds, and a `scope_checks` of a module is still read and checked.
+
+`qory run` reads neither `plan` nor `scope_checks`: a run does not run a scope check, and
+the push step does not read the plan type.
+
 ### Qory's images
 
 `qory`'s repository defines two images for the agent under `images/`, and one a prebuild

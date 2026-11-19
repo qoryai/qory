@@ -1,0 +1,3 @@
+Give each plan type of scope_checks one command, a list of strings, not a list of lists.
+  scope_checks.build-plan[0] is a list.
+  The manifest is modules/core/qory-module.yaml.

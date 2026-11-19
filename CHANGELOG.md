@@ -18,6 +18,14 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
+  the type whose launch version sets what the workflow's session may push. A module
+  declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: one
+  command for each type. `qory harness compose` ends with an error when the `plan` of a
+  workflow is not an artifact type, when a workflow with a `plan` has an access other
+  than `write`, and when no module of the base stack declares a scope check for the type
+  of a `plan`. A module that a checkout adds to the base declares none that counts.
+  `qory run` does not read `plan` or `scope_checks`.
 - A skill with the frontmatter keys `notes_for` (a role or a list of roles) and `paths` (one
   glob or more from the checkout root) is a note. The compose exits 2, with the fix as
   line 1, for a note with any of these:
@@ -1278,6 +1286,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- A compose error that has a short form for a long first line switches to it when the
+  first line has more than 98 characters. The line that qory prints has the 2 characters
+  of `✗ ` before it, so a line of 99 or 100 characters printed at 101 or 102. This covers
+  the errors for a duplicate scope check, a plan with no scope check, and a member of a
+  role group that is not shipped, left out or lacks a part of its contract.
 - A push check's container runs under the `runtime` that `wall.images` sets for the
   wall's default image, such as `runsc` (gVisor). Until now, it ran under the engine's
   default runtime.

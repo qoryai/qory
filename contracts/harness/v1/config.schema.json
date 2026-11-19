@@ -126,6 +126,8 @@
           "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
+            "if": {"required": ["plan"]},
+            "then": {"required": ["access"], "properties": {"access": {"const": "write"}}},
             "properties": {
               "time_limit": {
                 "description": "How long a dispatched run of the workflow may run, counted from the run's open, as a duration: 7h or 45m. The time_limit_minutes in the run's documents, when they set it, applies instead. A workflow without it runs for at most 3 hours.",
@@ -140,6 +142,12 @@
               "tier": {
                 "description": "The tier that names the main session's model and effort for a dispatched run of the workflow: light, balanced, or thinking. Left out, the workflow names none. qory passes nothing new to the run: Qory Apiary resolves the model and effort from the tier.",
                 "enum": ["light", "balanced", "thinking"]
+              },
+              "plan": {
+                "description": "The artifact type whose launch version sets what the workflow's session may push: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes. Left out, the workflow names none. Only a workflow with access write names one, and qory harness compose ends with an error for a type that no module of the stack declares a scope check for in scope_checks.",
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
               }
             }
           }

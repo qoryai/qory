@@ -55,6 +55,10 @@ func TestSchemas(t *testing.T) {
 		wantInvalid := strings.Contains(string(errText), "apiVersion") || badKind || strings.HasPrefix(fix, "Set qory to ") ||
 			strings.Contains(string(errText), " in qory.yaml.") && (strings.Contains(fix, " workflows.") || strings.HasPrefix(fix, "Remove workflows ")) ||
 			strings.Contains(string(errText), "bind.") && strings.Contains(string(errText), " in qory.yaml") && !strings.Contains(string(errText), " as many, ")
+		// A plan on a workflow whose access is not write is refused by the stack check, and
+		// the schemas state the same rule for the document that has the plan.
+		planOnNoWrite := strings.HasPrefix(fix, "Remove `plan` from ")
+		wantInvalid = wantInvalid || planOnNoWrite && fileHas(filepath.Join(dir, "qory.yaml"), "plan:")
 		err := composeSchema.Validate(document(t, filepath.Join(dir, "qory.yaml")))
 		if wantInvalid && err == nil {
 			t.Errorf("%s: the document passed the schema; want a failure", dir)
@@ -63,7 +67,8 @@ func TestSchemas(t *testing.T) {
 			t.Errorf("%s: the document failed the schema: %v", dir, err)
 		}
 		if f := filepath.Join(dir, "stack", "qory-stack.yaml"); fileExists(f) {
-			wantBadStack := strings.HasPrefix(fix, "Set workflows.") && strings.Contains(string(errText), " is in stack/qory-stack.yaml.")
+			wantBadStack := strings.HasPrefix(fix, "Set workflows.") && strings.Contains(string(errText), " is in stack/qory-stack.yaml.") ||
+				planOnNoWrite && fileHas(f, "plan:")
 			err := stackSchema.Validate(document(t, f))
 			if wantBadStack && err == nil {
 				t.Errorf("%s passed the schema; want a failure", f)
@@ -80,7 +85,8 @@ func TestSchemas(t *testing.T) {
 			// by its path in the fixture: after the fix, or, for a role's map, at the end
 			// of the cause line.
 			rel, _ := filepath.Rel(dir, m)
-			wantBad := strings.Contains(string(errText), " in "+rel+":") || strings.Contains(string(errText), " is in "+rel+".")
+			wantBad := strings.Contains(string(errText), " in "+rel+":") || strings.Contains(string(errText), " is in "+rel+".") ||
+				strings.Contains(string(errText), "scope_checks") && strings.Contains(string(errText), "The manifest is "+rel+".")
 			err := moduleSchema.Validate(document(t, m))
 			if wantBad && err == nil {
 				t.Errorf("%s passed the schema; want a failure", m)
@@ -123,6 +129,12 @@ func TestSchemas(t *testing.T) {
 			}
 		}
 	}
+}
+
+// fileHas reports whether the file at path contains text.
+func fileHas(path, text string) bool {
+	data, err := os.ReadFile(path)
+	return err == nil && strings.Contains(string(data), text)
 }
 
 // TestMCPSchemaMatchesTheReader keeps the schema and module.Read in step on the server
@@ -392,6 +404,64 @@ func TestModuleSchemaMatchesTheReaderOnPushChecks(t *testing.T) {
 		}
 		if _, err := module.ReadManifest(dir); (err == nil) != c.valid {
 			t.Errorf("reader: %s valid=%v err=%v", c.items, c.valid, err)
+		}
+	}
+}
+
+// TestModuleSchemaMatchesTheReaderOnScopeChecks keeps the schema and module.ReadManifest in
+// step on scope_checks: each value passes both or fails both. The one rule the schema
+// cannot state, one type twice in one module, is the reader's alone, since a JSON object
+// has each key once.
+func TestModuleSchemaMatchesTheReaderOnScopeChecks(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/module.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		value string
+		valid bool
+	}{
+		{`{}`, true},
+		{`{"build-plan": ["checks.js", "scope", "--plan"]}`, true},
+		{`{"build-plan": ["checks.js"], "change-plan": ["./bin/check", ""]}`, true},
+		{`{"` + strings.Repeat("a", 64) + `": ["c.js"]}`, true},
+		{`{"build-plan": ["c.js", "--dir", "../x"]}`, true},
+		{`{"Build-Plan": ["c.js"]}`, false},
+		{`{"build_plan": ["c.js"]}`, false},
+		{`{"": ["c.js"]}`, false},
+		{`{"` + strings.Repeat("a", 65) + `": ["c.js"]}`, false},
+		{`{"build-plan": []}`, false},
+		{`{"build-plan": [""]}`, false},
+		{`{"build-plan": ["/usr/bin/node"]}`, false},
+		{`{"build-plan": ["../c.js"]}`, false},
+		{`{"build-plan": ["a/../c.js"]}`, false},
+		{`{"build-plan": ["c.js", 3]}`, false},
+		{`{"build-plan": [["c.js"]]}`, false},
+		{`{"build-plan": [["c.js"], ["d.js"]]}`, false},
+		{`{"build-plan": ["c.js"], "x": "y"}`, false},
+		{`{"build-plan": "c.js scope"}`, false},
+		{`{"build-plan": null}`, false},
+		{`["c.js"]`, false},
+		{`"build-plan"`, false},
+	} {
+		var value any
+		if err := json.Unmarshal([]byte(c.value), &value); err != nil {
+			t.Fatal(err)
+		}
+		doc := map[string]any{"apiVersion": "qory.dev/v1alpha1", "name": "core", "scope_checks": value}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("schema: %s valid=%v err=%v", c.value, c.valid, err)
+		}
+		dir := t.TempDir()
+		body, err := yaml.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, module.ManifestName), body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := module.ReadManifest(dir); (err == nil) != c.valid {
+			t.Errorf("reader: %s valid=%v err=%v", c.value, c.valid, err)
 		}
 	}
 }
