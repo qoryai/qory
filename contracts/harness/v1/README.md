@@ -2012,8 +2012,10 @@ Per runtime, the files written into its directory:
   `.claude/rules/qory-harness.md` and `.claude/agents` register the bare names.
 - **codex**: `config.toml` with the model, the servers as `[mcp_servers.<name>]` tables,
   `features.unified_exec_tty = false`, a `hooks.state."<file>:<event>:<group>:<hook>"`
-  table with the `trusted_hash` of each `command` hook of `hooks.json` and `config.toml`,
-  `<file>` being the file in the home's `codex` folder with links resolved, and any other
+  table with the `trusted_hash` of each `command` hook of `hooks.json` and `config.toml`
+  that has no U+2028 or U+2029 in its command, status message or matcher, `<file>` being
+  the file in the home's `codex` folder with links resolved and each name in the case on
+  disk, and any other
   `settings/codex/` file, without `shell_environment_policy.set`, whose
   variables are the launch's, one `agents/<name>.toml` per agent with the body as
   `developer_instructions`, with the tier as `model` and `model_reasoning_effort` in a

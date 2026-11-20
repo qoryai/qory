@@ -743,7 +743,7 @@ For claude, copilot and codex composed alone, an effort outside the runtime's va
 Codex gets the tiers only in a home composed for codex alone. One tier map serves every runtime of a home, so in a home composed for claude too, a Codex agent would get a Claude model id. A home composed for codex and another runtime, at once or by an earlier compose that the home keeps, writes no tier into the Codex agents and prints the `skipped` row for codex:
 
 ```text
-skipped  tier thinking for codex  (codex agents have no model setting; agent planner runs on the main model)
+skipped  tier thinking for codex  (qory writes tiers into codex agents only in a home composed for codex alone; agent planner runs on the main model)
 ```
 
 A Codex agent with no tier gets no model and no effort from its file.
@@ -758,12 +758,12 @@ Codex has no setting for any other tool of an agent. An agent without `Write` or
 
 ## Hooks on Codex
 
-Codex reads hooks from `hooks.json` and from the `hooks` table of `config.toml`. A module ships them in `settings/codex/hooks.json` or `settings/codex/config.toml`; the core module of the harness has its hooks in `settings/codex/config.toml`.
+Codex reads hooks from `hooks.json` and from the `hooks` table of `config.toml`. A module ships them in `settings/codex/hooks.json` or `settings/codex/config.toml`.
 
-- **A run without a wall.** Codex runs a hook of `$CODEX_HOME` only when `hooks.state` in `$CODEX_HOME/config.toml` has the hook's hash, and skips it with no error otherwise. qory writes a `trusted_hash` for each `command` hook into the `config.toml` of the home's `codex` folder, keyed by `<home>/codex/<file>:<event>:<group>:<hook>` with every link in the path resolved, as Codex resolves `CODEX_HOME`. qory starts Codex without `--dangerously-bypass-hook-trust`, which would also run hooks that the agent writes.
+- **A run without a wall.** Codex runs a hook of `$CODEX_HOME` only when `hooks.state` in `$CODEX_HOME/config.toml` has the hook's hash, and skips it with no error otherwise. qory writes a `trusted_hash` for each `command` hook into the `config.toml` of the home's `codex` folder, keyed by `<home>/codex/<file>:<event>:<group>:<hook>` with every link in the path resolved and each name in the case on disk, as Codex resolves `CODEX_HOME`. qory starts Codex without `--dangerously-bypass-hook-trust`, which would also run hooks that the agent writes.
 - **A walled run.** qory binds every hook of both files in `/etc/codex/hooks.json`, read-only, where Codex runs it with no hash.
 
-Two limits apply to a run without a wall:
+Three limits apply to a run without a wall:
 
 - An `mcp_tool` hook gets no hash, so Codex skips it. The compose prints a row for each:
 
@@ -771,9 +771,11 @@ Two limits apply to a run without a wall:
   skipped  hooks.PreToolUse[0].hooks[0] in config.toml for codex  (qory writes no trusted hash for an mcp_tool hook; Codex skips it in a run without a wall)
   ```
 
+- A `command` hook with U+2028 or U+2029 in its command, its `statusMessage` or its group's `matcher` gets no hash either, and the compose prints a row for it with the reason `qory writes no trusted hash for a hook with U+2028 or U+2029`.
+
 - If `harness.launch.codex.env` sets `CODEX_HOME`, Codex reads a home other than the one in the keys of the hashes, and skips every hook with no error. Leave `CODEX_HOME` to qory.
 
-qory's `config.toml` also sets `features.unified_exec_tty = false`, in a walled run too. A shell that the agent starts with a terminal takes later commands through `write_stdin`, for which Codex runs no `PreToolUse` hook; with this setting, Codex refuses a shell with a terminal. A Codex agent cannot start an interactive shell.
+qory's `config.toml` also sets `features.unified_exec_tty = false`, in a walled run too. A shell that the agent starts with a terminal takes later commands through `write_stdin`, for which Codex runs no `PreToolUse` hook; with this setting, Codex starts no shell with a terminal. A Codex agent cannot start an interactive shell.
 
 ## Removing the harness
 

@@ -25,15 +25,18 @@ release may change what an existing document does, and states it under Upgrading
   `model` and its effort as `model_reasoning_effort` in `agents/<name>.toml`. An effort
   outside `none`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra` stops the compose
   with exit 2. A home composed for codex and another runtime writes no tier into the
-  Codex agents, since one tier map serves every runtime, and keeps the `skipped` row
-  `tier <tier> for codex`.
+  Codex agents, since one tier map serves every runtime, and prints the `skipped` row
+  `tier <tier> for codex  (qory writes tiers into codex agents only in a home composed
+  for codex alone; …)`.
 - A Codex run without a wall runs the harness's hooks. Codex skips a hook of
   `$CODEX_HOME` with no error unless `hooks.state` has its hash, so the home's
   `config.toml` now has a `trusted_hash` for each `command` hook of `hooks.json` and
-  `config.toml`. An `mcp_tool` hook gets no hash, and the compose prints
+  `config.toml`. An `mcp_tool` hook, and a hook with U+2028 or U+2029 in its command,
+  status message or matcher, gets no hash, and the compose prints
   `skipped  hooks.<event>[<group>].hooks[<hook>] in <file> for codex` for it. A
   `CODEX_HOME` set in `harness.launch.codex.env` points Codex at a home other than the
-  one in the keys of the hashes, and Codex skips the hooks. See "Hooks on Codex" in `docs/harness.md`.
+  one in the keys of the hashes, and Codex skips the hooks. See "Hooks on Codex" in
+  `docs/harness.md`.
 - A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
   the type whose launch version sets what the workflow's session may push. A module
   declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: one
