@@ -1,0 +1,8 @@
+apiVersion: qory.dev/v1alpha1
+harness:
+  extends: {path: stack}
+  target:
+    runtime: claude
+  runtimes:
+    codex:
+      version: 0.170.0

@@ -15,7 +15,8 @@ import (
 
 // TestSchemas validates every fixture document against the contract's schemas: a
 // qory.yaml that composes passes config.schema.json, one refused for its apiVersion, a
-// kind, its qory key, its workflows, its bind or a key it does not read fails it,
+// kind, its qory key, its workflows, its runtimes, its bind or a key it does not read
+// fails it,
 // every module manifest passes module.schema.json unless the fixture expects it refused,
 // every MCP server file passes
 // mcp.schema.json unless the fixture expects it refused, the stack a fixture extends,
@@ -55,6 +56,10 @@ func TestSchemas(t *testing.T) {
 		wantInvalid := strings.Contains(string(errText), "apiVersion") || badKind || strings.HasPrefix(fix, "Set qory to ") ||
 			strings.Contains(string(errText), " in qory.yaml.") && (strings.Contains(fix, " workflows.") || strings.HasPrefix(fix, "Remove workflows ")) ||
 			strings.Contains(string(errText), "bind.") && strings.Contains(string(errText), " in qory.yaml") && !strings.Contains(string(errText), " as many, ")
+		// A runtime's pin that is not an exact version, or of a runtime qory does not
+		// install, fails the schema of the file that sets it.
+		pinRefused := strings.HasPrefix(fix, "Set runtimes.") || strings.HasSuffix(fix, " from runtimes.")
+		wantInvalid = wantInvalid || pinRefused && strings.Contains(string(errText), " is in qory.yaml.")
 		// A plan on a workflow whose access is not write is refused by the stack check, and
 		// the schemas state the same rule for the document that has the plan.
 		planOnNoWrite := strings.HasPrefix(fix, "Remove `plan` from ")
@@ -70,7 +75,7 @@ func TestSchemas(t *testing.T) {
 			t.Errorf("%s: the document failed the schema: %v", dir, err)
 		}
 		if f := filepath.Join(dir, "stack", "qory-stack.yaml"); fileExists(f) {
-			wantBadStack := strings.HasPrefix(fix, "Set workflows.") && strings.Contains(string(errText), " is in stack/qory-stack.yaml.") ||
+			wantBadStack := (strings.HasPrefix(fix, "Set workflows.") || pinRefused) && strings.Contains(string(errText), " is in stack/qory-stack.yaml.") ||
 				planOnNoWrite && fileHas(f, "plan:") ||
 				fix == "Remove the key, or rename it to one qory-stack.yaml reads." && strings.Contains(string(errText), " of stack/qory-stack.yaml.")
 			err := stackSchema.Validate(document(t, f))

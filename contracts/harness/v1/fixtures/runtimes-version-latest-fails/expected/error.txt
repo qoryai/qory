@@ -1,0 +1,4 @@
+Set runtimes.codex.version to an exact version, or remove runtimes.codex.
+  An exact version starts with a digit, followed by up to 31 letters, digits, . or -. A runtime with no pin installs its latest version.
+  The value is "latest".
+  runtimes.codex is in qory.yaml.

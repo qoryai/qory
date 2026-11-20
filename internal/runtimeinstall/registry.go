@@ -69,7 +69,9 @@ var ErrNotCached = errors.New("the registry has no copy of the runtime")
 //
 // It reads newest, then the image manifest of linux/arch by its digest, then <version>
 // from newest's annotation org.opencontainers.image.version, which must have newest's
-// digest, then the manifest of linux/arch again: see [registry.resolve] for why. The
+// digest, then the manifest of linux/arch again: see [registry.resolve] for why. For a
+// pinned version it reads the tag <version> and then the manifest of linux/arch, see
+// [registry.resolvePinned]; a 404 of that tag is a [*NotPublishedError]. The
 // release's Open reads the layer by its digest, and its reader returns an error when the
 // bytes do not match the layer's size or sha256 digest; Install checks the sha512
 // checksum on top. A 401 with a Bearer
@@ -80,7 +82,7 @@ var ErrNotCached = errors.New("the registry has no copy of the runtime")
 // the instance, and the run's proxy sets the run's credentials on a request by its host.
 // With no instance, "", no realm is taken.
 func RegistryFetch(client *http.Client, host, arch, instance string) Fetch {
-	return func(ctx context.Context, runtime string) (Release, error) {
+	return func(ctx context.Context, runtime, pinned string) (Release, error) {
 		if arch != "amd64" && arch != "arm64" {
 			return Release{}, fmt.Errorf("Run on an amd64 or arm64 machine\nThe registry has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
 		}
@@ -88,7 +90,13 @@ func RegistryFetch(client *http.Client, host, arch, instance string) Fetch {
 			return Release{}, fmt.Errorf("Install %s some other way\nqory installs only %s", runtime, strings.Join(Runtimes(), " and "))
 		}
 		r := &registry{client: client, host: host, instance: instance, runtime: runtime, repository: "shared/runtimes/" + runtime}
-		rel, err := r.resolve(ctx, arch)
+		var rel Release
+		var err error
+		if pinned == "" {
+			rel, err = r.resolve(ctx, arch)
+		} else {
+			rel, err = r.resolvePinned(ctx, arch, pinned)
+		}
 		if err != nil {
 			return Release{}, err
 		}
@@ -195,6 +203,41 @@ func (r *registry) resolve(ctx context.Context, arch string) (Release, error) {
 		return Release{}, fmt.Errorf(textCache+"%s:%s has the digest\n  %s,\n  and :%s has\n  %s", r.repository, version, again, newestTag, digest)
 	}
 	if _, _, err := r.platformLayer(ctx, entry, version, arch); err != nil {
+		return Release{}, err
+	}
+	return Release{
+		Version:    version,
+		Integrity:  layer.Annotations[annotIntegrity],
+		Signatures: sigs,
+		Open:       func(ctx context.Context) (io.ReadCloser, error) { return r.blob(ctx, layer, version) },
+	}, nil
+}
+
+// resolvePinned reads the tag version, then the manifest of linux/arch by its digest,
+// and returns the release. The read of the platform's manifest keeps the tag in the
+// registry, as for [registry.resolve]. A 404 of the tag is a [*NotPublishedError].
+func (r *registry) resolvePinned(ctx context.Context, arch, version string) (Release, error) {
+	body, _, err := r.manifest(ctx, version, version)
+	var status *statusError
+	if errors.As(err, &status) && status.status == http.StatusNotFound {
+		return Release{}, &NotPublishedError{Runtime: r.runtime, Version: version}
+	}
+	if err != nil {
+		return Release{}, err
+	}
+	index, err := decode(body, mediaIndex)
+	if err != nil {
+		return Release{}, fmt.Errorf(textCache+"%s:%s is not a runtime's image index:\n  %w", r.repository, version, err)
+	}
+	if got := index.Annotations[annotVersion]; got != version {
+		return Release{}, fmt.Errorf(textCache+"%s:%s has the version %q", r.repository, version, got)
+	}
+	entry, err := r.platform(index, version, arch)
+	if err != nil {
+		return Release{}, err
+	}
+	layer, sigs, err := r.platformLayer(ctx, entry, version, arch)
+	if err != nil {
 		return Release{}, err
 	}
 	return Release{

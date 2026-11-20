@@ -1042,6 +1042,47 @@ For Codex, npm publishes each platform's build as a version of the same package,
 `/@openai/codex/<version>-linux-x64`, or `-linux-arm64`, then its tarball, with the
 same checks.
 
+#### A pinned version
+
+A stack pins the version of a runtime with `runtimes`, in its `qory-stack.yaml` or in the
+harness section of the checkout's `qory.yaml`, whose pin of a runtime wins
+([the harness contract](../contracts/harness/v1/README.md#the-stack)):
+
+```yaml
+runtimes:
+  codex:
+    version: 0.167.2
+```
+
+With a pin of the run's runtime, `qory run` installs that version, and reads neither the
+registry's `newest` nor npm's dist-tags:
+
+- From the registry, it reads `shared/runtimes/<runtime>:<version>`, then the manifest of
+  the machine's platform by its digest, then the layer, with the same checks. The
+  registry returns 503 while it fetches a version it does not have yet, and `qory run`
+  waits for it as for `newest`.
+- From npm, it reads `/@anthropic-ai/claude-code-linux-x64/<version>`, or
+  `/@openai/codex/<version>-linux-x64`, or the `-arm64` builds, then the tarball, with
+  the same checks.
+
+A runtime that the stack does not pin installs its newest version. When the registry
+returns 404 for the version's tag, or npm returns 404 for the version's document, the
+run stops before its session. A run on a person's machine prints the fix, with the name
+of the file that pins the version, then the cause. When the pin comes from a base fetched
+over git, the fix shows the checkout's `qory.yaml` or `harness.yaml`, because the base's
+file is in a cache clone; a pin in that file wins over the base's:
+
+```text
+qory run: Set runtimes.codex.version in qory.yaml to a version the registry has.
+  The registry has no codex 0.167.9.
+```
+
+A run from a run key or a run code prints the cause alone:
+
+```text
+qory run: the registry has no codex 0.167.9
+```
+
 #### npm's signature
 
 Before it uses a version, from npm or from the registry, `qory run` checks npm's
@@ -1074,8 +1115,8 @@ it reads the tarball:
 
 A version's folder that an earlier run installed is used only after the same check.
 
-`qory run` reads the registry's `newest`, or npm's `latest`, on every run, and keeps no
-other record of the newest version: once either moves, the next run installs the new
+With no pin, `qory run` reads the registry's `newest`, or npm's `latest`, on every run,
+and keeps no other record of the newest version: once either moves, the next run installs the new
 version. On this path, `dist.integrity` comes from a document on the same host as the
 tarball, so it too guards against corruption, not against a compromised host.
 
@@ -1122,7 +1163,7 @@ came from. For Codex, it also contains the other files of Codex's folder in the 
 
 Every session of the run uses that one version, and the run holds the version's folder
 until it ends. Each install removes, in `<runtimes>/<runtime>/`, the folders of versions
-older than the newest that no run holds, and the temporary entries `.download-*` and
+older than the version it installs that no run holds, and the temporary entries `.download-*` and
 `.install-*` that no run is writing. It removes a version's folder only when the folder
 has the shape of an install: `bin/<runtime>` and `integrity`, both regular files, in a real
 `bin` folder. A folder with another content, such as one that a person made, stays. It
