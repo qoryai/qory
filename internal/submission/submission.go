@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"regexp"
 	"sync"
+	"unicode"
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -118,6 +119,18 @@ var commitID = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 // CommitID reports whether v is a commit id of the format: a full id of 40 or 64 lower-case
 // hexadecimal digits, as the schema's pattern for each commit.
 func CommitID(v string) bool { return commitID.MatchString(v) }
+
+// TitleRune reports whether the character r may be in a draft title, a step of the hand-off, or
+// a name that a status line shows: not a control character (Unicode category Cc), not a format
+// character (Cf) except U+200C and U+200D, which emoji sequences and some scripts need, and not
+// U+2028 or U+2029. A tag character such as U+E0041 and a bidirectional control such as U+202E
+// are Cf, so they do not pass. One rule serves every caller.
+func TitleRune(r rune) bool {
+	if r == '\u200c' || r == '\u200d' {
+		return true
+	}
+	return !unicode.Is(unicode.Cc, r) && !unicode.Is(unicode.Cf, r) && r != '\u2028' && r != '\u2029'
+}
 
 // Name is the name of the branch of the work item with the id workItemID.
 func Name(workItemID string) string { return prefix + workItemID }

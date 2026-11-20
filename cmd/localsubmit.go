@@ -324,7 +324,7 @@ var forgeHost = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a
 var forgePath = regexp.MustCompile(`^[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)+$`)
 
 // remoteSystemPath is the host and the repository path of a git remote address of a forge:
-// https://host/a/b.git, http, ssh and git with a host, and git@host:a/b. It returns an error for any
+// https://host/a/b.git, http, ssh and git with a host, and git@host:a/b. It returns ok false for any
 // other scheme, such as file or ext, an address with no host, and a host or path that is not one of a
 // forge, so the checks and the program never get a system such as file.
 func remoteSystemPath(remote string) (system, path string, ok bool) {

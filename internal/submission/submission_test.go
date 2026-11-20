@@ -46,6 +46,19 @@ func TestEmbeddedSchemaIsTheContract(t *testing.T) {
 	}
 }
 
+// TestTitleRune is the characters of a draft title: a control character, U+2028, U+2029 and a
+// format character stop it, except U+200C and U+200D, which pass.
+func TestTitleRune(t *testing.T) {
+	for r, want := range map[rune]bool{
+		'a': true, '\u00e9': true, '\u00a0': true, '\U0001F468': true, '\u200c': true, '\u200d': true,
+		'\a': false, '\t': false, '\u0085': false, '\u2028': false, '\u2029': false, '\u200b': false, '\u202e': false, '\U000E0041': false,
+	} {
+		if got := submission.TitleRune(r); got != want {
+			t.Errorf("TitleRune(%U) = %v, want %v", r, got, want)
+		}
+	}
+}
+
 // TestName is the branch of a work item: qory/ and the id.
 func TestName(t *testing.T) {
 	if got := submission.Name("wi_7k2m9pq4xt3a8b1c"); got != "qory/wi_7k2m9pq4xt3a8b1c" {

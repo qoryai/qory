@@ -8,7 +8,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/qoryai/integrations/contracts"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/submission"
 )
@@ -275,12 +277,12 @@ func TestAHandoffStepKeyIsAFullLowerCaseCommitID(t *testing.T) {
 }
 
 // TestAHandoffTitleWithAControlCharacterDropsTheText is a title with a tab, a line end, a NUL,
-// a DEL, a C1 control, a bidirectional override, a zero-width space or a line separator, which
-// the format's title pattern or the contract's draft_title does not accept: the text is dropped
-// with a line that has the position of the character, so the program is never given a title that
-// its draft_title line may not return. A title with none stays, a zero-width joiner included.
+// a DEL, a C1 control, a bidirectional override, a zero-width space, a line separator or a tag
+// character: the text is dropped with a line that has the position of the character, so the
+// program is never given a title that its draft_title line may not return. A title with none
+// stays, one with U+200C or an emoji sequence with U+200D included.
 func TestAHandoffTitleWithAControlCharacterDropsTheText(t *testing.T) {
-	for title, at := range map[string]int{`Add\ta page`: 4, `Add a page\n`: 11, `\u0000Add`: 1, `Add\u007f`: 4, `é\u001f`: 2, `Add\u0085`: 4, `a\u202eb`: 2, `a\u200bb`: 2, `a\u2028b`: 2, `Add a page é`: 0, `a\u200db`: 0} {
+	for title, at := range map[string]int{`Add\ta page`: 4, `Add a page\n`: 11, `\u0000Add`: 1, `Add\u007f`: 4, `é\u001f`: 2, `Add\u0085`: 4, `a\u202eb`: 2, `a\u200bb`: 2, `a\u2028b`: 2, `a\udb40\udc41b`: 2, `Add a page é`: 0, `a\u200db`: 0, `a\u200cb`: 0, `\ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67 home`: 0} {
 		t.Run(title, func(t *testing.T) {
 			h, err := readHandoff(handoffIn(t, `{"text":{"title":"`+title+`","description":"d"}}`))
 			if err != nil || h == nil {
@@ -387,6 +389,29 @@ func TestAHandoffTitleOfSpacesDropsTheText(t *testing.T) {
 		}
 		if got := h.text() != nil; got != kept || (!kept && !slices.Equal(h.dropped, []string{textDroppedBlank})) || (kept && len(h.dropped) != 0) {
 			t.Errorf("title %q: kept %v with the lines %q, want kept %v", title, got, h.dropped, kept)
+		}
+	}
+}
+
+// TestTheHandoffTitleRuleAgreesWithTheContractOnTheseTitles is a title that the pinned contract
+// accepts or does not accept as the draft_title line of the submit program: the hand-off keeps
+// each one that the contract accepts and drops each one that it does not, so the program's line
+// may return every title that the hand-off keeps. The hand-off also drops the format characters
+// that the contract does not list, such as U+0600 and the tag character U+E0041, which this table leaves out.
+func TestTheHandoffTitleRuleAgreesWithTheContractOnTheseTitles(t *testing.T) {
+	for _, title := range []string{
+		"Add a page", "Add \u00e9 \U0001F468\u200d\U0001F469\u200d\U0001F467", "a\u200cb", " a\u00a0", strings.Repeat("a", maxTitle),
+		"a\u200bb", "a\u202eb", "a\u2028b", "a\u2029b", "a\u00adb", "a\ufeffb", "a\u061cb", "a\x07b", "a\u0085b",
+		"   ", "\u00a0\u3000\u2009", strings.Repeat("a", maxTitle+1),
+	} {
+		lines := strings.Join([]string{
+			contracts.SubmitKeyDraftNumber + " 1", contracts.SubmitKeyDraftURL + " https://git.example.com/a",
+			contracts.SubmitKeyDraftTitle + " " + title, contracts.SubmitKeyDraftState + " draft", contracts.SubmitKeyDraftAction + " opened",
+		}, "\n") + "\n"
+		contractAccepts := contracts.ParseSubmitLines(lines, "git.example.com", contracts.DraftOpen, nil).Draft != nil
+		keeps := controlAt(title) == 0 && visibleTitle(title) && utf8.RuneCountInString(title) <= maxTitle
+		if contractAccepts != keeps {
+			t.Errorf("title %q: the contract accepts it: %v, the hand-off keeps it: %v", title, contractAccepts, keeps)
 		}
 	}
 }

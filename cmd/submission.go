@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
-	"github.com/qoryai/integrations/contracts"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/runapi"
@@ -135,16 +135,14 @@ const (
 	maxDroppedSteps        = 5
 )
 
-// controlAt is the 1-based position of the first character of title that the contract's draft
-// title rule does not accept (the control, bidirectional control, invisible or separator
-// characters of $defs.draft_title); 0 for none. Each character goes through [titleAccepted], so
-// qory has no list of its own: a title that passes here and has a visible character is one that
-// the program's draft_title line may return.
+// controlAt is the 1-based position of the first character of title that [submission.TitleRune]
+// does not pass (a control, a format character other than U+200C and U+200D, or U+2028 or
+// U+2029); 0 for none.
 func controlAt(title string) int {
 	i := 0
 	for _, r := range title {
 		i++
-		if !titleAccepted("x" + string(r)) {
+		if !submission.TitleRune(r) {
 			return i
 		}
 	}
@@ -190,16 +188,16 @@ func jsonCause(err error) string {
 func (h *handoff) limit() {
 	if h.Text != nil {
 		switch title, description := utf8.RuneCountInString(h.Text.Title), utf8.RuneCountInString(h.Text.Description); {
-		case title > maxTitle:
-			h.Text = nil
-			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedTitle, title, maxTitle))
 		case controlAt(h.Text.Title) > 0:
 			at := controlAt(h.Text.Title)
 			h.Text = nil
 			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedControl, at))
-		case title > 0 && !titleAccepted(h.Text.Title):
+		case title > 0 && !visibleTitle(h.Text.Title):
 			h.Text = nil
 			h.dropped = append(h.dropped, textDroppedBlank)
+		case title > maxTitle:
+			h.Text = nil
+			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedTitle, title, maxTitle))
 		case description > maxDescription:
 			h.Text = nil
 			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedDescription, description, maxDescription))
@@ -223,6 +221,22 @@ func (h *handoff) limit() {
 	if badKeys > 0 {
 		h.dropped = append(h.dropped, fmt.Sprintf(textDroppedKeys, badKeys))
 	}
+	var controlled []string
+	for commit, step := range h.Steps {
+		if strings.ContainsFunc(step, notTitleRune) {
+			controlled = append(controlled, commit)
+		}
+	}
+	slices.Sort(controlled)
+	for i, commit := range controlled {
+		delete(h.Steps, commit)
+		if i < maxDroppedSteps {
+			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedStepControl, shownCommit(commit)))
+		}
+	}
+	if len(controlled) > maxDroppedSteps {
+		h.dropped = append(h.dropped, fmt.Sprintf(textDroppedFurtherCtl, len(controlled)-maxDroppedSteps))
+	}
 	var over []string
 	for commit, step := range h.Steps {
 		if utf8.RuneCountInString(step) > maxStep {
@@ -240,41 +254,17 @@ func (h *handoff) limit() {
 	if len(over) > maxDroppedSteps {
 		h.dropped = append(h.dropped, fmt.Sprintf(textDroppedFurther, len(over)-maxDroppedSteps, maxStep))
 	}
-	var controlled []string
-	for commit, step := range h.Steps {
-		if !titleAccepted("x" + step) {
-			controlled = append(controlled, commit)
-		}
-	}
-	slices.Sort(controlled)
-	for i, commit := range controlled {
-		delete(h.Steps, commit)
-		if i < maxDroppedSteps {
-			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedStepControl, shownCommit(commit)))
-		}
-	}
-	if len(controlled) > maxDroppedSteps {
-		h.dropped = append(h.dropped, fmt.Sprintf(textDroppedFurtherCtl, len(controlled)-maxDroppedSteps))
-	}
 }
 
-// titleAccepted reports whether the integrations contract accepts title as the draft_title line
-// of the submit program: it runs the contract's check of the line on a draft whose other four
-// lines are valid, so qory has no character list of its own. A title with a line end is not
-// accepted, as the line would end there. The check also fails for a title of more than 256
-// characters, so callers test the length first.
-func titleAccepted(title string) bool {
-	if strings.ContainsAny(title, "\r\n") {
-		return false
-	}
-	lines := strings.Join([]string{
-		contracts.SubmitKeyDraftNumber + " 1",
-		contracts.SubmitKeyDraftURL + " https://git.example.com/a",
-		contracts.SubmitKeyDraftTitle + " " + title,
-		contracts.SubmitKeyDraftState + " " + contracts.DraftStateDraft,
-		contracts.SubmitKeyDraftAction + " " + contracts.DraftOpened,
-	}, "\n") + "\n"
-	return contracts.ParseSubmitLines(lines, "git.example.com", contracts.DraftOpen, nil).Draft != nil
+// notTitleRune reports whether r is a character that [submission.TitleRune] does not pass.
+func notTitleRune(r rune) bool { return !submission.TitleRune(r) }
+
+// visibleTitle reports whether title has a character that is not a space. The spaces are the
+// ones that the contract's draft_title rule lists (U+0020, U+00A0, U+1680, U+2000 to U+200A,
+// U+202F, U+205F and U+3000), which are the characters that [unicode.IsSpace] passes once
+// controls and U+2028 and U+2029 are out; a test compares both with the pinned contract.
+func visibleTitle(title string) bool {
+	return strings.ContainsFunc(title, func(r rune) bool { return !unicode.IsSpace(r) })
 }
 
 // shownCommit is commit as a line shows it: printable, masked and at most 64 characters.
