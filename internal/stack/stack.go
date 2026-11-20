@@ -491,13 +491,13 @@ type RuntimePin struct {
 	// From is the absolute path of the file that sets the pin. It is set as the stack is
 	// validated.
 	From string `yaml:"-"`
-	// number is whether version in the file is a YAML number, such as 2.1, which the
-	// decoder reads into Version as the string 2.1. Set by [RuntimePin.UnmarshalYAML].
+	// number is whether version in the file is a YAML number or date, such as 2.1 or
+	// 2024-01-01, which the decoder reads into Version as a string. Set by [RuntimePin.UnmarshalYAML].
 	number bool
 }
 
 // UnmarshalYAML reads an entry of runtimes and records in number whether version is a
-// YAML number. A key a pin does not have is reported as the decoder reports an unknown
+// YAML number or date. A key a pin does not have is reported as the decoder reports an unknown
 // field: the decode of the entry into plain runs without the decoder's check of keys.
 func (r *RuntimePin) UnmarshalYAML(n *yaml.Node) error {
 	type plain RuntimePin
@@ -509,7 +509,8 @@ func (r *RuntimePin) UnmarshalYAML(n *yaml.Node) error {
 			switch {
 			case key.Value != "version":
 				unknown = append(unknown, fmt.Sprintf("line %d: field %s not found in type stack.RuntimePin", key.Line, key.Value))
-			case value.Kind == yaml.ScalarNode && (value.ShortTag() == "!!int" || value.ShortTag() == "!!float"):
+			case value.Kind == yaml.ScalarNode && (value.ShortTag() == "!!int" || value.ShortTag() == "!!float" ||
+				value.ShortTag() == "!!timestamp"):
 				number = true
 			}
 		}
@@ -891,7 +892,7 @@ func (p *Stack) validate(compose bool) error {
 		if pin.number {
 			return exports.Refuse(
 				fmt.Sprintf("Put runtimes.%s.version in quotes, such as version: \"2.1.320\".", name),
-				"Without quotes, YAML reads the version as a number, and an exact version is a string.",
+				"Without quotes, YAML reads the version as a number or a date, and an exact version is a string.",
 				fmt.Sprintf("The value is %s.", exports.Value(pin.Version, false)),
 				fmt.Sprintf("runtimes.%s is in %s.", name, exports.FilePlace))
 		}
@@ -1278,8 +1279,7 @@ func FileAllowed(name string, prefixes []string) bool {
 // extending block. An entry of p that lists a base module by its name is no module of
 // the result: its exclude becomes that base module's [Module.CheckoutExclude], under the
 // rules of [checkoutExclude]. An extension key both files set is p's, and so is a
-// runtime's pin, [Stack.RuntimePins]. The result's File
-// and Root are p's.
+// runtime's pin, [Stack.RuntimePins]. The result's File and Root are p's.
 func Extend(base, p *Stack) (*Stack, error) {
 	if base.Extends.Path != "" || base.Extends.Git != "" {
 		return nil, &BaseExtendsError{File: base.File, Extends: base.Extends}

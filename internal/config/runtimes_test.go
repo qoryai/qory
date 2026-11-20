@@ -88,7 +88,7 @@ func TestComposeRefusesAPinWrittenAsANumber(t *testing.T) {
 	own := filepath.Join(root, "qory.yaml")
 	write(t, own, "harness:\n  extends: {path: ../base}\n  runtimes:\n    codex:\n      version: 2.1\n")
 	want := "Put runtimes.codex.version in quotes, such as version: \"2.1.320\".\n" +
-		"  Without quotes, YAML reads the version as a number, and an exact version is a string.\n" +
+		"  Without quotes, YAML reads the version as a number or a date, and an exact version is a string.\n" +
 		"  The value is 2.1.\n" +
 		"  runtimes.codex is in " + own + "."
 	if _, err := config.Compose(own); err == nil || err.Error() != want {

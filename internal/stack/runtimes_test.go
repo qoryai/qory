@@ -44,7 +44,7 @@ func TestLoadRefusesABadRuntimePin(t *testing.T) {
 	}
 	number := func(name, value string) string {
 		return "Put runtimes." + name + ".version in quotes, such as version: \"2.1.320\".\n" +
-			"  Without quotes, YAML reads the version as a number, and an exact version is a string.\n" +
+			"  Without quotes, YAML reads the version as a number or a date, and an exact version is a string.\n" +
 			"  The value is " + value + ".\n  runtimes." + name + " is in "
 	}
 	for _, c := range []struct{ body, want string }{
@@ -55,6 +55,7 @@ func TestLoadRefusesABadRuntimePin(t *testing.T) {
 		{"  claude:\n    version: 1.0.0+build.1\n", version("claude", "1.0.0+build.1")},
 		{"  claude:\n    version: 2.1\n", number("claude", "2.1")},
 		{"  codex:\n    version: 2\n", number("codex", "2")},
+		{"  claude:\n    version: 2024-01-01\n", number("claude", "2024-01-01")},
 		{"  gemini:\n    version: 1.0.0\n", "Remove gemini from runtimes.\n  qory installs and pins only claude and codex.\n  runtimes is in "},
 	} {
 		path := write(t, withRuntimes(c.body))
@@ -146,6 +147,7 @@ func TestTheSchemaTakesTheRuntimePins(t *testing.T) {
 		{"  codex:\n    version: 0.99.0-alpha.20\n", true},
 		{"  claude:\n    version: \"2.1\"\n", true},
 		{"  claude:\n    version: 2.1\n", false},
+		{"  claude:\n    version: 2024-01-01\n", false},
 		{"  claude:\n    version: 1.0.0+build.1\n", false},
 		{"  claude:\n    version: latest\n", false},
 		{"  claude:\n    version: \"\"\n", false},
