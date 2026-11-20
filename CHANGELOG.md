@@ -789,16 +789,16 @@ release may change what an existing document does, and states it under Upgrading
     the run to a key with no known reset first, then to the key that resets soonest.
     Before, the key with `chosen` came first whenever it was usable.
   - In a run without a wall, qory prints the error for a Codex argument on two lines:
-    the fix, which contains the flag, then the cause. Before, one line had both, split by
-    a colon. See `docs/run.md`.
+    the fix, which contains the flag, then the cause. See `docs/run.md`.
   - A run without a wall stops before Codex starts, exit 1, when `-c`, `--config`,
     `--enable` or `--disable` sets `features.hooks`, `features.codex_hooks` or
-    `features.unified_exec_tty`. The error has the fix first, then the cause: the
-    setting can turn off the hooks Codex runs before each tool call.
+    `features.unified_exec_tty`. The second line of the error is ``the setting can turn
+    off the hooks Codex runs before each tool call, or make Codex run no hook for a
+    command sent to a shell with a terminal``.
   - Each session's environment has `QORY_SESSION`, the session's number in the run,
     counted from 1. Without a wall, Forager's value replaces any other. A walled run that
     passes `QORY_SESSION` by `wall.env`, `--env` or the harness's `env` does not start,
-    `variable_reserved`.
+    `variable_reserved`, as for any other `QORY_` name.
 - qory builds with Forager 92ccf768. The gateway does not start when a machine
   credential in `forager.yaml` has a path in `paths` that matches no request, such as a
   path with a `.` or `..` segment, and its line has the path. A run that the gateway
@@ -1409,11 +1409,12 @@ release may change what an existing document does, and states it under Upgrading
   table above one; when it enables or disables `plugins`, `apps` or `connectors`; or
   when it is `--oss`, `--local-provider`, `--profile`, `-p`, `--search`,
   `--ignore-user-config`, `--dangerously-bypass-hook-trust` or `--remote`. qory prints
-  Forager's line, such as ``✗ remove the -c that sets model_provider from the launch's
-  arguments: the session sets that setting for Codex, or the setting changes where Codex
-  sends its requests`` for `-c model_provider=x`, or ``✗ remove the --config pair that
-  sets model_provider from the launch's arguments: the session sets model_provider, and a
-  later pair overrides the session's value`` for `--config model_provider=x`. Before, an
+  Forager's two lines, such as ``✗ remove the -c that sets model_provider from the
+  launch's arguments`` and the next line ``the session sets that setting for Codex, or the
+  setting changes where Codex sends its requests`` for `-c model_provider=x`, or
+  ``✗ remove the --config pair that sets model_provider from the launch's arguments`` and
+  the next line ``the session sets model_provider, and a later pair overrides the session's
+  value`` for `--config model_provider=x`. Before, an
   unwalled run passed every argument unchanged.
 - A refusal of a walled Codex run's arguments writes each control character of the key
   or feature it repeats as an escape, such as `\n`.

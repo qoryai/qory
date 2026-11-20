@@ -4737,7 +4737,7 @@ starts, with exit status 1, when a Codex argument before `--` is one of these:
 - `--enable` or `--disable` of `plugins`, `apps` or `connectors`.
 - `--config <key>=<value>` or `-c` in any form that sets `features.hooks`,
   `features.codex_hooks` or `features.unified_exec_tty`, a key under one, such as
-  `features.hooks.enabled`, or a table that sets one, such as `features={hooks=false}`;
+  `features.hooks.enabled`, or a table that sets one, such as `-c features={hooks=false}`;
   or `--enable` or `--disable` of `hooks`, `codex_hooks` or `unified_exec_tty`.
 - `--oss`, `--local-provider`, `--profile`, `-p`, `--search`, `--ignore-user-config`,
   `--dangerously-bypass-hook-trust` or `--remote`.
@@ -4766,6 +4766,9 @@ For `--disable hooks` they are:
 ✗ remove the --disable that sets features.hooks from the launch's arguments
   the setting can turn off the hooks Codex runs before each tool call, or make Codex run no hook for a command sent to a shell with a terminal
 ```
+
+For `--config features={...}`, a table above `features.plugins`, they are the
+`--config pair` lines for `features.plugins`. The run stops either way.
 
 Every other argument of an unwalled run passes unchanged.
 
