@@ -25,10 +25,30 @@ func TestClaudeReadsTheDescriptor(t *testing.T) {
 	}
 }
 
+// seven are the effort values Forager's codex descriptor lists for an agent.
+var seven = []string{"none", "low", "medium", "high", "xhigh", "max", "ultra"}
+
+// TestCodexHasAnAgentPlaceAndNoRunPlace reads codex's agent effort place from Forager's
+// codex descriptor, the TOML key model_reasoning_effort with seven values, and no run
+// place, since the descriptor has the run's effort as a setting. The codex renderer writes
+// a tier's effort under that key, so this test fails when the descriptor lists another.
+func TestCodexHasAnAgentPlaceAndNoRunPlace(t *testing.T) {
+	agent, ok := modelplace.AgentEffort("codex")
+	if !ok || agent.TOML != "model_reasoning_effort" || agent.Frontmatter != "" || !slices.Equal(agent.Values, seven) {
+		t.Errorf("agent effort %+v, %v", agent, ok)
+	}
+	if run, ok := modelplace.RunEffort("codex"); ok {
+		t.Errorf("codex has a run effort place %+v", run)
+	}
+	if args, env := modelplace.Launch("codex", "high"); args != nil || env != nil {
+		t.Errorf("codex launches with %q, %q", args, env)
+	}
+}
+
 // TestNoPlace reports false for a runtime whose descriptor has no model section and for a
 // name Forager does not take.
 func TestNoPlace(t *testing.T) {
-	for _, name := range []string{"codex", "opencode", "", "Claude", "a b"} {
+	for _, name := range []string{"opencode", "", "Claude", "a b"} {
 		if _, ok := modelplace.RunEffort(name); ok {
 			t.Errorf("%q has a run effort place", name)
 		}

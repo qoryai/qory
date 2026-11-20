@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/internal/render"
@@ -72,10 +73,10 @@ func TestWalledArgs(t *testing.T) {
 
 // TestWalledArgsRefuseAReservedConfigKey is each form of --config and -c that sets a key
 // Forager or qory sets for a walled run: the key itself, a key under it, a table above
-// it, model_reasoning_effort, and use_legacy_landlock, which Codex reads as
-// features.use_legacy_landlock. Each is refused with the key as given, also before exec
-// and with spaces around the key. An allowed key, a reserved key after --, a flag with
-// no = and a -c whose value Codex refuses pass.
+// it, model_reasoning_effort, use_legacy_landlock, which Codex reads as
+// features.use_legacy_landlock, and a key under hooks. Each is refused with the key as
+// given, also before exec and with spaces around the key. An allowed key, a reserved key
+// after --, a flag with no = and a -c whose value Codex refuses pass.
 func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 	rt, err := render.Lookup("codex")
 	if err != nil {
@@ -101,6 +102,7 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 		{[]string{"exec", "-c", "features={shell_snapshot=true}", "hi"}, "features"},
 		{[]string{"exec", "-c", "hooks={state={}}", "hi"}, "hooks"},
 		{[]string{"exec", "-c", "hooks.state.x=1", "hi"}, "hooks.state.x"},
+		{[]string{"exec", "--config=hooks.Stop=[]", "hi"}, "hooks.Stop"},
 		{[]string{"exec", "-c", "experimental_realtime_ws_base_url=x", "hi"}, "experimental_realtime_ws_base_url"},
 		{[]string{"exec", "-c", "model_reasoning_effort=high", "hi"}, "model_reasoning_effort"},
 		{[]string{"exec", "-c", "use_legacy_landlock=true", "hi"}, "use_legacy_landlock"},
@@ -118,7 +120,6 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 		{"exec", "--", "--oss", "--local-provider=x", "--profile", "x", "-px", "--enable", "apps", "--search", "--ignore-user-config"},
 		{"exec", "--enable", "--json", "hi"},
 		{"exec", "--disable=", "hi"},
-		{"exec", "--config=hooks.Stop=[]", "hi"},
 		{"exec", "-c", "model=gpt-5", "hi"},
 		{"exec", "-c", "hooks_x=1", "hi"},
 		{"exec", "-c", "model_provider", "hi"},
@@ -329,6 +330,67 @@ func TestWalledArgsRefusalsEscapeControlCharacters(t *testing.T) {
 		_, err := w.WalledArgs(c.args, home)
 		if err == nil || err.Error() != c.want {
 			t.Errorf("WalledArgs(%q): %v, want %q", c.args, err, c.want)
+		}
+	}
+}
+
+// TestCheckArgsRefuseTheHookSettingsWithoutAWall is each argument that the check of a run
+// without a wall refuses: --dangerously-bypass-hook-trust in both forms, --config and
+// -c at features.unified_exec_tty, features.codex_hooks, a key under hooks and the
+// features table above them, and --enable and --disable of unified_exec_tty,
+// codex_hooks and hooks. Each is refused with the text of a walled run, whose lines are
+// each at most 100 characters. --search, another feature, another key and every argument
+// after -- pass, as a walled run alone refuses them.
+func TestCheckArgsRefuseTheHookSettingsWithoutAWall(t *testing.T) {
+	rt, err := render.Lookup("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := rt.(render.ArgsChecker)
+	config := func(key string) string {
+		return "Remove `--config " + key + "` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
+	}
+	feature := func(flag, name string) string {
+		return "Remove `" + flag + " " + name + "` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
+	}
+	hooks := "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.\n  A Codex run takes its hook trust from qory and Forager, not from the arguments."
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"exec", "--dangerously-bypass-hook-trust", "hi"}, hooks},
+		{[]string{"--dangerously-bypass-hook-trust=true", "exec", "hi"}, hooks},
+		{[]string{"exec", "-c", "features.unified_exec_tty=true", "hi"}, config("features.unified_exec_tty")},
+		{[]string{"exec", "--config=hooks.x=1", "hi"}, config("hooks.x")},
+		{[]string{"exec", "-c", "features={unified_exec_tty=true}", "hi"}, config("features")},
+		{[]string{"exec", "-c", "features.codex_hooks=true", "hi"}, config("features.codex_hooks")},
+		{[]string{"exec", "-cfeatures.hooks=false", "hi"}, config("features.hooks")},
+		{[]string{"exec", "--enable", "unified_exec_tty", "hi"}, feature("--enable", "unified_exec_tty")},
+		{[]string{"exec", "--disable=codex_hooks", "hi"}, feature("--disable", "codex_hooks")},
+		{[]string{"exec", "--enable", "codex_hooks", "hi"}, feature("--enable", "codex_hooks")},
+		{[]string{"exec", "--disable", "hooks", "hi"}, feature("--disable", "hooks")},
+		{[]string{"--search", "exec", "--enable", "x", "-c", "hooks.Stop=[]"}, config("hooks.Stop")},
+	} {
+		err := c.CheckArgs(tc.args)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("CheckArgs(%q) = %v, want %q", tc.args, err, tc.want)
+			continue
+		}
+		for _, line := range strings.Split(err.Error(), "\n") {
+			if len(line) > 100 {
+				t.Errorf("CheckArgs(%q): a line of %d characters, want at most 100: %q", tc.args, len(line), line)
+			}
+		}
+	}
+	for _, args := range [][]string{
+		{"exec", "--search", "hi"},
+		{"exec", "--enable", "some_other_feature", "hi"},
+		{"exec", "-c", "model=x", "hi"},
+		{"exec", "-c", "features.apps=false", "--oss", "--profile", "p", "hi"},
+		{"exec", "--", "--dangerously-bypass-hook-trust", "-c", "hooks.x=1"},
+	} {
+		if err := c.CheckArgs(args); err != nil {
+			t.Errorf("CheckArgs(%q): %v", args, err)
 		}
 	}
 }

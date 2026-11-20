@@ -1220,6 +1220,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	}
 	skippedConfig = append(skippedConfig, effortRows...)
 	skippedConfig = append(skippedConfig, tierRows(res, all, at.root)...)
+	skippedConfig = append(skippedConfig, untrustedHookRows(res, all, at.home)...)
 	skippedConfig = append(skippedConfig, envRows...)
 	skippedConfig = append(skippedConfig, checks.rows...)
 	skippedConfig = append(skippedConfig, retired.rows...)

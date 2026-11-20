@@ -41,6 +41,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/modelplace"
 	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/render"
 )
@@ -116,8 +117,16 @@ func (codex) Reserved() []render.Reserved {
 // mcp_servers, one table per server containing the object as the module wrote it, and any
 // other codex settings fragment without shell_environment_policy.set, whose variables are
 // the launch's, see [EnvAt], then one agents/<name>.toml per agent containing the agent's
-// name, description and its body as developer_instructions, and a [features] table with
-// shell_tool = false for an agent that declares no shell tool, see [keepsShell]. The
+// name, description and its body as developer_instructions, the model its tier maps to as
+// model and the tier's effort, when the entry sets one, as model_reasoning_effort, and a
+// [features] table with shell_tool = false for an agent that declares no shell tool, see
+// [keepsShell]. A home composed for Codex and another runtime gets no tier, see
+// [render.AloneModel], and an agent whose tier has no map gets neither key.
+//
+// config.toml also gets features.unified_exec_tty = false, so the agent cannot start a
+// shell with a terminal and send it commands with write_stdin, for which Codex 0.170.0
+// runs no PreToolUse hook; and a hooks.state table with a trusted_hash for each command
+// hook of hooks.json and config.toml, see [trustedHooks]. The
 // instructions written as AGENTS.md end with the names the session registers, see
 // [render.Addressing]: a Codex home registers them as the modules wrote them, and the
 // file states that. Codex reads a project .codex only in a project the user has marked
@@ -161,6 +170,18 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 		}
 		render.PutServers(m, "mcp_servers", res.MCPFor(home))
 		render.DropEnv(m, setKey)
+		// A fragment may set neither features nor hooks.state, see [reservedKeys].
+		m["features"] = map[string]any{"unified_exec_tty": false}
+		hooks, _ := m["hooks"].(map[string]any)
+		fromJSON, _ := res.SettingsFor(Runtime, "hooks.json", home)["hooks"].(map[string]any)
+		state := trustedHooks(filepath.Join(home, Runtime), map[string]map[string]any{"hooks.json": fromJSON, "config.toml": hooks})
+		if len(state) > 0 {
+			if hooks == nil {
+				hooks = map[string]any{}
+				m["hooks"] = hooks
+			}
+			hooks["state"] = state
+		}
 	})
 	if err != nil {
 		return err
@@ -181,6 +202,12 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 			"name":                   name,
 			"description":            doc.String("description"),
 			"developer_instructions": strings.TrimRight(doc.Body, "\n"),
+		}
+		if t, ok := res.Tiers[e.Tier]; ok {
+			role["model"] = t.Model
+			if t.Effort != "" {
+				role[effortKey] = t.Effort
+			}
 		}
 		if !keepsShell(doc.Front) {
 			role["features"] = map[string]any{"shell_tool": false}
@@ -203,6 +230,26 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 	}
 	return nil
 }
+
+// effortKey is the key of an agent file that Codex reads the agent's effort from, the
+// agent place of the effort in Forager's descriptor for the runtime.
+const effortKey = "model_reasoning_effort"
+
+// AgentEfforts are the effort values a Codex agent file takes in [effortKey], as the
+// agent place of the effort in Forager's descriptor for the runtime lists them; nil when
+// the descriptor has none.
+func (codex) AgentEfforts() []string {
+	p, ok := modelplace.AgentEffort(Runtime)
+	if !ok {
+		return nil
+	}
+	return p.Values
+}
+
+// TiersAlone marks Codex as a [render.AloneModel]: a home composed for Codex and another
+// runtime writes no tier into the Codex agents, so a model id of another provider does
+// not reach them.
+func (codex) TiersAlone() {}
 
 // keepsShell reports whether a role keeps Codex's shell tool. A role with no tools key
 // keeps it, since Claude Code gives an agent with no tools key every tool. A role whose
@@ -241,8 +288,9 @@ const textReservedKey = "Remove `%s` from `settings/codex/config.toml`.\n  A Cod
 // shell, the files of instructions, compaction prompt and model list, the Node program,
 // and Codex's database and log folders. Each name is one Codex 0.167.2 reads
 // (codex-rs/config/src/config_toml.rs). A fragment may set the other keys of hooks, such
-// as hooks.Stop. A walled run's Codex arguments may not set them either, see
-// [checkArgs].
+// as hooks.Stop. The Codex arguments of a walled run may not set the keys of
+// [reservedKeys] either, and the arguments of every run may not set a key of
+// [trustKeys], such as hooks.Stop; see [checkArgs].
 var reservedKeys = []reservedKey{
 	{"model_provider"},
 	{"model_providers"},

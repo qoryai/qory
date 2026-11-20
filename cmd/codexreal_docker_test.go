@@ -90,14 +90,14 @@ var realCodexSums = map[string]string{
 // install the system skills: "failed to install system skills: <cause>".
 const systemSkillsLine = "install system skills"
 
-// realCodexImage builds an image on alpine with git, Codex, and [codexScan] with mark at
-// /usr/local/bin/codex-scan. Codex is npm's native build of @openai/codex for this
-// engine's machines, at version and checked against sums, the sha512 of the build for
-// each engine architecture in hex. The native build's folder stays whole, here at
-// /opt/codex, and the codex command links to its bin/codex, so Codex finds its helpers
-// beside it. Codex runs only in the image's build and its containers. The test removes
-// the image at its end.
-func realCodexImage(t *testing.T, version string, sums map[string]string, mark string) string {
+// realCodexImage builds an image on alpine with git, the alpine packages given, Codex,
+// and [codexScan] with mark at /usr/local/bin/codex-scan. Codex is npm's native build of
+// @openai/codex for this engine's machines, at version and checked against sums, the
+// sha512 of the build for each engine architecture in hex. The native build's folder
+// stays whole, here at /opt/codex, and the codex command links to its bin/codex, so Codex
+// finds its helpers beside it. Codex runs only in the image's build and its containers.
+// The test removes the image at its end.
+func realCodexImage(t *testing.T, version string, sums map[string]string, mark string, packages ...string) string {
 	t.Helper()
 	_, arch, _ := strings.Cut(dockerOut(t, "", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"), "/")
 	npmArch := map[string]string{"amd64": "x64", "arm64": "arm64"}[arch]
@@ -113,7 +113,7 @@ func realCodexImage(t *testing.T, version string, sums map[string]string, mark s
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "codex-scan"), strings.Replace(codexScan, "MARK", mark, 1))
 	writeFile(t, filepath.Join(dir, "Dockerfile"), "FROM public.ecr.aws/docker/library/alpine:3.22\n"+
-		"RUN apk add --no-cache git\n"+
+		"RUN apk add --no-cache "+strings.Join(append([]string{"git"}, packages...), " ")+"\n"+
 		"ADD https://registry.npmjs.org/@openai/codex/-/codex-"+version+"-linux-"+npmArch+".tgz /tmp/codex-native.tgz\n"+
 		"RUN echo \""+sum+"  /tmp/codex-native.tgz\" | sha512sum -c - \\\n"+
 		" && mkdir /tmp/x && tar -xzf /tmp/codex-native.tgz -C /tmp/x && mv \"/tmp/x/package/vendor/$(uname -m)-unknown-linux-musl\" /opt/codex \\\n"+
@@ -191,17 +191,15 @@ type upstreamEntry struct {
 	Bearer  string   `json:"bearer"`
 	Account string   `json:"account"`
 	Texts   []string `json:"texts"`
+	Outputs []string `json:"outputs"`
 }
 
 // upstream is the stub upstream's container and the address the gateway reaches it on.
 type upstream struct{ name, host string }
 
-// startUpstream builds cmd/testdata/codexupstream for this engine's machines and starts
-// it in a container on alpine, with a certificate of ca, removed at the test's end and
-// when it stops. It returns once the stub listens and this machine reaches it at the
-// container's address. A published port on 127.0.0.1 would not do: the wall's NO_PROXY
-// has the loopback addresses, so Codex would not send to it through the gateway.
-func startUpstream(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey) upstream {
+// upstreamBinary builds cmd/testdata/codexupstream for this engine's machines and
+// returns its path.
+func upstreamBinary(t *testing.T) string {
 	t.Helper()
 	_, arch, _ := strings.Cut(dockerOut(t, "", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"), "/")
 	bin := filepath.Join(t.TempDir(), "upstream")
@@ -211,6 +209,18 @@ func startUpstream(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey) 
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
+	return bin
+}
+
+// startUpstream builds cmd/testdata/codexupstream for this engine's machines and starts
+// it in a container on alpine, with a certificate of ca and the variables env, each
+// NAME=value, removed at the test's end and when it stops. It returns once the stub
+// listens and this machine reaches it at the container's address. A published port on
+// 127.0.0.1 would not do: the wall's NO_PROXY has the loopback addresses, so Codex would
+// not send to it through the gateway.
+func startUpstream(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey, env ...string) upstream {
+	t.Helper()
+	bin := upstreamBinary(t)
 	der, err := x509.MarshalPKCS8PrivateKey(caKey)
 	if err != nil {
 		t.Fatal(err)
@@ -219,10 +229,13 @@ func startUpstream(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey) 
 	_, _ = rand.Read(id[:])
 	u := upstream{name: "qory-test-upstream-" + hex.EncodeToString(id[:])}
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", u.name).Run() })
-	dockerOut(t, "", "run", "--rm", "--detach", "--stop-timeout", "1", "--name", u.name, "--mount", "type=bind,src="+bin+",dst=/upstream,readonly",
-		"--env", "QORY_TEST_UPSTREAM_CA="+base64.StdEncoding.EncodeToString(ca.Raw),
-		"--env", "QORY_TEST_UPSTREAM_CA_KEY="+base64.StdEncoding.EncodeToString(der),
-		"--entrypoint", "/upstream", "public.ecr.aws/docker/library/alpine:3.22")
+	args := []string{"run", "--rm", "--detach", "--stop-timeout", "1", "--name", u.name, "--mount", "type=bind,src=" + bin + ",dst=/upstream,readonly",
+		"--env", "QORY_TEST_UPSTREAM_CA=" + base64.StdEncoding.EncodeToString(ca.Raw),
+		"--env", "QORY_TEST_UPSTREAM_CA_KEY=" + base64.StdEncoding.EncodeToString(der)}
+	for _, e := range env {
+		args = append(args, "--env", e)
+	}
+	dockerOut(t, "", append(args, "--entrypoint", "/upstream", "public.ecr.aws/docker/library/alpine:3.22")...)
 	for deadline := time.Now().Add(30 * time.Second); ; {
 		logs, _ := exec.Command("docker", "logs", u.name).CombinedOutput()
 		if bytes.Contains(logs, []byte("upstream: listening")) {
@@ -409,20 +422,28 @@ func (s realCodexSetup) authority(t *testing.T) (*x509.Certificate, *ecdsa.Priva
 	return ca, key
 }
 
+// codexChild are the choices of [runRealCodexChild] beyond Codex's version: the alpine
+// packages the image adds, and the variables of the upstream, each NAME=value, such as
+// its script.
+type codexChild struct {
+	packages, upstreamEnv []string
+}
+
 // runRealCodexChild builds the wall's helper and the image, with Codex at version and
-// checked against sums, see [realCodexImage], starts the upstream, and runs test t in a
+// checked against sums and with child's packages, see [realCodexImage], starts the
+// upstream with child's variables, and runs test t in a
 // separate test binary, with the setup in [envRealCodexChild]: this
 // process may have read its roots already, and that binary reads them from the
 // upstream's authority. The test binary has until a minute before t's deadline, so this
 // process removes the upstream and the image also when that binary runs out of time.
-func runRealCodexChild(t *testing.T, version string, sums map[string]string) {
+func runRealCodexChild(t *testing.T, version string, sums map[string]string, child codexChild) {
 	t.Helper()
 	var id [6]byte
 	_, _ = rand.Read(id[:])
 	setup := realCodexSetup{Mark: "qorytest-" + hex.EncodeToString(id[:]), Helper: wallHelper(t)}
-	setup.Image = realCodexImage(t, version, sums, setup.Mark)
+	setup.Image = realCodexImage(t, version, sums, setup.Mark, child.packages...)
 	ca, caKey := testAuthority(t)
-	u := startUpstream(t, ca, caKey)
+	u := startUpstream(t, ca, caKey, child.upstreamEnv...)
 	keyDER, err := x509.MarshalPKCS8PrivateKey(caKey)
 	if err != nil {
 		t.Fatal(err)
@@ -476,7 +497,7 @@ func TestARealWalledCodexRunReachesTheModelThroughTheGateway(t *testing.T) {
 		t.Skip("no docker command")
 	}
 	if os.Getenv(envRealCodexChild) == "" {
-		runRealCodexChild(t, realCodexVersion, realCodexSums)
+		runRealCodexChild(t, realCodexVersion, realCodexSums, codexChild{})
 		return
 	}
 	var setup realCodexSetup

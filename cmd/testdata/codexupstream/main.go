@@ -1,13 +1,23 @@
-// Command codexupstream is a stub of the Responses API for the test of a real Codex run
-// behind the wall, TestARealWalledCodexRunReachesTheModelThroughTheGateway in package
-// cmd. It runs in a container: it signs a certificate for the container's addresses with
-// the authority in QORY_TEST_UPSTREAM_CA and QORY_TEST_UPSTREAM_CA_KEY, each DER in
-// standard base64, serves HTTPS on 8443, and prints "upstream: listening" once it
-// listens, with /tmp/upstream.jsonl made empty. It appends one JSON line per request to
-// that file before it answers: a POST to /v1/responses with a streamed message with the
-// text Hi, and every other request with 404. Each line has the method, the path, the
-// SHA-256 of the Authorization header's bearer value, the chatgpt-account-id header,
-// and the text of each input message.
+// Command codexupstream is a stub of the Responses API for the tests of a real Codex run
+// in package cmd, such as TestARealWalledCodexRunReachesTheModelThroughTheGateway. It runs
+// in a container: it signs a certificate for the container's addresses with the
+// authority in QORY_TEST_UPSTREAM_CA and QORY_TEST_UPSTREAM_CA_KEY, each DER in standard
+// base64, serves HTTPS on 8443, and prints "upstream: listening" once it listens, with
+// /tmp/upstream.jsonl made empty. With QORY_TEST_UPSTREAM_PLAIN=1 it serves plain HTTP on
+// 127.0.0.1:8080 in place of HTTPS, for a Codex container in its network namespace, and
+// needs no authority. It appends one JSON line per request to that file before it
+// returns the response: a streamed message with the text Hi for a POST to /v1/responses,
+// and 404 for every other request. Each line has the method, the path, the SHA-256 of the
+// Authorization header's bearer value, the chatgpt-account-id header, the text of each
+// input message, and the output of each tool call in the input.
+//
+// QORY_TEST_UPSTREAM_SCRIPT, a JSON list of steps, makes the stub return one step for
+// each request to /v1/responses, in order, and the message Hi after the last. A
+// step is one of {"call": <tool>, "args": {...}, "ns": <namespace>}, a function call;
+// {"custom": <tool>, "input": <text>}, a custom tool call such as apply_patch; and
+// {"text": <text>}, a message. An argument "__SESSION__" becomes the session id of the
+// last "session ID <n>" in a tool output of the request, as write_stdin needs. A step
+// with "__SESSION__" and no such tool output gets status 400, which ends the Codex run.
 package main
 
 import (
@@ -28,6 +38,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -43,10 +54,28 @@ type entry struct {
 	Bearer  string   `json:"bearer"`
 	Account string   `json:"account"`
 	Texts   []string `json:"texts,omitempty"`
+	Outputs []string `json:"outputs,omitempty"`
 }
 
-// stub logs each request and answers it.
-type stub struct{ mu sync.Mutex }
+// step is one response of the script, see the package's documentation.
+type step struct {
+	Call   string         `json:"call"`
+	Args   map[string]any `json:"args"`
+	NS     string         `json:"ns"`
+	Custom string         `json:"custom"`
+	Input  string         `json:"input"`
+	Text   string         `json:"text"`
+}
+
+// stub logs each request and returns a response: the next step of script while one is left.
+type stub struct {
+	mu     sync.Mutex
+	script []step
+	next   int
+}
+
+// sessionID finds the session id in a tool output of exec_command.
+var sessionID = regexp.MustCompile(`session ID (\d+)`)
 
 func (s *stub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
@@ -57,12 +86,15 @@ func (s *stub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Input []struct {
-			Role    string `json:"role"`
+			Type    string          `json:"type"`
+			Role    string          `json:"role"`
+			Output  json.RawMessage `json:"output"`
 			Content []struct {
 				Text string `json:"text"`
 			} `json:"content"`
 		} `json:"input"`
 	}
+	session := ""
 	if json.Unmarshal(body, &req) == nil {
 		for _, m := range req.Input {
 			for _, c := range m.Content {
@@ -70,10 +102,40 @@ func (s *stub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					e.Texts = append(e.Texts, m.Role+": "+c.Text[:min(len(c.Text), 300)])
 				}
 			}
+			if strings.HasSuffix(m.Type, "_output") && len(m.Output) > 0 {
+				out := string(m.Output)
+				var text string
+				if json.Unmarshal(m.Output, &text) == nil {
+					out = text
+				}
+				e.Outputs = append(e.Outputs, out)
+				if id := sessionID.FindStringSubmatch(out); id != nil {
+					session = id[1]
+				}
+			}
 		}
 	}
 	s.write(e)
 	if r.Method == http.MethodPost && r.URL.Path == "/v1/responses" {
+		s.mu.Lock()
+		var next *step
+		if s.next < len(s.script) {
+			next = &s.script[s.next]
+			s.next++
+		}
+		n := s.next
+		s.mu.Unlock()
+		if next != nil {
+			if session == "" && needsSession(*next) {
+				fmt.Fprintf(os.Stderr, "upstream: step %d needs a session ID, and no tool output has one\n", n)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprintf(w, `{"error":{"message":"stub: step %d needs a session ID, and no tool output has one","type":"invalid_request_error"}}`, n)
+				return
+			}
+			answerStep(w, *next, n, session)
+			return
+		}
 		answer(w)
 		return
 	}
@@ -82,8 +144,8 @@ func (s *stub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, `{"error":{"message":"stub: not found","type":"invalid_request_error"}}`)
 }
 
-// write appends e to the log, before the answer, so the log has the request once the
-// client has the answer.
+// write appends e to the log, before the response, so the log has the request once the
+// client has the response.
 func (s *stub) write(e entry) {
 	b, _ := json.Marshal(e)
 	s.mu.Lock()
@@ -97,20 +159,65 @@ func (s *stub) write(e entry) {
 	f.Close()
 }
 
-// answer streams a Responses answer with one assistant message, the text Hi.
+// answer streams a response of the Responses API with one assistant message, the text Hi.
 func answer(w http.ResponseWriter) {
+	stream(w, "resp_test_1", map[string]any{"type": "message", "role": "assistant", "id": "msg_test_1",
+		"content": []any{map[string]any{"type": "output_text", "text": "Hi"}}})
+}
+
+// stream streams a response of the Responses API with the id given and one output item.
+func stream(w http.ResponseWriter, id string, item map[string]any) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	for _, e := range []map[string]any{
-		{"type": "response.created", "response": map[string]any{"id": "resp_test_1"}},
-		{"type": "response.output_item.done", "item": map[string]any{"type": "message", "role": "assistant", "id": "msg_test_1",
-			"content": []any{map[string]any{"type": "output_text", "text": "Hi"}}}},
-		{"type": "response.completed", "response": map[string]any{"id": "resp_test_1",
+		{"type": "response.created", "response": map[string]any{"id": id}},
+		{"type": "response.output_item.done", "output_index": 0, "item": item},
+		{"type": "response.completed", "response": map[string]any{"id": id,
 			"usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}},
 	} {
 		b, _ := json.Marshal(e)
 		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e["type"], b)
 	}
+}
+
+// needsSession reports whether an argument of st is "__SESSION__".
+func needsSession(st step) bool {
+	for _, v := range st.Args {
+		if v == "__SESSION__" {
+			return true
+		}
+	}
+	return false
+}
+
+// answerStep streams a response of the Responses API with the one output item of st,
+// the script's step number n, with each argument "__SESSION__" replaced by session.
+func answerStep(w http.ResponseWriter, st step, n int, session string) {
+	id := fmt.Sprint(n)
+	var item map[string]any
+	switch {
+	case st.Call != "":
+		args := map[string]any{}
+		for k, v := range st.Args {
+			if v == "__SESSION__" {
+				var sid int
+				fmt.Sscan(session, &sid)
+				v = sid
+			}
+			args[k] = v
+		}
+		b, _ := json.Marshal(args)
+		item = map[string]any{"type": "function_call", "id": "fc_" + id, "call_id": "call_" + id, "name": st.Call, "arguments": string(b)}
+		if st.NS != "" {
+			item["namespace"] = st.NS
+		}
+	case st.Custom != "":
+		item = map[string]any{"type": "custom_tool_call", "id": "ctc_" + id, "call_id": "call_" + id, "name": st.Custom, "input": st.Input}
+	default:
+		item = map[string]any{"type": "message", "role": "assistant", "id": "msg_" + id,
+			"content": []any{map[string]any{"type": "output_text", "text": st.Text}}}
+	}
+	stream(w, "resp_"+id, item)
 }
 
 // leaf is a server certificate for the addresses of this machine, signed by the
@@ -162,12 +269,23 @@ func leaf() (*tls.Certificate, error) {
 }
 
 func main() {
-	cert, err := leaf()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "upstream:", err)
-		os.Exit(1)
+	s := &stub{}
+	if script := os.Getenv("QORY_TEST_UPSTREAM_SCRIPT"); script != "" {
+		if err := json.Unmarshal([]byte(script), &s.script); err != nil {
+			fmt.Fprintln(os.Stderr, "upstream: the script:", err)
+			os.Exit(1)
+		}
 	}
-	ln, err := tls.Listen("tcp", ":8443", &tls.Config{Certificates: []tls.Certificate{*cert}})
+	var ln net.Listener
+	var err error
+	if os.Getenv("QORY_TEST_UPSTREAM_PLAIN") == "1" {
+		ln, err = net.Listen("tcp", "127.0.0.1:8080")
+	} else {
+		var cert *tls.Certificate
+		if cert, err = leaf(); err == nil {
+			ln, err = tls.Listen("tcp", ":8443", &tls.Config{Certificates: []tls.Certificate{*cert}})
+		}
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "upstream:", err)
 		os.Exit(1)
@@ -177,6 +295,6 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("upstream: listening")
-	fmt.Fprintln(os.Stderr, "upstream:", http.Serve(ln, &stub{}))
+	fmt.Fprintln(os.Stderr, "upstream:", http.Serve(ln, s))
 	os.Exit(1)
 }

@@ -2015,9 +2015,14 @@ Per runtime, the files written into its directory:
   text (§Launching); neither is linked into the checkout, whose
   `.claude/rules/qory-harness.md` and `.claude/agents` register the bare names.
 - **codex**: `config.toml` with the model, the servers as `[mcp_servers.<name>]` tables,
-  and any other `settings/codex/` file, without `shell_environment_policy.set`, whose
-  variables are the launch's, one `agents/<name>.toml` per agent with the body as
-  `developer_instructions`, with `[features]` `shell_tool = false` when the agent's
+  `features.unified_exec_tty = false`, a `hooks.state."<file>:<event>:<group>:<hook>"`
+  table with the `trusted_hash` of each `command` hook of `hooks.json` and `config.toml`
+  that has no U+2028 or U+2029 in its command, status message or matcher, `<file>` being
+  the file in the home's `codex` folder with links resolved and each name in the case on
+  disk, and any other `settings/codex/` file, without `shell_environment_policy.set`,
+  whose variables are the launch's, one `agents/<name>.toml` per agent with the body as
+  `developer_instructions`, with the tier as `model` and `model_reasoning_effort` in a
+  home composed for codex alone, with `[features]` `shell_tool = false` when the agent's
   `tools` key lists no `Bash` or `PowerShell` (an agent with no `tools` key keeps the
   shell; Codex 0.149.0 or later reads this setting), and for a launch the skills copied
   under `skills/` as folders and regular files, since Codex 0.167.2 skips a `SKILL.md`
@@ -2053,14 +2058,18 @@ Per runtime, the files written into its directory:
   Codex arguments.`` and the next line ``A Codex run takes its settings from qory and
   Forager, not from the arguments.``, and on `--search` with ``Remove `--search` from the
   run's Codex arguments.`` and the next line ``A Codex run takes its web search setting
-  from qory and Forager, not from the arguments.`` It stops on
-  `--dangerously-bypass-hook-trust` with ``Remove `--dangerously-bypass-hook-trust` from
-  the run's Codex arguments.`` and the next line ``A Codex run takes its hook trust from
-  qory and Forager, not from the arguments.``, and on `--remote` or
+  from qory and Forager, not from the arguments.`` It stops on `--remote` or
   `--remote-auth-token-env`, also with `=`, with ``Remove `--remote` from the run's Codex
   arguments.`` and the next line ``A Codex run takes its app server from qory and Forager,
-  not from the arguments.`` (`--remote-auth-token-env` likewise). A key or feature in
-  these lines has each control character written as an escape. A hook in
+  not from the arguments.`` (`--remote-auth-token-env` likewise). Every Codex run,
+  walled or not, stops before the agent starts on `--dangerously-bypass-hook-trust`,
+  with ``Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.`` and
+  the next line ``A Codex run takes its hook trust from qory and Forager, not from the
+  arguments.``; on a `--config` or `-c` key at `hooks`, `features.hooks`,
+  `features.codex_hooks` or `features.unified_exec_tty`, under one, or `features`, with
+  the `--config` lines; and on `--enable` or `--disable` of `hooks`, `codex_hooks` or
+  `unified_exec_tty`, with the `--enable` lines. A key or feature in these lines has each
+  control character written as an escape. A hook in
   `settings/codex/config.toml` or `settings/codex/hooks.json` whose `timeout` or
   `additionalContextLimit` is negative or fractional, such as 2.0, fails the compose with
   ``Set `<key>` of the `<event>` hook to a whole number of 0 or more.`` and the next line
@@ -2112,7 +2121,7 @@ Per runtime, the files written into its directory:
 - **goose**: `agents/<name>.md` with `name`, `description` and `model`.
 - **any**: nothing.
 
-An agent's tier is written as `model` and `effort` in a claude agent, and as `model` and `reasoning-effort` in a copilot agent. The effort is one of `low`, `medium`, `high`, `xhigh` and `max` for claude, and one of `minimal`, `low`, `medium`, `high`, `xhigh` and `max` for copilot; another value fails the compose with exit 2. Copilot CLI reports a level the agent's model does not offer and leaves it unapplied. Cursor and opencode take an agent's effort only inside `model`, as `<id>[effort=<level>]` and `<provider>/<model>#<variant>`, which qory does not write: a tier is written as `model` alone for cursor, opencode and goose, and the agent runs at the session's effort, with a `skipped` row that lists the agents. A tier is not written at all for codex and gemini, with a row. On every compose for claude, qory refuses `env` in a `settings/claude/settings.json` fragment that sets `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_EFFORT` or `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`. It refuses them the same way in the configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export. With the home inside the checkout, it also refuses them in the checkout's `.claude/settings.json` and `.claude/settings.local.json` and in the user's Claude Code settings file.
+An agent's tier is written as `model` and `effort` in a claude agent, and as `model` and `reasoning-effort` in a copilot agent. The effort is one of `low`, `medium`, `high`, `xhigh` and `max` for claude, and one of `minimal`, `low`, `medium`, `high`, `xhigh` and `max` for copilot; another value fails the compose with exit 2. Copilot CLI reports a level the agent's model does not offer and leaves it unapplied. Cursor and opencode take an agent's effort only inside `model`, as `<id>[effort=<level>]` and `<provider>/<model>#<variant>`, which qory does not write: a tier is written as `model` alone for cursor, opencode and goose, and the agent runs at the session's effort, with a `skipped` row that lists the agents. A tier is written as `model` and `model_reasoning_effort` for codex in a home composed for codex alone, the effort one of `none`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra`, another value failing the compose with exit 2. In a home composed for codex and another runtime, a tier is not written for codex, since one tier map serves every runtime, with a row. A tier is not written at all for gemini, with a row. On every compose for claude, qory refuses `env` in a `settings/claude/settings.json` fragment that sets `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_EFFORT` or `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`. It refuses them the same way in the configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export. With the home inside the checkout, it also refuses them in the checkout's `.claude/settings.json` and `.claude/settings.local.json` and in the user's Claude Code settings file.
 
 Programs that read `AGENTS.md` and `.agents/skills` and have no separate package include
 DeepSeek Harness, Kilo Code, Kimi CLI, Factory Droid, Mistral Vibe, JetBrains Junie, Augment

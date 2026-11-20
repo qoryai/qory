@@ -31,6 +31,10 @@ var FixedEnvironment = []string{
 	// QORY_WALL_HELPER is the path of the Linux build of qory that TestRunBehindARealWall
 	// mounts. Without them those tests skip.
 	"QORY_TEST_DOCKER", "QORY_WALL_HELPER",
+	// QORY_TEST_HARNESS is the path of a harness checkout whose module core
+	// TestARealWalledCodexRunsTheReportsGuardOfTheHarness composes. Without it that test
+	// skips.
+	"QORY_TEST_HARNESS",
 	// The docker command reads the address of its engine and its configuration from these.
 	"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG",
 	// The go build in realWallImage reads the location of the toolchain, its caches and its

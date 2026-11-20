@@ -63,7 +63,7 @@ func TestTierEffortMistakes(t *testing.T) {
 		{[]string{"--tier-effort", "heavy=low"}, "Use one of the tiers light, balanced, and thinking.\n  heavy is not a tier.\n  The name is in --tier-effort heavy=low."},
 		{[]string{"--tier", "light=a", "--tier-effort", "light=low", "--tier-effort", "light=high"}, "--tier-effort light is given twice; give each tier once"},
 		{[]string{"--tier-effort", "light=low"}, "--tier-effort light=low: give --tier light=<model id> as well; the effort is for the model that --tier maps the tier to"},
-		{[]string{"--tier", "thinking=claude-opus-5-5", "--tier-effort", "thinking=ultra"}, "set tier thinking's effort to one of low, medium, high, xhigh, max for claude agents\nultra is not one (from --tier-effort)"},
+		{[]string{"--tier", "thinking=claude-opus-5-5", "--tier-effort", "thinking=ultra"}, "set tier thinking's effort to one of low, medium, high, xhigh, max\nultra is not one for claude agents (from --tier-effort)"},
 	} {
 		root := tierCheckout(t)
 		machineConfig(t, "harness:\n  tiers:\n    light: claude-haiku-5-5\n")
