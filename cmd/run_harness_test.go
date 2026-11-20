@@ -330,12 +330,13 @@ func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 	wants(t, string(data), "model_verbosity=low")
 }
 
-// TestACodexRunWithoutAWallStopsOnTheHookArguments is a run of codex without a wall given,
-// after qory run's --, an argument that turns off the hooks' trust or a hook setting:
-// each stops the run before Forager's join, with exit status 1 and the text of a walled
-// run, with the flag as typed and the whole key or feature. Line 1 is at most 100
-// characters behind "qory run: ", also with a key of 200 characters. An argument that a
-// walled run alone refuses, such as another feature or another key, reaches the program.
+// TestACodexRunWithoutAWallStopsOnTheHookArguments is a run of codex without a wall
+// given, after qory run's --, an argument that turns off the hooks' trust, sets project
+// trust or changes a hook setting: each stops the run before Forager's join, with exit
+// status 1 and the text of a walled run, with the flag as typed and the whole key or
+// feature. Line 1 is at most 100 characters behind "qory run: ", also with a key of 200
+// characters. An argument that only a walled run stops, such as another feature or
+// another key, reaches the program.
 func TestACodexRunWithoutAWallStopsOnTheHookArguments(t *testing.T) {
 	exportingCheckout(t, fakeRuntime(t))
 	config := func(flag, key string) string {

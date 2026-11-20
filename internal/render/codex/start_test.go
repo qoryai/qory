@@ -128,6 +128,7 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 		{"exec", "--disable=", "hi"},
 		{"exec", "-c", "model=gpt-5", "hi"},
 		{"exec", "-c", "hooks_x=1", "hi"},
+		{"exec", "-c", "projects_x=1", "hi"},
 		{"exec", "-c", "model_provider", "hi"},
 		{"exec", "-c", "--json", "model_provider=x"},
 		{"exec", "--", "-c", "model_provider=x"},
@@ -409,11 +410,11 @@ func TestArgsRefusalsKeepALongKeyOffLineOne(t *testing.T) {
 // TestCheckArgsRefuseTheHookSettingsWithoutAWall is each argument that the check of a
 // run without a wall stops: --dangerously-bypass-hook-trust and --trust in both forms,
 // --config and -c at features.unified_exec_tty, features.codex_hooks, a key under hooks
-// and the features table above them, and --enable and --disable of unified_exec_tty,
-// codex_hooks and hooks. Each stops with the text of a walled run, with the flag as
-// typed and the whole key or feature, and line 1 is at most 100 characters behind "qory
-// run: ". --search, another feature, another key and every argument after -- pass, as
-// only a walled run stops them.
+// and the features table above them, and projects, at it or under it, and --enable and
+// --disable of unified_exec_tty, codex_hooks and hooks. Each stops with the text of a
+// walled run, with the flag as typed and the whole key or feature, and line 1 is at
+// most 100 characters behind "qory run: ". --search, another feature, another key and
+// every argument after -- pass, as only a walled run stops them.
 func TestCheckArgsRefuseTheHookSettingsWithoutAWall(t *testing.T) {
 	rt, err := render.Lookup("codex")
 	if err != nil {
@@ -467,6 +468,7 @@ func TestCheckArgsRefuseTheHookSettingsWithoutAWall(t *testing.T) {
 		{"exec", "--enable", "some_other_feature", "hi"},
 		{"exec", "-c", "model=x", "hi"},
 		{"exec", "-c", "x=projects", "hi"},
+		{"exec", "-c", "projects_x=1", "hi"},
 		{"exec", "-c", "features.apps=false", "--oss", "--profile", "p", "hi"},
 		{"exec", "--", "--dangerously-bypass-hook-trust", "--trust", "-c", "hooks.x=1"},
 	} {

@@ -170,10 +170,10 @@ var argReservedKeys = []reservedKey{{"model_reasoning_effort"}, {"skills"}, {"cl
 // (codex-rs/features/src/lib.rs, FEATURES, and legacy.rs, ALIASES), and the projects
 // table. A shell with a terminal takes commands through write_stdin, for which Codex
 // 0.170.0 runs no PreToolUse hook. Codex 0.169.0 merges the --config values before it
-// reads projects for trust (codex-rs/config/src/loader/mod.rs), so a --config value of
-// projects.<folder>.trust_level = "trusted" trusts that folder for the session, and
-// Codex then reads the folder's .codex/config.toml, which can set features.hooks =
-// false.
+// reads projects for trust (codex-rs/config/src/loader/mod.rs): with a --config value
+// of projects.<folder>.trust_level = "trusted", Codex trusts that folder for the
+// session and then reads the folder's .codex/config.toml, which can set features.hooks
+// = false.
 var trustKeys = []reservedKey{{"hooks"}, {"features", "hooks"}, {"features", "codex_hooks"}, {"features", "unified_exec_tty"}, {"projects"}}
 
 // trustFeatures are the features of [trustKeys] as the values of --enable and --disable.
@@ -235,13 +235,13 @@ func (codex) CheckArgs(args []string) error {
 // last flag for a key, so such an argument would replace Forager's value. Codex reads
 // the key of --config as the text before the first =, without spaces at either end,
 // with use_legacy_landlock read as features.use_legacy_landlock, as a dotted path
-// (codex-rs/config/src/overrides.rs). A key at a reserved path or under one is refused.
-// A key above one is refused whatever its value: the value replaces the whole table,
-// Forager's --config values in it too. Codex refuses a --config, -c, --enable or
-// --disable with no value after it, or with a value that starts with -, so such a flag
-// passes here. --oss, --ignore-user-config, --search and --trust take no value, and
-// Codex exits with an error on one given with =; checkArgs stops such a form as well.
-// Codex reads no long flag by a shortened name: its parser does not turn on
+// (codex-rs/config/src/overrides.rs). checkArgs stops a key at a reserved path or under
+// one, and a key above one whatever its value: the value replaces the whole table,
+// Forager's --config values in it too. Codex exits with an error on a --config, -c,
+// --enable or --disable with no value after it, or with a value that starts with -, so
+// such a flag passes here. --oss, --ignore-user-config, --search and --trust take no
+// value, and Codex exits with an error on one given with =; checkArgs stops such a form
+// as well. Codex reads no long flag by a shortened name: its parser does not turn on
 // infer_long_args. Of its short flags, only -h and -V take no value, and both print and
 // exit, so no other flag comes before -c or -p in one word.
 func checkArgs(args []string, walled bool) error {

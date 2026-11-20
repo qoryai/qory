@@ -694,13 +694,11 @@ release may change what an existing document does, and states it under Upgrading
   line, so the first line does not grow with the key. `--trust` stops the run with
   ``Remove `--trust` from the run's Codex arguments.`` and the next line `` `--trust`
   saves trust for a project folder with no trust setting, and Codex then reads the
-  folder's `.codex/config.toml`, which can set `features.hooks = false`. `` With
-  `--trust`, `codex exec` saves trust for a project folder with no trust setting in
-  `$CODEX_HOME/config.toml`, and Codex then reads the folder's `.codex/config.toml`, which
-  can set `features.hooks = false`. Before, a run without a wall stopped on most of them
-  at Forager's check, with Forager's lines, and passed a key under `hooks`. A walled run
-  stopped on `hooks.state` and `hooks={…}`, and passed the other keys under `hooks`, such
-  as `hooks.Stop`. Every run passed `--trust`.
+  folder's `.codex/config.toml`, which can set `features.hooks = false`. `` `codex exec
+  --trust` writes that trust into `$CODEX_HOME/config.toml`. Before, a run without a wall
+  stopped on most of them at Forager's check, with Forager's lines, and passed a key under
+  `hooks`. A walled run stopped on `hooks.state` and `hooks={…}`, and passed the other
+  keys under `hooks`, such as `hooks.Stop`. Every run passed `--trust`.
 - A run from a run code whose explore documents contain no `run_settings` stops before
   anything is installed or fetched, with `The run settings set no runtime, so the run
   did not start; the code is used.` and `qory runs one of claude and codex.` Until now,
@@ -1482,12 +1480,11 @@ release may change what an existing document does, and states it under Upgrading
   `--config` line.
 - An unwalled Codex run stops before Codex starts, with exit status 1, when a Codex
   argument before `--` sets a key Forager sets for Codex, such as `model_provider` or
-  `web_search`, or `model_providers`, `profile`, `profiles`, `projects`,
-  `responses_api_metadata`, `openai_base_url`, `chatgpt_base_url`,
-  `experimental_realtime_*_base_url`, `skills` or `cloud.skills`, a key under one or a
-  table above one; when it enables or disables `plugins`, `apps` or `connectors`; or
-  when it is `--oss`, `--local-provider`, `--profile`, `-p`, `--search`,
-  `--ignore-user-config` or `--remote`. qory prints
+  `web_search`, or `model_providers`, `profile`, `profiles`, `responses_api_metadata`,
+  `openai_base_url`, `chatgpt_base_url`, `experimental_realtime_*_base_url`, `skills` or
+  `cloud.skills`, a key under one or a table above one; when it enables or disables
+  `plugins`, `apps` or `connectors`; or when it is `--oss`, `--local-provider`,
+  `--profile`, `-p`, `--search`, `--ignore-user-config` or `--remote`. qory prints
   Forager's two lines, such as ``✗ remove the -c that sets model_provider from the
   launch's arguments`` and the next line ``the session sets that setting for Codex, or the
   setting changes where Codex sends its requests`` for `-c model_provider=x`, or

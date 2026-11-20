@@ -4791,8 +4791,8 @@ Forager puts its `--config` flags ahead of the run's Codex arguments, and Codex 
 last flag for a key.
 
 qory stops every Codex run, walled or not, before the agent starts, with exit status 1,
-when an argument before `--` turns off the trust of the hooks, trusts the project
-folder, or changes a hook setting:
+when an argument before `--` turns off the trust of the hooks, sets project trust, or
+changes a hook setting:
 
 - `--dangerously-bypass-hook-trust`, also with `=`: ``Remove
   `--dangerously-bypass-hook-trust` from the run's Codex arguments.`` and the next line
@@ -4853,9 +4853,9 @@ one of these:
 
 - `--config <key>=<value>` or `-c` in any form, where the key is a key Forager sets for
   Codex, such as `model_provider`, `web_search` or `features.apps`, or `model_providers`,
-  `profile`, `profiles`, `projects`, `responses_api_metadata`, `openai_base_url`,
-  `chatgpt_base_url`, `experimental_realtime_*_base_url`, `skills` or `cloud.skills`, a
-  key under one, or a table above one.
+  `profile`, `profiles`, `responses_api_metadata`, `openai_base_url`, `chatgpt_base_url`,
+  `experimental_realtime_*_base_url`, `skills` or `cloud.skills`, a key under one, or a
+  table above one.
 - `--enable` or `--disable` of `plugins`, `apps` or `connectors`.
 - `--oss`, `--local-provider`, `--profile`, `-p`, `--search`, `--ignore-user-config` or
   `--remote`.
