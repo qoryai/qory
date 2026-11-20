@@ -100,7 +100,11 @@ func RegistryFetch(client *http.Client, host, arch, instance string) Fetch {
 		if err != nil {
 			return Release{}, err
 		}
-		rel.Signed, _ = signedName(runtime, rel.Version, arch)
+		signed, ok := signedName(runtime, rel.Version, arch)
+		if !ok {
+			return Release{}, fmt.Errorf("Install %s some other way\nqory installs only %s", runtime, strings.Join(Runtimes(), " and "))
+		}
+		rel.Signed = signed
 		rel.Program, rel.Folder = layout(runtime, arch)
 		return rel, nil
 	}

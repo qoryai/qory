@@ -1100,11 +1100,21 @@ it reads the tarball:
   ```
 
 - only keys that expired: a newer version of the runtime is signed by npm's current key.
+  With a pinned version, the fix is to pin a newer one:
 
   ```text
-  qory run: Pin a newer version of codex. Its release is signed only by an npm key that expired on 2025-01-29.
-  npm signed codex 0.170.0 with a key that expired on 2025-01-29.
-  The key is SHA256:<keyid>.
+  qory run: Pin a newer version of codex.
+    npm signed codex <version> with a key that expired on 2025-01-29.
+    The key is SHA256:<keyid>.
+  ```
+
+  With no pin, the fix is to check where the release comes from, npm or the registry's
+  runtime cache:
+
+  ```text
+  qory run: Check the source of codex's releases.
+    npm signed codex <version> with a key that expired on 2025-01-29.
+    The key is SHA256:<keyid>.
   ```
 
 A version's folder that an earlier run installed is used only after the same check.

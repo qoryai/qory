@@ -236,7 +236,7 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 			return Installed{}, fmt.Errorf("Update qory.\n%w", err)
 		}
 	}
-	if err := verify(rel, keys, time.Now(), o.Runtime); err != nil {
+	if err := verify(rel, keys, time.Now(), o.Runtime, o.Version != ""); err != nil {
 		return Installed{}, err
 	}
 	f := folder{base: filepath.Join(o.Folder, o.Runtime), runtime: o.Runtime}

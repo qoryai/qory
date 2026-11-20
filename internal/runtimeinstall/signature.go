@@ -173,8 +173,9 @@ func decodeSignature(r json.RawMessage, strict bool) (Signature, bool) {
 // runtime's name, such as codex; an error shows the release as <runtime> <rel.Version>.
 // A bad signature by a key qory has is refused first, then a key qory does not have,
 // then an expired key. The key's id is on the last line, so the cause's first line stays
-// short.
-func verify(rel Release, keys []SigningKey, now time.Time, runtime string) error {
+// short. pinned is whether the install has a pinned version: the fix for an expired key
+// is then a newer pin, and otherwise the source of the releases.
+func verify(rel Release, keys []SigningKey, now time.Time, runtime string, pinned bool) error {
 	what := runtime + " " + rel.Version
 	if len(rel.Signatures) == 0 {
 		return fmt.Errorf(textRelease+"npm has no signature of %s", what)
@@ -202,9 +203,11 @@ func verify(rel Release, keys []SigningKey, now time.Time, runtime string) error
 	case unknown != "":
 		return fmt.Errorf("Update qory.\nnpm signed %s with a key that this qory does not have.\nThe key is %s.", what, unknown)
 	}
-	expiry := keysExpiry(keys, expired)
-	return fmt.Errorf("Pin a newer version of %s. Its release is signed only by an npm key that expired on %s.\n"+
-		"npm signed %s with a key that expired on %s.\nThe key is %s.", runtime, expiry, what, expiry, expired)
+	fix := "Check the source of " + runtime + "'s releases."
+	if pinned {
+		fix = "Pin a newer version of " + runtime + "."
+	}
+	return fmt.Errorf("%s\n  npm signed %s with a key that expired on %s.\n  The key is %s.", fix, what, keysExpiry(keys, expired), expired)
 }
 
 // keysExpiry is the expiry date of the key keyid of keys, as 2006-01-02.

@@ -133,10 +133,14 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 				return Release{}, fmt.Errorf(textRelease+"The dist.signatures of %s\n  are not npm's signatures: %v", what, err)
 			}
 		}
+		signed, ok := signedName(runtime, version, arch)
+		if !ok {
+			return Release{}, fmt.Errorf("Install %s some other way\nqory installs only %s from npm", runtime, strings.Join(Runtimes(), " and "))
+		}
 		rel := Release{
 			Version:    version,
 			Integrity:  doc.Dist.Integrity,
-			Signed:     platform + "@" + docVersion,
+			Signed:     signed,
 			Signatures: sigs,
 			Open: func(ctx context.Context) (io.ReadCloser, error) {
 				resp, err := n.get(ctx, tarball.String(), "", "the tarball of "+what)

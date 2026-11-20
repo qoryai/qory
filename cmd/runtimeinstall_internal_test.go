@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoryai/forager/accesskey"
 
@@ -238,6 +239,30 @@ func TestTheDispatchedCauseOfTheLongestPinFits(t *testing.T) {
 	}
 	if len(line) > 100 {
 		t.Errorf("the line has %d characters: %s", len(line), line)
+	}
+}
+
+// TestAnExpiredKeysCauseStandsAlone installs claude 2.1.320, signed only by a key that
+// expired on 2025-01-29, pinned and with no pin. A dispatched run shows the same cause
+// for both, alone, with no indent on its first line; a person's run shows the fix line
+// of each, then the cause on indented lines.
+func TestAnExpiredKeysCauseStandsAlone(t *testing.T) {
+	keys := rt.Keys()
+	keys[0].Expires = time.Date(2025, 1, 29, 0, 0, 0, 0, time.UTC)
+	const cause = "npm signed claude 2.1.320 with a key that expired on 2025-01-29.\n  The key is " + rt.KeyID
+	for pin, fix := range map[string]string{"2.1.320": "Pin a newer version of claude.", "": "Check the source of claude's releases."} {
+		src := &rt.Source{}
+		src.Publish("2.1.320", rt.PlainTarball(t, "2.1.320"))
+		_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: src.Fetch, Runtime: "claude", Version: pin, Folder: t.TempDir(), Keys: keys})
+		if err == nil {
+			t.Fatalf("pin %q: the install succeeded", pin)
+		}
+		if got := causeOnly(installFailed(err)).Error(); got != cause {
+			t.Errorf("pin %q: a dispatched run shows %q, want %q", pin, got, cause)
+		}
+		if got, want := installFailed(err).Error(), fix+"\n  "+cause+"."; got != want {
+			t.Errorf("pin %q: a person's run shows %q, want %q", pin, got, want)
+		}
 	}
 }
 

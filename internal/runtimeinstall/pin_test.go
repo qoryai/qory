@@ -208,6 +208,43 @@ func TestTheRegistryRefusesAPinnedTagThatIsNotThePin(t *testing.T) {
 	}
 }
 
+// TestAPinnedVersionWithABadSignatureStops pins claude 2.1.320, from npm and from the
+// registry's runtime cache, whose signature is npm's signature of 2.1.319: the install
+// stops because the signature does not verify, and reads no tarball and no layer.
+func TestAPinnedVersionWithABadSignatureStops(t *testing.T) {
+	const want = "Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID
+	const other = "@anthropic-ai/claude-code-linux-x64@2.1.319"
+	t.Run("npm", func(t *testing.T) {
+		npm := rt.StartNpm(t)
+		npm.Publish("2.1.320")
+		npm.Publish("2.1.321")
+		npm.SignWith(func(_, i string) any { return rt.Signatures(other, i) })
+		_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+			Keys: rt.Keys(), Fetch: runtimeinstall.NpmFetch(http.DefaultClient, npm.URL(), "amd64"), Runtime: "claude", Version: "2.1.320", Folder: t.TempDir(),
+		})
+		if err == nil || err.Error() != want || npm.TarballGets() != 0 {
+			t.Fatalf("the install returned %v after %d tarballs, want %q", err, npm.TarballGets(), want)
+		}
+	})
+	t.Run("the registry", func(t *testing.T) {
+		f := newFromRegistry(t)
+		tarball := rt.PlainTarball(t, "2.1.320")
+		bad := rt.SignaturesJSON(other, rt.Integrity(tarball))
+		f.reg.Publish("2.1.320", false, map[string]rt.Layer{"amd64": {Tarball: tarball, Signatures: &bad}})
+		f.reg.PublishPlain("2.1.321")
+		client, err := runtimeinstall.ProxyClient(f.proxy.URL(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+			Keys: rt.Keys(), Fetch: runtimeinstall.RegistryFetch(client, f.reg.Host(), "amd64", f.reg.Instance()), Runtime: "claude", Version: "2.1.320", Folder: f.folder,
+		})
+		if err == nil || err.Error() != want || f.reg.BlobGets() != 0 {
+			t.Fatalf("the install returned %v after %d layers, want %q", err, f.reg.BlobGets(), want)
+		}
+	})
+}
+
 // TestInstallRefusesAPinThatIsNotAnExactVersion pins versions that are not exact: a
 // dist-tag, a path, a first character that is not a digit, a +, which no OCI tag has,
 // and a version of 33 characters. Install refuses each before it fetches.
