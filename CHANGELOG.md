@@ -30,6 +30,9 @@ release may change what an existing document does, and states it under Upgrading
   Qory Apiary's closes the run `failed`. The steps before a later session need a wall and no
   container of the run kept, and past the setup's limit they close the run `cancelled` with
   `timeout`, exit 124.
+- The agent of a walled run gets `QORY_SESSION`, the session's number from 1, which Forager
+  sets at each join: `qory run agent-env` keeps the name, as it keeps `QORY_RUN_ID`. Before,
+  the verb removed it, and the agent of a walled run had no session number.
 - A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
   the type whose launch version sets what the workflow's session may push. A module
   declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: one

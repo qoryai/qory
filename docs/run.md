@@ -2766,7 +2766,8 @@ session ended. For a session, qory prints
    removes the home of the session before, with its files;
 4. joins the session with the answer's model key and time limit, counted from the agent's
    start. The route to qory serves the session that runs (see [The route to
-   qory](#the-route-to-qory)).
+   qory](#the-route-to-qory)). Each session's agent gets its number in `QORY_SESSION`,
+   starting at 1.
 
 The steps before a later session have the setup's limit of 30 minutes from their start. A
 later session's steps past that limit close the run `cancelled` with the reason `timeout`,

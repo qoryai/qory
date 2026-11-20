@@ -678,3 +678,40 @@ func TestASessionWithoutAKeyAfterOneWithAKeyJoinsWithNone(t *testing.T) {
 		}
 	}
 }
+
+// TestEachSessionOfAWalledRunKeepsItsNumberThroughAgentEnv is a walled run of two sessions
+// whose agent starts through the agent-env verb. The file of kept names of each session lists
+// QORY_SESSION, so the agent's environment after the verb has the number that Forager sets at
+// the join: 1, then 2. The fake join sets no variable, so the value given to the verb stands
+// in for Forager's.
+func TestEachSessionOfAWalledRunKeepsItsNumberThroughAgentEnv(t *testing.T) {
+	defer cmd.StartThroughAgentEnv()()
+	var mu sync.Mutex
+	kept := map[int][]byte{}
+	r := runLoop(t, loopSetup{
+		answers: []string{laterAnswer(2, "claude", "example-provider-2", 30)},
+		joined: func(n int, spec session.SessionSpec) {
+			for i, a := range spec.Args {
+				if a == "agent-env" && i+1 < len(spec.Args) {
+					data, err := os.ReadFile(spec.Args[i+1])
+					if err != nil {
+						t.Error(err)
+					}
+					mu.Lock()
+					kept[n] = data
+					mu.Unlock()
+				}
+			}
+		},
+	})
+	if r.err != nil || len(r.joins) != 2 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	for n := 1; n <= 2; n++ {
+		if kept[n] == nil {
+			t.Fatalf("session %d's launch does not start through the agent-env verb", n)
+		}
+		number := strconv.Itoa(n)
+		wants(t, agentEnvSees(t, kept[n], session.EnvSession+"="+number), "\n"+session.EnvSession+"="+number+"\n")
+	}
+}
