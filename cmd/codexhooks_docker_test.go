@@ -87,7 +87,7 @@ func TestARealWalledCodexRunsAHookOfEtcCodexTurnedOff(t *testing.T) {
 		t.Skip("no docker command")
 	}
 	if os.Getenv(envRealCodexChild) == "" {
-		runRealCodexChild(t, realCodexVersion, realCodexSums)
+		runRealCodexChild(t, realCodexVersion, realCodexSums, codexChild{})
 		return
 	}
 	var setup realCodexSetup

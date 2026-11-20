@@ -88,12 +88,12 @@ func TestMain(m *testing.M) {
 	if slices.Contains(os.Args, "-test.run=^TestForagerRunKeepsThePushCredentialOnThePushProxyAlone$") {
 		realPush = os.Getenv("QORY_TEST_REAL_PUSH")
 	}
-	// The child of TestARealWalledCodexRunReachesTheModelThroughTheGateway, and of
-	// TestARealWalledCodexRunsAHookOfEtcCodexTurnedOff, keeps its setup,
-	// QORY_TEST_REAL_CODEX_CHILD, in the same way. Without it, the child starts another
-	// child binary, which does the same, until the time runs out.
+	// The child of each test of a real walled Codex run that runRealCodexChild starts keeps
+	// its setup, QORY_TEST_REAL_CODEX_CHILD, in the same way. Without it, the child starts
+	// another child binary, which does the same, until the time runs out.
 	realCodex := ""
-	for _, name := range []string{"TestARealWalledCodexRunReachesTheModelThroughTheGateway", "TestARealWalledCodexRunsAHookOfEtcCodexTurnedOff"} {
+	for _, name := range []string{"TestARealWalledCodexRunReachesTheModelThroughTheGateway", "TestARealWalledCodexRunsAHookOfEtcCodexTurnedOff",
+		"TestARealWalledCodexRunsTheGuardHook", "TestARealWalledCodexRunsTheReportsGuardOfTheHarness"} {
 		if slices.Contains(os.Args, "-test.run=^"+name+"$") {
 			realCodex = os.Getenv("QORY_TEST_REAL_CODEX_CHILD")
 		}
