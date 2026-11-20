@@ -46,7 +46,7 @@ func TestCodexRefusesReservedKeys(t *testing.T) {
 		t.Run(c.key, func(t *testing.T) {
 			res, home := composeEnv(t, withFile("modules/core/settings/codex/config.toml", c.fragment), nil, "codex")
 			err := render.Build(res, home, lookup(t, "codex"))
-			want := "Remove `" + c.key + "` from `settings/codex/config.toml`.\n  A Codex run takes this key from qory and Forager, not from the harness."
+			want := "Remove the reserved key from `settings/codex/config.toml`.\n  qory reserves `" + c.key + "`; a Codex run takes no value for it from the harness."
 			if err == nil || err.Error() != want {
 				t.Fatalf("Build: %v, want %q", err, want)
 			}
@@ -62,6 +62,35 @@ func TestCodexRefusesReservedKeys(t *testing.T) {
 	}
 	config := read(t, filepath.Join(home, "codex", "config.toml"))
 	has(t, "codex config.toml", config, "other = true", `command = "/bin/true"`)
+}
+
+// TestCodexReservedKeyTextKeepsTheKeyOffLineOne is a Codex fragment that sets a reserved
+// key of 200 characters and one with an escape and a line end in its TOML-quoted name:
+// line 1 of the text is at most 100 characters behind "qory run: ", the cause line has the
+// whole key with each control character written as a Go escape, and the text has no raw
+// control character but its one line end.
+func TestCodexReservedKeyTextKeepsTheKeyOffLineOne(t *testing.T) {
+	long := "experimental_realtime_" + strings.Repeat("x", 200) + "_base_url"
+	for _, c := range []struct{ fragment, shown string }{
+		{long + " = \"wss://example.com\"\n", long},
+		{"\"experimental_realtime_\\u001b[2J\\n_base_url\" = \"wss://example.com\"\n", `experimental_realtime_\x1b[2J\n_base_url`},
+	} {
+		res, home := composeEnv(t, withFile("modules/core/settings/codex/config.toml", c.fragment), nil, "codex")
+		err := render.Build(res, home, lookup(t, "codex"))
+		if err == nil {
+			t.Fatalf("Build(%q): no error, want the reserved key", c.fragment)
+		}
+		first, cause, _ := strings.Cut(err.Error(), "\n")
+		if line := "qory run: " + first; utf8.RuneCountInString(line) > 100 {
+			t.Errorf("Build(%q): line 1 of %d characters behind qory run:, want at most 100: %q", c.fragment, utf8.RuneCountInString(line), line)
+		}
+		if !strings.Contains(cause, "`"+c.shown+"`") {
+			t.Errorf("Build(%q): cause line %q, want it to contain `%s`", c.fragment, cause, c.shown)
+		}
+		if strings.ContainsFunc(first+cause, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+			t.Errorf("Build(%q): a raw control character in %q", c.fragment, err.Error())
+		}
+	}
 }
 
 // TestCodexRefusesABadHookNumber is a Codex config.toml or hooks.json fragment with a

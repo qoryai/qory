@@ -535,7 +535,7 @@ func TestARealWalledCodexRunReachesTheModelThroughTheGateway(t *testing.T) {
 					"wall:\n  adapter: docker\n  helper: "+helper+"\n  user: \"1000:1000\"\n  image: "+image+"\n")
 				return nil
 			}, []string{"--home", filepath.Join(tempDir(t), "home")}, func(s string) string {
-				return s + "workflows:\n  hello:\n    time_limit: 5m\n    access: read\n"
+				return s + "workflows:\n  hello:\n    access: read\n"
 			}, func(d map[string]any) {
 				d["run_settings"] = map[string]any{"runtime": "codex"}
 			}, helloSkill, nil)

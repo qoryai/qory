@@ -763,7 +763,7 @@ Codex reads hooks from `hooks.json` and from the `hooks` table of `config.toml`.
 - **A run without a wall.** Codex runs a hook of `$CODEX_HOME` only when `hooks.state` in `$CODEX_HOME/config.toml` has the hook's hash, and skips it with no error otherwise. qory writes a `trusted_hash` for each `command` hook into the `config.toml` of the home's `codex` folder, keyed by `<home>/codex/<file>:<event>:<group>:<hook>` with every link in the path resolved and each name in the case on disk, as Codex resolves `CODEX_HOME`. qory starts Codex without `--dangerously-bypass-hook-trust`, which would also run hooks that the agent writes.
 - **A walled run.** qory binds every hook of both files in `/etc/codex/hooks.json`, read-only, where Codex runs it with no hash.
 
-qory stops every Codex run, walled or not, before the agent starts, when its Codex arguments before `--` contain `--dangerously-bypass-hook-trust`, set the `hooks` table or the feature `hooks`, `codex_hooks` or `unified_exec_tty` with `-c` or `--config`, or turn one of those features on or off with `--enable` or `--disable`. See [Codex arguments that stop a run](run.md#codex-arguments-that-stop-a-run).
+qory stops every Codex run, walled or not, before the agent starts, when its Codex arguments before `--` contain `--dangerously-bypass-hook-trust` or `--trust`, set the `hooks` table, the `projects` table or the feature `hooks`, `codex_hooks` or `unified_exec_tty` with `-c` or `--config`, or turn one of those features on or off with `--enable` or `--disable`. See [Codex arguments that stop a run](run.md#codex-arguments-that-stop-a-run).
 
 Three limits apply to a run without a wall:
 

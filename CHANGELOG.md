@@ -680,16 +680,25 @@ release may change what an existing document does, and states it under Upgrading
   through `write_stdin`, for which Codex runs no `PreToolUse` hook. A Codex agent can no
   longer start an interactive shell with a terminal.
 - qory stops every Codex run, walled or not, before the agent starts, when its Codex
-  arguments before `--` contain `--dangerously-bypass-hook-trust`, also with `=`, set
-  `hooks`, `features.hooks`, `features.codex_hooks` or `features.unified_exec_tty` with
-  `-c` or `--config`, a key under one, such as `hooks.Stop`, or the table `features`, or
-  pass `hooks`, `codex_hooks` or `unified_exec_tty` to `--enable` or `--disable`. The
-  error has two lines, such as ``Remove `--config hooks.Stop` from the run's Codex
-  arguments.`` and ``A Codex run takes this key from qory and Forager, not from the
-  arguments.`` Before, a run without a wall stopped on most of them at Forager's check,
-  with Forager's lines, and passed a key under `hooks`. A walled run stopped on
-  `hooks.state` and `hooks={…}`, and passed the other keys under `hooks`, such as
-  `hooks.Stop`.
+  arguments before `--` contain `--dangerously-bypass-hook-trust` or `--trust`, each also
+  with `=`, set `hooks`, `features.hooks`, `features.codex_hooks`,
+  `features.unified_exec_tty` or `projects` with `-c` or `--config`, a key under one, such
+  as `hooks.Stop`, or the table `features`, or pass `hooks`, `codex_hooks` or
+  `unified_exec_tty` to `--enable` or `--disable`. The error has two lines, ``Remove the
+  `<flag>` flag and its value from the run's Codex arguments.`` and ``In this run, qory
+  reserves `<key>`; the run takes no value for it from the arguments.``, where `<flag>` is
+  `-c`, `--config`, `--enable` or `--disable` as typed and `<key>` is the key, such as
+  `hooks.Stop`, or `features.<feature>` for `--enable` and `--disable`. For the table
+  `features` in a run without a wall, the second line is `` `features` is a table that
+  contains `features.hooks`, which qory reserves in this run. `` The key is on the second
+  line, so the first line does not grow with the key. `--trust` stops the run with
+  ``Remove `--trust` from the run's Codex arguments.`` and the next line `` `--trust`
+  saves trust for a project folder with no trust setting, and Codex then reads the
+  folder's `.codex/config.toml`, which can set `features.hooks = false`. `` `codex exec
+  --trust` writes that trust into `$CODEX_HOME/config.toml`. Before, a run without a wall
+  stopped on most of them at Forager's check, with Forager's lines, and passed a key under
+  `hooks`. A walled run stopped on `hooks.state` and `hooks={…}`, and passed the other
+  keys under `hooks`, such as `hooks.Stop`. Every run passed `--trust`.
 - A run from a run code whose explore documents contain no `run_settings` stops before
   anything is installed or fetched, with `The run settings set no runtime, so the run
   did not start; the code is used.` and `qory runs one of claude and codex.` Until now,
@@ -1422,19 +1431,22 @@ release may change what an existing document does, and states it under Upgrading
   `chatgpt_base_url`, `responses_api_metadata`, a key of the form
   `experimental_realtime_*_base_url`, `profile`, `profiles`, `cli_auth_credentials_store`,
   `allow_login_shell`, `model_instructions_file`, `experimental_compact_prompt_file`,
-  `model_catalog_json`, `js_repl_node_path`, `sqlite_home` or `log_dir`, with ``Remove
-  `<key>` from `settings/codex/config.toml`.`` and the next line ``A Codex run takes this
-  key from qory and Forager, not from the harness.`` A fragment may still set the other
-  keys of `hooks`, such as `hooks.Stop`.
+  `model_catalog_json`, `js_repl_node_path`, `sqlite_home` or `log_dir`, with ``Remove the
+  reserved key from `settings/codex/config.toml`.`` and the next line ``qory reserves
+  `<key>`; a Codex run takes no value for it from the harness.`` The key on the second
+  line has each control character written as an escape, such as `\n`. A fragment may
+  still set the other keys of `hooks`, such as `hooks.Stop`.
 - A walled Codex run refuses Codex arguments before `--` that set one of those keys or
   `model_reasoning_effort`, a key under one, or a table above one, such as `-c
   features.shell_snapshot=true` or `--config model_providers={}`, in the forms `--config`,
-  `--config=`, `-c`, `-c<key>=<value>` and `-c=<key>=<value>`, with ``Remove `--config
-  <key>` from the run's Codex arguments.`` and the next line ``A Codex run takes this key
-  from qory and Forager, not from the arguments.`` The run stops before the agent starts,
-  with exit status 1. Forager puts its `--config` flags first, and Codex takes the last
-  one for a key. An unwalled run gets Forager's shorter check, in the entry for unwalled
-  Codex runs.
+  `--config=`, `-c`, `-c<key>=<value>` and `-c=<key>=<value>`, with ``Remove the `<flag>`
+  flag and its value from the run's Codex arguments.`` and the next line ``In this run,
+  qory reserves `<key>`; the run takes no value for it from the arguments.``, where
+  `<flag>` is `-c` or `--config` as typed. For a table above a reserved key, such as
+  `feedback`, the next line is `` `feedback` is a table that contains `feedback.enabled`,
+  which qory reserves in this run. `` The run stops before the agent starts, with exit
+  status 1. Forager puts its `--config` flags first, and Codex takes the last one for a
+  key. An unwalled run gets Forager's shorter check, in the entry for unwalled Codex runs.
 - A walled Codex run refuses `--oss` and `--local-provider` before `--`, with ``Remove
   `<flag>` from the run's Codex arguments.`` and the next line ``A Codex run takes its
   model provider from qory and Forager, not from the arguments.``, and `--profile` in the
@@ -1444,11 +1456,13 @@ release may change what an existing document does, and states it under Upgrading
   the agent starts, with exit status 1. An unwalled run gets Forager's shorter check, in
   the entry for unwalled Codex runs. A run of another runtime is unchanged.
 - A walled Codex run refuses `--enable <feature>` and `--disable <feature>` before `--`,
-  also as `--enable=<feature>`, for every feature, the legacy name `connectors` too: Codex
-  reads them as `--config features.<feature>=true` or `false`. The text is ``Remove
-  `--enable <feature>` from the run's Codex arguments.`` and the next line ``A Codex run
-  takes this key from qory and Forager, not from the arguments.``, or the same with
-  `--disable`.
+  also as `--enable=<feature>`, for every feature other than `hooks`, `codex_hooks` and
+  `unified_exec_tty`, the legacy name `connectors` too: Codex reads them as `--config
+  features.<feature>=true` or `false`. The text is ``Remove the `--enable` flag and its
+  value from the run's Codex arguments.`` and the next line ``A walled Codex run takes no
+  feature from its arguments, `<feature>` included.``, or the same with `--disable`. For
+  `hooks`, `codex_hooks` and `unified_exec_tty`, the next line is ``In this run, qory
+  reserves `features.<feature>`; the run takes no value for it from the arguments.``
 - A walled Codex run refuses `--ignore-user-config` before `--`, with ``Remove
   `--ignore-user-config` from the run's Codex arguments.`` and the next line ``A Codex run
   takes its settings from qory and Forager, not from the arguments.``, and `--search`,
@@ -1466,12 +1480,11 @@ release may change what an existing document does, and states it under Upgrading
   `--config` line.
 - An unwalled Codex run stops before Codex starts, with exit status 1, when a Codex
   argument before `--` sets a key Forager sets for Codex, such as `model_provider` or
-  `web_search`, or `model_providers`, `profile`, `profiles`, `projects`,
-  `responses_api_metadata`, `openai_base_url`, `chatgpt_base_url`,
-  `experimental_realtime_*_base_url`, `skills` or `cloud.skills`, a key under one or a
-  table above one; when it enables or disables `plugins`, `apps` or `connectors`; or
-  when it is `--oss`, `--local-provider`, `--profile`, `-p`, `--search`,
-  `--ignore-user-config` or `--remote`. qory prints
+  `web_search`, or `model_providers`, `profile`, `profiles`, `responses_api_metadata`,
+  `openai_base_url`, `chatgpt_base_url`, `experimental_realtime_*_base_url`, `skills` or
+  `cloud.skills`, a key under one or a table above one; when it enables or disables
+  `plugins`, `apps` or `connectors`; or when it is `--oss`, `--local-provider`,
+  `--profile`, `-p`, `--search`, `--ignore-user-config` or `--remote`. qory prints
   Forager's two lines, such as ``✗ remove the -c that sets model_provider from the
   launch's arguments`` and the next line ``the session sets that setting for Codex, or the
   setting changes where Codex sends its requests`` for `-c model_provider=x`, or

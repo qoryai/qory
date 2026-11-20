@@ -312,7 +312,7 @@ func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 	}
 	log := walledForager(t)
 	_, err = run(t, "run", "codex", "--", "-c", "model_provider=x")
-	want := "Remove `--config model_provider` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
+	want := "Remove the `-c` flag and its value from the run's Codex arguments.\n  In this run, qory reserves `model_provider`; the run takes no value for it from the arguments."
 	if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
 		t.Errorf("a walled run: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
 	}
@@ -330,33 +330,44 @@ func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 	wants(t, string(data), "model_verbosity=low")
 }
 
-// TestACodexRunWithoutAWallStopsOnTheHookArguments is a run of codex without a wall given,
-// after qory run's --, an argument that turns off the hooks' trust or a hook setting:
-// each stops the run before Forager's join, with exit status 1 and the text of a walled
-// run, whose lines are each at most 100 characters. An argument that a walled run alone
-// refuses, such as another feature or another key, reaches the program.
+// TestACodexRunWithoutAWallStopsOnTheHookArguments is a run of codex without a wall
+// given, after qory run's --, an argument that turns off the hooks' trust, sets project
+// trust or changes a hook setting: each stops the run before Forager's join, with exit
+// status 1 and the text of a walled run, with the flag as typed and the whole key or
+// feature. Line 1 is at most 100 characters behind "qory run: ", also with a key of 200
+// characters. An argument that only a walled run stops, such as another feature or
+// another key, reaches the program.
 func TestACodexRunWithoutAWallStopsOnTheHookArguments(t *testing.T) {
 	exportingCheckout(t, fakeRuntime(t))
-	config := func(key string) string {
-		return "Remove `--config " + key + "` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
+	config := func(flag, key string) string {
+		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  In this run, qory reserves `" + key + "`; the run takes no value for it from the arguments."
 	}
 	feature := func(flag, name string) string {
-		return "Remove `" + flag + " " + name + "` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
+		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  In this run, qory reserves `features." + name + "`; the run takes no value for it from the arguments."
+	}
+	above := func(flag, key, reserved string) string {
+		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  `" + key + "` is a table that contains `" + reserved + "`, which qory reserves in this run."
 	}
 	hooks := "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.\n  A Codex run takes its hook trust from qory and Forager, not from the arguments."
+	trust := "Remove `--trust` from the run's Codex arguments.\n  `--trust` saves trust for a project folder with no trust setting, and Codex then reads the folder's `.codex/config.toml`, which can set `features.hooks = false`."
 	for _, c := range []struct {
 		args []string
 		want string
 	}{
+		{[]string{"exec", "--trust", "hi"}, trust},
 		{[]string{"--dangerously-bypass-hook-trust"}, hooks},
 		{[]string{"--dangerously-bypass-hook-trust=true"}, hooks},
-		{[]string{"-c", "features.unified_exec_tty=true"}, config("features.unified_exec_tty")},
-		{[]string{"--config=hooks.x=1"}, config("hooks.x")},
-		{[]string{"-c", "features={hooks=false}"}, config("features")},
-		{[]string{"-c", "features.codex_hooks=true"}, config("features.codex_hooks")},
+		{[]string{"-c", "features.unified_exec_tty=true"}, config("-c", "features.unified_exec_tty")},
+		{[]string{"--config=hooks.x=1"}, config("--config", "hooks.x")},
+		{[]string{"-c", "features={hooks=false}"}, above("-c", "features", "features.hooks")},
+		{[]string{"-c", "features.codex_hooks=true"}, config("-c", "features.codex_hooks")},
+		{[]string{"-c", `projects={"/work"={trust_level="trusted"}}`}, config("-c", "projects")},
+		{[]string{"-c", "projects./work.trust_level=trusted"}, config("-c", "projects./work.trust_level")},
+		{[]string{"--config=projects={}"}, config("--config", "projects")},
 		{[]string{"--enable", "unified_exec_tty"}, feature("--enable", "unified_exec_tty")},
 		{[]string{"--disable=codex_hooks"}, feature("--disable", "codex_hooks")},
 		{[]string{"--enable", "codex_hooks"}, feature("--enable", "codex_hooks")},
+		{[]string{"-c", "hooks." + strings.Repeat("x", 194) + "=1"}, config("-c", "hooks."+strings.Repeat("x", 194))},
 	} {
 		out, err := run(t, append([]string{"run", "codex", "--"}, c.args...)...)
 		if cmd.ExitCode(err) != 1 || err == nil || err.Error() != c.want {
@@ -365,13 +376,11 @@ func TestACodexRunWithoutAWallStopsOnTheHookArguments(t *testing.T) {
 		}
 		fix, _, _ := strings.Cut(c.want, "\n")
 		wants(t, out, "✗ "+fix+"\n")
-		for _, line := range strings.Split(err.Error(), "\n") {
-			if len(line) > 100 {
-				t.Errorf("%q: a line of %d characters, want at most 100: %q", c.args, len(line), line)
-			}
+		if line := "qory run: " + fix; len(line) > 100 {
+			t.Errorf("%q: line 1 of %d characters behind qory run:, want at most 100: %q", c.args, len(line), line)
 		}
 	}
-	for _, args := range [][]string{{"-c", "model=x"}, {"--enable", "some_other_feature"}} {
+	for _, args := range [][]string{{"-c", "model=x"}, {"-c", "x=projects"}, {"--enable", "some_other_feature"}} {
 		out, err := run(t, append([]string{"run", "codex", "--"}, args...)...)
 		if cmd.ExitCode(err) != 3 {
 			t.Fatalf("%q: %v (exit %d), want the program's exit 3\n%s", args, err, cmd.ExitCode(err), out)

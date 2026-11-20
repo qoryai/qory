@@ -275,7 +275,7 @@ func walledGuard(t *testing.T, packages []string, script string, extra map[strin
 		if stackFile != nil {
 			s = stackFile(s)
 		}
-		return s + "workflows:\n  hello:\n    time_limit: 5m\n    access: read\n"
+		return s + "workflows:\n  hello:\n    access: read\n"
 	}, func(d map[string]any) {
 		// Codex 0.170.0 lists spawn_agent among the tools of a model such as gpt-5.5, the
 		// model of TestACodexWithoutAWallRunsTheTrustedHooks.
