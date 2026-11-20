@@ -903,7 +903,7 @@ func (p *Stack) validate(compose bool) error {
 		if !runtimeinstall.ValidVersion(pin.Version) {
 			return exports.Refuse(
 				fmt.Sprintf("Set runtimes.%s.version to an exact version, or remove runtimes.%s.", name, name),
-				"An exact version starts with a digit, followed by up to 63 letters, digits, . or -. A runtime with no pin installs its latest version.",
+				"An exact version starts with a digit, followed by up to 47 letters, digits, . or -. A runtime with no pin installs its latest version.",
 				fmt.Sprintf("The value is %s.", exports.Value(pin.Version, true)),
 				fmt.Sprintf("runtimes.%s is in %s.", name, exports.FilePlace))
 		}
