@@ -491,14 +491,14 @@ type RuntimePin struct {
 	// From is the absolute path of the file that sets the pin. It is set as the stack is
 	// validated.
 	From string `yaml:"-"`
-	// number is whether the file writes version as a YAML number, such as 2.1, which the
+	// number is whether version in the file is a YAML number, such as 2.1, which the
 	// decoder reads into Version as the string 2.1. Set by [RuntimePin.UnmarshalYAML].
 	number bool
 }
 
 // UnmarshalYAML reads an entry of runtimes and records in number whether version is a
 // YAML number. A key a pin does not have is reported as the decoder reports an unknown
-// field, since the decode of the entry here does not check its keys.
+// field: the decode of the entry into plain runs without the decoder's check of keys.
 func (r *RuntimePin) UnmarshalYAML(n *yaml.Node) error {
 	type plain RuntimePin
 	var unknown []string
