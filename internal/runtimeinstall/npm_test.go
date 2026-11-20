@@ -107,7 +107,7 @@ func TestTheNpmFetchRefuses(t *testing.T) {
 				n.PublishWith("x64", "2.1.320", rt.PlainTarball(t, "2.1.320"), rt.Integrity(other), "")
 				n.SetLatest("2.1.320")
 			},
-			want:     "Check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum\n  " + rt.Integrity(other),
+			want:     "Check the source of claude's releases.\n  The tarball of claude 2.1.320 does not match the checksum\n  " + rt.Integrity(other),
 			tarballs: 1,
 		},
 		{
@@ -117,17 +117,17 @@ func TestTheNpmFetchRefuses(t *testing.T) {
 				n.PublishWith("x64", "2.1.320", b, rt.Integrity(b), "https://tarballs.example/claude.tgz")
 				n.SetLatest("2.1.320")
 			},
-			want: "Check the source of the runtime's releases\nThe tarball of @anthropic-ai/claude-code-linux-x64 2.1.320 is not on 127.0.0.1:",
+			want: "Check the source of claude's releases.\n  The tarball of @anthropic-ai/claude-code-linux-x64 2.1.320 is not on 127.0.0.1:",
 		},
 		{
 			name:    "latest that is no version",
 			publish: func(n *rt.Npm) { n.SetLatest("../2") },
-			want:    "Check the source of the runtime's releases\nThe dist-tag latest of @anthropic-ai/claude-code is \"../2\"",
+			want:    "Check the source of claude's releases.\n  The dist-tag latest of @anthropic-ai/claude-code is \"../2\"",
 		},
 		{
 			name:    "no platform package",
 			publish: func(n *rt.Npm) { n.SetLatest("2.1.320") },
-			want:    "Check the source of the runtime's releases\n@anthropic-ai/claude-code-linux-x64 2.1.320 returned 404",
+			want:    "Check the source of claude's releases.\n  @anthropic-ai/claude-code-linux-x64 2.1.320 returned 404",
 		},
 		{
 			name: "registry over http off loopback",
