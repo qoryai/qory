@@ -312,7 +312,7 @@ func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 	}
 	log := walledForager(t)
 	_, err = run(t, "run", "codex", "--", "-c", "model_provider=x")
-	want := "Remove the `-c` flag and its value from the run's Codex arguments.\n  A Codex run takes `model_provider` from qory and Forager, not from the arguments."
+	want := "Remove the `-c` flag and its value from the run's Codex arguments.\n  qory and Forager reserve `model_provider`; a Codex run takes no value for it from the arguments."
 	if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
 		t.Errorf("a walled run: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
 	}
@@ -339,10 +339,13 @@ func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 func TestACodexRunWithoutAWallStopsOnTheHookArguments(t *testing.T) {
 	exportingCheckout(t, fakeRuntime(t))
 	config := func(flag, key string) string {
-		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  A Codex run takes `" + key + "` from qory and Forager, not from the arguments."
+		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  qory and Forager reserve `" + key + "`; a Codex run takes no value for it from the arguments."
 	}
 	feature := func(flag, name string) string {
-		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  A Codex run takes the feature `" + name + "` from qory and Forager, not from the arguments."
+		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  qory and Forager reserve `features." + name + "`; a Codex run takes no value for it from the arguments."
+	}
+	above := func(flag, key, reserved string) string {
+		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  A value for `" + key + "` replaces `" + reserved + "`, which qory and Forager reserve."
 	}
 	hooks := "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.\n  A Codex run takes its hook trust from qory and Forager, not from the arguments."
 	for _, c := range []struct {
@@ -353,7 +356,7 @@ func TestACodexRunWithoutAWallStopsOnTheHookArguments(t *testing.T) {
 		{[]string{"--dangerously-bypass-hook-trust=true"}, hooks},
 		{[]string{"-c", "features.unified_exec_tty=true"}, config("-c", "features.unified_exec_tty")},
 		{[]string{"--config=hooks.x=1"}, config("--config", "hooks.x")},
-		{[]string{"-c", "features={hooks=false}"}, config("-c", "features")},
+		{[]string{"-c", "features={hooks=false}"}, above("-c", "features", "features.hooks")},
 		{[]string{"-c", "features.codex_hooks=true"}, config("-c", "features.codex_hooks")},
 		{[]string{"--enable", "unified_exec_tty"}, feature("--enable", "unified_exec_tty")},
 		{[]string{"--disable=codex_hooks"}, feature("--disable", "codex_hooks")},

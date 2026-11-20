@@ -110,20 +110,28 @@ func StartDirs(args []string) []string {
 }
 
 // textConfigArg is the refusal of a run whose Codex arguments set a key of [trustKeys],
-// or, in a walled run, of [reservedKeys] or [argReservedKeys], with --config or -c, with
-// the flag as typed, --config or -c, and the key as given for its two %s. The key is on
-// the cause line, so line 1 is at most as long as with --config.
-const textConfigArg = "Remove the `%s` flag and its value from the run's Codex arguments.\n  A Codex run takes `%s` from qory and Forager, not from the arguments."
+// or, in a walled run, of [reservedKeys] or [argReservedKeys], or a key under one, with
+// --config or -c, with the flag as typed, --config or -c, and the key as given for its two
+// %s. --enable and --disable of a feature of [trustFeatures] get it too, with the flag and
+// features.<feature>. The key is on the cause line, so line 1 is at most as long as with
+// --config.
+const textConfigArg = "Remove the `%s` flag and its value from the run's Codex arguments.\n  qory and Forager reserve `%s`; a Codex run takes no value for it from the arguments."
+
+// textConfigAboveArg is the refusal of a run whose Codex arguments set a key above a key
+// of [trustKeys], or, in a walled run, of [reservedKeys] or [argReservedKeys], with the
+// flag as typed, the key as given and the reserved key under it for its three %s: Codex
+// replaces the whole table with the value, the reserved key in it too.
+const textConfigAboveArg = "Remove the `%s` flag and its value from the run's Codex arguments.\n  A value for `%s` replaces `%s`, which qory and Forager reserve."
 
 // textProviderArg is the refusal of a walled run whose Codex arguments contain --oss or
 // --local-provider, with the flag for its %s.
 const textProviderArg = "Remove `%s` from the run's Codex arguments.\n  A Codex run takes its model provider from qory and Forager, not from the arguments."
 
-// textFeatureArg is the refusal of a run whose Codex arguments contain --enable or
-// --disable of a feature of [trustFeatures], or of any feature in a walled run, with the
-// flag and the feature as given for its two %s. The feature is on the cause line, so
-// line 1 is at most as long as with --disable.
-const textFeatureArg = "Remove the `%s` flag and its value from the run's Codex arguments.\n  A Codex run takes the feature `%s` from qory and Forager, not from the arguments."
+// textFeatureArg is the refusal of a walled run whose Codex arguments contain --enable or
+// --disable of a feature outside [trustFeatures], with the flag and the feature as given
+// for its two %s. The feature is on the cause line, so line 1 is at most as long as with
+// --disable.
+const textFeatureArg = "Remove the `%s` flag and its value from the run's Codex arguments.\n  A walled Codex run takes no feature from its arguments, `%s` included."
 
 // textProfileArg is the refusal of a walled run whose Codex arguments contain --profile
 // or -p.
@@ -249,14 +257,16 @@ func checkArgs(args []string, walled bool) error {
 		case a == "--enable" || a == "--disable":
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
-				if walled || slices.Contains(trustFeatures, args[i]) {
-					return fmt.Errorf(textFeatureArg, a, shownArg(args[i]))
+				if err := featureArg(a, args[i], walled); err != nil {
+					return err
 				}
 			}
 			continue
 		case strings.HasPrefix(a, "--enable=") || strings.HasPrefix(a, "--disable="):
-			if flag, feature, _ := strings.Cut(a, "="); feature != "" && (walled || slices.Contains(trustFeatures, feature)) {
-				return fmt.Errorf(textFeatureArg, flag, shownArg(feature))
+			if flag, feature, _ := strings.Cut(a, "="); feature != "" {
+				if err := featureArg(flag, feature, walled); err != nil {
+					return err
+				}
 			}
 			continue
 		case a == "--config" || a == "-c":
@@ -276,9 +286,24 @@ func checkArgs(args []string, walled bool) error {
 		if !ok {
 			continue
 		}
-		if key = strings.TrimSpace(key); reservedArg(key, walled) {
+		key = strings.TrimSpace(key)
+		if reserved, above, ok := reservedArg(key, walled); ok && above {
+			return fmt.Errorf(textConfigAboveArg, flag, shownArg(key), shownArg(strings.Join(reserved, ".")))
+		} else if ok {
 			return fmt.Errorf(textConfigArg, flag, shownArg(key))
 		}
+	}
+	return nil
+}
+
+// featureArg returns the refusal of flag, --enable or --disable, with feature, when the
+// feature is one of [trustFeatures], as the key features.<feature>, or when walled.
+func featureArg(flag, feature string, walled bool) error {
+	switch {
+	case slices.Contains(trustFeatures, feature):
+		return fmt.Errorf(textConfigArg, flag, shownArg("features."+feature))
+	case walled:
+		return fmt.Errorf(textFeatureArg, flag, shownArg(feature))
 	}
 	return nil
 }
@@ -288,10 +313,11 @@ func checkArgs(args []string, walled bool) error {
 // see [module.Escape], so the line reaches the terminal as one line of plain text.
 func shownArg(name string) string { return module.Escape(accesskey.ShownName(name, false)) }
 
-// reservedArg reports whether key, a dotted key path of a --config flag, is a path of
-// [trustKeys], or with walled of [reservedKeys] or [argReservedKeys], lies under one, or
-// lies above one.
-func reservedArg(key string, walled bool) bool {
+// reservedArg returns the first key path of [trustKeys], or with walled of [reservedKeys]
+// and [argReservedKeys], that key, a dotted key path of a --config flag, is or lies under,
+// with ok. Without one, it returns the first such path that key lies above, with above and
+// ok.
+func reservedArg(key string, walled bool) (reserved reservedKey, above, ok bool) {
 	if key == "use_legacy_landlock" {
 		key = "features.use_legacy_landlock"
 	}
@@ -301,11 +327,16 @@ func reservedArg(key string, walled bool) bool {
 		keys = slices.Concat(trustKeys, reservedKeys, argReservedKeys)
 	}
 	for _, k := range keys {
-		if overlaps(k, names) {
-			return true
+		if len(names) >= len(k) && overlaps(k, names) {
+			return k, false, true
 		}
 	}
-	return false
+	for _, k := range keys {
+		if overlaps(k, names) {
+			return k, true, true
+		}
+	}
+	return nil, false, false
 }
 
 // overlaps reports whether each name of the shorter of k and names matches the

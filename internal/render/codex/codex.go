@@ -275,8 +275,9 @@ func keepsShell(front map[string]any) bool {
 type reservedKey []string
 
 // textReservedKey is the refusal of a fragment that sets a key of [reservedKeys], with
-// the key as a dotted path for its %s.
-const textReservedKey = "Remove `%s` from `settings/codex/config.toml`.\n  A Codex run takes this key from qory and Forager, not from the harness."
+// the key as a dotted path, as [shownArg] prints it, for its %s. The key is on the cause
+// line, so line 1 has a fixed length.
+const textReservedKey = "Remove the reserved key from `settings/codex/config.toml`.\n  qory and Forager reserve `%s`; a Codex run takes no value for it from the harness."
 
 // reservedKeys are the key paths of config.toml that a harness fragment may not set,
 // because Forager's launch of Codex sets them as --config flags, which win over every
@@ -325,7 +326,7 @@ var reservedKeys = []reservedKey{
 func checkReserved(m map[string]any) error {
 	for _, k := range reservedKeys {
 		if key, ok := findKey(m, k); ok {
-			return fmt.Errorf(textReservedKey, strings.Join(key, "."))
+			return fmt.Errorf(textReservedKey, shownArg(strings.Join(key, ".")))
 		}
 	}
 	return nil

@@ -4800,22 +4800,26 @@ when an argument before `--` turns off the trust of the hooks or changes a hook 
   and `-c=<key>=<value>`, where the key is `hooks`, `features.hooks`,
   `features.codex_hooks` or `features.unified_exec_tty`, a key under one, such as
   `hooks.Stop`, or the table `features` above them: ``Remove the `<flag>` flag and its
-  value from the run's Codex arguments.`` and the next line ``A Codex run takes `<key>`
-  from qory and Forager, not from the arguments.``, where `<flag>` is `-c` or `--config`
-  as typed.
+  value from the run's Codex arguments.``, where `<flag>` is `-c` or `--config` as typed,
+  and the next line ``qory and Forager reserve `<key>`; a Codex run takes no value for it
+  from the arguments.`` For a table above a reserved key, the next line is ``A value for
+  `<key>` replaces `<reserved key>`, which qory and Forager reserve.``, such as ``A value
+  for `features` replaces `features.hooks`, which qory and Forager reserve.``
 - `--enable <feature>` or `--disable <feature>`, also with `=`, of `hooks`, `codex_hooks`
   or `unified_exec_tty`: ``Remove the `--enable` flag and its value from the run's Codex
-  arguments.`` and the next line ``A Codex run takes the feature `<feature>` from qory
-  and Forager, not from the arguments.``, or the same with `--disable`.
+  arguments.``, or the same with `--disable`, and the next line ``qory and Forager reserve
+  `features.<feature>`; a Codex run takes no value for it from the arguments.``
 
 qory also stops a walled Codex run in the same way when an argument before `--` is one of
 these:
 
-- `--config <key>=<value>` in the same forms, where the key is another key qory or
-  Forager sets, `skills` or `cloud.skills`, a key under one, or a table above one, such
+- `--config <key>=<value>` in the same forms, where the key is another key that qory and
+  Forager reserve, `skills` or `cloud.skills`, a key under one, or a table above one, such
   as `cloud`, with the `--config` lines.
-- `--enable <feature>` or `--disable <feature>`, also with `=`, for every other feature,
-  with the `--enable` lines.
+- `--enable <feature>` or `--disable <feature>`, also with `=`, for every other feature:
+  ``Remove the `--enable` flag and its value from the run's Codex arguments.``, or the
+  same with `--disable`, and the next line ``A walled Codex run takes no feature from its
+  arguments, `<feature>` included.``
 - `--oss` or `--local-provider`: ``Remove `<flag>` from the run's Codex arguments.`` and
   the next line ``A Codex run takes its model provider from qory and Forager, not from the
   arguments.``

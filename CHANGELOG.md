@@ -685,13 +685,15 @@ release may change what an existing document does, and states it under Upgrading
   `-c` or `--config`, a key under one, such as `hooks.Stop`, or the table `features`, or
   pass `hooks`, `codex_hooks` or `unified_exec_tty` to `--enable` or `--disable`. The
   error has two lines, ``Remove the `<flag>` flag and its value from the run's Codex
-  arguments.`` and ``A Codex run takes `<key>` from qory and Forager, not from the
-  arguments.``, where `<flag>` is `-c` or `--config` as typed and `<key>` is the key, such
-  as `hooks.Stop`. The key is on the second line, so the first line does not grow with
-  the key. Before, a run without a wall stopped on most of them at Forager's check,
-  with Forager's lines, and passed a key under `hooks`. A walled run stopped on
-  `hooks.state` and `hooks={…}`, and passed the other keys under `hooks`, such as
-  `hooks.Stop`.
+  arguments.`` and ``qory and Forager reserve `<key>`; a Codex run takes no value for it
+  from the arguments.``, where `<flag>` is `-c` or `--config` as typed and `<key>` is the
+  key, such as `hooks.Stop`, or `features.<feature>` for `--enable` and `--disable`. For
+  the table `features`, the second line is ``A value for `features` replaces
+  `features.hooks`, which qory and Forager reserve.`` The key is on the second line, so
+  the first line does not grow with the key. Before, a run without a wall stopped on most
+  of them at Forager's check, with Forager's lines, and passed a key under `hooks`. A
+  walled run stopped on `hooks.state` and `hooks={…}`, and passed the other keys under
+  `hooks`, such as `hooks.Stop`.
 - A run from a run code whose explore documents contain no `run_settings` stops before
   anything is installed or fetched, with `The run settings set no runtime, so the run
   did not start; the code is used.` and `qory runs one of claude and codex.` Until now,
@@ -1424,20 +1426,22 @@ release may change what an existing document does, and states it under Upgrading
   `chatgpt_base_url`, `responses_api_metadata`, a key of the form
   `experimental_realtime_*_base_url`, `profile`, `profiles`, `cli_auth_credentials_store`,
   `allow_login_shell`, `model_instructions_file`, `experimental_compact_prompt_file`,
-  `model_catalog_json`, `js_repl_node_path`, `sqlite_home` or `log_dir`, with ``Remove
-  `<key>` from `settings/codex/config.toml`.`` and the next line ``A Codex run takes this
-  key from qory and Forager, not from the harness.`` A fragment may still set the other
-  keys of `hooks`, such as `hooks.Stop`.
+  `model_catalog_json`, `js_repl_node_path`, `sqlite_home` or `log_dir`, with ``Remove the
+  reserved key from `settings/codex/config.toml`.`` and the next line ``qory and Forager
+  reserve `<key>`; a Codex run takes no value for it from the harness.`` The key on the
+  second line has each control character written as an escape, such as `\n`. A fragment
+  may still set the other keys of `hooks`, such as `hooks.Stop`.
 - A walled Codex run refuses Codex arguments before `--` that set one of those keys or
   `model_reasoning_effort`, a key under one, or a table above one, such as `-c
   features.shell_snapshot=true` or `--config model_providers={}`, in the forms `--config`,
   `--config=`, `-c`, `-c<key>=<value>` and `-c=<key>=<value>`, with ``Remove the
-  `<flag>` flag and its value from the run's Codex arguments.`` and the next line ``A
-  Codex run takes `<key>` from qory and Forager, not from the arguments.``, where `<flag>`
-  is `-c` or `--config` as typed. The run stops
-  before the agent starts, with exit status 1. Forager puts its `--config` flags first,
-  and Codex takes the last one for a key. An unwalled run gets Forager's shorter check, in
-  the entry for unwalled Codex runs.
+  `<flag>` flag and its value from the run's Codex arguments.`` and the next line ``qory
+  and Forager reserve `<key>`; a Codex run takes no value for it from the arguments.``,
+  where `<flag>` is `-c` or `--config` as typed. For a table above a reserved key, such as
+  `feedback`, the next line is ``A value for `feedback` replaces `feedback.enabled`, which
+  qory and Forager reserve.`` The run stops before the agent starts, with exit status 1.
+  Forager puts its `--config` flags first, and Codex takes the last one for a key. An
+  unwalled run gets Forager's shorter check, in the entry for unwalled Codex runs.
 - A walled Codex run refuses `--oss` and `--local-provider` before `--`, with ``Remove
   `<flag>` from the run's Codex arguments.`` and the next line ``A Codex run takes its
   model provider from qory and Forager, not from the arguments.``, and `--profile` in the
@@ -1450,8 +1454,8 @@ release may change what an existing document does, and states it under Upgrading
   also as `--enable=<feature>`, for every feature, the legacy name `connectors` too: Codex
   reads them as `--config features.<feature>=true` or `false`. The text is ``Remove the
   `--enable` flag and its value from the run's Codex arguments.`` and the next line ``A
-  Codex run takes the feature `<feature>` from qory and Forager, not from the
-  arguments.``, or the same with `--disable`.
+  walled Codex run takes no feature from its arguments, `<feature>` included.``, or the
+  same with `--disable`.
 - A walled Codex run refuses `--ignore-user-config` before `--`, with ``Remove
   `--ignore-user-config` from the run's Codex arguments.`` and the next line ``A Codex run
   takes its settings from qory and Forager, not from the arguments.``, and `--search`,
