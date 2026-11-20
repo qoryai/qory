@@ -249,13 +249,23 @@ echo "commit_url $QORY_SUBMIT_BASE_COMMIT https://git.example.com/acme/shop/comm
 		t.Errorf("the repository is %+v", r)
 	}
 	for _, want := range []string{
-		"qory run: The submit program printed a line that qory cannot use, so qory left it out.\n  Line 1: the number is not a whole number of 1 to 9 digits, 1 or more.",
+		"qory run: The submit program printed a line that qory cannot use, so qory left it out.\n  Line 1: the number is not a whole number from 1 to 9223372036854775807, without a leading zero.",
 		"  Line 2: the draft needs five lines, and draft_number, draft_title, draft_state, draft_action is missing; the line is left out.",
 		"  Line 3: the address is not on the repository's system.",
 	} {
 		if !strings.Contains(printed, want) {
 			t.Errorf("the step did not print %q:\n%s", want, printed)
 		}
+	}
+}
+
+// TestADraftNumberOfThePinnedMaximumIsRecorded is a draft number of 9223372036854775807, the
+// largest that the pinned contract takes: the stored document still matches the submission format.
+func TestADraftNumberOfThePinnedMaximumIsRecorded(t *testing.T) {
+	body := strings.Replace(fillScript, "draft_number 7", "draft_number 9223372036854775807", 1)
+	got, printed := runProgram(t, &submitProgram{command: []string{programScript(t, body)}}, passedDocument())
+	if want := `{"number":9223372036854775807,`; !strings.HasPrefix(string(got.Repositories[0].Draft), want) {
+		t.Errorf("the draft is %s, want it to start with %s; the step printed %q", got.Repositories[0].Draft, want, printed)
 	}
 }
 

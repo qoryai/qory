@@ -3236,8 +3236,8 @@ or `kept`, and `kept` for a draft that is `closed` or `merged`), each with its v
 space, and `commit_url <commit> <address>` for the base and each commit. qory takes the five
 draft lines as the draft, only when each is there once and valid, and each address as the
 `commit_url` of the repository, its `base` or its commit. A run with no run code and no run key keeps no record
-of them. A number has 1 to 9 digits and no
-leading zero, a title is UTF-8 of at most 256 characters with a character that is not a space
+of them. A number is a whole number from 1 to
+9223372036854775807 with no leading zero, a title is UTF-8 of at most 256 characters with a character that is not a space
 and no control, bidirectional or invisible character, and an address is `https` on the
 repository's `system`, with a path, at most 2048 characters, of the ASCII characters that RFC
 3986 allows, and with no user, port, query or fragment. qory leaves out a line, and prints
