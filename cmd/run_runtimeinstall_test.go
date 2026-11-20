@@ -22,6 +22,7 @@ import (
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/proxygit/proxygittest"
+	"github.com/qoryai/qory/internal/render/codex"
 	rt "github.com/qoryai/qory/internal/runtimeinstall/runtimeinstalltest"
 )
 
@@ -677,6 +678,32 @@ func TestAStepThatRunsPastTheSetupLimitIsTheOneNamed(t *testing.T) {
 	}
 	wants(t, r.out, "✗ the run was cancelled during the load of the push checks:\n  the steps before claude starts may take at most 5s\n")
 	lacks(t, r.out, "during the copy")
+}
+
+// TestACodexHomeWritePastTheSetupLimitIsTheOneNamed is a dispatched walled Codex run
+// whose write of the Codex home takes 200ms past a setup limit of 5 seconds and then
+// ends: the image's fetch after it fails at once, and the line names the write of the
+// Codex home, the step that ran past the limit, not the image's fetch.
+func TestACodexHomeWritePastTheSetupLimitIsTheOneNamed(t *testing.T) {
+	const limit = 5 * time.Second
+	defer cmd.SetSetupLimit(limit)()
+	defer cmd.SetWriteWalledHome(func(dir, files string, run codex.WalledRun) ([]codex.Bound, error) {
+		time.Sleep(limit + 200*time.Millisecond)
+		return codex.WriteWalledHome(dir, files, run)
+	})()
+	reg, npm, proxy := rt.StartCodexRegistry(t), rt.StartCodexNpm(t), rt.StartProxy(t)
+	reg.PublishPlain("0.170.0")
+	r := endsWithin(t, 30*time.Second, func() installRun {
+		return runInstalling(t, installSetup{reg: reg, npm: npm, proxy: proxy, walled: true, runtime: "codex", version: "0.170.0"})
+	})
+	if cmd.ExitCode(r.err) != 124 || len(r.joins) != 0 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out, "✗ the run was cancelled during the write of the Codex home:\n  the steps before codex starts may take at most 5s\n")
+	lacks(t, r.out, "during the fetch of the run's image", "check the disk")
+	if len(r.closes) != 1 || r.closes[0].State != event.StateCancelled || r.closes[0].Reason != event.ReasonTimeout || r.closes[0].ExitCode != 124 {
+		t.Errorf("the closes: %+v, want one cancelled with timeout and 124", r.closes)
+	}
 }
 
 // TestARegistryThatKeepsReturning503StopsAtSIGTERM sends SIGTERM to qory run while the

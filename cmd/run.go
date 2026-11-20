@@ -1146,11 +1146,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return nil
 			}
 			// codexHomeWork writes the Codex home of a walled Codex run, see [walledCodexHome],
-			// once hostWork has bound the checkout or its copy, and mounts it. The home goes in
-			// the copy's folder, <user cache>/qory/runs/<run id>, or, for a run with no copy,
-			// in a new folder at that path. Both go when the run ends, as the copy does; the
-			// home goes also when the copy stays.
+			// within the run's setup, once hostWork has bound the checkout or its copy, and
+			// mounts it. No call in it takes setupCtx: a write that passes setupDeadline runs
+			// to its end, and the check after the steps names it. The home goes in the copy's
+			// folder, <user cache>/qory/runs/<run id>, or, for a run with no copy, in a new
+			// folder at that path. Both go when the run ends, as the copy does; the home goes
+			// also when the copy stays.
 			codexHomeWork := func() error {
+				enter(stepCodexHome)
 				checkout, root := at.root, ""
 				if copied != nil {
 					checkout, root = copied.dir.Work(), copied.dir.Root()
