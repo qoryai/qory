@@ -1156,8 +1156,8 @@ came from. For Codex, it also contains the other files of Codex's folder in the 
    lets anyone run it and `0644` otherwise; `bin/codex`, `bin/codex-code-mode-host`,
    `codex-resources/bwrap` and `codex-path/rg` are always `0755`. A link, a hard link, a
    path with a `.` or `..` segment, an entry twice, a file `integrity` at the folder's
-   top, more than 10,000 entries, or no `bin/codex` stops the run with `Check the source
-   of the runtime's releases`. A missing or empty `bin/codex-code-mode-host`,
+   top, more than 10,000 entries, or no `bin/codex` stops the run with the fix line
+   `Check the source of codex's releases.` A missing or empty `bin/codex-code-mode-host`,
    `codex-resources/bwrap` or `codex-path/rg` means that Codex moved its files, and stops
    the run with `Update qory.`, then `The tarball of codex <version> has no` and the
    missing file on the next line. The tarball may unpack to at most

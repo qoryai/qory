@@ -155,9 +155,9 @@ release may change what an existing document does, and states it under Upgrading
   missing or bad signature stops the run with `Check the source of <runtime>'s
   releases.`; a signature only by a key qory does not have stops it with `Update qory.`;
   a signature only by an expired key stops it with `Pin a newer version of <runtime>.`
-  for a pinned version, and with the fix of a bad signature with no pin. A layer
-  without the annotation stops it with `Ask Qory Apiary's instance admin to check the
-  registry's runtime cache`.
+  for a pinned version, and with `Check the source of <runtime>'s releases.` with no
+  pin. A layer without the annotation stops it with `Ask Qory Apiary's instance admin to
+  check the registry's runtime cache`.
 - Every run of Claude Code installs the runtime's program before its session: from the
   runtime cache of the pool's registry, or of `pool.registry`, or else from npm, through
   the run's host proxy when the run has one. qory reads the registry's `newest`, or npm's
