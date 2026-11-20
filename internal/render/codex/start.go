@@ -151,7 +151,7 @@ const textRemoteArg = "Remove `%s` from the run's Codex arguments.\n  A Codex ru
 var argReservedKeys = []reservedKey{{"model_reasoning_effort"}, {"skills"}, {"cloud", "skills"}}
 
 // trustKeys are the key paths that the Codex arguments of every run may not set, walled
-// or not: the hooks table, whose state holds the trusted hashes and whose events add
+// or not: the hooks table, whose state contains the trusted hashes and whose events add
 // hooks, and the features that run hooks and that keep a shell with a terminal off,
 // unified_exec_tty and hooks with its legacy name codex_hooks
 // (codex-rs/features/src/lib.rs, FEATURES, and legacy.rs, ALIASES). A shell with a
@@ -159,17 +159,17 @@ var argReservedKeys = []reservedKey{{"model_reasoning_effort"}, {"skills"}, {"cl
 // PreToolUse hook.
 var trustKeys = []reservedKey{{"hooks"}, {"features", "hooks"}, {"features", "codex_hooks"}, {"features", "unified_exec_tty"}}
 
-// trustFeatures are the features of [trustKeys], which --enable and --disable name.
+// trustFeatures are the features of [trustKeys] as the values of --enable and --disable.
 var trustFeatures = []string{"hooks", "codex_hooks", "unified_exec_tty"}
 
-// CheckArgs refuses args, the Codex arguments of a run without a wall, as [checkArgs]
-// does for every run. A walled run gets the whole check from [codex.WalledArgs].
+// CheckArgs returns an error for args, the Codex arguments of a run without a wall, as
+// [checkArgs] does for every run. A walled run gets the whole check from [codex.WalledArgs].
 func (codex) CheckArgs(args []string) error {
 	return checkArgs(args, false)
 }
 
-// checkArgs refuses args, a run's Codex arguments, when one before -- changes the hooks
-// that qory sets for the run, naming the first in args:
+// checkArgs returns an error for args, a run's Codex arguments, when one before --
+// changes the hooks that qory sets for the run, naming the first in args:
 //
 //   - --dangerously-bypass-hook-trust, with which Codex runs hooks that were never
 //     trusted (codex-rs/utils/cli/src/shared_options.rs, bypass_hook_trust);
@@ -180,8 +180,8 @@ func (codex) CheckArgs(args []string) error {
 //     --enable <feature> and --enable=<feature>, which Codex reads as --config
 //     features.<feature>=true or false (codex-rs/cli/src/main.rs, FeatureToggles).
 //
-// With walled, it also refuses args when one before -- changes what Forager and qory set
-// for a walled run:
+// With walled, it also returns an error for args when one before -- changes what Forager
+// and qory set for a walled run:
 //
 //   - --oss, which starts Codex on an open-source model provider, or --local-provider,
 //     which names one, in the forms --local-provider <name> and --local-provider=<name>

@@ -21,8 +21,8 @@ release may change what an existing document does, and states it under Upgrading
 - In a home composed for codex alone, a Codex agent with a tier gets the tier's model as
   `model` and its effort as `model_reasoning_effort` in `agents/<name>.toml`. An effort
   outside `none`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra` stops the compose
-  with exit 2 and two lines, the form that an effort outside the values of claude and
-  copilot agents now gets too:
+  with exit 2 and these two lines, which an effort outside the values of claude and
+  copilot agents also gets:
 
   ```text
   set tier <t>'s effort to one of <values>
@@ -690,7 +690,9 @@ release may change what an existing document does, and states it under Upgrading
   error has two lines, such as ``Remove `--config hooks.Stop` from the run's Codex
   arguments.`` and ``A Codex run takes this key from qory and Forager, not from the
   arguments.`` Before, a run without a wall stopped on most of them at Forager's check,
-  with Forager's lines, and passed a key under `hooks`, which a walled run passed too.
+  with Forager's lines, and passed a key under `hooks`. A walled run stopped on
+  `hooks.state` and `hooks={…}`, and passed the other keys under `hooks`, such as
+  `hooks.Stop`.
 - A run from a run code whose explore documents contain no `run_settings` stops before
   anything is installed or fetched, with `The run settings set no runtime, so the run
   did not start; the code is used.` and `qory runs one of claude and codex.` Until now,
@@ -848,11 +850,10 @@ release may change what an existing document does, and states it under Upgrading
     Before, the key with `chosen` came first whenever it was usable.
   - In a run without a wall, qory prints the error for a Codex argument on two lines:
     the fix, which contains the flag, then the cause. See `docs/run.md`.
-  - A run without a wall stops before Codex starts, exit 1, when `-c`, `--config`,
-    `--enable` or `--disable` sets `features.hooks`, `features.codex_hooks` or
-    `features.unified_exec_tty`. The second line of the error is ``the setting can turn
-    off the hooks Codex runs before each tool call, or make Codex run no hook for a
-    command sent to a shell with a terminal``.
+  - Forager stops a run without a wall before Codex starts, exit 1, when `-c`,
+    `--config`, `--enable` or `--disable` sets `features.hooks`, `features.codex_hooks`
+    or `features.unified_exec_tty`. qory stops these arguments first, with the lines of
+    a walled run: see the entry "qory stops every Codex run, walled or not" above.
   - Each session's environment has `QORY_SESSION`, the session's number in the run,
     counted from 1. Without a wall, Forager's value replaces any other. A walled run that
     passes `QORY_SESSION` by `wall.env`, `--env` or the harness's `env` does not start,
@@ -1453,7 +1454,7 @@ release may change what an existing document does, and states it under Upgrading
 - A Codex run, walled or not, stops on `--dangerously-bypass-hook-trust` before `--`,
   with ``Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.`` and
   the next line ``A Codex run takes its hook trust from qory and Forager, not from the
-  arguments.`` A walled Codex run refuses `--remote` and `--remote-auth-token-env`, also
+  arguments.`` A walled Codex run stops on `--remote` and `--remote-auth-token-env`, also
   with `=`, with ``Remove `--remote` from the run's Codex arguments.`` and the next line
   ``A Codex run takes its app server from qory and Forager, not from the arguments.``
   (`--remote-auth-token-env` likewise).
