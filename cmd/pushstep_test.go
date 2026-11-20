@@ -2079,7 +2079,7 @@ func TestASecondRepositoryThatFailsGivesTheFix(t *testing.T) {
 		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
 	}, nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "qory run: "+deleteBranch+": qory pushed acme/site and stored no version, because the push of the next repository failed: change the rule on "+proxygittest.Host)
+	wants(t, r.out, "qory run: "+deleteBranch+"\n  qory pushed acme/site and stored no version, because the push of the next repository failed: change the rule on "+proxygittest.Host)
 	if p.branchHead(t) == "" {
 		t.Error("the first repository has no branch")
 	}
@@ -2113,7 +2113,7 @@ func TestASecondRepositoryWhoseHeadMovedEndsTheRunWithPushHeadChanged(t *testing
 	if got := r.closes[0].Reason; got != string(contracts.EndCodePushHeadChanged) {
 		t.Errorf("the run closed with the reason %q, want %q", got, contracts.EndCodePushHeadChanged)
 	}
-	wants(t, r.out, "qory run: "+deleteBranch+": qory pushed acme/site and stored no version, because the push of the next repository failed: Set the branch to the expected commit or delete it; its head is not that commit.")
+	wants(t, r.out, "qory run: "+deleteBranch+"\n  qory pushed acme/site and stored no version, because the push of the next repository failed: Set the branch to the expected commit or delete it; its head is not that commit.")
 	if got := proxygittest.Git(t, lib, "rev-parse", "refs/heads/qory/"+workItem); got != moved {
 		t.Errorf("the second repository's branch is at %s, want %s", got, moved)
 	}

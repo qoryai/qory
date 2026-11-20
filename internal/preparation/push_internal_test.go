@@ -1195,7 +1195,7 @@ func TestAListThatFailsAfterThePushSaysThePushLanded(t *testing.T) {
 		t.Fatal("the listing did not fail")
 	}
 	err := listFailed(b, cause)
-	want := "qory run: delete branch qory/wi_1 of acme/shop on " + b.system + ": qory pushed acme/shop and stored no version, because the list of the run's commits failed: "
+	want := "qory run: delete branch qory/wi_1 of acme/shop on " + b.system + "\n  qory pushed acme/shop and stored no version, because the list of the run's commits failed: "
 	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), "; the code is used") {
 		t.Errorf("the error is %v, want the start %q", err, want)
 	}
