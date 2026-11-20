@@ -188,6 +188,23 @@ echo "draft_action kept"
 	}
 }
 
+// TestATitleWithAZeroWidthJoinerPassesTheHandoffAndTheProgramRead is a title of an emoji sequence,
+// which has U+200D: the contract accepts it, so the hand-off keeps the text and the draft line
+// that the program prints with it is recorded.
+func TestATitleWithAZeroWidthJoinerPassesTheHandoffAndTheProgramRead(t *testing.T) {
+	const title = "Add \U0001F469\u200d\U0001F4BB docs"
+	given, err := readHandoff(handoffIn(t, `{"text":{"title":"Add \ud83d\udc69\u200d\ud83d\udcbb docs","description":"d"}}`))
+	if err != nil || given == nil || given.text() == nil || len(given.dropped) != 0 || given.text().Title != title {
+		t.Fatalf("the hand-off is %+v, %v, want the text kept with the title %q", given, err, title)
+	}
+	document := passedDocument()
+	document.Text = given.text()
+	got, printed := runProgram(t, &submitProgram{command: []string{programScript(t, fillScript)}}, document)
+	if want := `"title":"` + title + `"`; !strings.Contains(string(got.Repositories[0].Draft), want) {
+		t.Errorf("the draft is %s, want it to have %s; the step printed %q", got.Repositories[0].Draft, want, printed)
+	}
+}
+
 // TestAProgramPastItsLimitHasNoDraft is a program that sleeps past the limit: it is stopped,
 // the draft is program-timeout, and the step prints the limit.
 func TestAProgramPastItsLimitHasNoDraft(t *testing.T) {

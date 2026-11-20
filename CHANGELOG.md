@@ -685,7 +685,8 @@ release may change what an existing document does, and states it under Upgrading
   format, a description with a NUL character or a line that is a marker of the draft's block
   (`<!-- qory:start -->` or `<!-- qory:end -->`), a step with a control, invisible, direction
   or separator character, and a step whose key is not a full lower-case commit id, with a
-  line that states the cause and the values.
+  line that states the cause and the values. The title and step rule is the one of the submit
+  program's draft title line, so a zero-width joiner (U+200D), as in an emoji sequence, stays.
 - qory adds `/.qory/handoff/` to the checkout's `.git/info/exclude` for a run on a work
   item's branch, so `git add -A` and `git commit -a` leave the hand-off file out of a commit.
   A commit of the run that has a path under `.qory/handoff/`, in any letter case, as
