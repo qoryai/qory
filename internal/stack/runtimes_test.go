@@ -32,9 +32,10 @@ func TestLoadReadsTheRuntimePins(t *testing.T) {
 }
 
 // TestLoadRefusesABadRuntimePin refuses a pin that is not an exact version, latest, a
-// version with + and one of 33 characters among them, a version that YAML reads as a number, also through an alias
-// to the version or to the whole entry, and a runtime that qory does not install, each
-// with the fix first, the cause, and the file last. The error is compared whole.
+// version with + and one of 33 characters among them, a version that YAML reads as a
+// number, also through an alias to the version or to the whole entry, and a runtime that
+// qory does not install, each with the fix first, the cause, and the file last. The
+// error is compared whole.
 func TestLoadRefusesABadRuntimePin(t *testing.T) {
 	isolate(t)
 	version := func(name, value string) string {
