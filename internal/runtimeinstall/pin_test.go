@@ -175,6 +175,39 @@ func TestOnlyA404MakesAPinNotPublished(t *testing.T) {
 	}
 }
 
+// TestTheRegistryRefusesAPinnedTagThatIsNotThePin pins claude to 2.1.300 in a registry
+// whose tag 2.1.300 has an image manifest in place of an image index, or the index of
+// 2.1.320: the install stops with the fix first and the tag and its fault after it.
+func TestTheRegistryRefusesAPinnedTagThatIsNotThePin(t *testing.T) {
+	const manifest = `{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json"}`
+	for _, c := range []struct {
+		name string
+		tag  func(r *rt.Registry) []byte
+		want string
+	}{
+		{"an image manifest", func(*rt.Registry) []byte { return []byte(manifest) },
+			"shared/runtimes/claude:2.1.300 is not a runtime's image index:\n" +
+				"  its media type is \"application/vnd.oci.image.manifest.v1+json\", not application/vnd.oci.image.index.v1+json"},
+		{"the index of another version", func(r *rt.Registry) []byte { return r.Tag("2.1.320") },
+			"shared/runtimes/claude:2.1.300 has the version \"2.1.320\""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := rt.StartRegistry(t)
+			r.PublishPlain("2.1.300")
+			r.PublishPlain("2.1.320")
+			r.SetTag("2.1.300", c.tag(r))
+			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+				Keys: rt.Keys(), Fetch: runtimeinstall.RegistryFetch(http.DefaultClient, r.Host(), "amd64", r.Instance()),
+				Runtime: "claude", Version: "2.1.300", Folder: t.TempDir(),
+			})
+			want := "Ask Qory Apiary's instance admin to check the registry's runtime cache\n" + c.want
+			if err == nil || err.Error() != want {
+				t.Fatalf("the install returned %v, want %q", err, want)
+			}
+		})
+	}
+}
+
 // TestInstallRefusesAPinThatIsNotAnExactVersion pins versions that are not exact: a
 // dist-tag, a path, a first character that is not a digit, and a +, which no OCI tag
 // has. Install refuses each before it fetches.
