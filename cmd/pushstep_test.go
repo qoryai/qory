@@ -2136,7 +2136,7 @@ func TestASecondRepositoryWhoseHeadMovedEndsTheRunWithPushHeadChanged(t *testing
 	lib := filepath.Join(p.h.server.Root, "acme", "lib.git")
 	proxygittest.Git(t, lib, "config", "http.receivepack", "true")
 	tree := proxygittest.Git(t, lib, "rev-parse", "main^{tree}")
-	moved := proxygittest.Git(t, lib, "commit-tree", tree, "-m", "Another push")
+	moved := proxygittest.Git(t, lib, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit-tree", tree, "-m", "Another push")
 	hook := filepath.Join(p.bare, "hooks", "post-receive")
 	writeFile(t, hook, "#!/bin/sh\ngit --git-dir="+lib+" update-ref refs/heads/qory/"+workItem+" "+moved+"\n")
 	if err := os.Chmod(hook, 0o755); err != nil {
