@@ -32,8 +32,8 @@ release may change what an existing document does, and states it under Upgrading
   `config.toml` now has a `trusted_hash` for each `command` hook of `hooks.json` and
   `config.toml`. An `mcp_tool` hook gets no hash, and the compose prints
   `skipped  hooks.<event>[<group>].hooks[<hook>] in <file> for codex` for it. A
-  `CODEX_HOME` set in `harness.launch.codex.env` points Codex at a home that the hashes
-  do not name, and Codex skips the hooks. See "Hooks on Codex" in `docs/harness.md`.
+  `CODEX_HOME` set in `harness.launch.codex.env` points Codex at a home other than the
+  one in the keys of the hashes, and Codex skips the hooks. See "Hooks on Codex" in `docs/harness.md`.
 - A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
   the type whose launch version sets what the workflow's session may push. A module
   declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: one

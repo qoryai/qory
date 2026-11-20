@@ -175,7 +175,7 @@ func hookHash(event string, group, handler map[string]any) (string, bool) {
 	data := bytes.TrimSuffix(b.Bytes(), []byte("\n"))
 	// serde_json writes U+2028 and U+2029 as they are, and encoding/json escapes them,
 	// so a hook with either gets no trust rather than a hash Codex does not compute.
-	if bytes.Contains(data, []byte(` `)) || bytes.Contains(data, []byte(` `)) {
+	if bytes.Contains(data, []byte(`\u2028`)) || bytes.Contains(data, []byte(`\u2029`)) {
 		return "", false
 	}
 	sum := sha256.Sum256(data)
@@ -183,7 +183,7 @@ func hookHash(event string, group, handler map[string]any) (string, bool) {
 }
 
 // hookTimeout is a hook's timeout in seconds as Codex normalizes it: SessionEnd and
-// Interrupt default to 1 and are held between 1 and 3; every other event defaults to 600
+// Interrupt default to 1 and are limited to 1 to 3; every other event defaults to 600
 // and is at least 1.
 func hookTimeout(event string, v any) int64 {
 	n, set := wholeNumber(v)
@@ -206,15 +206,10 @@ func wholeNumber(v any) (int64, bool) {
 	switch n := v.(type) {
 	case int64:
 		return n, true
-	case int:
-		return int64(n), true
 	case float64:
 		if n == math.Trunc(n) && math.Abs(n) < math.Exp2(63) {
 			return int64(n), true
 		}
-	case json.Number:
-		i, err := n.Int64()
-		return i, err == nil
 	}
 	return 0, false
 }

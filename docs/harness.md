@@ -740,7 +740,7 @@ qory writes a tier into these keys of each runtime's agent file:
 
 For claude, copilot and codex composed alone, an effort outside the runtime's values stops the compose with exit 2. For cursor, opencode and goose, the compose prints a `skipped` row for a tier's effort, with the agents it concerns, and for gemini a `skipped` row for a tier's model.
 
-Codex gets the tiers only in a home composed for codex alone. One tier map serves every runtime of a home, so in a home that also holds claude, a Codex agent would get a Claude model id. A home composed for codex and another runtime, at once or by an earlier compose that the home keeps, writes no tier into the Codex agents and prints the `skipped` row for codex:
+Codex gets the tiers only in a home composed for codex alone. One tier map serves every runtime of a home, so in a home composed for claude too, a Codex agent would get a Claude model id. A home composed for codex and another runtime, at once or by an earlier compose that the home keeps, writes no tier into the Codex agents and prints the `skipped` row for codex:
 
 ```text
 skipped  tier thinking for codex  (codex agents have no model setting; agent planner runs on the main model)
@@ -771,7 +771,7 @@ Two limits apply to a run without a wall:
   skipped  hooks.PreToolUse[0].hooks[0] in config.toml for codex  (qory writes no trusted hash for an mcp_tool hook; Codex skips it in a run without a wall)
   ```
 
-- If `harness.launch.codex.env` sets `CODEX_HOME`, Codex reads a home that the hashes do not name, and skips every hook with no error. Leave `CODEX_HOME` to qory.
+- If `harness.launch.codex.env` sets `CODEX_HOME`, Codex reads a home other than the one in the keys of the hashes, and skips every hook with no error. Leave `CODEX_HOME` to qory.
 
 qory's `config.toml` also sets `features.unified_exec_tty = false`, in a walled run too. A shell that the agent starts with a terminal takes later commands through `write_stdin`, for which Codex runs no `PreToolUse` hook; with this setting, Codex refuses a shell with a terminal. A Codex agent cannot start an interactive shell.
 

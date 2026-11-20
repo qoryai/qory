@@ -187,7 +187,7 @@ func TestComposeWritesATierForEachRuntime(t *testing.T) {
 
 // TestComposeWritesTiersIntoCodexAgents composes for codex alone: each Codex agent with a
 // mapped tier gets the tier's model as model and its effort, when the entry sets one, as
-// model_reasoning_effort, with no skipped row. The agent's own effort and the model id of
+// model_reasoning_effort, with no skipped row. The effort in the agent's frontmatter and the model id of
 // an agent with no tier are not written. A compose of the same home for claude keeps the
 // codex runtime in the home, and the Codex agents then get no model, with the skipped row
 // for codex.

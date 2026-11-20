@@ -18,7 +18,7 @@ import (
 	"github.com/qoryai/qory/cmd"
 )
 
-// denyHook is a PreToolUse hook that denies a tool call whose input names locked/, and
+// denyHook is a PreToolUse hook that denies a tool call whose input contains locked/, and
 // spawn_agent, with exit status 2 and the reason on stderr, which Codex returns to the
 // model as the tool's output.
 const denyHook = `#!/bin/sh

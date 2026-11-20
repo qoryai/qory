@@ -126,7 +126,7 @@ func TestARoleWithoutAShellToolGetsNoShell(t *testing.T) {
 // with a matcher, a timeout, a status message and a context limit, and a Stop hook with a
 // matcher and a context limit, which Codex leaves out of a Stop hook's hash; in
 // config.toml, a PreModelRequest hook, a PreToolUse group with an mcp_tool hook before an
-// async command hook, and a SessionEnd hook whose timeout Codex holds at 3.
+// async command hook, and a SessionEnd hook whose timeout Codex limits to 3.
 var hookSettings = map[string]string{
 	"settings/codex/hooks.json": `{"hooks": {
   "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "$QORY_HARNESS_HOME/hooks/guard.sh", "timeout": 10, "statusMessage": "Checking", "additionalContextLimit": 100}]}],
@@ -278,5 +278,38 @@ func TestConfigTrustsEachCommandHook(t *testing.T) {
 	}
 	if got, want := codex.UntrustedHooks(res, home), []string{"hooks.PreToolUse[0].hooks[0] in config.toml"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("UntrustedHooks %q, want %q", got, want)
+	}
+}
+
+// TestConfigHasHookStateOnlyForHooks checks the hooks table of config.toml: a module with
+// hooks in hooks.json alone gets one with the state of its hook, and a module with no hook
+// gets none.
+func TestConfigHasHookStateOnlyForHooks(t *testing.T) {
+	rt, err := render.Lookup("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name  string
+		files map[string]string
+		want  int
+	}{
+		{"hooks.json alone", map[string]string{"settings/codex/hooks.json": `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo stop"}]}]}}`}, 1},
+		{"no hook", map[string]string{"settings/codex/config.toml": "approval_policy = \"never\"\n"}, 0},
+	} {
+		res := composeModule(t, c.files)
+		home := filepath.Join(t.TempDir(), "harness")
+		if err := render.Build(res, home, rt); err != nil {
+			t.Fatal(err)
+		}
+		var config map[string]any
+		if _, err := toml.DecodeFile(filepath.Join(home, "codex", "config.toml"), &config); err != nil {
+			t.Fatal(err)
+		}
+		hooks, has := config["hooks"].(map[string]any)
+		state, _ := hooks["state"].(map[string]any)
+		if len(state) != c.want || has != (c.want > 0) {
+			t.Errorf("%s: hooks %v, want %d keys in hooks.state", c.name, config["hooks"], c.want)
+		}
 	}
 }

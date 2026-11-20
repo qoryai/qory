@@ -203,7 +203,7 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 			"description":            doc.String("description"),
 			"developer_instructions": strings.TrimRight(doc.Body, "\n"),
 		}
-		if t, ok := res.Tiers[e.Tier]; ok && e.Tier != "" {
+		if t, ok := res.Tiers[e.Tier]; ok {
 			role["model"] = t.Model
 			if t.Effort != "" {
 				role[effortKey] = t.Effort
