@@ -34,8 +34,11 @@ import (
 
 // textNotPublished is the error of a run whose stack pins a version of its runtime that
 // the source of the releases does not have: the fix, with the runtime and the name of the
-// file that pins it, then the cause, with the runtime and the version. The file's name,
-// qory.yaml or qory-stack.yaml, keeps the fix line within 100 characters.
+// file that pins it, then the cause, with the runtime and the version. For a pin of a
+// base fetched over git, the fix contains the checkout's qory.yaml instead, since the
+// base's file is in a cache clone and a pin in the checkout's file wins over the base's.
+// The file's name, qory.yaml, harness.yaml or qory-stack.yaml, keeps the fix line within
+// 100 characters.
 const textNotPublished = "Set runtimes.%s.version in %s to a version the registry has.\n  The registry has no %s %s."
 
 // textNoRuntimeProxy is the error of a run whose host proxy, through which qory reads the
@@ -82,7 +85,9 @@ func instanceAddress(r *config.Forager) string {
 // installRuntime installs the program of runtime, the runtime of the run's session, for
 // the platform linux/<this machine's architecture>, the platform of the container
 // engine. It returns nil for a runtime qory installs no program of. pin is the composed
-// stack's pin of runtime, empty for none, which installs the newest release.
+// stack's pin of runtime, empty for none, which installs the newest release. pinFile is
+// the name of the checkout's file when the base was fetched over git, "" otherwise; the
+// fix line of a pin that the source does not have uses it in place of pin.From's name.
 //
 // The source is the registry of machine, the lines after a run code that qory run pool
 // writes, or else the registry of r, [runtimeRegistry], or else npm. The registry's token
@@ -92,7 +97,7 @@ func instanceAddress(r *config.Forager) string {
 // <state>/runtimes. A walled run, and a run with a control plane, reads through the
 // run's host proxy, proxied set; a run on a person's machine with neither sends its
 // requests directly. The host proxy closes once the install ends.
-func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machine runtimeinstall.Machine, proxied bool, runtime string, pin stack.RuntimePin, state string, report func(string)) (*runtimeinstall.Installed, error) {
+func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machine runtimeinstall.Machine, proxied bool, runtime string, pin stack.RuntimePin, pinFile, state string, report func(string)) (*runtimeinstall.Installed, error) {
 	if !installRuntimes || !slices.Contains(runtimeinstall.Runtimes(), runtime) {
 		return nil, nil
 	}
@@ -136,7 +141,11 @@ func installRuntime(ctx context.Context, run openedRun, r *config.Forager, machi
 	in, err := runtimeinstall.Install(ctx, opts)
 	var missing *runtimeinstall.NotPublishedError
 	if errors.As(err, &missing) {
-		return nil, fmt.Errorf(textNotPublished, runtime, filepath.Base(pin.From), missing.Runtime, missing.Version)
+		file := filepath.Base(pin.From)
+		if pinFile != "" {
+			file = pinFile
+		}
+		return nil, fmt.Errorf(textNotPublished, runtime, file, missing.Runtime, missing.Version)
 	}
 	if err != nil {
 		return nil, err

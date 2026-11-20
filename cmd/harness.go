@@ -684,6 +684,10 @@ type composed struct {
 	workflows map[string]stack.Workflow
 	// runtimes are the composed stack's pins of the runtimes' versions, nil for none.
 	runtimes map[string]stack.RuntimePin
+	// pinFile is the name of the checkout's file when the base was fetched over git, ""
+	// otherwise: the fix line of a pin that the registry does not have uses it in place
+	// of the base's file, which is in a cache clone, see [installRuntime].
+	pinFile string
 	// checkoutOnly is, per runtime composed for, what [render.CheckoutOnly] lists.
 	checkoutOnly map[string][]string
 	// codex is what a walled Codex run writes its Codex home from, see [codexParts].
@@ -757,15 +761,19 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 	}
 	var workflows map[string]stack.Workflow
 	var runtimes map[string]stack.RuntimePin
+	var pinFile string
 	if res.Stack != nil {
 		workflows, runtimes = res.Stack.Workflows, res.Stack.RuntimePins
+		if res.Base != nil && res.Base.Commit != "" {
+			pinFile = res.Stack.ConfigFile()
+		}
 	}
 	checkoutOnly := map[string][]string{}
 	for _, rt := range targets {
 		checkoutOnly[rt.Name()] = render.CheckoutOnly(rt, res)
 	}
 	parts := codexParts{skills: codex.AllowedSkills(res), readRules: res.CodexReadRules, sourceDirs: res.SourceDirs()}
-	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, runtimes: runtimes, checkoutOnly: checkoutOnly, codex: parts}, nil
+	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, runtimes: runtimes, pinFile: pinFile, checkoutOnly: checkoutOnly, codex: parts}, nil
 }
 
 // pushChecksWritable stops a walled run before the home is written when a module

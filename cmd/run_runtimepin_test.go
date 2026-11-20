@@ -104,15 +104,18 @@ func TestAPinTheRegistryDoesNotHaveStopsADispatchedRun(t *testing.T) {
 // a person's machine, with no run key, from npm, or from the registry's runtime cache
 // when forager.yaml sets pool.registry, each of which has only claude 2.1.320 and codex
 // 0.170.0. A pin of 9.9.9 in the checkout's qory.yaml, a pin of the base stack that the
-// checkout's qory.yaml extends (claude 2.1.300, codex 0.167.2), and a pin of 9.9.9 in the
-// checkout's qory.yaml over the base's pin each stop the run before the session: qory run
-// prints the fix line, with the name of the file of the nearer pin, then the cause.
+// checkout's qory.yaml extends by path or over git (claude 2.1.300, codex 0.167.2), and a
+// pin of 9.9.9 in the checkout's qory.yaml over the base's pin each stop the run before
+// the session: qory run prints the fix line, with the name of the file of the nearer pin,
+// or qory.yaml for the pin of a base fetched over git, then the cause.
 func TestAPinTheRegistryDoesNotHaveStopsAPersonsRun(t *testing.T) {
-	// docs are the checkout's qory.yaml for each fixture, with the runtime as %[1]s.
+	// docs are the checkout's qory.yaml for each fixture, with the runtime as %[1]s and
+	// the URL of the base's repository as %[2]s.
 	docs := map[string]string{
 		"two-modules": "apiVersion: qory.dev/v1alpha1\nharness:\n  target:\n    runtime: %[1]s\n  modules:\n" +
 			"    - name: core\n      source: {path: modules/core}\n    - name: nextjs\n      source: {path: modules/nextjs}\n",
 		"runtimes-nearer-layer-wins": "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {path: stack}\n  target:\n    runtime: %[1]s\n",
+		"git-base":                   "apiVersion: qory.dev/v1alpha1\nharness:\n  extends: {git: %[2]s, ref: main, path: nextjs-15}\n  target:\n    runtime: %[1]s\n",
 	}
 	for _, rc := range []struct{ runtime, newest, base string }{{"claude", "2.1.320", "2.1.300"}, {"codex", "0.170.0", "0.167.2"}} {
 		for _, c := range []struct {
@@ -121,6 +124,7 @@ func TestAPinTheRegistryDoesNotHaveStopsAPersonsRun(t *testing.T) {
 		}{
 			{"a pin in the checkout's qory.yaml", "two-modules", "9.9.9", "qory.yaml", true, false},
 			{"a pin in the base stack", "runtimes-nearer-layer-wins", rc.base, "qory-stack.yaml", false, false},
+			{"a pin in a base stack fetched over git", "git-base", rc.base, "qory.yaml", false, false},
 			{"a pin in the checkout's qory.yaml over the base's", "runtimes-nearer-layer-wins", "9.9.9", "qory.yaml", true, false},
 			{"a pin the registry's cache does not have", "two-modules", "9.9.9", "qory.yaml", true, true},
 		} {
@@ -135,14 +139,19 @@ func TestAPinTheRegistryDoesNotHaveStopsAPersonsRun(t *testing.T) {
 				npm.Publish(rc.newest)
 				defer cmd.SetNpmRegistry(npm.URL())()
 				root := newCheckout(t)
-				copyFixture(t, c.fixture, root)
+				url := ""
+				if c.fixture == "git-base" {
+					url = baseRepoWith(t, baseStack+pinOf(rc.runtime, rc.base))
+				} else {
+					copyFixture(t, c.fixture, root)
+				}
 				if c.registry {
 					reg := startRegistry(t)
 					reg.PublishPlain(rc.newest)
 					defer cmd.SetInstanceAddress(func(*config.Forager) string { return reg.Instance() })()
 					writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "pool:\n  registry: "+reg.Host()+"/qory-env\n  run_config: "+t.TempDir()+"\n")
 				}
-				doc := fmt.Sprintf(docs[c.fixture], rc.runtime)
+				doc := fmt.Sprintf(docs[c.fixture], rc.runtime, url)
 				if c.pin {
 					doc += "  runtimes:\n    " + rc.runtime + ":\n      version: 9.9.9\n"
 				}

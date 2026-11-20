@@ -29,8 +29,9 @@ release may change what an existing document does, and states it under Upgrading
   runtime other than `claude` and `codex`. `harness.runtimes` in the user's `qory.yaml` or an
   ancestor's is refused. A pinned version that the registry does not have stops the run before its
   session with `Set runtimes.<runtime>.version in <file> to a version the registry has.`
-  and the cause, `The registry has no <runtime> <version>.`; a dispatched run prints the
-  cause alone.
+  and the cause, `The registry has no <runtime> <version>.`; `<file>` is the checkout's
+  `qory.yaml` for a pin of a base fetched over git. A dispatched run prints the cause
+  alone.
 - A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
   the type whose launch version sets what the workflow's session may push. A module
   declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: one
