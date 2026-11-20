@@ -348,10 +348,12 @@ func TestACodexRunWithoutAWallStopsOnTheHookArguments(t *testing.T) {
 		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  `" + key + "` is a table that contains `" + reserved + "`, which qory reserves in this run."
 	}
 	hooks := "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.\n  A Codex run takes its hook trust from qory and Forager, not from the arguments."
+	trust := "Remove `--trust` from the run's Codex arguments.\n  `--trust` saves trust for the project folder, which lets its `.codex/config.toml` turn the hooks off."
 	for _, c := range []struct {
 		args []string
 		want string
 	}{
+		{[]string{"exec", "--trust", "hi"}, trust},
 		{[]string{"--dangerously-bypass-hook-trust"}, hooks},
 		{[]string{"--dangerously-bypass-hook-trust=true"}, hooks},
 		{[]string{"-c", "features.unified_exec_tty=true"}, config("-c", "features.unified_exec_tty")},

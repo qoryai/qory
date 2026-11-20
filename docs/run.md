@@ -4796,6 +4796,9 @@ when an argument before `--` turns off the trust of the hooks or changes a hook 
 - `--dangerously-bypass-hook-trust`, also with `=`: ``Remove
   `--dangerously-bypass-hook-trust` from the run's Codex arguments.`` and the next line
   ``A Codex run takes its hook trust from qory and Forager, not from the arguments.``
+- `--trust`, also with `=`: ``Remove `--trust` from the run's Codex arguments.`` and the
+  next line `` `--trust` saves trust for the project folder, which lets its
+  `.codex/config.toml` turn the hooks off. ``
 - `--config <key>=<value>` in the forms `--config`, `--config=`, `-c`, `-c<key>=<value>`
   and `-c=<key>=<value>`, where the key is `hooks`, `features.hooks`,
   `features.codex_hooks` or `features.unified_exec_tty`, a key under one, such as

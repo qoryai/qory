@@ -148,6 +148,9 @@ const textSearchArg = "Remove `--search` from the run's Codex arguments.\n  A Co
 // --dangerously-bypass-hook-trust.
 const textHookTrustArg = "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.\n  A Codex run takes its hook trust from qory and Forager, not from the arguments."
 
+// textTrustArg is the refusal of a run whose Codex arguments contain --trust.
+const textTrustArg = "Remove `--trust` from the run's Codex arguments.\n  `--trust` saves trust for the project folder, which lets its `.codex/config.toml` turn the hooks off."
+
 // textRemoteArg is the refusal of a walled run whose Codex arguments contain --remote or
 // --remote-auth-token-env, with the flag for its %s.
 const textRemoteArg = "Remove `%s` from the run's Codex arguments.\n  A Codex run takes its app server from qory and Forager, not from the arguments."
@@ -183,6 +186,11 @@ func (codex) CheckArgs(args []string) error {
 //
 //   - --dangerously-bypass-hook-trust, with which Codex runs hooks that were never
 //     trusted (codex-rs/utils/cli/src/shared_options.rs, bypass_hook_trust);
+//   - --trust, with which codex exec writes projects.<folder>.trust_level = "trusted"
+//     into $CODEX_HOME/config.toml for the project folder, so Codex then reads that
+//     folder's .codex/config.toml, which can set features.hooks = false
+//     (codex-rs/exec/src/cli.rs, trust, and lib.rs, set_project_trust_level, in
+//     0.169.0). Clap reads its bool field as ArgAction::SetTrue, which takes no value;
 //   - --config or -c that sets a key of [trustKeys], in the forms --config <k=v>,
 //     --config=<k=v>, -c <k=v>, -c<k=v> and -c=<k=v>
 //     (codex-rs/utils/cli/src/config_override.rs);
@@ -224,11 +232,11 @@ func (codex) CheckArgs(args []string) error {
 // A key above one is refused whatever its value: the value replaces the whole table,
 // Forager's --config values in it too. Codex refuses a --config, -c,
 // --enable or --disable with no value after it, or with a value that starts with -, so
-// such a flag passes here. --oss, --ignore-user-config and --search take no value, and
-// Codex refuses one given with =; such a form is refused here as well. Codex reads no
-// long flag by a shortened name: its parser does not turn on infer_long_args. Of its
-// short flags, only -h and -V take no value, and both print and exit, so no other flag
-// comes before -c or -p in one word.
+// such a flag passes here. --oss, --ignore-user-config, --search and --trust take no
+// value, and Codex refuses one given with =; such a form is refused here as well. Codex
+// reads no long flag by a shortened name: its parser does not turn on infer_long_args. Of
+// its short flags, only -h and -V take no value, and both print and exit, so no other
+// flag comes before -c or -p in one word.
 func checkArgs(args []string, walled bool) error {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -238,6 +246,8 @@ func checkArgs(args []string, walled bool) error {
 			return nil
 		case a == "--dangerously-bypass-hook-trust" || strings.HasPrefix(a, "--dangerously-bypass-hook-trust="):
 			return errors.New(textHookTrustArg)
+		case a == "--trust" || strings.HasPrefix(a, "--trust="):
+			return errors.New(textTrustArg)
 		case !walled && !strings.HasPrefix(a, "--enable") && !strings.HasPrefix(a, "--disable") && !strings.HasPrefix(a, "--config") && !strings.HasPrefix(a, "-c"):
 			continue
 		case a == "--oss" || strings.HasPrefix(a, "--oss="):
