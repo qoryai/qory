@@ -126,11 +126,16 @@ func TestARoleWithoutAShellToolGetsNoShell(t *testing.T) {
 // with a matcher, a timeout, a status message and a context limit, and a Stop hook with a
 // matcher and a context limit, which Codex leaves out of a Stop hook's hash; in
 // config.toml, a PreModelRequest hook, a PreToolUse group with an mcp_tool hook before an
-// async command hook, and a SessionEnd hook whose timeout Codex limits to 3.
+// async command hook, and a SessionEnd hook whose timeout Codex limits to 3. hooks.json
+// also has a PostToolUse hook with the default context limit, 2500, which Codex leaves
+// out of the hash; config.toml also has a SessionEnd hook and an Interrupt hook with no
+// timeout, which default to 1, and a UserPromptSubmit hook with timeout 0, which Codex
+// raises to 1.
 var hookSettings = map[string]string{
 	"settings/codex/hooks.json": `{"hooks": {
   "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "$QORY_HARNESS_HOME/hooks/guard.sh", "timeout": 10, "statusMessage": "Checking", "additionalContextLimit": 100}]}],
-  "Stop": [{"matcher": "ignored", "hooks": [{"type": "command", "command": "echo stop", "additionalContextLimit": 100}]}]
+  "Stop": [{"matcher": "ignored", "hooks": [{"type": "command", "command": "echo stop", "additionalContextLimit": 100}]}],
+  "PostToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": "echo post", "additionalContextLimit": 2500}]}]
 }}
 `,
 	"settings/codex/config.toml": `[[hooks.PreModelRequest]]
@@ -155,6 +160,22 @@ async = true
 type = "command"
 command = "echo end"
 timeout = 10
+
+[[hooks.SessionEnd]]
+[[hooks.SessionEnd.hooks]]
+type = "command"
+command = "echo end again"
+
+[[hooks.Interrupt]]
+[[hooks.Interrupt.hooks]]
+type = "command"
+command = "echo interrupt"
+
+[[hooks.UserPromptSubmit]]
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = "echo prompt"
+timeout = 0
 `,
 }
 
@@ -230,11 +251,15 @@ func TestConfigTrustsEachCommandHook(t *testing.T) {
 	// the identity written out here, the command as the home's hooks.json has it.
 	want := func(h, codex string) map[string]string {
 		identities := map[string]string{
-			"hooks.json:pre_tool_use:0:0":       `{"event_name":"pre_tool_use","hooks":[{"additionalContextLimit":100,"async":false,"command":"` + h + `/hooks/guard.sh","statusMessage":"Checking","timeout":10,"type":"command"}],"matcher":"Bash"}`,
-			"hooks.json:stop:0:0":               `{"event_name":"stop","hooks":[{"async":false,"command":"echo stop","timeout":600,"type":"command"}]}`,
-			"config.toml:pre_model_request:0:0": `{"event_name":"pre_model_request","hooks":[{"async":false,"command":"echo model","timeout":30,"type":"command"}]}`,
-			"config.toml:pre_tool_use:0:1":      `{"event_name":"pre_tool_use","hooks":[{"async":true,"command":"echo tool","timeout":600,"type":"command"}],"matcher":"*"}`,
-			"config.toml:session_end:0:0":       `{"event_name":"session_end","hooks":[{"async":false,"command":"echo end","timeout":3,"type":"command"}]}`,
+			"hooks.json:pre_tool_use:0:0":        `{"event_name":"pre_tool_use","hooks":[{"additionalContextLimit":100,"async":false,"command":"` + h + `/hooks/guard.sh","statusMessage":"Checking","timeout":10,"type":"command"}],"matcher":"Bash"}`,
+			"hooks.json:stop:0:0":                `{"event_name":"stop","hooks":[{"async":false,"command":"echo stop","timeout":600,"type":"command"}]}`,
+			"config.toml:pre_model_request:0:0":  `{"event_name":"pre_model_request","hooks":[{"async":false,"command":"echo model","timeout":30,"type":"command"}]}`,
+			"config.toml:pre_tool_use:0:1":       `{"event_name":"pre_tool_use","hooks":[{"async":true,"command":"echo tool","timeout":600,"type":"command"}],"matcher":"*"}`,
+			"config.toml:session_end:0:0":        `{"event_name":"session_end","hooks":[{"async":false,"command":"echo end","timeout":3,"type":"command"}]}`,
+			"hooks.json:post_tool_use:0:0":       `{"event_name":"post_tool_use","hooks":[{"async":false,"command":"echo post","timeout":600,"type":"command"}],"matcher":"Edit"}`,
+			"config.toml:session_end:1:0":        `{"event_name":"session_end","hooks":[{"async":false,"command":"echo end again","timeout":1,"type":"command"}]}`,
+			"config.toml:interrupt:0:0":          `{"event_name":"interrupt","hooks":[{"async":false,"command":"echo interrupt","timeout":1,"type":"command"}]}`,
+			"config.toml:user_prompt_submit:0:0": `{"event_name":"user_prompt_submit","hooks":[{"async":false,"command":"echo prompt","timeout":1,"type":"command"}]}`,
 		}
 		out := map[string]string{}
 		for key, identity := range identities {
@@ -276,7 +301,7 @@ func TestConfigTrustsEachCommandHook(t *testing.T) {
 			t.Errorf("%s: hooks.state %v\nwant %v", c.home, got, w)
 		}
 	}
-	if got, want := codex.UntrustedHooks(res, home), []string{"hooks.PreToolUse[0].hooks[0] in config.toml"}; !reflect.DeepEqual(got, want) {
+	if got, want := codex.UntrustedHooks(res, home), []codex.UntrustedHook{{Hook: "hooks.PreToolUse[0].hooks[0] in config.toml", Reason: "qory writes no trusted hash for an mcp_tool hook"}}; !reflect.DeepEqual(got, want) {
 		t.Errorf("UntrustedHooks %q, want %q", got, want)
 	}
 }

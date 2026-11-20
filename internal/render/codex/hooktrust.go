@@ -9,6 +9,7 @@ import (
 	"math"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/qoryai/qory/internal/compose"
 )
@@ -62,29 +63,57 @@ func forEachHook(hooks map[string]any, fn func(event string, g, h int, group, ha
 	}
 }
 
+// UntrustedHook is a hook that Render writes no trusted hash for: Hook is
+// "hooks.<event>[<group>].hooks[<hook>] in <file>", and Reason is why.
+type UntrustedHook struct {
+	Hook, Reason string
+}
+
 // UntrustedHooks lists each hook of the Codex settings of res, for a home at home, that
-// Render writes no trusted hash for, as "hooks.<event>[<group>].hooks[<hook>] in <file>":
-// an mcp_tool hook. Codex skips such a hook in a run without a wall, with no error; a
-// walled run binds it at [SystemInWall], where Codex runs it.
+// Render writes no trusted hash for: an mcp_tool hook, and a command hook whose hash
+// would contain U+2028 or U+2029, see [separatorIn]. Codex skips such a hook in a run
+// without a wall, with no error; a walled run binds it at [SystemInWall], where Codex
+// runs it.
 //
 // shortcut: qory hashes command hooks only, as Codex 0.170.0 does for them; hash an
 // mcp_tool hook, with its server, tool and input, when a harness ships one.
-func UntrustedHooks(res *compose.Result, home string) []string {
-	var out []string
+func UntrustedHooks(res *compose.Result, home string) []UntrustedHook {
+	var out []UntrustedHook
 	for _, file := range hookFiles {
 		hooks, _ := res.SettingsFor(Runtime, file, home)["hooks"].(map[string]any)
-		forEachHook(hooks, func(event string, g, h int, _, handler map[string]any) {
-			if handler["type"] == "mcp_tool" {
-				out = append(out, fmt.Sprintf("hooks.%s[%d].hooks[%d] in %s", event, g, h, file))
+		forEachHook(hooks, func(event string, g, h int, group, handler map[string]any) {
+			hook := fmt.Sprintf("hooks.%s[%d].hooks[%d] in %s", event, g, h, file)
+			switch {
+			case handler["type"] == "mcp_tool":
+				out = append(out, UntrustedHook{hook, "qory writes no trusted hash for an mcp_tool hook"})
+			case handler["type"] == "command" && separatorIn(event, group, handler):
+				out = append(out, UntrustedHook{hook, "qory writes no trusted hash for a hook with U+2028 or U+2029"})
 			}
 		})
 	}
 	return out
 }
 
+// separatorIn reports whether the command, the statusMessage or, for an event of
+// [matched], the group's matcher of a hook contains U+2028 or U+2029. serde_json writes
+// both as they are, and encoding/json escapes them, so hookHash would compute a hash that
+// Codex does not.
+func separatorIn(event string, group, handler map[string]any) bool {
+	texts := []any{handler["command"], handler["statusMessage"]}
+	if matched[event] {
+		texts = append(texts, group["matcher"])
+	}
+	for _, v := range texts {
+		if s, ok := v.(string); ok && strings.ContainsAny(s, "\u2028\u2029") {
+			return true
+		}
+	}
+	return false
+}
+
 // resolvedPath is p, made absolute, with every link resolved: the nearest folder of p
-// that exists, resolved, and the rest of p after it. A compose with --check renders for
-// a home that may not exist yet.
+// that exists, resolved, with its names in the case on disk, see [onDiskCase], and the
+// rest of p after it. A compose with --check renders for a home that may not exist yet.
 func resolvedPath(p string) string {
 	if abs, err := filepath.Abs(p); err == nil {
 		p = abs
@@ -92,7 +121,7 @@ func resolvedPath(p string) string {
 	rest := ""
 	for dir := p; ; {
 		if r, err := filepath.EvalSymlinks(dir); err == nil {
-			return filepath.Join(r, rest)
+			return filepath.Join(onDiskCase(r), rest)
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -146,10 +175,9 @@ const defaultContextLimit = 2500
 // the compact JSON, keys sorted, of the event's label, the matcher where the event takes
 // one, and the one handler normalized: type, command as written, timeout with Codex's
 // default and limits, async, and statusMessage and additionalContextLimit when they
-// count. False for a handler that is no command, and for a command with U+2028 or
-// U+2029, which get no trust.
+// count. False for a handler that is no command, and for one that [separatorIn] finds.
 func hookHash(event string, group, handler map[string]any) (string, bool) {
-	if handler["type"] != "command" {
+	if handler["type"] != "command" || separatorIn(event, group, handler) {
 		return "", false
 	}
 	command, ok := handler["command"].(string)
@@ -173,11 +201,6 @@ func hookHash(event string, group, handler map[string]any) (string, bool) {
 	// The identity has text, whole numbers and booleans only, which always encode.
 	_ = enc.Encode(identity)
 	data := bytes.TrimSuffix(b.Bytes(), []byte("\n"))
-	// serde_json writes U+2028 and U+2029 as they are, and encoding/json escapes them,
-	// so a hook with either gets no trust rather than a hash Codex does not compute.
-	if bytes.Contains(data, []byte(`\u2028`)) || bytes.Contains(data, []byte(`\u2029`)) {
-		return "", false
-	}
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:]), true
 }
@@ -200,7 +223,7 @@ func hookTimeout(event string, v any) int64 {
 }
 
 // wholeNumber is v, a number of a settings file as the compose decoded it, as a whole
-// number: an int64 from TOML, or a whole float64 from JSON. Render refuses a negative or
+// number: an int64 from TOML, or a whole float64 from JSON. Render fails on a negative or
 // fractional hook number before it hashes, see [checkHookNumbers].
 func wholeNumber(v any) (int64, bool) {
 	switch n := v.(type) {

@@ -136,7 +136,7 @@ func checkTierEfforts(res *compose.Result, runtimes []render.Runtime, root strin
 			if !mapped || t.Effort == "" || len(used[name]) == 0 || slices.Contains(am.AgentEfforts(), t.Effort) {
 				continue
 			}
-			return fmt.Errorf("set tier %s's effort to one of %s for %s agents\n%s is not one (from %s)", name, strings.Join(am.AgentEfforts(), ", "), rt.Name(), exports.Value(t.Effort, false), tierEffortFrom(t, root))
+			return fmt.Errorf("set tier %s's effort to one of %s\n%s is not one for %s agents (from %s)", name, strings.Join(am.AgentEfforts(), ", "), exports.Value(t.Effort, false), rt.Name(), tierEffortFrom(t, root))
 		}
 	}
 	return nil
@@ -212,7 +212,10 @@ func tierRows(res *compose.Result, runtimes []render.Runtime, root string) [][2]
 			if many {
 				verb = "run"
 			}
+			_, alone := rt.(render.AloneModel)
 			switch {
+			case !writesModel && alone:
+				rows = append(rows, [2]string{"skipped", "tier " + name + " for " + rt.Name() + "  (qory writes tiers into " + rt.Name() + " agents only in a home composed for " + rt.Name() + " alone; " + w + " " + verb + " on the main model)"})
 			case !writesModel:
 				rows = append(rows, [2]string{"skipped", "tier " + name + " for " + rt.Name() + "  (" + rt.Name() + " agents have no model setting; " + w + " " + verb + " on the main model)"})
 			case t.Effort != "" && am.AgentEfforts() == nil:
@@ -231,8 +234,8 @@ func untrustedHookRows(res *compose.Result, runtimes []render.Runtime, home stri
 		return nil
 	}
 	var rows [][2]string
-	for _, hook := range codex.UntrustedHooks(res, home) {
-		rows = append(rows, [2]string{"skipped", hook + " for codex  (qory writes no trusted hash for an mcp_tool hook; Codex skips it in a run without a wall)"})
+	for _, u := range codex.UntrustedHooks(res, home) {
+		rows = append(rows, [2]string{"skipped", u.Hook + " for codex  (" + u.Reason + "; Codex skips it in a run without a wall)"})
 	}
 	return rows
 }

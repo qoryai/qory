@@ -156,7 +156,7 @@ func TestComposeWritesATierForEachRuntime(t *testing.T) {
 		"effort max of tier thinking for opencode  (qory writes no effort into opencode agents; agents planner, scout run at the session's effort)",
 		"effort max of tier thinking for goose  (qory writes no effort into goose agents; agents planner, scout run at the session's effort)",
 		"tier thinking for gemini  (gemini agents have no model setting; agents planner, scout run on the main model)",
-		"tier thinking for codex  (codex agents have no model setting; agents planner, scout run on the main model)",
+		"tier thinking for codex  (qory writes tiers into codex agents only in a home composed for codex alone; agents planner, scout run on the main model)",
 	}; !reflect.DeepEqual(got, want) {
 		t.Errorf("skipped rows %q\nwant %q\n%s", got, want, out)
 	}
@@ -229,9 +229,9 @@ func TestComposeWritesTiersIntoCodexAgents(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	if got, want := fieldRows(out)["skipped"], []string{
-		"tier light for codex  (codex agents have no model setting; agent explorer runs on the main model)",
-		"tier balanced for codex  (codex agents have no model setting; agent reviewer runs on the main model)",
-		"tier thinking for codex  (codex agents have no model setting; agent planner runs on the main model)",
+		"tier light for codex  (qory writes tiers into codex agents only in a home composed for codex alone; agent explorer runs on the main model)",
+		"tier balanced for codex  (qory writes tiers into codex agents only in a home composed for codex alone; agent reviewer runs on the main model)",
+		"tier thinking for codex  (qory writes tiers into codex agents only in a home composed for codex alone; agent planner runs on the main model)",
 	}; !reflect.DeepEqual(got, want) {
 		t.Errorf("skipped rows %q\nwant %q\n%s", got, want, out)
 	}
@@ -247,7 +247,7 @@ func TestComposeRefusesAnEffortCodexAgentsDoNotTake(t *testing.T) {
 	root := tierCheckout(t)
 	tierModule(t, root, "codex", tierAgents, "tiers: {balanced: {model: example-model, effort: minimal}}")
 	_, err := run(t, "harness", "compose")
-	want := "set tier balanced's effort to one of none, low, medium, high, xhigh, max, ultra for codex agents\nminimal is not one (from qory.yaml)"
+	want := "set tier balanced's effort to one of none, low, medium, high, xhigh, max, ultra\nminimal is not one for codex agents (from qory.yaml)"
 	if cmd.ExitCode(err) != 2 || err == nil || err.Error() != want {
 		t.Errorf("exit %d, err %v\nwant %s", cmd.ExitCode(err), err, want)
 	}
@@ -270,7 +270,7 @@ func TestComposeTakesAnEffortOfAnotherRuntimeBesideCodex(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	if got, want := fieldRows(out)["skipped"], []string{
-		"tier balanced for codex  (codex agents have no model setting; agent reviewer runs on the main model)",
+		"tier balanced for codex  (qory writes tiers into codex agents only in a home composed for codex alone; agent reviewer runs on the main model)",
 	}; !reflect.DeepEqual(got, want) {
 		t.Errorf("skipped rows %q\nwant %q\n%s", got, want, out)
 	}
@@ -322,7 +322,7 @@ func TestComposeRefusesAnEffortCopilotAgentsDoNotTake(t *testing.T) {
 	root := tierCheckout(t)
 	tierModule(t, root, "copilot", tierAgents, "tiers: {thinking: {model: example-model, effort: ultra}}")
 	_, err := run(t, "harness", "compose")
-	want := "set tier thinking's effort to one of minimal, low, medium, high, xhigh, max for copilot agents\nultra is not one (from qory.yaml)"
+	want := "set tier thinking's effort to one of minimal, low, medium, high, xhigh, max\nultra is not one for copilot agents (from qory.yaml)"
 	if cmd.ExitCode(err) != 2 || err == nil || err.Error() != want {
 		t.Errorf("exit %d, err %v\nwant %s", cmd.ExitCode(err), err, want)
 	}
@@ -337,7 +337,7 @@ func TestComposeRefusesAnEffortClaudeAgentsDoNotTake(t *testing.T) {
 	root := tierCheckout(t)
 	tierModule(t, root, "claude", tierAgents, "tiers: {thinking: {model: claude-opus-5-5, effort: ultra}}")
 	_, err := run(t, "harness", "compose")
-	want := "set tier thinking's effort to one of low, medium, high, xhigh, max for claude agents\nultra is not one (from qory.yaml)"
+	want := "set tier thinking's effort to one of low, medium, high, xhigh, max\nultra is not one for claude agents (from qory.yaml)"
 	if cmd.ExitCode(err) != 2 || err == nil || err.Error() != want {
 		t.Errorf("exit %d, err %v\nwant %s", cmd.ExitCode(err), err, want)
 	}
