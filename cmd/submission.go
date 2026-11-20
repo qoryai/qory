@@ -123,7 +123,7 @@ func readHandoff(root string) (*handoff, error) {
 const (
 	textDroppedTitle       = "Title: %d characters, over the limit of %d. qory dropped the text."
 	textDroppedDescription = "Description: %d characters, over the limit of %d. qory dropped the text."
-	textDroppedBlank       = "Title: has no character that is not a space. qory dropped the text."
+	textDroppedBlank       = "Title: has no character that is not a space, U+200C or U+200D. qory dropped the text."
 	textDroppedControl     = "Title: has a control character at character %d. qory dropped the text."
 	textDroppedNUL         = "Description: has a NUL character at character %d. qory dropped the text."
 	textDroppedMarker      = "Description: line %d is a marker line of the draft's block. qory dropped the text."
@@ -259,12 +259,14 @@ func (h *handoff) limit() {
 // notTitleRune reports whether r is a character that [submission.TitleRune] does not pass.
 func notTitleRune(r rune) bool { return !submission.TitleRune(r) }
 
-// visibleTitle reports whether title has a character that is not a space. The spaces are the
-// ones that the contract's draft_title rule lists (U+0020, U+00A0, U+1680, U+2000 to U+200A,
-// U+202F, U+205F and U+3000), which are the characters that [unicode.IsSpace] passes once
-// controls and U+2028 and U+2029 are out; a test compares both with the pinned contract.
+// visibleTitle reports whether title has a character that shows: not a space, U+200C or U+200D.
+// The spaces are the ones that the contract's draft_title rule lists (U+0020, U+00A0, U+1680,
+// U+2000 to U+200A, U+202F, U+205F and U+3000), which are the characters that [unicode.IsSpace]
+// passes once controls and U+2028 and U+2029 are out. U+200C and U+200D pass [submission.TitleRune]
+// but show nothing alone. The pinned contract still accepts a title of only these, see
+// TestTheHandoffTitleRuleAgreesWithTheContractOnTheseTitles.
 func visibleTitle(title string) bool {
-	return strings.ContainsFunc(title, func(r rune) bool { return !unicode.IsSpace(r) })
+	return strings.ContainsFunc(title, func(r rune) bool { return !unicode.IsSpace(r) && r != '\u200c' && r != '\u200d' })
 }
 
 // shownCommit is commit as a line shows it: printable, masked and at most 64 characters.

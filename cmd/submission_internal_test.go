@@ -379,16 +379,36 @@ func TestAHandoffStepWithAControlCharacterIsDropped(t *testing.T) {
 }
 
 // TestAHandoffTitleOfSpacesDropsTheText is a title of spaces only, of U+0020, U+00A0 or another
-// space of the draft title's rule: the draft title would be refused, so the text is dropped with a
-// line and the draft has no title. A title with one other character stays.
+// space of the draft title's rule, or of spaces with U+200C and U+200D, which show nothing: the
+// text is dropped with a line and the draft has no title. A title with one other character stays.
 func TestAHandoffTitleOfSpacesDropsTheText(t *testing.T) {
-	for title, kept := range map[string]bool{`   `: false, `\u00a0\u00a0`: false, ` \u3000\u2009 `: false, ` a `: true} {
+	for title, kept := range map[string]bool{`   `: false, `\u00a0\u00a0`: false, ` \u3000\u2009 `: false, ` a `: true,
+		`\u200c`: false, `\u200d`: false, ` \u200c\u200d `: false, `\u200c a`: true, `\ud83d\udc68\u200d\ud83d\udc69`: true} {
 		h, err := readHandoff(handoffIn(t, `{"text":{"title":"`+title+`","description":"d"}}`))
 		if err != nil || h == nil {
 			t.Fatalf("%v, %v", h, err)
 		}
 		if got := h.text() != nil; got != kept || (!kept && !slices.Equal(h.dropped, []string{textDroppedBlank})) || (kept && len(h.dropped) != 0) {
 			t.Errorf("title %q: kept %v with the lines %q, want kept %v", title, got, h.dropped, kept)
+		}
+	}
+}
+
+// TestAHandoffTitleOfInvisibleCharactersIsTheKnownDifferenceFromThePinnedContract is a title of
+// only spaces, U+200C and U+200D: the hand-off drops it, and the pinned contract (integrations
+// e4bf534a) still accepts it as a draft_title line. When the pin moves to a contract that stops
+// it, this test fails: move these titles into the agreement table below and delete this test.
+func TestAHandoffTitleOfInvisibleCharactersIsTheKnownDifferenceFromThePinnedContract(t *testing.T) {
+	for _, title := range []string{"\u200c", "\u200d", " \u200c\u200d "} {
+		lines := strings.Join([]string{
+			contracts.SubmitKeyDraftNumber + " 1", contracts.SubmitKeyDraftURL + " https://git.example.com/a",
+			contracts.SubmitKeyDraftTitle + " " + title, contracts.SubmitKeyDraftState + " draft", contracts.SubmitKeyDraftAction + " opened",
+		}, "\n") + "\n"
+		if contracts.ParseSubmitLines(lines, "git.example.com", contracts.DraftOpen, nil).Draft == nil {
+			t.Errorf("title %q: the pinned contract stops it now; move it into the agreement table", title)
+		}
+		if visibleTitle(title) {
+			t.Errorf("title %q: the hand-off keeps it", title)
 		}
 	}
 }

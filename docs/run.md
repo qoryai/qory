@@ -3125,12 +3125,12 @@ characters is dropped, so its commit is `unreviewed`. A `text` whose `title` has
 character (Unicode category Cc, such as a tab or a line end), a format character (category
 Cf, such as a bidirectional control, a zero-width space or a tag character) other than U+200C
 and U+200D, or U+2028 or U+2029, is dropped whole. U+200C and U+200D, as in an emoji
-sequence, stay in a title. A step with one of these characters is dropped, and so is a step
+sequence, stay in a title, but a `text` whose `title` has only spaces, U+200C and U+200D is dropped whole. A step with one of these characters is dropped, and so is a step
 whose key is not a full commit id of 40 or 64 lower-case hexadecimal digits. qory prints `qory run: The hand-off
 file has a part the submission format does not allow, so qory dropped it.`, then one line
 indented by two spaces for each part: `Title: <n> characters, over the limit of 256. qory
 dropped the text.`, `Description: <n> characters, over the limit of 20000. qory dropped the
-text.`, `Title: has a control character at character <n>. qory dropped the text.`, `Description: has a NUL character at character <n>. qory dropped the text.`, `Description: line <n> is a marker line of the draft's block. qory dropped the text.`, `Step of commit <commit>: has a control, invisible, direction or separator character. qory dropped the step.`, `<n> further steps have a control, invisible, direction or separator character. qory dropped them.`, `Title: has no character that is not a space. qory dropped the text.`, `<n> step
+text.`, `Title: has a control character at character <n>. qory dropped the text.`, `Description: has a NUL character at character <n>. qory dropped the text.`, `Description: line <n> is a marker line of the draft's block. qory dropped the text.`, `Step of commit <commit>: has a control, invisible, direction or separator character. qory dropped the step.`, `<n> further steps have a control, invisible, direction or separator character. qory dropped them.`, `Title: has no character that is not a space, U+200C or U+200D. qory dropped the text.`, `<n> step
 keys are not a full commit id of 40 or 64 lower-case hexadecimal digits. qory dropped them.`, and `Step of commit <commit>: <n> characters, over the limit of 128. qory dropped the
 step.`, for at most 5 steps, then `<n> further steps are over the limit of 128 characters.
 qory dropped them.` It prints no content of the file. A step for a commit that this run did not make is not used. The run
@@ -3291,7 +3291,7 @@ of them. A number is a whole number from 1 to
 no control character, and none of U+00AD, U+061C, U+180E, U+200B, U+200E, U+200F, U+2028,
 U+2029, U+202A to U+202E, U+2060 to U+2064, U+2066 to U+2069, U+FEFF and U+FFF9 to U+FFFB
 (the contract's rule for a line; U+200C and U+200D are allowed, and the hand-off drops a title
-with any other format character before the program runs), and an address is `https` on the
+with any other format character, or with only spaces, U+200C and U+200D, before the program runs), and an address is `https` on the
 repository's `system`, with a path, at most 2048 characters, of the ASCII characters that RFC
 3986 allows, and with no user, port, query or fragment. qory leaves out a line, and prints
 `qory run: The submit program printed a line that qory cannot use, so qory left it out.` with
