@@ -41,6 +41,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/modelplace"
 	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/render"
 )
@@ -116,8 +117,11 @@ func (codex) Reserved() []render.Reserved {
 // mcp_servers, one table per server containing the object as the module wrote it, and any
 // other codex settings fragment without shell_environment_policy.set, whose variables are
 // the launch's, see [EnvAt], then one agents/<name>.toml per agent containing the agent's
-// name, description and its body as developer_instructions, and a [features] table with
-// shell_tool = false for an agent that declares no shell tool, see [keepsShell]. The
+// name, description and its body as developer_instructions, the model its tier maps to as
+// model and the tier's effort, when the entry sets one, as model_reasoning_effort, and a
+// [features] table with shell_tool = false for an agent that declares no shell tool, see
+// [keepsShell]. A home composed for Codex and another runtime gets no tier, see
+// [render.AloneModel], and an agent whose tier has no map gets neither key. The
 // instructions written as AGENTS.md end with the names the session registers, see
 // [render.Addressing]: a Codex home registers them as the modules wrote them, and the
 // file states that. Codex reads a project .codex only in a project the user has marked
@@ -182,6 +186,12 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 			"description":            doc.String("description"),
 			"developer_instructions": strings.TrimRight(doc.Body, "\n"),
 		}
+		if t, ok := res.Tiers[e.Tier]; ok && e.Tier != "" {
+			role["model"] = t.Model
+			if t.Effort != "" {
+				role[effortKey] = t.Effort
+			}
+		}
 		if !keepsShell(doc.Front) {
 			role["features"] = map[string]any{"shell_tool": false}
 		}
@@ -203,6 +213,26 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 	}
 	return nil
 }
+
+// effortKey is the key of an agent file that Codex reads the agent's effort from, the
+// agent place of the effort in Forager's descriptor for the runtime.
+const effortKey = "model_reasoning_effort"
+
+// AgentEfforts are the effort values a Codex agent file takes in [effortKey], as the
+// agent place of the effort in Forager's descriptor for the runtime lists them; nil when
+// the descriptor has none.
+func (codex) AgentEfforts() []string {
+	p, ok := modelplace.AgentEffort(Runtime)
+	if !ok {
+		return nil
+	}
+	return p.Values
+}
+
+// TiersAlone marks Codex as a [render.AloneModel]: a home composed for Codex and another
+// runtime writes no tier into the Codex agents, so a model id of another provider does
+// not reach them.
+func (codex) TiersAlone() {}
 
 // keepsShell reports whether a role keeps Codex's shell tool. A role with no tools key
 // keeps it, since Claude Code gives an agent with no tools key every tool. A role whose

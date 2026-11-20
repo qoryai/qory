@@ -121,11 +121,12 @@ func tierAgents(res *compose.Result) map[string][]string {
 func writesAgents(rt render.Runtime) bool { return !slices.Contains(rt.Skips(), "agents") }
 
 // checkTierEfforts refuses a tier's effort that a runtime writing efforts into its agents
-// does not take, for a tier an agent sets. from is shortened against root.
+// does not take, for a tier an agent sets, see [render.TierWriter]. from is shortened
+// against root.
 func checkTierEfforts(res *compose.Result, runtimes []render.Runtime, root string) error {
 	used := tierAgents(res)
 	for _, rt := range runtimes {
-		am, ok := rt.(render.AgentModel)
+		am, ok := render.TierWriter(rt, runtimes)
 		if !ok || am.AgentEfforts() == nil || !writesAgents(rt) {
 			continue
 		}
@@ -169,7 +170,7 @@ func tierEffortFrom(t stack.Tier, root string) string {
 
 // tierRows are the rows of a compose for the tiers its agents set: each tier with the
 // model it maps to or that it has none, then, per runtime, a tier's model or effort the
-// runtime does not write into its agents.
+// runtime does not write into its agents in a home of runtimes, see [render.TierWriter].
 func tierRows(res *compose.Result, runtimes []render.Runtime, root string) [][2]string {
 	used := tierAgents(res)
 	who := func(agents []string) (string, bool) {
@@ -199,7 +200,7 @@ func tierRows(res *compose.Result, runtimes []render.Runtime, root string) [][2]
 		if !writesAgents(rt) {
 			continue
 		}
-		am, writesModel := rt.(render.AgentModel)
+		am, writesModel := render.TierWriter(rt, runtimes)
 		for _, name := range module.Tiers {
 			t, ok := res.Tiers[name]
 			if !ok || len(used[name]) == 0 {

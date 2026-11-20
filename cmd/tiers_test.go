@@ -185,6 +185,100 @@ func TestComposeWritesATierForEachRuntime(t *testing.T) {
 	}
 }
 
+// TestComposeWritesTiersIntoCodexAgents composes for codex alone: each Codex agent with a
+// mapped tier gets the tier's model as model and its effort, when the entry sets one, as
+// model_reasoning_effort, with no skipped row. The agent's own effort and the model id of
+// an agent with no tier are not written. A compose of the same home for claude keeps the
+// codex runtime in the home, and the Codex agents then get no model, with the skipped row
+// for codex.
+func TestComposeWritesTiersIntoCodexAgents(t *testing.T) {
+	root := tierCheckout(t)
+	tierModule(t, root, "codex", tierAgents,
+		"tiers:",
+		"  light: example-small-model",
+		"  balanced: {model: example-mid-model, effort: medium}",
+		"  thinking: {model: example-big-model, effort: max}",
+	)
+	out, err := run(t, "harness", "compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got := fieldRows(out)["skipped"]; len(got) > 0 {
+		t.Errorf("skipped rows %q, want none\n%s", got, out)
+	}
+	if got, want := fieldRows(out)["tier"], []string{
+		"light  example-small-model  (agent explorer; from qory.yaml)",
+		"balanced  example-mid-model, effort medium  (agent reviewer; from qory.yaml)",
+		"thinking  example-big-model, effort max  (agent planner; from qory.yaml)",
+	}; !reflect.DeepEqual(got, want) {
+		t.Errorf("tier rows %q\nwant %q\n%s", got, want, out)
+	}
+	agents := filepath.Join(root, ".qory", "harness", "codex", "agents")
+	for name, want := range map[string]string{
+		"explorer": "developer_instructions = \"Explores.\"\nmodel = \"example-small-model\"\nname = \"explorer\"\n",
+		"reviewer": "developer_instructions = \"Reviews.\"\nmodel = \"example-mid-model\"\nmodel_reasoning_effort = \"medium\"\nname = \"reviewer\"\n",
+		"planner":  "developer_instructions = \"Plans.\"\nmodel = \"example-big-model\"\nmodel_reasoning_effort = \"max\"\nname = \"planner\"\n",
+		"writer":   "developer_instructions = \"Writes.\"\nname = \"writer\"\n",
+	} {
+		if got := readText(t, filepath.Join(agents, name+".toml")); got != "description = \"\"\n"+want {
+			t.Errorf("codex agents/%s.toml:\n%s\nwant:\ndescription = \"\"\n%s", name, got, want)
+		}
+	}
+	out, err = run(t, "harness", "compose", "--runtime", "claude")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got, want := fieldRows(out)["skipped"], []string{
+		"tier light for codex  (codex agents have no model setting; agent explorer runs on the main model)",
+		"tier balanced for codex  (codex agents have no model setting; agent reviewer runs on the main model)",
+		"tier thinking for codex  (codex agents have no model setting; agent planner runs on the main model)",
+	}; !reflect.DeepEqual(got, want) {
+		t.Errorf("skipped rows %q\nwant %q\n%s", got, want, out)
+	}
+	if got := readText(t, filepath.Join(agents, "planner.toml")); strings.Contains(got, "model") {
+		t.Errorf("codex agents/planner.toml beside claude:\n%s", got)
+	}
+}
+
+// TestComposeRefusesAnEffortCodexAgentsDoNotTake refuses, for a home of codex alone, a
+// tier's effort that a Codex agent does not take, with the seven values it does, the fix
+// first, in a first line of at most 100 characters.
+func TestComposeRefusesAnEffortCodexAgentsDoNotTake(t *testing.T) {
+	root := tierCheckout(t)
+	tierModule(t, root, "codex", tierAgents, "tiers: {balanced: {model: example-model, effort: minimal}}")
+	_, err := run(t, "harness", "compose")
+	want := "set tier balanced's effort to one of none, low, medium, high, xhigh, max, ultra for codex agents\nminimal is not one (from qory.yaml)"
+	if cmd.ExitCode(err) != 2 || err == nil || err.Error() != want {
+		t.Errorf("exit %d, err %v\nwant %s", cmd.ExitCode(err), err, want)
+	}
+	if first, _, _ := strings.Cut(want, "\n"); len(first) > 100 {
+		t.Errorf("first line is %d characters, more than 100", len(first))
+	}
+	if _, err := os.Stat(filepath.Join(root, ".qory")); !errors.Is(err, os.ErrNotExist) {
+		t.Error(".qory was written")
+	}
+}
+
+// TestComposeTakesAnEffortOfAnotherRuntimeBesideCodex composes for copilot and codex with
+// an effort that copilot agents take and Codex agents do not: the Codex agents get no
+// tier, so the compose writes the home, with the skipped row for codex.
+func TestComposeTakesAnEffortOfAnotherRuntimeBesideCodex(t *testing.T) {
+	root := tierCheckout(t)
+	tierModule(t, root, "[copilot, codex]", tierAgents, "tiers: {balanced: {model: example-model, effort: minimal}}")
+	out, err := run(t, "harness", "compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got, want := fieldRows(out)["skipped"], []string{
+		"tier balanced for codex  (codex agents have no model setting; agent reviewer runs on the main model)",
+	}; !reflect.DeepEqual(got, want) {
+		t.Errorf("skipped rows %q\nwant %q\n%s", got, want, out)
+	}
+	if got := readText(t, filepath.Join(root, ".qory", "harness", "codex", "agents", "reviewer.toml")); strings.Contains(got, "model") {
+		t.Errorf("codex agents/reviewer.toml:\n%s", got)
+	}
+}
+
 // TestComposeRefusesATierMistake refuses each mistake of the flag and the main model with
 // exit status 2, before anything is written.
 func TestComposeRefusesATierMistake(t *testing.T) {
