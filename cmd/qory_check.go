@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/ui"
 )
@@ -48,7 +49,7 @@ func (c *qoryChecks) check(file, what string, want stack.Constraint) error {
 	if c.version == "" {
 		if !c.seen[file] {
 			c.seen[file] = true
-			c.rows = append(c.rows, [2]string{"qory", build().title() + "  (a build from source; not checked against " + want.String() + " in " + ui.Short(file, c.root) + ")"})
+			c.rows = append(c.rows, [2]string{"qory", build().title() + "  (a build from source; not checked against " + want.String() + " in " + exports.Value(ui.Short(file, c.root), false) + ")"})
 		}
 		return nil
 	}
@@ -95,5 +96,5 @@ func (r *retiredRows) add(what, declared string) {
 		return
 	}
 	r.seen[what] = true
-	r.rows = append(r.rows, [2]string{"retired", ui.Short(what, r.root) + "  (apiVersion " + declared + "; read as " + stack.APIVersion + ", the line to write)"})
+	r.rows = append(r.rows, [2]string{"retired", exports.Value(ui.Short(what, r.root), false) + "  (apiVersion " + declared + "; read as " + stack.APIVersion + ", the line to write)"})
 }
