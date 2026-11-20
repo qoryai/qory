@@ -365,10 +365,11 @@ func TestAProgramThatEndsWithAHelperHoldingItsOutputHasItsDraft(t *testing.T) {
 }
 
 // TestTheProgramHasNoControllingTerminal is a program that tries to open the terminal: it cannot,
-// so it can never ask the person a question.
+// so it can never ask the person a question. It redirects `true`: a failed redirect of the
+// special builtin `:` ends dash, which is /bin/sh on Debian.
 func TestTheProgramHasNoControllingTerminal(t *testing.T) {
 	seen := filepath.Join(t.TempDir(), "seen")
-	program := &submitProgram{command: []string{programScript(t, "if : </dev/tty 2>/dev/null; then echo tty; else echo no-tty; fi > "+seen+"\n"+fillScript)}}
+	program := &submitProgram{command: []string{programScript(t, "if true </dev/tty 2>/dev/null; then echo tty; else echo no-tty; fi > "+seen+"\n"+fillScript)}}
 	runProgram(t, program, passedDocument())
 	data, _ := os.ReadFile(seen)
 	if strings.TrimSpace(string(data)) != "no-tty" {

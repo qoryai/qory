@@ -87,18 +87,44 @@ func TestForagerRunKeepsThePushCredentialOnThePushProxyAlone(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Go reads the authorities of SSL_CERT_FILE on Linux alone, and the gateway must trust the test forge's")
 	}
-	if dir := os.Getenv(envRealPush); dir != "" {
+	if dir := realSetup(t, envRealPush); dir != "" {
 		realPush(t, dir)
 		return
 	}
-	dir, err := os.MkdirTemp("", "q-rp")
+	startRealChild(t, "q-rp", "TestForagerRunKeepsThePushCredentialOnThePushProxyAlone", envRealPush)
+}
+
+// realChildArg is the argument after "--" that marks the child process of a test of a real
+// gateway. A child never starts a child: it takes the parent branch of its test only when its
+// marker is missing and this argument is too.
+const realChildArg = "qory-real-child"
+
+// realSetup is the folder that the parent of a test of a real gateway gave its child in the
+// variable env, "" in the parent. It fails the test when the child has no folder, as
+// when TestMain does not keep the variable: the child would be a parent and start a child
+// without end.
+func realSetup(t *testing.T, env string) string {
+	t.Helper()
+	dir := os.Getenv(env)
+	if dir == "" && slices.Contains(os.Args, realChildArg) {
+		t.Fatalf("this child of %s has no %s, so it would start another child; TestMain must keep the variable", os.Args[0], env)
+	}
+	return dir
+}
+
+// startRealChild writes the certificates of a test forge in a new folder, whose name starts
+// with prefix, and runs this binary again with only test, the folder in env, and SSL_CERT_FILE
+// set to its authority. It fails the test when the child fails.
+func startRealChild(t *testing.T, prefix, test, env string) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	writeRealCertificates(t, dir)
-	child := exec.Command(os.Args[0], "-test.run=^TestForagerRunKeepsThePushCredentialOnThePushProxyAlone$", "-test.count=1")
-	child.Env = append(os.Environ(), envRealPush+"="+dir, "SSL_CERT_FILE="+filepath.Join(dir, "ca.pem"))
+	child := exec.Command(os.Args[0], "-test.run=^"+test+"$", "-test.count=1", "--", realChildArg)
+	child.Env = append(os.Environ(), env+"="+dir, "SSL_CERT_FILE="+filepath.Join(dir, "ca.pem"))
 	if out, err := child.CombinedOutput(); err != nil {
 		t.Fatalf("the child run failed: %v\n%s", err, out)
 	}
@@ -422,21 +448,11 @@ func TestForagerRunReadsTheBranchHeadWithTheReadCredential(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Go reads the authorities of SSL_CERT_FILE on Linux alone, and the gateway must trust the test forge's")
 	}
-	if dir := os.Getenv(envRealHead); dir != "" {
+	if dir := realSetup(t, envRealHead); dir != "" {
 		realHead(t, dir)
 		return
 	}
-	dir, err := os.MkdirTemp("", "q-rh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	writeRealCertificates(t, dir)
-	child := exec.Command(os.Args[0], "-test.run=^TestForagerRunReadsTheBranchHeadWithTheReadCredential$", "-test.count=1")
-	child.Env = append(os.Environ(), envRealHead+"="+dir, "SSL_CERT_FILE="+filepath.Join(dir, "ca.pem"))
-	if out, err := child.CombinedOutput(); err != nil {
-		t.Fatalf("the child run failed: %v\n%s", err, out)
-	}
+	startRealChild(t, "q-rh", "TestForagerRunReadsTheBranchHeadWithTheReadCredential", envRealHead)
 }
 
 // realHead is the run of the child process of [TestForagerRunReadsTheBranchHeadWithTheReadCredential].

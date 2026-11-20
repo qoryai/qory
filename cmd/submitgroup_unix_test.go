@@ -3,7 +3,6 @@
 package cmd
 
 import (
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,18 +11,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
-)
 
-// gone reports, within two seconds, whether no process has the id pid.
-func gone(pid int) bool {
-	for range 40 {
-		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
-			return true
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return false
-}
+	"github.com/qoryai/qory/internal/testenv"
+)
 
 // helperPID reads the id of the background process that a program script wrote to file.
 func helperPID(t *testing.T, file string) int {
@@ -35,6 +25,9 @@ func helperPID(t *testing.T, file string) int {
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
 		t.Fatalf("the helper's id is %q: %v", data, err)
+	}
+	if pid <= 1 {
+		t.Fatalf("the helper's id is %d: kill(%d) would reach more than the helper", pid, pid)
 	}
 	return pid
 }
@@ -48,7 +41,7 @@ func TestAProgramPastItsLimitStopsItsHelpers(t *testing.T) {
 	if string(got.Repositories[0].Draft) != `{"none":"program-timeout"}` {
 		t.Errorf("the draft is %s", got.Repositories[0].Draft)
 	}
-	if pid := helperPID(t, file); !gone(pid) {
+	if pid := helperPID(t, file); !testenv.Gone(pid) {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		t.Errorf("the helper %d runs after the limit", pid)
 	}
@@ -60,7 +53,7 @@ func TestAProgramThatEndsLeavesNoHelper(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "pid")
 	program := &submitProgram{command: []string{programScript(t, "sleep 60 >/dev/null 2>&1 &\necho $! > "+file+"\nexit 0\n")}}
 	runProgram(t, program, passedDocument())
-	if pid := helperPID(t, file); !gone(pid) {
+	if pid := helperPID(t, file); !testenv.Gone(pid) {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		t.Errorf("the helper %d runs after the program ended", pid)
 	}
