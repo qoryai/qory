@@ -37,6 +37,23 @@ release may change what an existing document does, and states it under Upgrading
   `CODEX_HOME` set in `harness.launch.codex.env` points Codex at a home other than the
   one in the keys of the hashes, and Codex skips the hooks. See "Hooks on Codex" in
   `docs/harness.md`.
+- A stack pins the version of a runtime that `qory run` installs:
+  `runtimes: {codex: {version: 0.167.2}}` in a `qory-stack.yaml` or in the harness
+  section of the checkout's `qory.yaml`, whose pin of a runtime wins over the base's. A
+  runtime that no layer pins installs its latest version, as before. The run reads the
+  pinned version from the registry's runtime cache, the tag `<version>`, or from npm,
+  the version's document, with the same signature and checksum checks. qory stops with
+  an error on a version that does not start with a digit, `latest` among them, a version
+  with `+`, a version longer than 32 characters, a version that YAML reads as a number
+  or a date, such as an unquoted `2.1`, and a runtime other than `claude` and `codex`.
+  qory stops with an error on `harness.runtimes` in the user's `qory.yaml` or
+  `harness.yaml`, and in an ancestor's `qory.yaml` or `harness.yaml` that discovery or
+  `-f` selects to compose; in another ancestor's file, qory leaves the pin unread. A
+  pinned version that the registry does not have stops the run before its session with
+  `Set runtimes.<runtime>.version in <file> to a version the registry has.` and the
+  cause, `The registry has no <runtime> <version>.`; `<file>` is the checkout's
+  `qory.yaml` or `harness.yaml` for a pin of a base fetched over git. A dispatched run
+  prints the cause alone.
 - A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
   the type whose launch version sets what the workflow's session may push. A module
   declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: one

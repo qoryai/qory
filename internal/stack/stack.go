@@ -20,6 +20,7 @@ import (
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/runtimeinstall"
 )
 
 // APIVersion is the format version this qory reads, [exports.APIVersion], and the one a
@@ -429,6 +430,11 @@ type Stack struct {
 	// the harness section of a checkout's qory.yaml that defines a stack; a section that
 	// extends a stack sets none, and [Extend] takes the base's.
 	Workflows map[string]Workflow `yaml:"workflows,omitempty"`
+	// RuntimePins are the versions of the runtimes that qory run installs, by runtime
+	// name, from runtimes; a runtime they leave out installs its newest release. A stack
+	// file sets them, and so does the harness section of a checkout's qory.yaml. After
+	// [Extend], the checkout's pin of a runtime replaces the base's.
+	RuntimePins map[string]RuntimePin `yaml:"runtimes,omitempty"`
 	// Hooks are the workflow hooks of a checkout's qory.yaml, from harness.hooks, read
 	// only in a document that extends a stack; a stack file has none. After [Extend],
 	// they are the checkout's.
@@ -476,6 +482,60 @@ type Workflow struct {
 	// HookPoints are the points of the workflow where a checkout extending the stack
 	// may add workflow hooks, by the point's name; nil for none.
 	HookPoints map[string]HookPoint `yaml:"hook_points,omitempty"`
+}
+
+// RuntimePin is the version a stack pins of a runtime, an entry of runtimes.
+type RuntimePin struct {
+	// Version is an exact version, see [runtimeinstall.ValidVersion].
+	Version string `yaml:"version"`
+	// From is the absolute path of the file that sets the pin. It is set as the stack is
+	// validated.
+	From string `yaml:"-"`
+	// number is whether version in the file is a YAML number or date, such as 2.1 or
+	// 2024-01-01, which the decoder reads into Version as a string. Set by [RuntimePin.UnmarshalYAML].
+	number bool
+}
+
+// UnmarshalYAML reads an entry of runtimes and records in number whether version is a
+// YAML number or date. A key a pin does not have is reported as the decoder reports an unknown
+// field: the decode of the entry into plain runs without the decoder's check of keys.
+func (r *RuntimePin) UnmarshalYAML(n *yaml.Node) error {
+	type plain RuntimePin
+	var unknown []string
+	number := false
+	if n.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			key, value := n.Content[i], n.Content[i+1]
+			// An alias, version: *v, has the tag of the node it points to.
+			if value.Kind == yaml.AliasNode {
+				value = value.Alias
+			}
+			switch {
+			case key.Value != "version":
+				unknown = append(unknown, fmt.Sprintf("line %d: field %s not found in type stack.RuntimePin", key.Line, key.Value))
+			case value.Kind == yaml.ScalarNode && (value.ShortTag() == "!!int" || value.ShortTag() == "!!float" ||
+				value.ShortTag() == "!!timestamp"):
+				number = true
+			}
+		}
+	}
+	if len(unknown) > 0 {
+		return &yaml.TypeError{Errors: unknown}
+	}
+	var p plain
+	if err := n.Decode(&p); err != nil {
+		// The decoder's text has the type of p; the entry's type is stack.RuntimePin.
+		var typeErr *yaml.TypeError
+		if errors.As(err, &typeErr) {
+			for i, e := range typeErr.Errors {
+				typeErr.Errors[i] = strings.ReplaceAll(e, "stack.plain", "stack.RuntimePin")
+			}
+		}
+		return err
+	}
+	*r = RuntimePin(p)
+	r.number = number
+	return nil
 }
 
 // Tiers are the tier names: the names a tier placeholder, ${qory:<tier>}, may take in an
@@ -824,6 +884,31 @@ func (p *Stack) validate(compose bool) error {
 		}
 		w.TimeLimit = d
 		p.Workflows[name] = w
+	}
+	for _, name := range slices.Sorted(maps.Keys(p.RuntimePins)) {
+		if !slices.Contains(runtimeinstall.Runtimes(), name) {
+			return exports.Refuse(
+				fmt.Sprintf("Remove %s from runtimes.", accesskey.ShownName(name, false)),
+				"qory installs and pins only "+strings.Join(runtimeinstall.Runtimes(), " and ")+".",
+				"runtimes is in "+exports.FilePlace+".")
+		}
+		pin := p.RuntimePins[name]
+		if pin.number {
+			return exports.Refuse(
+				fmt.Sprintf("Put runtimes.%s.version in quotes, such as version: \"2.1.320\".", name),
+				"Without quotes, YAML reads the version as a number or a date, and an exact version is a string.",
+				fmt.Sprintf("The value is %s.", exports.Value(pin.Version, false)),
+				fmt.Sprintf("runtimes.%s is in %s.", name, exports.FilePlace))
+		}
+		if !runtimeinstall.ValidVersion(pin.Version) {
+			return exports.Refuse(
+				fmt.Sprintf("Set runtimes.%s.version to an exact version, or remove runtimes.%s.", name, name),
+				"An exact version starts with a digit, followed by up to 31 letters, digits, . or -. A runtime with no pin installs its latest version.",
+				fmt.Sprintf("The value is %s.", exports.Value(pin.Version, true)),
+				fmt.Sprintf("runtimes.%s is in %s.", name, exports.FilePlace))
+		}
+		pin.From = p.File
+		p.RuntimePins[name] = pin
 	}
 	// A stack that a checkout's qory.yaml defines cannot be extended, so no hook can
 	// reach a point it declares.
@@ -1197,8 +1282,8 @@ func FileAllowed(name string, prefixes []string) bool {
 // [Base.Qory] does. It refuses a base that extends another and a base without an
 // extending block. An entry of p that lists a base module by its name is no module of
 // the result: its exclude becomes that base module's [Module.CheckoutExclude], under the
-// rules of [checkoutExclude]. An extension key both files set is p's. The result's File
-// and Root are p's.
+// rules of [checkoutExclude]. An extension key both files set is p's, and so is a
+// runtime's pin, [Stack.RuntimePins]. The result's File and Root are p's.
 func Extend(base, p *Stack) (*Stack, error) {
 	if base.Extends.Path != "" || base.Extends.Git != "" {
 		return nil, &BaseExtendsError{File: base.File, Extends: base.Extends}
@@ -1265,6 +1350,14 @@ func Extend(base, p *Stack) (*Stack, error) {
 	}
 	if len(out.Extensions) == 0 {
 		out.Extensions = nil
+	}
+	out.RuntimePins = nil
+	if len(base.RuntimePins)+len(p.RuntimePins) > 0 {
+		out.RuntimePins = maps.Clone(base.RuntimePins)
+		if out.RuntimePins == nil {
+			out.RuntimePins = map[string]RuntimePin{}
+		}
+		maps.Copy(out.RuntimePins, p.RuntimePins)
 	}
 	return &out, nil
 }

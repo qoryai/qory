@@ -24,8 +24,8 @@ const fixtures = "../../contracts/harness/v1/fixtures"
 
 // TestFixtures runs every fixture: the document in its qory.yaml, on the stack it
 // extends when it extends one, composes to the expected entries, settings, instructions,
-// push checks, scope checks, workflow plan types, workflow hooks and workflow access levels, or fails with the expected
-// error text.
+// push checks, scope checks, workflow plan types, workflow hooks, workflow access levels and
+// runtime pins, or fails with the expected error text.
 func TestFixtures(t *testing.T) {
 	dirs, err := filepath.Glob(filepath.Join(fixtures, "*"))
 	if err != nil || len(dirs) == 0 {
@@ -223,6 +223,16 @@ func TestFixtures(t *testing.T) {
 			}
 			if _, err := os.Stat("expected/access.txt"); err == nil || b.Len() > 0 {
 				expectText(t, "expected/access.txt", b.String())
+			}
+			// expected/runtimes.txt is the version each runtime is pinned to, with the file
+			// of the layer that pins it, when the stack pins any.
+			b.Reset()
+			for _, name := range slices.Sorted(maps.Keys(res.Stack.RuntimePins)) {
+				pin := res.Stack.RuntimePins[name]
+				fmt.Fprintf(&b, "%s %s %s\n", name, pin.Version, strings.TrimPrefix(pin.From, dir+string(filepath.Separator)))
+			}
+			if _, err := os.Stat("expected/runtimes.txt"); err == nil || b.Len() > 0 {
+				expectText(t, "expected/runtimes.txt", b.String())
 			}
 		})
 	}

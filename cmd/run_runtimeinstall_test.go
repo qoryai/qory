@@ -52,6 +52,9 @@ type installSetup struct {
 	// runtime is the runtime of the run; empty means claude. version is the version the
 	// image's fetch looks for in qory's state folder; empty means 2.1.320.
 	runtime, version string
+	// runtimes is the harness section's runtimes key, such as
+	// "runtimes:\n  claude:\n    version: 2.1.300\n"; empty for none.
+	runtimes string
 	// args are flags that follow the run key's.
 	args []string
 	// during, when set, runs in its own goroutine while the run goes on.
@@ -114,7 +117,7 @@ func runInstalling(t *testing.T, s installSetup) installRun {
 		},
 	})
 	defer restore()
-	writeFile(t, filepath.Join(h.dir, "qory.yaml"), ownStack("apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: "+runtime+"\nmodules:\n  - name: core\n    source: {git: \""+h.server.URL("acme/harness")+"\", ref: main, path: modules/core}\n"))
+	writeFile(t, filepath.Join(h.dir, "qory.yaml"), ownStack("apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: "+runtime+"\nmodules:\n  - name: core\n    source: {git: \""+h.server.URL("acme/harness")+"\", ref: main, path: modules/core}\n"+s.runtimes))
 	args = append(args, s.args...)
 	if s.during != nil {
 		go s.during()

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -148,7 +149,7 @@ func TestTheInstallCausesStandAlone(t *testing.T) {
 	}
 	install := installStub
 	noTarballOf := func(version string) runtimeinstall.Fetch {
-		return func(context.Context, string) (runtimeinstall.Release, error) {
+		return func(context.Context, string, string) (runtimeinstall.Release, error) {
 			integrity := rt.Integrity(rt.PlainTarball(t, version))
 			signed := "@anthropic-ai/claude-code-linux-x64@" + version
 			return runtimeinstall.Release{Version: version, Integrity: integrity, Signed: signed, Signatures: rt.Signatures(signed, integrity)}, nil
@@ -212,6 +213,31 @@ func TestTheInstallCausesStandAlone(t *testing.T) {
 		if person := installFailed(c.err).Error(); person != c.want {
 			t.Errorf("a person's run shows %q, want %q", person, c.want)
 		}
+	}
+}
+
+// TestTheDispatchedCauseOfTheLongestPinFits is the line a run from a run code prints for
+// a pin that the registry does not have, with the longest runtime name of
+// runtimeinstall.Runtimes() and a pin of 32 characters, the longest one a stack may set:
+// with "qory run: " and [codeUsed], the line has at most 100 characters.
+func TestTheDispatchedCauseOfTheLongestPinFits(t *testing.T) {
+	runtime := ""
+	for _, r := range runtimeinstall.Runtimes() {
+		if len(r) > len(runtime) {
+			runtime = r
+		}
+	}
+	pin := "1" + strings.Repeat("0", 31)
+	if !runtimeinstall.ValidVersion(pin) || runtimeinstall.ValidVersion(pin+"0") {
+		t.Fatalf("the longest pin a stack may set is not %d characters", len(pin))
+	}
+	err := fmt.Errorf(textNotPublished, runtime, "qory-stack.yaml", runtime, pin)
+	line := "qory run: " + causeOnly(installFailed(err)).Error() + codeUsed
+	if want := "qory run: the registry has no " + runtime + " " + pin + "; the code is used"; line != want {
+		t.Fatalf("a dispatched run shows %q, want %q", line, want)
+	}
+	if len(line) > 100 {
+		t.Errorf("the line has %d characters: %s", len(line), line)
 	}
 }
 

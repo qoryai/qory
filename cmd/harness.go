@@ -682,6 +682,12 @@ type composed struct {
 	harness []session.HarnessSource
 	// workflows are the composed stack's workflows, nil for none.
 	workflows map[string]stack.Workflow
+	// runtimes are the composed stack's pins of the runtimes' versions, nil for none.
+	runtimes map[string]stack.RuntimePin
+	// pinFile is the name of the checkout's file when the base was fetched over git, ""
+	// otherwise: the fix line of a pin that the registry does not have uses it in place
+	// of the base's file, which is in a cache clone, see [installRuntime].
+	pinFile string
 	// checkoutOnly is, per runtime composed for, what [render.CheckoutOnly] lists.
 	checkoutOnly map[string][]string
 	// codex is what a walled Codex run writes its Codex home from, see [codexParts].
@@ -754,15 +760,20 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 		return nil, err
 	}
 	var workflows map[string]stack.Workflow
+	var runtimes map[string]stack.RuntimePin
+	var pinFile string
 	if res.Stack != nil {
-		workflows = res.Stack.Workflows
+		workflows, runtimes = res.Stack.Workflows, res.Stack.RuntimePins
+		if res.Base != nil && res.Base.Commit != "" {
+			pinFile = res.Stack.ConfigFile()
+		}
 	}
 	checkoutOnly := map[string][]string{}
 	for _, rt := range targets {
 		checkoutOnly[rt.Name()] = render.CheckoutOnly(rt, res)
 	}
 	parts := codexParts{skills: codex.AllowedSkills(res), readRules: res.CodexReadRules, sourceDirs: res.SourceDirs()}
-	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, checkoutOnly: checkoutOnly, codex: parts}, nil
+	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, runtimes: runtimes, pinFile: pinFile, checkoutOnly: checkoutOnly, codex: parts}, nil
 }
 
 // pushChecksWritable stops a walled run before the home is written when a module
@@ -948,8 +959,17 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 		if p, fetched, err = compose.LoadReference(ref, fetchOpts); err != nil {
 			return nil, composeError(err)
 		}
-	} else if p, err = config.LoadStack(file); err != nil {
-		return nil, input(err)
+	} else {
+		// A document that -f selects in an ancestor directory is refused for a pin, as
+		// [config.DiscoverStack] refuses it.
+		if o.file != "" {
+			if err := config.SelectedDocument(root, file); err != nil {
+				return nil, input(err)
+			}
+		}
+		if p, err = config.LoadStack(file); err != nil {
+			return nil, input(err)
+		}
 	}
 	retired.add(p.File, p.RetiredAPIVersion)
 	// A stack named with -f, in a checkout whose own document extends one, is that
