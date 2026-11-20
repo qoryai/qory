@@ -417,7 +417,9 @@ func TestAHandoffTitleOfInvisibleCharactersIsTheKnownDifferenceFromThePinnedCont
 // accepts or does not accept as the draft_title line of the submit program: the hand-off keeps
 // each one that the contract accepts and drops each one that it does not, so the program's line
 // may return every title that the hand-off keeps. The hand-off also drops the format characters
-// that the contract does not list, such as U+0600 and the tag character U+E0041, which this table leaves out.
+// that the contract does not list, such as U+0600 and the tag character U+E0041, which this table leaves out,
+// and a title of only spaces, U+200C and U+200D, see
+// TestAHandoffTitleOfInvisibleCharactersIsTheKnownDifferenceFromThePinnedContract.
 func TestTheHandoffTitleRuleAgreesWithTheContractOnTheseTitles(t *testing.T) {
 	for _, title := range []string{
 		"Add a page", "Add \u00e9 \U0001F468\u200d\U0001F469\u200d\U0001F467", "a\u200cb", " a\u00a0", strings.Repeat("a", maxTitle),

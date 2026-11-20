@@ -697,15 +697,15 @@ release may change what an existing document does, and states it under Upgrading
 - A session hands its title, description and the step of each commit to the submit step in
   the file at the path in `QORY_SUBMISSION_HANDOFF`. A commit with no step is `unreviewed`. qory
   reads the file inside the checkout: a link as the file, or a link that leads out of the
-  checkout, ends the read. It drops a title with a control character or with no character
-  that is not a space, U+200C or U+200D, a title, description or step that is over a limit of the submission
-  format, a description with a NUL character or a line that is a marker of the draft's block
-  (`<!-- qory:start -->` or `<!-- qory:end -->`), a step with a character that stops a title,
-  and a step whose key is not a full lower-case commit id, with a
-  line that states the cause and the values. One rule covers a title, a step and the name of
-  a machine step: a control character, a format character other than U+200C and U+200D,
-  and U+2028 and U+2029 stop a title or a step, and a name loses them. U+200C and U+200D,
-  as in an emoji sequence, stay.
+  checkout, ends the read. qory drops each of these, with a line that states the cause and
+  the values: a title with a control character; a title with no character that is not a
+  space, U+200C or U+200D; a title, description or step that is over a limit of the
+  submission format; a description with a NUL character or a line that is a marker of the
+  draft's block (`<!-- qory:start -->` or `<!-- qory:end -->`); a step with a character that
+  stops a title; and a step whose key is not a full lower-case commit id. One rule covers a
+  title, a step and the name of a machine step: a control character, a format character
+  other than U+200C and U+200D, and U+2028 and U+2029 stop a title or a step, and a name
+  loses them. U+200C and U+200D, as in an emoji sequence, stay.
 - qory adds `/.qory/handoff/` to the checkout's `.git/info/exclude` for a run on a work
   item's branch, so `git add -A` and `git commit -a` leave the hand-off file out of a commit.
   A commit of the run that has a path under `.qory/handoff/`, in any letter case, as
