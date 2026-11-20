@@ -4769,16 +4769,17 @@ For `--disable hooks` they are:
 
 A `--config features={...}` pair sets the whole `features` table, so Codex drops the
 feature settings that earlier `--config` pairs set. The session passes
-`features.plugins=false` and `features.apps=false` in such pairs, so Forager's lines name
-`features.plugins`, and the run stops. For `--config features={hooks=false}` they are:
+`features.plugins=false` and `features.apps=false` in such pairs. Forager's lines contain
+`features.plugins`, the first of the two, and the run stops. For
+`--config features={hooks=false}` they are:
 
 ```
 ✗ remove the --config pair that sets features.plugins from the launch's arguments
   the session sets features.plugins, and a later pair overrides the session's value
 ```
 
-`-c features={hooks=false}` prints the hook lines, with `-c` and `features.hooks` in the
-first line.
+For `-c features={hooks=false}`, qory prints the hook lines, with `-c` and
+`features.hooks` in the first line.
 
 Every other argument of an unwalled run passes unchanged.
 
