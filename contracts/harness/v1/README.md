@@ -2039,43 +2039,47 @@ Per runtime, the files written into its directory:
   `allow_login_shell`, `model_instructions_file`, `experimental_compact_prompt_file`,
   `model_catalog_json`, `js_repl_node_path`, `sqlite_home` or `log_dir` fails the compose
   with ``Remove the reserved key from `settings/codex/config.toml`.`` and the next line
-  ``qory and Forager reserve `<key>`; a Codex run takes no value for it from the
-  harness.``, with each control character of the key written as an escape, such as `\n`.
-  A walled run whose Codex arguments before `--` set one of these keys,
-  `model_reasoning_effort`, `skills` or `cloud.skills`, a key under one, or a table above
-  one, such as `cloud`, with `--config`, `--config=`, `-c`, `-c<key>=<value>` or
-  `-c=<key>=<value>`, stops before the agent starts with ``Remove the `<flag>` flag and
-  its value from the run's Codex arguments.`` and the next line ``qory and Forager reserve
-  `<key>`; a Codex run takes no value for it from the arguments.``, where `<flag>` is `-c`
-  or `--config` as typed. For a table above a reserved key, such as `cloud`, the next line
-  is ``A value for `cloud` replaces `cloud.skills`, which qory and Forager reserve.`` A
-  fragment may still set `model_reasoning_effort`. Such a run also stops on `--oss` or
-  `--local-provider` before `--`, with ``Remove `<flag>` from the run's Codex arguments.``
-  and the next line ``A Codex run takes its model provider from qory and Forager, not from
-  the arguments.``, and on `--profile` or `-p`, with ``Remove `--profile` from the run's
-  Codex arguments.`` and the next line ``A Codex run takes its settings from qory and
-  Forager, not from a profile.``, and on `--enable` or `--disable` with any feature, which
-  Codex reads as `--config features.<feature>=true` or `false`, with ``Remove the
-  `--enable` flag and its value from the run's Codex arguments.`` and the next line ``A
-  walled Codex run takes no feature from its arguments, `<feature>` included.``
-  (`--disable` likewise). It stops on `--ignore-user-config` with ``Remove
-  `--ignore-user-config` from the run's Codex arguments.`` and the next line ``A Codex run
-  takes its settings from qory and Forager, not from the arguments.``, and on `--search`
-  with ``Remove `--search` from the run's Codex arguments.`` and the next line ``A Codex
-  run takes its web search setting from qory and Forager, not from the arguments.`` It
-  stops on `--remote` or `--remote-auth-token-env`, also with `=`, with ``Remove
-  `--remote` from the run's Codex arguments.`` and the next line ``A Codex run takes its
-  app server from qory and Forager, not from the arguments.`` (`--remote-auth-token-env`
-  likewise). Every Codex run, walled or not, stops before the agent starts on
-  `--dangerously-bypass-hook-trust`, with ``Remove `--dangerously-bypass-hook-trust` from
-  the run's Codex arguments.`` and the next line ``A Codex run takes its hook trust from
-  qory and Forager, not from the arguments.``; on a `--config` or `-c` key at `hooks`,
-  `features.hooks`, `features.codex_hooks` or `features.unified_exec_tty`, under one, or
-  `features`, with the `--config` lines; and on `--enable` or `--disable` of `hooks`,
-  `codex_hooks` or `unified_exec_tty`, with the `--enable` lines. A key or feature in
-  these lines has each control character written as an escape. A hook in
-  `settings/codex/config.toml` or `settings/codex/hooks.json` whose `timeout` or
-  `additionalContextLimit` is negative or fractional, such as 2.0, fails the compose with
+  ``qory reserves `<key>`; a Codex run takes no value for it from the harness.``, with
+  each control character of the key written as an escape, such as `\n`. A walled run whose
+  Codex arguments before `--` set one of these keys, `model_reasoning_effort`, `skills` or
+  `cloud.skills`, a key under one, or a table above one, such as `cloud`, with `--config`,
+  `--config=`, `-c`, `-c<key>=<value>` or `-c=<key>=<value>`, stops before the agent
+  starts with ``Remove the `<flag>` flag and its value from the run's Codex arguments.``
+  and the next line ``In this run, qory reserves `<key>`; the run takes no value for it
+  from the arguments.``, where `<flag>` is `-c` or `--config` as typed. For a table above
+  a reserved key, such as `cloud`, the next line is `` `cloud` is a table that contains
+  `cloud.skills`, which qory reserves in this run. `` A fragment may still set
+  `model_reasoning_effort`. Such a run also stops on `--oss` or `--local-provider` before
+  `--`, with ``Remove `<flag>` from the run's Codex arguments.`` and the next line ``A
+  Codex run takes its model provider from qory and Forager, not from the arguments.``, and
+  on `--profile` or `-p`, with ``Remove `--profile` from the run's Codex arguments.`` and
+  the next line ``A Codex run takes its settings from qory and Forager, not from a
+  profile.``, and on `--enable` or `--disable` with every feature other than `hooks`,
+  `codex_hooks` and `unified_exec_tty`, which Codex reads as `--config
+  features.<feature>=true` or `false`, with ``Remove the `--enable` flag and its value
+  from the run's Codex arguments.`` and the next line ``A walled Codex run takes no
+  feature from its arguments, `<feature>` included.`` (`--disable` likewise). It stops on
+  `--ignore-user-config` with ``Remove `--ignore-user-config` from the run's Codex
+  arguments.`` and the next line ``A Codex run takes its settings from qory and Forager,
+  not from the arguments.``, and on `--search` with ``Remove `--search` from the run's
+  Codex arguments.`` and the next line ``A Codex run takes its web search setting from
+  qory and Forager, not from the arguments.`` It stops on `--remote` or
+  `--remote-auth-token-env`, also with `=`, with ``Remove `--remote` from the run's Codex
+  arguments.`` and the next line ``A Codex run takes its app server from qory and Forager,
+  not from the arguments.`` (`--remote-auth-token-env` likewise). Every Codex run, walled
+  or not, stops before the agent starts on `--dangerously-bypass-hook-trust`, with
+  ``Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.`` and the
+  next line ``A Codex run takes its hook trust from qory and Forager, not from the
+  arguments.``; on a `--config` or `-c` key at `hooks`, `features.hooks`,
+  `features.codex_hooks` or `features.unified_exec_tty`, under one, or `features`, with
+  the `--config` lines; and on `--enable` or `--disable` of `hooks`, `codex_hooks` or
+  `unified_exec_tty`, with ``Remove the `<flag>` flag and its value from the run's Codex
+  arguments.``, where `<flag>` is `--enable` or `--disable` as typed, and the next line
+  ``In this run, qory reserves `features.<feature>`; the run takes no value for it from
+  the arguments.`` A key or feature in these lines has each control character written as
+  an escape. A hook in `settings/codex/config.toml` or `settings/codex/hooks.json` whose
+  `timeout` or `additionalContextLimit` is negative or fractional, such as 2.0, fails the
+  compose with
   ``Set `<key>` of the `<event>` hook to a whole number of 0 or more.`` and the next line
   ``The hook is in the harness's `settings/codex/<file>`, and Codex ignores the whole file
   otherwise.`` A hook group or a hook there that Codex 0.170.0 cannot decode, such as a

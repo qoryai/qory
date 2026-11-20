@@ -115,13 +115,13 @@ func StartDirs(args []string) []string {
 // %s. --enable and --disable of a feature of [trustFeatures] get it too, with the flag and
 // features.<feature>. The key is on the cause line, so line 1 is at most as long as with
 // --config.
-const textConfigArg = "Remove the `%s` flag and its value from the run's Codex arguments.\n  qory and Forager reserve `%s`; a Codex run takes no value for it from the arguments."
+const textConfigArg = "Remove the `%s` flag and its value from the run's Codex arguments.\n  In this run, qory reserves `%s`; the run takes no value for it from the arguments."
 
 // textConfigAboveArg is the refusal of a run whose Codex arguments set a key above a key
 // of [trustKeys], or, in a walled run, of [reservedKeys] or [argReservedKeys], with the
-// flag as typed, the key as given and the reserved key under it for its three %s: Codex
-// replaces the whole table with the value, the reserved key in it too.
-const textConfigAboveArg = "Remove the `%s` flag and its value from the run's Codex arguments.\n  A value for `%s` replaces `%s`, which qory and Forager reserve."
+// flag as typed, the key as given and the reserved key under it for its three %s. The
+// text states only that the table contains the reserved key.
+const textConfigAboveArg = "Remove the `%s` flag and its value from the run's Codex arguments.\n  `%s` is a table that contains `%s`, which qory reserves in this run."
 
 // textProviderArg is the refusal of a walled run whose Codex arguments contain --oss or
 // --local-provider, with the flag for its %s.

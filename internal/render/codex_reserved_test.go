@@ -46,7 +46,7 @@ func TestCodexRefusesReservedKeys(t *testing.T) {
 		t.Run(c.key, func(t *testing.T) {
 			res, home := composeEnv(t, withFile("modules/core/settings/codex/config.toml", c.fragment), nil, "codex")
 			err := render.Build(res, home, lookup(t, "codex"))
-			want := "Remove the reserved key from `settings/codex/config.toml`.\n  qory and Forager reserve `" + c.key + "`; a Codex run takes no value for it from the harness."
+			want := "Remove the reserved key from `settings/codex/config.toml`.\n  qory reserves `" + c.key + "`; a Codex run takes no value for it from the harness."
 			if err == nil || err.Error() != want {
 				t.Fatalf("Build: %v, want %q", err, want)
 			}

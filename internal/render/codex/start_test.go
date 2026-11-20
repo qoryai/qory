@@ -72,12 +72,12 @@ func TestWalledArgs(t *testing.T) {
 }
 
 // TestWalledArgsRefuseAReservedConfigKey is each form of --config and -c that sets a key
-// Forager or qory sets for a walled run: the key itself, a key under it, a table above
-// it, model_reasoning_effort, use_legacy_landlock, which Codex reads as
+// qory reserves in a walled run: the key itself, a key under it, a table above it,
+// model_reasoning_effort, use_legacy_landlock, which Codex reads as
 // features.use_legacy_landlock, and a key under hooks. Each is refused with the key as
 // given, also before exec and with spaces around the key; a table above a reserved key,
-// such as feedback, with the reserved key under it. An allowed key, a reserved key after
-// --, a flag with no = and a -c whose value Codex refuses pass.
+// such as feedback, with the reserved key it contains. An allowed key, a reserved key
+// after --, a flag with no = and a -c whose value Codex rejects with an error pass.
 func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 	rt, err := render.Lookup("codex")
 	if err != nil {
@@ -110,12 +110,12 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 		{[]string{"exec", "-c", "model_verbosity=low", "-c", "web_search=live", "hi"}, "-c", "web_search"},
 	} {
 		got, err := w.WalledArgs(c.args, home)
-		want := "Remove the `" + c.flag + "` flag and its value from the run's Codex arguments.\n  qory and Forager reserve `" + c.key + "`; a Codex run takes no value for it from the arguments."
+		want := "Remove the `" + c.flag + "` flag and its value from the run's Codex arguments.\n  In this run, qory reserves `" + c.key + "`; the run takes no value for it from the arguments."
 		if err == nil || err.Error() != want || got != nil {
 			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, want)
 		}
 	}
-	want := "Remove the `-c` flag and its value from the run's Codex arguments.\n  A value for `feedback` replaces `feedback.enabled`, which qory and Forager reserve."
+	want := "Remove the `-c` flag and its value from the run's Codex arguments.\n  `feedback` is a table that contains `feedback.enabled`, which qory reserves in this run."
 	if _, err := w.WalledArgs([]string{"exec", "-c", "feedback={}", "hi"}, home); err == nil || err.Error() != want {
 		t.Errorf("WalledArgs(-c feedback={}): %v, want %q", err, want)
 	}
@@ -183,8 +183,7 @@ func TestWalledArgsRefuseAProviderOrAProfile(t *testing.T) {
 // TestWalledArgsRefuseAFeature is each form of --enable and --disable, before exec, after
 // it, repeated, and with the legacy name connectors: each is refused with the flag and the
 // first such feature, as one a walled run takes from no argument. A feature of the hook
-// trust is refused as the key features.<feature> that qory and Forager reserve in every
-// run.
+// trust is refused as the key features.<feature> that qory reserves in every run.
 func TestWalledArgsRefuseAFeature(t *testing.T) {
 	rt, err := render.Lookup("codex")
 	if err != nil {
@@ -218,7 +217,7 @@ func TestWalledArgsRefuseAFeature(t *testing.T) {
 		{[]string{"exec", "--enable", "hooks", "hi"}, "--enable", "features.hooks"},
 		{[]string{"--disable=unified_exec_tty"}, "--disable", "features.unified_exec_tty"},
 	} {
-		want := "Remove the `" + c.flag + "` flag and its value from the run's Codex arguments.\n  qory and Forager reserve `" + c.key + "`; a Codex run takes no value for it from the arguments."
+		want := "Remove the `" + c.flag + "` flag and its value from the run's Codex arguments.\n  In this run, qory reserves `" + c.key + "`; the run takes no value for it from the arguments."
 		if _, err := w.WalledArgs(c.args, home); err == nil || err.Error() != want {
 			t.Errorf("WalledArgs(%q): %v, want %q", c.args, err, want)
 		}
@@ -312,10 +311,10 @@ func TestWalledArgsRefuseSkills(t *testing.T) {
 		{"skills={}", "skills", ""},
 		{"cloud.skills.enabled=true", "cloud.skills.enabled", ""},
 		{"cloud.skills={}", "cloud.skills", ""},
-		{"cloud={}", "cloud", "  A value for `cloud` replaces `cloud.skills`, which qory and Forager reserve."},
+		{"cloud={}", "cloud", "  `cloud` is a table that contains `cloud.skills`, which qory reserves in this run."},
 	} {
 		if c.cause == "" {
-			c.cause = "  qory and Forager reserve `" + c.key + "`; a Codex run takes no value for it from the arguments."
+			c.cause = "  In this run, qory reserves `" + c.key + "`; the run takes no value for it from the arguments."
 		}
 		for _, f := range []struct {
 			flag string
@@ -348,7 +347,7 @@ func TestWalledArgsRefusalsEscapeControlCharacters(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"-c", "features.x\n\x1b[2Jy=1"}, "Remove the `-c` flag and its value from the run's Codex arguments.\n  qory and Forager reserve `features.x\\n\\x1b[2Jy`; a Codex run takes no value for it from the arguments."},
+		{[]string{"-c", "features.x\n\x1b[2Jy=1"}, "Remove the `-c` flag and its value from the run's Codex arguments.\n  In this run, qory reserves `features.x\\n\\x1b[2Jy`; the run takes no value for it from the arguments."},
 		{[]string{"--enable", "x\ay"}, "Remove the `--enable` flag and its value from the run's Codex arguments.\n  A walled Codex run takes no feature from its arguments, `x\\ay` included."},
 		{[]string{"--disable=x\ry"}, "Remove the `--disable` flag and its value from the run's Codex arguments.\n  A walled Codex run takes no feature from its arguments, `x\\ry` included."},
 	} {
@@ -416,13 +415,13 @@ func TestCheckArgsRefuseTheHookSettingsWithoutAWall(t *testing.T) {
 	}
 	c := rt.(render.ArgsChecker)
 	config := func(flag, key string) string {
-		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  qory and Forager reserve `" + key + "`; a Codex run takes no value for it from the arguments."
+		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  In this run, qory reserves `" + key + "`; the run takes no value for it from the arguments."
 	}
 	feature := func(flag, name string) string {
-		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  qory and Forager reserve `features." + name + "`; a Codex run takes no value for it from the arguments."
+		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  In this run, qory reserves `features." + name + "`; the run takes no value for it from the arguments."
 	}
 	above := func(flag, key, reserved string) string {
-		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  A value for `" + key + "` replaces `" + reserved + "`, which qory and Forager reserve."
+		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  `" + key + "` is a table that contains `" + reserved + "`, which qory reserves in this run."
 	}
 	hooks := "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.\n  A Codex run takes its hook trust from qory and Forager, not from the arguments."
 	for _, tc := range []struct {

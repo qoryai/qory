@@ -312,7 +312,7 @@ func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 	}
 	log := walledForager(t)
 	_, err = run(t, "run", "codex", "--", "-c", "model_provider=x")
-	want := "Remove the `-c` flag and its value from the run's Codex arguments.\n  qory and Forager reserve `model_provider`; a Codex run takes no value for it from the arguments."
+	want := "Remove the `-c` flag and its value from the run's Codex arguments.\n  In this run, qory reserves `model_provider`; the run takes no value for it from the arguments."
 	if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
 		t.Errorf("a walled run: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
 	}
@@ -339,13 +339,13 @@ func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 func TestACodexRunWithoutAWallStopsOnTheHookArguments(t *testing.T) {
 	exportingCheckout(t, fakeRuntime(t))
 	config := func(flag, key string) string {
-		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  qory and Forager reserve `" + key + "`; a Codex run takes no value for it from the arguments."
+		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  In this run, qory reserves `" + key + "`; the run takes no value for it from the arguments."
 	}
 	feature := func(flag, name string) string {
-		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  qory and Forager reserve `features." + name + "`; a Codex run takes no value for it from the arguments."
+		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  In this run, qory reserves `features." + name + "`; the run takes no value for it from the arguments."
 	}
 	above := func(flag, key, reserved string) string {
-		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  A value for `" + key + "` replaces `" + reserved + "`, which qory and Forager reserve."
+		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  `" + key + "` is a table that contains `" + reserved + "`, which qory reserves in this run."
 	}
 	hooks := "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.\n  A Codex run takes its hook trust from qory and Forager, not from the arguments."
 	for _, c := range []struct {
