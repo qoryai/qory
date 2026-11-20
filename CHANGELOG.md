@@ -779,10 +779,22 @@ release may change what an existing document does, and states it under Upgrading
   cancelled gets no folder. The start commit of a run skips a cancelled version of the
   artifact `branch` too. Before, all three took the newest version, cancelled or not. An
   index without the field `cancelled` reads as no version cancelled.
-- qory builds with Forager 57a8deb5 and integrations e4bf534a. In a run configuration
-  from a control plane, the run's model key is `default_model_provider_credential_name`,
-  which was `model_credential`, and each API credential has a `group`. In the
-  next-session answer, a session's model key is `model_provider_credential_name`.
+- qory builds with Forager 57a8deb5 and integrations e4bf534a.
+  - In a run configuration from a control plane, the run's model key is
+    `default_model_provider_credential_name`, which was `model_credential`, and each API
+    credential has a `group`. In the next-session answer, a session's model key is
+    `model_provider_credential_name`.
+  - A run configuration whose API credential has `chosen` stops the run,
+    `run_configuration_invalid`. When the active key reaches its limit, the gateway moves
+    the run to a key with no known reset first, then to the key that resets soonest.
+    Before, the key with `chosen` came first whenever it was usable.
+  - In a run without a wall, qory prints the refusal of a Codex argument on two lines:
+    the fix, which contains the flag, then the cause. Before, one line had both, split by
+    a colon. See `docs/run.md`.
+  - Each session's environment has `QORY_SESSION`, the session's number in the run,
+    counted from 1. Without a wall, Forager's value replaces any other. A walled run that
+    passes `QORY_SESSION` by `wall.env`, `--env` or the harness's `env` does not start,
+    `variable_reserved`.
 - qory builds with Forager 92ccf768. The gateway does not start when a machine
   credential in `forager.yaml` has a path in `paths` that matches no request, such as a
   path with a `.` or `..` segment, and its line has the path. A run that the gateway

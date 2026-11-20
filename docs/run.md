@@ -4738,13 +4738,23 @@ starts, with exit status 1, when a Codex argument before `--` is one of these:
 - `--oss`, `--local-provider`, `--profile`, `-p`, `--search`, `--ignore-user-config`,
   `--dangerously-bypass-hook-trust` or `--remote`.
 
-qory prints Forager's line, which contains the flag, such as ``✗ remove the -c that sets
-model_provider from the launch's arguments: the session sets that setting for Codex, or
-the setting changes where Codex sends its requests`` for `-c model_provider=x`. For
-`--config <key>=<value>` and `--config=<key>=<value>` with a key Forager sets, the line is
-``✗ remove the --config pair that sets <key> from the launch's arguments: the session sets
-<key>, and a later pair overrides the session's value``. Every other argument of an
-unwalled run passes unchanged.
+qory prints Forager's two lines: the fix, which contains the flag, then the cause. For
+`-c model_provider=x` they are:
+
+```
+✗ remove the -c that sets model_provider from the launch's arguments
+  the session sets that setting for Codex, or the setting changes where Codex sends its requests
+```
+
+For `--config <key>=<value>` and `--config=<key>=<value>` with a key Forager sets, they
+are:
+
+```
+✗ remove the --config pair that sets <key> from the launch's arguments
+  the session sets <key>, and a later pair overrides the session's value
+```
+
+Every other argument of an unwalled run passes unchanged.
 
 ### A run that may write works in a copy
 
