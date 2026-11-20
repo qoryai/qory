@@ -1095,7 +1095,7 @@ it reads the tarball:
 
   ```text
   qory run: Update qory.
-    npm signed codex 0.170.0 with a key that this qory does not have.
+    npm signed codex 0.170.0 with a key this qory does not have.
     The key is SHA256:<keyid>.
   ```
 

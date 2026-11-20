@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"fmt"
 	"net"
 	"net/http"
@@ -218,9 +221,10 @@ func TestTheInstallCausesStandAlone(t *testing.T) {
 }
 
 // TestTheDispatchedCauseOfTheLongestPinFits is the line a run from a run code prints for
-// a pin that the registry does not have, with the longest runtime name of
-// runtimeinstall.Runtimes() and a pin of 32 characters, the longest one a stack may set:
-// with "qory run: " and [codeUsed], the line has at most 100 characters.
+// a pin that the registry does not have, and the lines it prints for a release signed
+// with a bad signature, a key qory does not have and an expired key, with the longest
+// runtime name of runtimeinstall.Runtimes() and a pin of 32 characters, the longest one a
+// stack may set: with "qory run: " and [codeUsed], each line has at most 100 characters.
 func TestTheDispatchedCauseOfTheLongestPinFits(t *testing.T) {
 	runtime := ""
 	for _, r := range runtimeinstall.Runtimes() {
@@ -239,6 +243,41 @@ func TestTheDispatchedCauseOfTheLongestPinFits(t *testing.T) {
 	}
 	if len(line) > 100 {
 		t.Errorf("the line has %d characters: %s", len(line), line)
+	}
+
+	// The test's source signs only claude, so the signature cases need claude to be the
+	// longest name.
+	if runtime != "claude" {
+		t.Fatalf("the longest runtime name is %s, and the signature cases install claude", runtime)
+	}
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad, unknown, expired := rt.Keys(), rt.Keys(), rt.Keys()
+	bad[0].Key = &other.PublicKey
+	unknown[0].KeyID = "SHA256:another"
+	expired[0].Expires = time.Date(2025, 1, 29, 0, 0, 0, 0, time.UTC)
+	for first, keys := range map[string][]runtimeinstall.SigningKey{
+		"npm's signature of claude " + pin + " does not verify.":               bad,
+		"npm signed claude " + pin + " with a key this qory does not have.":    unknown,
+		"npm signed claude " + pin + " with a key that expired on 2025-01-29.": expired,
+	} {
+		src := &rt.Source{}
+		src.Publish(pin, rt.PlainTarball(t, pin))
+		_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: src.Fetch, Runtime: runtime, Version: pin, Folder: t.TempDir(), Keys: keys})
+		if err == nil {
+			t.Fatalf("%s: the install succeeded", first)
+		}
+		out := "qory run: " + causeOnly(installFailed(err)).Error() + codeUsed
+		if want := "qory run: " + first + "\n  The key is " + rt.KeyID + codeUsed; out != want {
+			t.Errorf("a dispatched run shows %q, want %q", out, want)
+		}
+		for l := range strings.SplitSeq(out, "\n") {
+			if len(l) > 100 {
+				t.Errorf("the line has %d characters: %s", len(l), l)
+			}
+		}
 	}
 }
 

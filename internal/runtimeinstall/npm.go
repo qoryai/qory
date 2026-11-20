@@ -133,10 +133,8 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 				return Release{}, fmt.Errorf(textRelease(runtime)+"\n  The dist.signatures of %s\n  are not npm's signatures: %v.", what, err)
 			}
 		}
-		signed, ok := signedName(runtime, version, arch)
-		if !ok {
-			return Release{}, fmt.Errorf("Install %s some other way\nqory installs only %s from npm", runtime, strings.Join(Runtimes(), " and "))
-		}
+		// NpmFetch returned at its start for a runtime or an architecture with no package.
+		signed, _ := signedName(runtime, version, arch)
 		rel := Release{
 			Version:    version,
 			Integrity:  doc.Dist.Integrity,

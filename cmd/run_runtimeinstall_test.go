@@ -730,7 +730,7 @@ var signatureCases = []struct {
 }{
 	{"no signature", "Check the source of claude's releases.", "npm has no signature of claude 2.1.320.",
 		func(string, string) any { return nil }},
-	{"a key qory does not have", "Update qory.", "npm signed claude 2.1.320 with a key that this qory does not have.\n  The key is SHA256:another.",
+	{"a key qory does not have", "Update qory.", "npm signed claude 2.1.320 with a key this qory does not have.\n  The key is SHA256:another.",
 		func(s, i string) any {
 			return []map[string]string{{"keyid": "SHA256:another", "sig": rt.Sign(s + ":" + i)}}
 		}},

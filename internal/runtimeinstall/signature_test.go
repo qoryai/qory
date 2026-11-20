@@ -68,7 +68,7 @@ func TestNpmsSignatureIsCheckedBeforeTheInstall(t *testing.T) {
 			"Check the source of claude's releases.\n  The dist.signatures of " + what + "\n  are not npm's signatures: it has no signature."},
 		{"a key qory does not have", func(s, i string) any {
 			return []runtimeinstall.Signature{{KeyID: "SHA256:another", Sig: rt.Sign(s + ":" + i)}}
-		}, "Update qory.\n  npm signed claude 2.1.320 with a key that this qory does not have.\n  The key is SHA256:another."},
+		}, "Update qory.\n  npm signed claude 2.1.320 with a key this qory does not have.\n  The key is SHA256:another."},
 		{"a bad signature", func(string, string) any {
 			return []runtimeinstall.Signature{{KeyID: rt.KeyID, Sig: "MEUCIQDnotasignature"}}
 		}, "Check the source of claude's releases.\n  npm's signature of claude 2.1.320 does not verify.\n  The key is " + rt.KeyID + "."},
@@ -314,7 +314,7 @@ func TestAnInstallWithNoKeysUsesTheBuiltInKeys(t *testing.T) {
 	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
 		Fetch: runtimeinstall.NpmFetch(http.DefaultClient, npm.URL(), "amd64"), Runtime: "claude", Folder: t.TempDir(),
 	})
-	want := "Update qory.\n  npm signed claude 2.1.320 with a key that this qory does not have.\n  The key is " + rt.KeyID + "."
+	want := "Update qory.\n  npm signed claude 2.1.320 with a key this qory does not have.\n  The key is " + rt.KeyID + "."
 	if err == nil || err.Error() != want {
 		t.Fatalf("the error is %v, want %q", err, want)
 	}

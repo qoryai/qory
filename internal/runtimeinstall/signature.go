@@ -201,7 +201,7 @@ func verify(rel Release, keys []SigningKey, now time.Time, runtime string, pinne
 	case bad != "":
 		return fmt.Errorf(textRelease(runtime)+"\n  npm's signature of %s does not verify.\n  The key is %s.", what, bad)
 	case unknown != "":
-		return fmt.Errorf("Update qory.\n  npm signed %s with a key that this qory does not have.\n  The key is %s.", what, unknown)
+		return fmt.Errorf("Update qory.\n  npm signed %s with a key this qory does not have.\n  The key is %s.", what, unknown)
 	}
 	fix := textRelease(runtime)
 	if pinned {
