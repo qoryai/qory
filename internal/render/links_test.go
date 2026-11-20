@@ -350,8 +350,9 @@ func TestForceReplacesWhatGitCanRestore(t *testing.T) {
 }
 
 // TestForeignFileAtTheCodexConfigLink is a regular file at .codex/config.toml, where the
-// compose writes a link into the home: the next link step stops with a plain
-// ForeignPathError, and with force with one for an untracked file, and the file stays.
+// link step writes a link into the home: the next link step stops with a plain
+// ForeignPathError at that path, and with force with one for an untracked file, and the
+// file stays.
 func TestForeignFileAtTheCodexConfigLink(t *testing.T) {
 	res, root, home := composeFixture(t, "codex")
 	codex := lookup(t, "codex")
@@ -372,15 +373,15 @@ func TestForeignFileAtTheCodexConfigLink(t *testing.T) {
 	write(t, path, "model = \"theirs\"\n")
 	var foreign *render.ForeignPathError
 	_, err := render.LinkInto(codex, res, root, home, false)
-	if !errorsAs(err, &foreign) || foreign.Reason != "" {
-		t.Fatalf("err = %v, want a plain ForeignPathError", err)
+	if !errorsAs(err, &foreign) || foreign.Reason != "" || foreign.Path != path {
+		t.Fatalf("err = %v, want a plain ForeignPathError at %s", err, path)
 	}
 	_, err = render.LinkInto(codex, res, root, home, true)
-	if !errorsAs(err, &foreign) || foreign.Reason != "is not tracked in git" {
-		t.Fatalf("with force: err = %v, want a ForeignPathError for an untracked file", err)
+	if !errorsAs(err, &foreign) || foreign.Reason != "is not tracked in git" || foreign.Path != path {
+		t.Fatalf("with force: err = %v, want a ForeignPathError for an untracked file at %s", err, path)
 	}
 	if isLink(t, path) {
-		t.Fatal(".codex/config.toml is a link after the refused link steps")
+		t.Fatal(".codex/config.toml is a link after the two stopped link steps")
 	}
 	if data, err := os.ReadFile(path); err != nil || string(data) != "model = \"theirs\"\n" {
 		t.Errorf(".codex/config.toml = %q, %v, want the file as written", data, err)

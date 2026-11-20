@@ -267,7 +267,7 @@ func TestWalledArgsRefuseHookTrustAndRemote(t *testing.T) {
 	hooks := "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.\n  A Codex run takes its hook trust from qory and Forager, not from the arguments."
 	remote := "Remove `--remote` from the run's Codex arguments.\n  A Codex run takes its app server from qory and Forager, not from the arguments."
 	token := "Remove `--remote-auth-token-env` from the run's Codex arguments.\n  A Codex run takes its app server from qory and Forager, not from the arguments."
-	trust := "Remove `--trust` from the run's Codex arguments.\n  `--trust` saves trust for the project folder, which lets its `.codex/config.toml` turn the hooks off."
+	trust := "Remove `--trust` from the run's Codex arguments.\n  `--trust` saves trust for a project folder with no trust setting, and Codex then reads the folder's `.codex/config.toml`, which can set `features.hooks = false`."
 	for _, c := range []struct {
 		args []string
 		want string
@@ -406,13 +406,13 @@ func TestArgsRefusalsKeepALongKeyOffLineOne(t *testing.T) {
 }
 
 // TestCheckArgsRefuseTheHookSettingsWithoutAWall is each argument that the check of a
-// run without a wall refuses: --dangerously-bypass-hook-trust and --trust in both
-// forms, --config and -c at features.unified_exec_tty, features.codex_hooks, a key
-// under hooks and the features table above them, and --enable and --disable of
-// unified_exec_tty, codex_hooks and hooks. Each is refused with the text of a walled
-// run, with the flag as typed and the whole key or feature, and line 1 is at most 100
-// characters behind "qory run: ". --search, another feature, another key and every
-// argument after -- pass, as a walled run alone refuses them.
+// run without a wall stops: --dangerously-bypass-hook-trust and --trust in both forms,
+// --config and -c at features.unified_exec_tty, features.codex_hooks, a key under hooks
+// and the features table above them, and --enable and --disable of unified_exec_tty,
+// codex_hooks and hooks. Each stops with the text of a walled run, with the flag as
+// typed and the whole key or feature, and line 1 is at most 100 characters behind "qory
+// run: ". --search, another feature, another key and every argument after -- pass, as
+// only a walled run stops them.
 func TestCheckArgsRefuseTheHookSettingsWithoutAWall(t *testing.T) {
 	rt, err := render.Lookup("codex")
 	if err != nil {
@@ -429,7 +429,7 @@ func TestCheckArgsRefuseTheHookSettingsWithoutAWall(t *testing.T) {
 		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  `" + key + "` is a table that contains `" + reserved + "`, which qory reserves in this run."
 	}
 	hooks := "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.\n  A Codex run takes its hook trust from qory and Forager, not from the arguments."
-	trust := "Remove `--trust` from the run's Codex arguments.\n  `--trust` saves trust for the project folder, which lets its `.codex/config.toml` turn the hooks off."
+	trust := "Remove `--trust` from the run's Codex arguments.\n  `--trust` saves trust for a project folder with no trust setting, and Codex then reads the folder's `.codex/config.toml`, which can set `features.hooks = false`."
 	for _, tc := range []struct {
 		args []string
 		want string

@@ -693,13 +693,14 @@ release may change what an existing document does, and states it under Upgrading
   contains `features.hooks`, which qory reserves in this run. `` The key is on the second
   line, so the first line does not grow with the key. `--trust` stops the run with
   ``Remove `--trust` from the run's Codex arguments.`` and the next line `` `--trust`
-  saves trust for the project folder, which lets its `.codex/config.toml` turn the hooks
-  off. `` With `--trust`, codex exec saves trust for the project folder in
+  saves trust for a project folder with no trust setting, and Codex then reads the
+  folder's `.codex/config.toml`, which can set `features.hooks = false`. `` With
+  `--trust`, `codex exec` saves trust for a project folder with no trust setting in
   `$CODEX_HOME/config.toml`, and Codex then reads the folder's `.codex/config.toml`, which
   can set `features.hooks = false`. Before, a run without a wall stopped on most of them
   at Forager's check, with Forager's lines, and passed a key under `hooks`. A walled run
   stopped on `hooks.state` and `hooks={…}`, and passed the other keys under `hooks`, such
-  as `hooks.Stop`.
+  as `hooks.Stop`. Every run passed `--trust`.
 - A run from a run code whose explore documents contain no `run_settings` stops before
   anything is installed or fetched, with `The run settings set no runtime, so the run
   did not start; the code is used.` and `qory runs one of claude and codex.` Until now,
