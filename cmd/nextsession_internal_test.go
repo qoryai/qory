@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -16,6 +17,8 @@ import (
 	"github.com/qoryai/forager/server"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/integrations/contracts"
+
+	"github.com/qoryai/qory/internal/runapi"
 )
 
 // endAnswer and sessionAnswer are answers to the next-session request: the end of the run, and
@@ -166,11 +169,60 @@ func TestAnEndedRunGetsOneNextSessionRequest(t *testing.T) {
 	}
 }
 
+// nextRefusalStatus is the status of each code of Qory Apiary's refusals of the next-session
+// request, as the description of next-session-refusal.schema.json lists them. The schema's
+// enum has the codes, and only its description has their statuses.
+var nextRefusalStatus = map[string]int{
+	"bad_request":                  http.StatusBadRequest,
+	"unsupported_contract_version": http.StatusBadRequest,
+	"not_found":                    http.StatusNotFound,
+	"run_ended":                    http.StatusConflict,
+	"payload_too_large":            http.StatusRequestEntityTooLarge,
+	"invalid_request":              http.StatusBadRequest,
+	"session_mismatch":             http.StatusConflict,
+	"rate_limited":                 http.StatusTooManyRequests,
+	"unavailable":                  http.StatusServiceUnavailable,
+}
+
+// TestTheNextSessionRefusalCodesAreThePinnedSchemas reads the codes of the enum error in
+// next-session-refusal.schema.json of the pinned integrations: they are the codes of
+// nextRefusalStatus, which TestEachRefusalCodeOfTheNextSessionRequest sends, so a code that
+// the contract adds fails here until the test sets its status and what qory does with it.
+// Each code of nextRetried, and run_ended, which runEndedLine reads, is one of them.
+func TestTheNextSessionRefusalCodesAreThePinnedSchemas(t *testing.T) {
+	doc, err := contracts.RunDocument("next-session-refusal.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var codes []string
+	if props, ok := doc.(map[string]any)["properties"].(map[string]any); ok {
+		if e, ok := props["error"].(map[string]any); ok {
+			enum, _ := e["enum"].([]any)
+			for _, c := range enum {
+				s, _ := c.(string)
+				codes = append(codes, s)
+			}
+		}
+	}
+	if len(codes) == 0 {
+		t.Fatalf("next-session-refusal.schema.json has no enum at /properties/error: %v", doc)
+	}
+	slices.Sort(codes)
+	if tested := slices.Sorted(maps.Keys(nextRefusalStatus)); !slices.Equal(codes, tested) {
+		t.Errorf("the schema's codes are %q, and the test sends %q", codes, tested)
+	}
+	for _, c := range append(slices.Clone(nextRetried), runapi.CodeRunEnded) {
+		if !slices.Contains(codes, c) {
+			t.Errorf("qory reads the code %q, which the schema's codes %q do not contain", c, codes)
+		}
+	}
+}
+
 // TestEachRefusalCodeOfTheNextSessionRequest is a request whose first send gets each code of
-// next-session-refusal.schema.json from Qory Apiary, a refusal of the gateway's, a status with
-// no coded refusal, as the link returns it ([server.StatusError]), and a failure with no
-// response, and whose second send gets the end. rate_limited, unavailable, a 500 of Qory
-// Apiary's with a code not in the schema, the gateway's
+// nextRefusalStatus from Qory Apiary at its status, a status of 500 or above from Qory Apiary,
+// a refusal of the gateway's, a status with no coded refusal, as the link returns it
+// ([server.StatusError]), and a failure with no response, and whose second send gets the
+// end. rate_limited, unavailable, a 500 of Qory Apiary's with any code, the gateway's
 // refusals, an uncoded 503 or 429 and no response are sent again after 1 s; run_ended is one
 // send and the end line; every other code of Qory Apiary's, and an uncoded 400, is one send
 // and an error with the fix first and the status and code.
@@ -178,30 +230,34 @@ func TestEachRefusalCodeOfTheNextSessionRequest(t *testing.T) {
 	apiary := func(status int, code string) error {
 		return &accesskey.Refusal{Status: status, Code: code, From: accesskey.FromApiary}
 	}
-	for name, c := range map[string]struct {
+	type refusalCase struct {
 		err     error
 		retried bool
 		ended   string
 		// detail is the error's second line, for a status the gateway returned.
 		detail string
-	}{
-		"bad_request":                  {err: apiary(http.StatusBadRequest, "bad_request")},
-		"unsupported_contract_version": {err: apiary(http.StatusBadRequest, "unsupported_contract_version")},
-		"not_found":                    {err: apiary(http.StatusNotFound, "not_found")},
-		"run_ended":                    {err: apiary(http.StatusConflict, "run_ended"), ended: textRunEndedLater},
-		"payload_too_large":            {err: apiary(http.StatusRequestEntityTooLarge, "payload_too_large")},
-		"invalid_request":              {err: apiary(http.StatusBadRequest, "invalid_request")},
-		"session_mismatch":             {err: apiary(http.StatusConflict, "session_mismatch")},
-		"rate_limited":                 {err: apiary(http.StatusTooManyRequests, "rate_limited"), retried: true},
-		"unavailable":                  {err: apiary(http.StatusServiceUnavailable, "unavailable"), retried: true},
-		"500 internal":                 {err: apiary(http.StatusInternalServerError, "internal"), retried: true},
-		"gateway refusal":              {err: &accesskey.Refusal{Status: http.StatusBadGateway, Code: "control_plane_unavailable", From: accesskey.FromGateway}, retried: true},
-		"gateway 413":                  {err: &accesskey.Refusal{Status: http.StatusRequestEntityTooLarge, Code: "payload_too_large", From: accesskey.FromGateway}, retried: true},
-		"uncoded 503":                  {err: GatewayBusyErr(), retried: true},
-		"uncoded 429":                  {err: &server.StatusError{What: "the next-session request", Status: http.StatusTooManyRequests}, retried: true},
-		"uncoded 400":                  {err: &server.StatusError{What: "the next-session request", Status: http.StatusBadRequest}, detail: "The gateway returned 400: Bad Request"},
-		"no response":                  {err: errors.New("dial tcp: connection refused"), retried: true},
-	} {
+	}
+	cases := map[string]refusalCase{
+		"500 internal":        {err: apiary(http.StatusInternalServerError, "internal"), retried: true},
+		"500 invalid_request": {err: apiary(http.StatusInternalServerError, "invalid_request"), retried: true},
+		"gateway refusal":     {err: &accesskey.Refusal{Status: http.StatusBadGateway, Code: "control_plane_unavailable", From: accesskey.FromGateway}, retried: true},
+		"gateway 413":         {err: &accesskey.Refusal{Status: http.StatusRequestEntityTooLarge, Code: "payload_too_large", From: accesskey.FromGateway}, retried: true},
+		"uncoded 503":         {err: GatewayBusyErr(), retried: true},
+		"uncoded 429":         {err: &server.StatusError{What: "the next-session request", Status: http.StatusTooManyRequests}, retried: true},
+		"uncoded 400":         {err: &server.StatusError{What: "the next-session request", Status: http.StatusBadRequest}, detail: "The gateway returned 400: Bad Request"},
+		"no response":         {err: errors.New("dial tcp: connection refused"), retried: true},
+	}
+	for code, status := range nextRefusalStatus {
+		c := refusalCase{err: apiary(status, code)}
+		switch code {
+		case "rate_limited", "unavailable":
+			c.retried = true
+		case "run_ended":
+			c.ended = textRunEndedLater
+		}
+		cases[code] = c
+	}
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			waits := shortWaits(t)
 			link := &nextLink{respond: func(n int) ([]byte, error) {

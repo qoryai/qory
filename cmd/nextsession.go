@@ -100,10 +100,8 @@ func unreadAnswer(err error) string {
 // nextRetried are the codes of Qory Apiary's refusals of the next-session request that
 // qory sends again at any status: rate_limited, a 429, and unavailable, a 503 for a step Qory
 // Apiary did not store. A refusal below 500 with any other code ends the run, see
-// [nextRefused].
-//
-// shortcut: code strings match next-session-refusal.schema.json at integrations e4bf534a; add
-// a schema check after the repin.
+// [nextRefused]. The codes are those of run/v1 next-session-refusal.schema.json, which a
+// test reads.
 var nextRetried = []string{"rate_limited", "unavailable"}
 
 // retryNext reports whether the next-session request is sent again after err, the one place
