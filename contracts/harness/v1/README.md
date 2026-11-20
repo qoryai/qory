@@ -2021,9 +2021,8 @@ Per runtime, the files written into its directory:
   table with the `trusted_hash` of each `command` hook of `hooks.json` and `config.toml`
   that has no U+2028 or U+2029 in its command, status message or matcher, `<file>` being
   the file in the home's `codex` folder with links resolved and each name in the case on
-  disk, and any other
-  `settings/codex/` file, without `shell_environment_policy.set`, whose
-  variables are the launch's, one `agents/<name>.toml` per agent with the body as
+  disk, and any other `settings/codex/` file, without `shell_environment_policy.set`,
+  whose variables are the launch's, one `agents/<name>.toml` per agent with the body as
   `developer_instructions`, with the tier as `model` and `model_reasoning_effort` in a
   home composed for codex alone, with `[features]` `shell_tool = false` when the agent's
   `tools` key lists no `Bash` or `PowerShell` (an agent with no `tools` key keeps the
@@ -2061,14 +2060,18 @@ Per runtime, the files written into its directory:
   Codex arguments.`` and the next line ``A Codex run takes its settings from qory and
   Forager, not from the arguments.``, and on `--search` with ``Remove `--search` from the
   run's Codex arguments.`` and the next line ``A Codex run takes its web search setting
-  from qory and Forager, not from the arguments.`` It stops on
-  `--dangerously-bypass-hook-trust` with ``Remove `--dangerously-bypass-hook-trust` from
-  the run's Codex arguments.`` and the next line ``A Codex run takes its hook trust from
-  qory and Forager, not from the arguments.``, and on `--remote` or
+  from qory and Forager, not from the arguments.`` It stops on `--remote` or
   `--remote-auth-token-env`, also with `=`, with ``Remove `--remote` from the run's Codex
   arguments.`` and the next line ``A Codex run takes its app server from qory and Forager,
-  not from the arguments.`` (`--remote-auth-token-env` likewise). A key or feature in
-  these lines has each control character written as an escape. A hook in
+  not from the arguments.`` (`--remote-auth-token-env` likewise). Every Codex run,
+  walled or not, stops before the agent starts on `--dangerously-bypass-hook-trust`,
+  with ``Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.`` and
+  the next line ``A Codex run takes its hook trust from qory and Forager, not from the
+  arguments.``; on a `--config` or `-c` key at `hooks`, `features.hooks`,
+  `features.codex_hooks` or `features.unified_exec_tty`, under one, or `features`, with
+  the `--config` lines; and on `--enable` or `--disable` of `hooks`, `codex_hooks` or
+  `unified_exec_tty`, with the `--enable` lines. A key or feature in these lines has each
+  control character written as an escape. A hook in
   `settings/codex/config.toml` or `settings/codex/hooks.json` whose `timeout` or
   `additionalContextLimit` is negative or fractional, such as 2.0, fails the compose with
   ``Set `<key>` of the `<event>` hook to a whole number of 0 or more.`` and the next line

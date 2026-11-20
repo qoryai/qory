@@ -91,12 +91,12 @@ var realCodexSums = map[string]string{
 const systemSkillsLine = "install system skills"
 
 // realCodexImage builds an image on alpine with git, the alpine packages given, Codex,
-// and [codexScan] with mark at /usr/local/bin/codex-scan. Codex is npm's native build of @openai/codex for this
-// engine's machines, at version and checked against sums, the sha512 of the build for
-// each engine architecture in hex. The native build's folder stays whole, here at
-// /opt/codex, and the codex command links to its bin/codex, so Codex finds its helpers
-// beside it. Codex runs only in the image's build and its containers. The test removes
-// the image at its end.
+// and [codexScan] with mark at /usr/local/bin/codex-scan. Codex is npm's native build of
+// @openai/codex for this engine's machines, at version and checked against sums, the
+// sha512 of the build for each engine architecture in hex. The native build's folder
+// stays whole, here at /opt/codex, and the codex command links to its bin/codex, so Codex
+// finds its helpers beside it. Codex runs only in the image's build and its containers.
+// The test removes the image at its end.
 func realCodexImage(t *testing.T, version string, sums map[string]string, mark string, packages ...string) string {
 	t.Helper()
 	_, arch, _ := strings.Cut(dockerOut(t, "", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"), "/")

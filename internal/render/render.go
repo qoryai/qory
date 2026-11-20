@@ -298,6 +298,14 @@ type Walled interface {
 	WalledArgs(args []string, home string) ([]string, error)
 }
 
+// ArgsChecker is a [Launcher] whose launch arguments a run without a wall checks too. A
+// walled run checks them in [Walled].
+type ArgsChecker interface {
+	// CheckArgs is an error when args, the launch's arguments, set what every run takes
+	// from qory alone; the run then stops before the launch.
+	CheckArgs(args []string) error
+}
+
 // SettingsInliner is a [Launcher] whose settings file a run passes to Forager as its
 // JSON, read from the home by qory, after the home's check: Forager reads no file of
 // the home. The flag takes a file or the JSON itself.

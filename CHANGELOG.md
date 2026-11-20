@@ -15,22 +15,29 @@ release may change what an existing document does, and states it under Upgrading
 - qory needs git 2.36 or later.
 - Compose again each home outside the checkout that has a module in the checkout. Until
   then, `--check` exits 6 with a `kind` row for each of the module's entries.
-- Compose each Codex home again. Until then, `--check` exits 6: the home's `config.toml`
-  gains `features.unified_exec_tty = false` and the hashes of the harness's hooks, and
-  the agents of a home composed for codex alone gain their tiers.
 
 ### Added
 
 - In a home composed for codex alone, a Codex agent with a tier gets the tier's model as
   `model` and its effort as `model_reasoning_effort` in `agents/<name>.toml`. An effort
   outside `none`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra` stops the compose
-  with exit 2. A home composed for codex and another runtime writes no tier into the
-  Codex agents, since one tier map serves every runtime, and prints the `skipped` row
-  `tier <tier> for codex  (qory writes tiers into codex agents only in a home composed
-  for codex alone; …)`.
+  with exit 2 and two lines, the form that an effort outside the values of claude and
+  copilot agents now gets too:
+
+  ```text
+  set tier <t>'s effort to one of <values>
+  <v> is not one for <runtime> agents (from <file>)
+  ```
+
+  A home composed for codex and another runtime writes no tier into the Codex agents,
+  since one tier map serves every runtime, and prints this `skipped` row:
+
+  ```text
+  skipped  tier <tier> for codex  (qory writes tiers into codex agents only in a home composed for codex alone; …)
+  ```
 - A Codex run without a wall runs the harness's hooks. Codex skips a hook of
   `$CODEX_HOME` with no error unless `hooks.state` has its hash, so the home's
-  `config.toml` now has a `trusted_hash` for each `command` hook of `hooks.json` and
+  `config.toml` has a `trusted_hash` for each `command` hook of `hooks.json` and
   `config.toml`. An `mcp_tool` hook, and a hook with U+2028 or U+2029 in its command,
   status message or matcher, gets no hash, and the compose prints
   `skipped  hooks.<event>[<group>].hooks[<hook>] in <file> for codex` for it. A
@@ -675,6 +682,15 @@ release may change what an existing document does, and states it under Upgrading
   `features.unified_exec_tty = false`. A shell started with a terminal takes commands
   through `write_stdin`, for which Codex runs no `PreToolUse` hook. A Codex agent can no
   longer start an interactive shell with a terminal.
+- qory stops every Codex run, walled or not, before the agent starts, when its Codex
+  arguments before `--` contain `--dangerously-bypass-hook-trust`, also with `=`, set
+  `hooks`, `features.hooks`, `features.codex_hooks` or `features.unified_exec_tty` with
+  `-c` or `--config`, a key under one, such as `hooks.Stop`, or the table `features`, or
+  pass `hooks`, `codex_hooks` or `unified_exec_tty` to `--enable` or `--disable`. The
+  error has two lines, such as ``Remove `--config hooks.Stop` from the run's Codex
+  arguments.`` and ``A Codex run takes this key from qory and Forager, not from the
+  arguments.`` Before, a run without a wall stopped on most of them at Forager's check,
+  with Forager's lines, and passed a key under `hooks`, which a walled run passed too.
 - A run from a run code whose explore documents contain no `run_settings` stops before
   anything is installed or fetched, with `The run settings set no runtime, so the run
   did not start; the code is used.` and `qory runs one of claude and codex.` Until now,
@@ -1434,12 +1450,13 @@ release may change what an existing document does, and states it under Upgrading
   takes its settings from qory and Forager, not from the arguments.``, and `--search`,
   with ``Remove `--search` from the run's Codex arguments.`` and the next line ``A Codex
   run takes its web search setting from qory and Forager, not from the arguments.``
-- A walled Codex run refuses `--dangerously-bypass-hook-trust` before `--`, with ``Remove
-  `--dangerously-bypass-hook-trust` from the run's Codex arguments.`` and the next line
-  ``A Codex run takes its hook trust from qory and Forager, not from the arguments.``, and
-  `--remote` and `--remote-auth-token-env`, also with `=`, with ``Remove `--remote` from
-  the run's Codex arguments.`` and the next line ``A Codex run takes its app server from
-  qory and Forager, not from the arguments.`` (`--remote-auth-token-env` likewise).
+- A Codex run, walled or not, stops on `--dangerously-bypass-hook-trust` before `--`,
+  with ``Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.`` and
+  the next line ``A Codex run takes its hook trust from qory and Forager, not from the
+  arguments.`` A walled Codex run refuses `--remote` and `--remote-auth-token-env`, also
+  with `=`, with ``Remove `--remote` from the run's Codex arguments.`` and the next line
+  ``A Codex run takes its app server from qory and Forager, not from the arguments.``
+  (`--remote-auth-token-env` likewise).
 - A walled Codex run refuses `--config` keys at `skills` or `cloud.skills`, under one,
   or above one, such as `-c skills.bundled.enabled=true` or `-c cloud={}`, with the
   `--config` line.
@@ -1450,7 +1467,7 @@ release may change what an existing document does, and states it under Upgrading
   `experimental_realtime_*_base_url`, `skills` or `cloud.skills`, a key under one or a
   table above one; when it enables or disables `plugins`, `apps` or `connectors`; or
   when it is `--oss`, `--local-provider`, `--profile`, `-p`, `--search`,
-  `--ignore-user-config`, `--dangerously-bypass-hook-trust` or `--remote`. qory prints
+  `--ignore-user-config` or `--remote`. qory prints
   Forager's two lines, such as ``✗ remove the -c that sets model_provider from the
   launch's arguments`` and the next line ``the session sets that setting for Codex, or the
   setting changes where Codex sends its requests`` for `-c model_provider=x`, or

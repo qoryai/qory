@@ -288,8 +288,8 @@ const textReservedKey = "Remove `%s` from `settings/codex/config.toml`.\n  A Cod
 // shell, the files of instructions, compaction prompt and model list, the Node program,
 // and Codex's database and log folders. Each name is one Codex 0.167.2 reads
 // (codex-rs/config/src/config_toml.rs). A fragment may set the other keys of hooks, such
-// as hooks.Stop. A walled run's Codex arguments may not set them either, see
-// [checkArgs].
+// as hooks.Stop. A walled run's Codex arguments may not set them either, and no run's
+// arguments may set a key of [trustKeys], see [checkArgs].
 var reservedKeys = []reservedKey{
 	{"model_provider"},
 	{"model_providers"},

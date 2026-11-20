@@ -4755,21 +4755,37 @@ starts with ``remove the run's folder, or start the run again with another id`` 
 next line ``A walled Codex run writes its Codex home in a new folder, <folder>, and that
 folder exists``.
 
-### Codex arguments a run refuses
+### Codex arguments that stop a run
 
-qory and Forager set the model provider, the settings and the hooks of a walled Codex
-run. Forager puts its `--config` flags ahead of the run's Codex arguments, and Codex
-takes the last flag for a key. So a walled Codex run stops before the agent starts, with
-exit status 1, when an argument before `--` is one of these:
+qory and Forager set the model provider, the settings and the hooks of a Codex run.
+Forager puts its `--config` flags ahead of the run's Codex arguments, and Codex takes the
+last flag for a key.
 
+qory stops every Codex run, walled or not, before the agent starts, with exit status 1,
+when an argument before `--` turns off the trust of the hooks or changes a hook setting:
+
+- `--dangerously-bypass-hook-trust`, also with `=`: ``Remove
+  `--dangerously-bypass-hook-trust` from the run's Codex arguments.`` and the next line
+  ``A Codex run takes its hook trust from qory and Forager, not from the arguments.``
 - `--config <key>=<value>` in the forms `--config`, `--config=`, `-c`, `-c<key>=<value>`
-  and `-c=<key>=<value>`, where the key is a key qory or Forager sets, `skills` or
-  `cloud.skills`, a key under one, or a table above one, such as `cloud`. The line is
-  ``Remove `--config <key>` from the run's Codex arguments.`` and the next line ``A Codex
-  run takes this key from qory and Forager, not from the arguments.``
-- `--enable <feature>` or `--disable <feature>`, also with `=`, for every feature:
-  ``Remove `--enable <feature>` from the run's Codex arguments.`` and the next line ``A
-  Codex run takes this key from qory and Forager, not from the arguments.``
+  and `-c=<key>=<value>`, where the key is `hooks`, `features.hooks`,
+  `features.codex_hooks` or `features.unified_exec_tty`, a key under one, such as
+  `hooks.Stop`, or the table `features` above them: ``Remove `--config <key>` from the
+  run's Codex arguments.`` and the next line ``A Codex run takes this key from qory and
+  Forager, not from the arguments.``
+- `--enable <feature>` or `--disable <feature>`, also with `=`, of `hooks`, `codex_hooks`
+  or `unified_exec_tty`: ``Remove `--enable <feature>` from the run's Codex arguments.``
+  and the next line ``A Codex run takes this key from qory and Forager, not from the
+  arguments.``
+
+qory also stops a walled Codex run in the same way when an argument before `--` is one of
+these:
+
+- `--config <key>=<value>` in the same forms, where the key is another key qory or
+  Forager sets, `skills` or `cloud.skills`, a key under one, or a table above one, such
+  as `cloud`, with the `--config` lines.
+- `--enable <feature>` or `--disable <feature>`, also with `=`, for every other feature,
+  with the `--enable` lines.
 - `--oss` or `--local-provider`: ``Remove `<flag>` from the run's Codex arguments.`` and
   the next line ``A Codex run takes its model provider from qory and Forager, not from the
   arguments.``
@@ -4781,9 +4797,6 @@ exit status 1, when an argument before `--` is one of these:
   not from the arguments.``
 - `--search`: ``Remove `--search` from the run's Codex arguments.`` and the next line ``A
   Codex run takes its web search setting from qory and Forager, not from the arguments.``
-- `--dangerously-bypass-hook-trust`: ``Remove `--dangerously-bypass-hook-trust` from the
-  run's Codex arguments.`` and the next line ``A Codex run takes its hook trust from qory
-  and Forager, not from the arguments.``
 - `--remote <addr>` or `--remote-auth-token-env <name>`, also with `=`: ``Remove
   `--remote` from the run's Codex arguments.`` and the next line ``A Codex run takes its
   app server from qory and Forager, not from the arguments.``, or the same with
@@ -4792,8 +4805,9 @@ exit status 1, when an argument before `--` is one of these:
 A key or feature in the line has each control character written as an escape, such as
 `\n`. Arguments after `--` pass unchanged.
 
-An unwalled Codex run gets a shorter check, from Forager: the run stops before Codex
-starts, with exit status 1, when a Codex argument before `--` is one of these:
+A Codex run without a wall gets a shorter check of its other arguments, from Forager: the
+run stops before Codex starts, with exit status 1, when a Codex argument before `--` is
+one of these:
 
 - `--config <key>=<value>` or `-c` in any form, where the key is a key Forager sets for
   Codex, such as `model_provider`, `web_search` or `features.apps`, or `model_providers`,
@@ -4801,12 +4815,8 @@ starts, with exit status 1, when a Codex argument before `--` is one of these:
   `chatgpt_base_url`, `experimental_realtime_*_base_url`, `skills` or `cloud.skills`, a
   key under one, or a table above one.
 - `--enable` or `--disable` of `plugins`, `apps` or `connectors`.
-- `--config <key>=<value>` or `-c` in any form that sets `features.hooks`,
-  `features.codex_hooks` or `features.unified_exec_tty`, a key under one, such as
-  `features.hooks.enabled`, or a table that sets one, such as `-c features={hooks=false}`;
-  or `--enable` or `--disable` of `hooks`, `codex_hooks` or `unified_exec_tty`.
-- `--oss`, `--local-provider`, `--profile`, `-p`, `--search`, `--ignore-user-config`,
-  `--dangerously-bypass-hook-trust` or `--remote`.
+- `--oss`, `--local-provider`, `--profile`, `-p`, `--search`, `--ignore-user-config` or
+  `--remote`.
 
 qory prints Forager's two lines: the fix, which contains the flag, then the cause. For
 `-c model_provider=x` they are:
@@ -4824,30 +4834,7 @@ are:
   the session sets <key>, and a later pair overrides the session's value
 ```
 
-For `features.hooks`, `features.codex_hooks` and `features.unified_exec_tty`, the first
-line contains the flag and the setting, and the second line is the same for all three.
-For `--disable hooks` they are:
-
-```
-✗ remove the --disable that sets features.hooks from the launch's arguments
-  the setting can turn off the hooks Codex runs before each tool call, or make Codex run no hook for a command sent to a shell with a terminal
-```
-
-A `--config features={...}` pair sets the whole `features` table, so Codex drops the
-feature settings that earlier `--config` pairs set. The session passes
-`features.plugins=false` and `features.apps=false` in such pairs. Forager's lines contain
-`features.plugins`, the first of the two, and the run stops. For
-`--config features={hooks=false}` they are:
-
-```
-✗ remove the --config pair that sets features.plugins from the launch's arguments
-  the session sets features.plugins, and a later pair overrides the session's value
-```
-
-For `-c features={hooks=false}`, qory prints the hook lines, with `-c` and
-`features.hooks` in the first line.
-
-Every other argument of an unwalled run passes unchanged.
+Every other argument of a run without a wall passes unchanged.
 
 ### A run that may write works in a copy
 

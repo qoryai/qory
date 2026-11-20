@@ -128,12 +128,13 @@ func TestARoleWithoutAShellToolGetsNoShell(t *testing.T) {
 // config.toml, a PreModelRequest hook, a PreToolUse group with an mcp_tool hook before an
 // async command hook, and a SessionEnd hook whose timeout Codex limits to 3. hooks.json
 // also has a PostToolUse hook with the default context limit, 2500, which Codex leaves
-// out of the hash; config.toml also has a SessionEnd hook and an Interrupt hook with no
-// timeout, which default to 1, and a UserPromptSubmit hook with timeout 0, which Codex
-// raises to 1.
+// out of the hash, and a PreToolUse group with no matcher, whose hash has none;
+// config.toml also has a SessionEnd hook and an Interrupt hook with no timeout, which
+// default to 1, and a UserPromptSubmit hook with timeout 0, which Codex raises to 1.
 var hookSettings = map[string]string{
 	"settings/codex/hooks.json": `{"hooks": {
-  "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "$QORY_HARNESS_HOME/hooks/guard.sh", "timeout": 10, "statusMessage": "Checking", "additionalContextLimit": 100}]}],
+  "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "$QORY_HARNESS_HOME/hooks/guard.sh", "timeout": 10, "statusMessage": "Checking", "additionalContextLimit": 100}]},
+    {"hooks": [{"type": "command", "command": "echo any tool"}]}],
   "Stop": [{"matcher": "ignored", "hooks": [{"type": "command", "command": "echo stop", "additionalContextLimit": 100}]}],
   "PostToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": "echo post", "additionalContextLimit": 2500}]}]
 }}
@@ -256,6 +257,7 @@ func TestConfigTrustsEachCommandHook(t *testing.T) {
 			"config.toml:pre_model_request:0:0":  `{"event_name":"pre_model_request","hooks":[{"async":false,"command":"echo model","timeout":30,"type":"command"}]}`,
 			"config.toml:pre_tool_use:0:1":       `{"event_name":"pre_tool_use","hooks":[{"async":true,"command":"echo tool","timeout":600,"type":"command"}],"matcher":"*"}`,
 			"config.toml:session_end:0:0":        `{"event_name":"session_end","hooks":[{"async":false,"command":"echo end","timeout":3,"type":"command"}]}`,
+			"hooks.json:pre_tool_use:1:0":        `{"event_name":"pre_tool_use","hooks":[{"async":false,"command":"echo any tool","timeout":600,"type":"command"}]}`,
 			"hooks.json:post_tool_use:0:0":       `{"event_name":"post_tool_use","hooks":[{"async":false,"command":"echo post","timeout":600,"type":"command"}],"matcher":"Edit"}`,
 			"config.toml:session_end:1:0":        `{"event_name":"session_end","hooks":[{"async":false,"command":"echo end again","timeout":1,"type":"command"}]}`,
 			"config.toml:interrupt:0:0":          `{"event_name":"interrupt","hooks":[{"async":false,"command":"echo interrupt","timeout":1,"type":"command"}]}`,
