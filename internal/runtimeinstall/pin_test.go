@@ -226,17 +226,21 @@ func TestInstallRefusesAPinThatIsNotAnExactVersion(t *testing.T) {
 	}
 }
 
-// TestInstallRefusesAReleaseThatIsNotThePin has a source that returns claude 2.1.320 for
-// the pin 2.1.300: Install refuses it, and opens no tarball.
+// TestInstallRefusesAReleaseThatIsNotThePin has a source that returns claude 2.1.320, a
+// version with a line break, or "..", for the pin 2.1.300: Install refuses each with the
+// text of a release that is not the pin, never the text of the newest's version, with a
+// version that is not a version's shape in quotes, and opens no tarball.
 func TestInstallRefusesAReleaseThatIsNotThePin(t *testing.T) {
-	src := &rt.Source{}
-	src.Publish("2.1.320", rt.PlainTarball(t, "2.1.320"))
-	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
-		Keys: rt.Keys(), Fetch: src.Fetch, Runtime: "claude", Version: "2.1.300", Folder: t.TempDir(),
-	})
-	want := "Check the source of the runtime's releases\nThe source returned claude 2.1.320, and the pinned version is 2.1.300"
-	if err == nil || err.Error() != want || src.Opens() != 0 {
-		t.Fatalf("the install returned %v after %d opens, want %q", err, src.Opens(), want)
+	for returned, shown := range map[string]string{"2.1.320": "2.1.320", "2.1.320\nx": `"2.1.320\nx"`, "..": `".."`} {
+		src := &rt.Source{}
+		src.Publish(returned, rt.PlainTarball(t, "2.1.320"))
+		_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+			Keys: rt.Keys(), Fetch: src.Fetch, Runtime: "claude", Version: "2.1.300", Folder: t.TempDir(),
+		})
+		want := "Check the source of the runtime's releases\nThe source returned claude " + shown + ", and the pinned version is 2.1.300"
+		if err == nil || err.Error() != want || src.Opens() != 0 {
+			t.Errorf("the install returned %v after %d opens, want %q", err, src.Opens(), want)
+		}
 	}
 }
 

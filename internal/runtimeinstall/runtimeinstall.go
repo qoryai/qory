@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -211,11 +212,17 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 	if err != nil {
 		return Installed{}, err
 	}
+	// A pinned install checks the pin first: a release of the pin has the pin's shape, so
+	// only an install of the newest gets the text of the newest's version.
+	if o.Version != "" && rel.Version != o.Version {
+		got := rel.Version
+		if !versionShape.MatchString(got) {
+			got = strconv.Quote(got)
+		}
+		return Installed{}, fmt.Errorf(textRelease+"The source returned %s %s, and the pinned version is %s", o.Runtime, got, o.Version)
+	}
 	if !versionShape.MatchString(rel.Version) {
 		return Installed{}, fmt.Errorf(textRelease+"The newest %s has the version %q, and a version is 1 to 64 letters, digits, ., + or -, the first a letter or a digit", o.Runtime, rel.Version)
-	}
-	if o.Version != "" && rel.Version != o.Version {
-		return Installed{}, fmt.Errorf(textRelease+"The source returned %s %s, and the pinned version is %s", o.Runtime, rel.Version, o.Version)
 	}
 	sum, err := sha512Of(rel.Integrity)
 	if err != nil {
