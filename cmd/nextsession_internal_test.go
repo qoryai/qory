@@ -22,7 +22,7 @@ import (
 // a session 2 of the workflow fix on codex with a model key.
 const (
 	endAnswer     = `{"next":"end"}`
-	sessionAnswer = `{"next":"session","session":2,"workflow":"fix","model_choice":{"runtime":"codex"},"model_credential":"example-provider-1","time_limit_minutes":30,"full_suite":true,"inputs":{"version":1}}`
+	sessionAnswer = `{"next":"session","session":2,"workflow":"fix","model_choice":{"runtime":"codex"},"model_provider_credential_name":"example-provider-1","time_limit_minutes":30,"full_suite":true,"inputs":{"version":1}}`
 )
 
 // nextLink is a link that returns, for send n from 1, the answer or the error of respond(n),
@@ -84,7 +84,7 @@ func TestTheNextSessionAnswerIsRead(t *testing.T) {
 	if err != nil || ended != "" {
 		t.Fatalf("askNextSession: %q, %v", ended, err)
 	}
-	if a.Next != contracts.NextSessionKindSession || a.Workflow != "fix" || a.ModelChoice.Runtime != "codex" || a.ModelCredential != "example-provider-1" || a.TimeLimitMinutes != 30 || !a.FullSuite {
+	if a.Next != contracts.NextSessionKindSession || a.Workflow != "fix" || a.ModelChoice.Runtime != "codex" || a.ModelProviderCredentialName != "example-provider-1" || a.TimeLimitMinutes != 30 || !a.FullSuite {
 		t.Errorf("the answer is %+v", a)
 	}
 	if want := []string{`{"session":1,"state":"succeeded","reason":null}`}; !slices.Equal(link.bodies, want) {

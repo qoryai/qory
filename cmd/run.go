@@ -1532,9 +1532,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if timeout > 0 {
 					spec.Timeout = timeout
 				}
-				spec.ModelCredential = ""
+				spec.ModelProviderCredentialName = ""
 				if fromCode != nil {
-					spec.ModelCredential = fromCode.modelCredential
+					spec.ModelProviderCredentialName = fromCode.modelCredential
 				}
 				spec.After, spec.AfterTimeout = nil, 0
 				suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, fullSuite: fullSuiteOf(fromCode), extensions: extensions, said: said})

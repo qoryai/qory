@@ -168,7 +168,7 @@ func placesFromReport(o homeOptions) (places, bool, error) {
 		return places{}, false, nil
 	}
 	if err != nil {
-		return places{}, false, err
+		return places{}, false, exports.HideValueError(err, reportFor(home))
 	}
 	at := places{root: rep.Checkout, home: home, report: reportFor(home), links: rep.Links != report.NoLinks && !o.noLinks}
 	// A home is the checkout's .qory/harness, the one home inside a checkout, or a home
@@ -849,6 +849,9 @@ func allRuntimes(home string, targets []render.Runtime) []render.Runtime {
 // --runtime and --model flags, looks every runtime up, prints the title, composes, and
 // builds the report. A collision is printed on errOut and comes back marked reported.
 func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) {
+	// A path of -f that contains a key or a code, such as qrk_, prints as a phrase in
+	// each error of the compose, see [exports.HideValueError].
+	defer func() { err = exports.HideValueError(err, o.file) }()
 	flagTiers, err := tierFlags(o.tiers, o.tierEfforts)
 	if err != nil {
 		return nil, input(err)
@@ -1909,7 +1912,7 @@ func readReport(at places) (report.Report, error) {
 		return rep, fmt.Errorf("no composed harness for %s; run qory harness compose", at.root)
 	}
 	if err != nil {
-		return rep, err
+		return rep, exports.HideValueError(err, at.report)
 	}
 	if rep.Version != report.Version {
 		return rep, input(fmt.Errorf("%s: report version %d is not one this qory reads; versions: %d", exports.Value(at.report, false), rep.Version, report.Version))

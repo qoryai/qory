@@ -792,6 +792,26 @@ release may change what an existing document does, and states it under Upgrading
   cancelled gets no folder. The start commit of a run skips a cancelled version of the
   artifact `branch` too. Before, all three took the newest version, cancelled or not. An
   index without the field `cancelled` reads as no version cancelled.
+- qory builds with Forager 57a8deb5 and integrations e4bf534a.
+  - In a run configuration from a control plane, the run's model key is
+    `default_model_provider_credential_name`, which was `model_credential`, and each API
+    credential has a `group`. In the next-session answer, a session's model key is
+    `model_provider_credential_name`.
+  - A run configuration whose API credential has `chosen` stops the run,
+    `run_configuration_invalid`. When the active key reaches its limit, the gateway moves
+    the run to a key with no known reset first, then to the key that resets soonest.
+    Before, the key with `chosen` came first whenever it was usable.
+  - In a run without a wall, qory prints the error for a Codex argument on two lines:
+    the fix, which contains the flag, then the cause. See `docs/run.md`.
+  - A run without a wall stops before Codex starts, exit 1, when `-c`, `--config`,
+    `--enable` or `--disable` sets `features.hooks`, `features.codex_hooks` or
+    `features.unified_exec_tty`. The second line of the error is ``the setting can turn
+    off the hooks Codex runs before each tool call, or make Codex run no hook for a
+    command sent to a shell with a terminal``.
+  - Each session's environment has `QORY_SESSION`, the session's number in the run,
+    counted from 1. Without a wall, Forager's value replaces any other. A walled run that
+    passes `QORY_SESSION` by `wall.env`, `--env` or the harness's `env` does not start,
+    `variable_reserved`, as for any other `QORY_` name.
 - qory builds with Forager 92ccf768. The gateway does not start when a machine
   credential in `forager.yaml` has a path in `paths` that matches no request, such as a
   path with a `.` or `..` segment, and its line has the path. A run that the gateway
@@ -1404,11 +1424,12 @@ release may change what an existing document does, and states it under Upgrading
   table above one; when it enables or disables `plugins`, `apps` or `connectors`; or
   when it is `--oss`, `--local-provider`, `--profile`, `-p`, `--search`,
   `--ignore-user-config`, `--dangerously-bypass-hook-trust` or `--remote`. qory prints
-  Forager's line, such as ``✗ remove the -c that sets model_provider from the launch's
-  arguments: the session sets that setting for Codex, or the setting changes where Codex
-  sends its requests`` for `-c model_provider=x`, or ``✗ remove the --config pair that
-  sets model_provider from the launch's arguments: the session sets model_provider, and a
-  later pair overrides the session's value`` for `--config model_provider=x`. Before, an
+  Forager's two lines, such as ``✗ remove the -c that sets model_provider from the
+  launch's arguments`` and the next line ``the session sets that setting for Codex, or the
+  setting changes where Codex sends its requests`` for `-c model_provider=x`, or
+  ``✗ remove the --config pair that sets model_provider from the launch's arguments`` and
+  the next line ``the session sets model_provider, and a later pair overrides the session's
+  value`` for `--config model_provider=x`. Before, an
   unwalled run passed every argument unchanged.
 - A refusal of a walled Codex run's arguments writes each control character of the key
   or feature it repeats as an escape, such as `\n`.
@@ -1477,6 +1498,26 @@ release may change what an existing document does, and states it under Upgrading
   1024 entries, more than 4096 values, nesting deeper than 64 levels, or more than 256
   KiB, and a description that is not valid UTF-8, holds a `\u` escape of a lone
   surrogate or repeats a member.
+- Every qory command that describes an integration checks the description against the
+  integration contract of the `github.com/qoryai/integrations` commit qory is built with.
+  What changes for a description:
+  - `vendor`, `egress_hosts`, the `model_provider` role, and the `source` role's `apply`,
+    `item_noun`, `collection_noun`, `items`, `comments`, `submissions`, `targets`,
+    `guide`, `secrets` and `credential_scope` pass the check.
+  - A credential host that starts with `*.` fails the check.
+  - A `model_provider` role without the contract's shape fails the check. Before, any
+    object passed.
+  - A description with no `program_version` and a role other than `model_provider` fails
+    the check with `value must be 'model_provider'`, where it failed with `missing
+    property 'program_version'`. A data description, with no `program_version`, the one
+    role `model_provider` and no `writeOnly` setting, passes the check, and the command
+    then ends with an error, because it plays no role qory expands.
+  - A settings `$schema` that is not a URI fails the check with `is not valid uri`, where
+    qory printed `the settings schema is written in …`.
+  - A settings schema whose `$vocabulary` key, `patternProperties` key, `$id`, `$ref`,
+    `$dynamicRef` or `pattern` is not valid fails the check, where qory printed `the
+    settings schema does not compile`.
+  - Each rule of a failed check is cut at 200 characters, with `...` after it.
 - `qory run` given a run key starts Claude Code with `--setting-sources user`,
   `--strict-mcp-config`, and the harness's MCP list or an empty one. Behind a wall,
   Claude Code's `CLAUDE_CONFIG_DIR` is an empty folder qory makes after the commands the
@@ -1661,6 +1702,25 @@ release may change what an existing document does, and states it under Upgrading
   reference in another of its files as a link.
 
 ### Security
+
+- These errors and lines print "(a value that contains a run key)", or the phrase for
+  the kind of key or code, in place of a value that contains `qak_`, `qrk_`, `qecr_` or
+  an enrolment code's prefix, in any letter case; line 1 is otherwise as before, and a
+  wrong value without one prints as before:
+  - `qory run verdict` with a wrong verdict, `qory artifact push` with a wrong type or
+    `--name`, and `qory artifact pull <type> --version N` with no version N;
+  - `unknown command`, for `qory <arg>` and for a stray argument of a command that
+    takes none, and `Unknown help topic` of `qory help <arg>`;
+  - a flag's value that is not an int, a bool or a duration, and an unknown flag, as
+    `--<value>`, `-<value>` or `---<value>`;
+  - the file errors of `qory artifact push <file>`, of `--withdraw` with files, and of
+    `qory run verdict escalate --points`;
+  - the errors of `qory harness compose -f`, `qory worktree add -f` and `qory run -f`
+    that printed the file's path or name, and the compose's `qory` and `retired` rows;
+  - an error reading the harness report of `--home`, also for `qory run`;
+  - `qory gateway --listen`, also in the cause of a failed lookup of its host;
+  - a read-write `--mount` that contains qory's state directory;
+  - the line of `qory run end` with a `--reason` that contains a key.
 
 - qory builds with Go 1.27.4, and go.mod requires Go 1.27.4. Go 1.27.4's `crypto/x509`
   returns an error for the intermediate certificates that Go no longer trusts

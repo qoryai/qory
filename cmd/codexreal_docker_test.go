@@ -282,9 +282,9 @@ func startModelControl(t *testing.T, host string, login bool, value string) {
 		auth = map[string]any{"scheme": "bearer", "oauth": true, "account_header": codexAccountHeader, "account_claim": codexAccountClaim}
 	}
 	runDoc, err := json.Marshal(map[string]any{"version": 1,
-		"security_policy":  map[string]any{"version": 1, "egress": map[string]any{"mode": "enforce", "allow": []string{host}}},
-		"model_credential": "model",
-		"credentials": []any{map[string]any{"name": "model", "format": "openai-responses", "endpoint": "https://" + host + ":8443/v1",
+		"security_policy":                        map[string]any{"version": 1, "egress": map[string]any{"mode": "enforce", "allow": []string{host}}},
+		"default_model_provider_credential_name": "model",
+		"credentials": []any{map[string]any{"name": "model", "group": "openai", "format": "openai-responses", "endpoint": "https://" + host + ":8443/v1",
 			"auth": auth, "paths": []string{"/v1/responses"}, "pause_for_s": 3600}}})
 	if err != nil {
 		t.Fatal(err)

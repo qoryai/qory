@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/config"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/statusfd"
 	"github.com/qoryai/qory/internal/ui"
 )
@@ -85,8 +89,28 @@ More: https://github.com/qoryai/qory`,
 	root.AddCommand(shortcuts()...)
 	root.AddCommand(worktreeShortcuts()...)
 	root.PersistentFlags().BoolP("verbose", "v", false, "print more of what the command does; each command's help lists what")
-	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return input(err) })
+	// An error of pflag's prints the flag or the value as written, and each word of it
+	// that contains a key or a code, such as qrk_, prints as a phrase.
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return input(exports.HideValueError(err, "")) })
+	maskHelpTopics(root)
 	return root
+}
+
+// maskHelpTopics makes cobra's help command print each topic it does not find, a value
+// that contains a key or a code, such as qrk_, as [exports.Value] prints it. The help
+// command prints that line itself, to standard error, and returns no error.
+//
+// shortcut: it wraps the Run of cobra's default help command, found by the name help;
+// replace it with a help command of qory's when cobra's command changes or qory needs one.
+func maskHelpTopics(root *cobra.Command) {
+	root.InitDefaultHelpCmd()
+	for _, c := range root.Commands() {
+		if c.Name() != "help" || c.Run == nil {
+			continue
+		}
+		run := c.Run
+		c.Run = func(c *cobra.Command, args []string) { run(c, exports.Values(args)) }
+	}
 }
 
 // verbose reports whether the root's --verbose was given, for any command of the tree.
@@ -116,16 +140,29 @@ func buzzing(cmd *cobra.Command) (stop func()) {
 }
 
 // noArgs is [cobra.NoArgs] returning an input error, so a stray argument exits with
-// [ExitInput].
+// [ExitInput], and printing the argument as [exports.Value] prints it.
 func noArgs(cmd *cobra.Command, args []string) error {
-	return input(cobra.NoArgs(cmd, args))
+	if len(args) > 0 {
+		return input(fmt.Errorf("unknown command %s for %q", exports.Value(args[0], true), cmd.CommandPath()))
+	}
+	return nil
 }
 
 // Execute builds the command tree, runs the command the arguments select, and returns its
 // error. The caller decides what to print and which status to exit with: [ErrReported]
 // reports whether the command printed the failure itself, [ExitCode] which status it gets.
 func Execute() error {
-	return Root().Execute()
+	err := Root().Execute()
+	// An error of cobra's, such as that of a command qory does not have, prints an
+	// argument as written before any check of qory's runs. When an argument contains a
+	// key or a code, such as qrk_, each word of the error that contains one, quoted or
+	// not, prints as a phrase.
+	for _, arg := range os.Args[1:] {
+		if exports.Value(arg, false) != arg {
+			return exports.HideValueError(err, "")
+		}
+	}
+	return err
 }
 
 // RunsQoryRun reports whether args, the arguments after the program's name, start qory

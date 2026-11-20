@@ -295,11 +295,12 @@ func TestWalledRunTakesTheHomeFromYourOwnFile(t *testing.T) {
 func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 	root, _ := exportingCheckout(t, fakeRuntime(t))
 	out, err := run(t, "run", "codex", "--", "-c", "model_provider=x")
-	refused := "remove the -c that sets model_provider from the launch's arguments: the session sets that setting for Codex, or the setting changes where Codex sends its requests"
-	if cmd.ExitCode(err) != 1 || err == nil || err.Error() != refused {
-		t.Fatalf("a run without a wall: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), refused, out)
+	fix := "remove the -c that sets model_provider from the launch's arguments"
+	cause := "the session sets that setting for Codex, or the setting changes where Codex sends its requests"
+	if cmd.ExitCode(err) != 1 || err == nil || err.Error() != fix+"\n"+cause {
+		t.Fatalf("a run without a wall: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), fix+"\n"+cause, out)
 	}
-	wants(t, out, "✗ "+refused+"\n")
+	wants(t, out, "✗ "+fix+"\n  "+cause+"\n")
 	lacks(t, out, " -c model_provider=x\n")
 	out, err = run(t, "run", "codex", "--", "-c", "model_verbosity=low")
 	if cmd.ExitCode(err) != 3 {

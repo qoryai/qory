@@ -120,8 +120,9 @@ type codeRun struct {
 	// shared is the documents' shared_run: qory sends the next-session request after each
 	// session and runs the session that the answer sets.
 	shared bool
-	// modelCredential is the model key the session joins with, the model_credential of a
-	// later session's next-session answer; "" for the run's start key, as session 1 has.
+	// modelCredential is the model key the session joins with, the
+	// model_provider_credential_name of a later session's next-session answer; "" for the
+	// run's default model provider credential, as session 1 has.
 	modelCredential string
 	minutes         int
 	hidden          bool
@@ -260,7 +261,7 @@ func (r *codeRun) next(a contracts.NextSessionAnswer) error {
 	if err != nil {
 		return err
 	}
-	r.runtime, r.settings, r.harness, r.modelCredential = runtime, settings, harness, a.ModelCredential
+	r.runtime, r.settings, r.harness, r.modelCredential = runtime, settings, harness, a.ModelProviderCredentialName
 	r.workflow, r.inputs, r.minutes, r.fullSuite = a.Workflow, a.Inputs, a.TimeLimitMinutes, a.FullSuite
 	return nil
 }

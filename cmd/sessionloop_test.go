@@ -33,7 +33,7 @@ import (
 func laterAnswer(n int, runtime, credential string, minutes int) string {
 	b, _ := json.Marshal(map[string]any{
 		"next": "session", "session": n, "workflow": "hello",
-		"model_choice": map[string]any{"runtime": runtime}, "model_credential": credential,
+		"model_choice": map[string]any{"runtime": runtime}, "model_provider_credential_name": credential,
 		"time_limit_minutes": minutes, "full_suite": false, "inputs": map[string]any{"version": 1},
 	})
 	return string(b)
@@ -202,8 +202,8 @@ func TestARunOfSeveralSessionsJoinsOncePerSession(t *testing.T) {
 		if !strings.Contains(program, "/"+want.runtime+" ") && !strings.HasPrefix(program, want.runtime+" ") {
 			t.Errorf("session %d starts %q, want %s", i+1, program, want.runtime)
 		}
-		if j.spec.ModelCredential != want.key {
-			t.Errorf("session %d joins with the key %q, want %q", i+1, j.spec.ModelCredential, want.key)
+		if j.spec.ModelProviderCredentialName != want.key {
+			t.Errorf("session %d joins with the key %q, want %q", i+1, j.spec.ModelProviderCredentialName, want.key)
 		}
 		if limit := j.spec.Timeout.Minutes(); limit <= float64(want.minutes-1) || limit > float64(want.minutes) {
 			t.Errorf("session %d has %v, want %d minutes", i+1, j.spec.Timeout, want.minutes)
@@ -661,11 +661,11 @@ func TestALaterSessionComposesWithTheTiersOfItsAnswer(t *testing.T) {
 }
 
 // TestASessionWithoutAKeyAfterOneWithAKeyJoinsWithNone is a run whose answers start session
-// 2 with the model key example-provider-2 and session 3 with no model_credential: session 3
-// joins with no key, and not with session 2's.
+// 2 with the model key example-provider-2 and session 3 with no
+// model_provider_credential_name: session 3 joins with no key, and not with session 2's.
 func TestASessionWithoutAKeyAfterOneWithAKeyJoinsWithNone(t *testing.T) {
-	third := strings.Replace(laterAnswer(3, "claude", "", 30), `"model_credential":"",`, "", 1)
-	if strings.Contains(third, "model_credential") {
+	third := strings.Replace(laterAnswer(3, "claude", "", 30), `"model_provider_credential_name":"",`, "", 1)
+	if strings.Contains(third, "model_provider_credential_name") {
 		t.Fatalf("the answer of session 3 is %s", third)
 	}
 	r := runLoop(t, loopSetup{answers: []string{laterAnswer(2, "claude", "example-provider-2", 30), third}})
@@ -673,7 +673,7 @@ func TestASessionWithoutAKeyAfterOneWithAKeyJoinsWithNone(t *testing.T) {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
 	for i, want := range []string{"", "example-provider-2", ""} {
-		if got := r.joins[i].spec.ModelCredential; got != want {
+		if got := r.joins[i].spec.ModelProviderCredentialName; got != want {
 			t.Errorf("session %d joins with the key %q, want %q", i+1, got, want)
 		}
 	}
