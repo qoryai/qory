@@ -683,10 +683,12 @@ release may change what an existing document does, and states it under Upgrading
   checkout, ends the read. It drops a title with a control character or with no character
   that is not a space, a title, description or step that is over a limit of the submission
   format, a description with a NUL character or a line that is a marker of the draft's block
-  (`<!-- qory:start -->` or `<!-- qory:end -->`), a step with a control, invisible, direction
-  or separator character, and a step whose key is not a full lower-case commit id, with a
-  line that states the cause and the values. The title and step rule is the one of the submit
-  program's draft title line, so a zero-width joiner (U+200D), as in an emoji sequence, stays.
+  (`<!-- qory:start -->` or `<!-- qory:end -->`), a step with a character that stops a title,
+  and a step whose key is not a full lower-case commit id, with a
+  line that states the cause and the values. One rule covers a title, a step and the name of
+  a machine step: a control character, a format character other than U+200C and U+200D,
+  and U+2028 and U+2029 stop a title or a step, and a name loses them. U+200C and U+200D,
+  as in an emoji sequence, stay.
 - qory adds `/.qory/handoff/` to the checkout's `.git/info/exclude` for a run on a work
   item's branch, so `git add -A` and `git commit -a` leave the hand-off file out of a commit.
   A commit of the run that has a path under `.qory/handoff/`, in any letter case, as
@@ -731,14 +733,14 @@ release may change what an existing document does, and states it under Upgrading
 - A push that landed with no version stored has one way out in the line of `qory run`:
   `delete branch qory/<work item id> of <path> on <system>`. The line also has this way out
   when the list of the run's commits fails after the push landed. A branch whose head is not the
-  commit the run expected is refused before any push, with the line `Set the branch to the
+  commit the run expected stops the step before any push, with the line `Set the branch to the
   expected commit or delete it` and the branch, the head and the expected commit on the next
   line. To go on, do one of the two, then take the work item in again. Moving the branch back
   works when the `Expected:` line shows `the start commit`; with `this run's last
   push` it works only when Qory Apiary recorded that push, and otherwise the next run stops at
   the head check again, so delete the branch. Line 3 of the text is the loss: either way, the
   commits on the branch that no version has are lost. A branch that is not on the forge cannot be deleted: its
-  refusal starts with `Create the branch at the expected commit on the forge`, has
+  line starts with `Create the branch at the expected commit on the forge`, has
   `Head: none`, and has the `git push` command that creates the branch. The next run creates
   a deleted branch at `target_version` when no version exists, and starts from the last
   version otherwise.
@@ -747,6 +749,11 @@ release may change what an existing document does, and states it under Upgrading
   fails to check out) now state the fact first: `Version <n> of the artifact submission has a
   ref other than <ref>, so the run did not start; the code is used`. They no longer name a
   fix in Qory Apiary, because only a run stores a version.
+- A run stops before the agent starts, with the line `Report this run to the instance admin of
+  Qory Apiary.` and a second line `The list of pushed commits has <value>, which is not a
+  full commit id, so the run did not start; the code is used`, when the work item's list of
+  pushed commits has a value that is not a full commit id. qory passes only full commit ids
+  to git.
 - The middle model tier is named `balanced` in place of `fast`. The tiers are `light`,
   `balanced` and `thinking`. `${qory:balanced}`, `--tier balanced=<model id>`,
   `--tier-effort balanced=<effort>`, `harness.tiers.balanced`, a workflow's `tier: balanced`

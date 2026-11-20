@@ -561,7 +561,9 @@ how it ended:
 1. For a run from a run code given `--machine-steps-file <file>`, which a machine's start
    script passes, the step `start machine`, of kind `machine`, right after the run opens:
    one line per entry of the file, such as `start Docker  3.2 s`, and it ends `succeeded`.
-   With a bad file the run has no such step, qory prints one line, and the run goes on.
+   With a bad file the run has no such step, qory prints one line, and the run goes on. A
+   name loses its terminal escape sequences, its control characters, its format characters
+   other than U+200C and U+200D, and U+2028 and U+2029, and is cut to 100 characters.
 2. When the run configuration lists repositories, the fetch, named after the run's
    repository, such as `fetch github.com/example-org/shop`, with `and 1 further
    repository` when there are two.
@@ -2162,6 +2164,7 @@ A run stops before the agent starts when:
 
 - the version does not match the [submission format](../contracts/harness/v1/README.md#the-submission-format),
   or its `ref` is another work item's;
+- the work item's list of pushed commits has a value that is not a full commit id;
 - a commit is not on its repository;
 - the target's commit has another `.qory` than `target_version`;
 - git does not check out a commit.
@@ -2169,6 +2172,9 @@ A run stops before the agent starts when:
 Each of these lines stops the run, exit 1. `<c>` is a commit's first 12 characters, and
 `<git line>` is the line that git wrote:
 
+- `Report this run to the instance admin of Qory Apiary.`, then a line indented by two
+  spaces: `The list of pushed commits has <value>, which is not a full commit id, so the run
+  did not start; the code is used`
 - `Version <n> of the artifact submission has a ref other than <ref>, so the run did not
   start; the code is used`
 - `Version <n> of the artifact submission does not have exactly one file of at most 262144
@@ -2850,14 +2856,14 @@ One repository can be pushed before another fails, and a push can succeed before
 is stored. The branch is then past every version of the artifact `submission`. When Qory
 Apiary has no record of the push (see The report of a push), the head of the branch is past
 the commit the next run starts at, and the next run ends `failed` with the end code
-`push_head_changed`, with the refusal that [The head check](#the-head-check) lists. To go on,
-delete the branch, or move it back to the commit that the second line of the refusal shows
+`push_head_changed`, with the line that [The head check](#the-head-check) lists. To go on,
+delete the branch, or move it back to the commit that the second line of that text shows
 after `Expected:`. Both lose the commits on the branch that no version has. Moving it back works
 when the `Expected:` line shows `the start commit`. When it shows `this run's last
 push`, the next run starts at the newest push that Qory Apiary recorded: moving the branch
 back works only when Apiary recorded that push, and otherwise the next run stops at the head check
 again, so delete the branch. A branch that is not on the forge, with `Head: none`, cannot be deleted:
-the refusal starts with `Create the branch at the expected commit on the forge; it is not
+the line starts with `Create the branch at the expected commit on the forge; it is not
 there.` and has the `git push` command that creates it. It occurs when the work item has a
 version or a pushed commit and the forge has no such branch. When the work item has no
 version, the next run creates a deleted branch at `target_version`, not at the commit that
@@ -2946,10 +2952,12 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   delete branch qory/<work item id> of <path> on <system>; then take the work item in
   again: qory pushed <branch>, and the request that stores its version ended with no
   response, so the version may or may not be stored: <error>; the code is used`
-- `delete branch qory/<work item id> of <path> on <system>: qory pushed <path> and stored
-  no version, because the push of the next repository failed: <line of that failure>`
-- `delete branch qory/<work item id> of <path> on <system>: qory pushed <path> and stored
-  no version, because the list of the run's commits failed: <line of git>; the code is used`
+- `delete branch qory/<work item id> of <path> on <system>`, then a line indented by two
+  spaces: `qory pushed <path> and stored no version, because the push of the next
+  repository failed: <line of that failure>`
+- `delete branch qory/<work item id> of <path> on <system>`, then a line indented by two
+  spaces: `qory pushed <path> and stored no version, because the list of the run's commits
+  failed: <line of git>; the code is used`
 
 #### The head check
 
@@ -2968,26 +2976,26 @@ credential alone. The result of each repository is one of these:
   push), and it descends from the start commit. qory fetches the history of the branch head
   only when a cancelled run recorded that head, and then checks that it descends from the
   start commit. A head below, above or beside a recorded head, or one that the record does
-  not list, is any other head and is refused with no fetch. qory pushes with
+  not list, is any other head, and the push stops with no fetch. qory pushes with
   `--force-with-lease=refs/heads/qory/<work item id>:<head>`, so the push replaces
   those commits only while the branch is still at the head qory read.
 - Any other head (an unrecorded head, a recorded head after the run's first push, or a
   recorded head that does not descend from the start commit) or the branch missing where the
   run did not start at the checkout: qory pushes nothing in any repository, and the step
-  fails with the refusal in the list above, which starts with `Set the branch to the
+  fails with the line in the list above, which starts with `Set the branch to the
   expected commit or delete it`, or with `Create the branch at the expected commit on the
   forge` for a missing branch.
 
 A push that the forge rejects with the status `[rejected]`, such as a lease that no longer
-matches, also fails the step with that refusal, with the head read again. When the read of a
+matches, also fails the step with that line, with the head read again. When the read of a
 head fails, the step fails with the line `Take the work item in again in Qory Apiary: the run's host proxy could not
 read the head.`, also in the list above.
 
-A refusal because the branch moved closes the run `failed` with the end code
+A head check that fails because the branch moved closes the run `failed` with the end code
 `push_head_changed`, after a session that succeeded, failed or timed out; after a session that
 failed or timed out, the exit code of the close is the session's. The run's time limit that cuts the
-step after the refusal does not change the close. A session that was interrupted or
-cancelled keeps its end. A stop that lands after the refusal closes the run `cancelled` after a
+step after that failure does not change the close. A session that was interrupted or
+cancelled keeps its end. A stop that lands after that failure closes the run `cancelled` after a
 session that succeeded, and keeps the end of the session after one that failed or timed out. After a
 session that did not succeed, any other failure of the step keeps the session's end, and a step that
 a stop or the time limit cut closes the run as the sections above say.
@@ -3071,12 +3079,13 @@ kind of the file first and opens it without blocking.
 
 qory also checks the file against the limits of the submission format, and drops the part
 that is over a limit and keeps the rest: a `text` whose `title` has more than 256 characters or
-whose `description` has more than 20000, has a NUL character or has a marker line of the draft's block (`<!-- qory:start -->` or `<!-- qory:end -->`, alone on a line, or followed by spaces, tabs or a carriage return) is dropped whole, and a step with a control, invisible, direction or separator character is dropped, and a step of more than 128
+whose `description` has more than 20000, has a NUL character or has a marker line of the draft's block (`<!-- qory:start -->` or `<!-- qory:end -->`, alone on a line, or followed by spaces, tabs or a carriage return) is dropped whole, and a step with a character that stops a title is dropped, and a step of more than 128
 characters is dropped, so its commit is `unreviewed`. A `text` whose `title` has a control
-character, such as a tab or a line end, a bidirectional control, a line or paragraph separator
-or an invisible format character that the draft title rule of the submit program contract lists
-(such as U+200B), is dropped whole; a zero-width joiner (U+200D), as in an emoji sequence, stays.
-A step is dropped under the same rule, and so is a step whose key is not a full commit id of 40 or 64 lower-case hexadecimal digits. qory prints `qory run: The hand-off
+character (Unicode category Cc, such as a tab or a line end), a format character (category
+Cf, such as a bidirectional control, a zero-width space or a tag character) other than U+200C
+and U+200D, or U+2028 or U+2029, is dropped whole. U+200C and U+200D, as in an emoji
+sequence, stay in a title. A step with one of these characters is dropped, and so is a step
+whose key is not a full commit id of 40 or 64 lower-case hexadecimal digits. qory prints `qory run: The hand-off
 file has a part the submission format does not allow, so qory dropped it.`, then one line
 indented by two spaces for each part: `Title: <n> characters, over the limit of 256. qory
 dropped the text.`, `Description: <n> characters, over the limit of 20000. qory dropped the
@@ -3237,8 +3246,11 @@ space, and `commit_url <commit> <address>` for the base and each commit. qory ta
 draft lines as the draft, only when each is there once and valid, and each address as the
 `commit_url` of the repository, its `base` or its commit. A run with no run code and no run key keeps no record
 of them. A number is a whole number from 1 to
-9223372036854775807 with no leading zero, a title is UTF-8 of at most 256 characters with a character that is not a space
-and no control, bidirectional or invisible character, and an address is `https` on the
+9223372036854775807 with no leading zero, a title is UTF-8 of at most 256 characters with a character that is not a space,
+no control character, and none of U+00AD, U+061C, U+180E, U+200B, U+200E, U+200F, U+2028,
+U+2029, U+202A to U+202E, U+2060 to U+2064, U+2066 to U+2069, U+FEFF and U+FFF9 to U+FFFB
+(the contract's rule for a line; U+200C and U+200D are allowed, and the hand-off drops a title
+with any other format character before the program runs), and an address is `https` on the
 repository's `system`, with a path, at most 2048 characters, of the ASCII characters that RFC
 3986 allows, and with no user, port, query or fragment. qory leaves out a line, and prints
 `qory run: The submit program printed a line that qory cannot use, so qory left it out.` with
