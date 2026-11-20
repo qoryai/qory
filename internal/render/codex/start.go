@@ -111,8 +111,8 @@ func StartDirs(args []string) []string {
 
 // textConfigArg is the refusal of a run whose Codex arguments set a key of [trustKeys],
 // or, in a walled run, of [reservedKeys] or [argReservedKeys], with --config or -c, with
-// the key as given for its %s.
-const textConfigArg = "Remove `--config %s` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
+// the key as given for its %s. The key is on the cause line, so line 1 has a fixed length.
+const textConfigArg = "Remove the `--config` flag and its value from the run's Codex arguments.\n  A Codex run takes `%s` from qory and Forager, not from the arguments."
 
 // textProviderArg is the refusal of a walled run whose Codex arguments contain --oss or
 // --local-provider, with the flag for its %s.
@@ -120,8 +120,9 @@ const textProviderArg = "Remove `%s` from the run's Codex arguments.\n  A Codex 
 
 // textFeatureArg is the refusal of a run whose Codex arguments contain --enable or
 // --disable of a feature of [trustFeatures], or of any feature in a walled run, with the
-// flag and the feature as given for its two %s.
-const textFeatureArg = "Remove `%s %s` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
+// flag and the feature as given for its two %s. The feature is on the cause line, so
+// line 1 is at most as long as with --disable.
+const textFeatureArg = "Remove the `%s` flag and its value from the run's Codex arguments.\n  A Codex run takes the feature `%s` from qory and Forager, not from the arguments."
 
 // textProfileArg is the refusal of a walled run whose Codex arguments contain --profile
 // or -p.
