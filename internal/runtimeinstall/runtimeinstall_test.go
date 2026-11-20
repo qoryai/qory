@@ -58,6 +58,21 @@ func files(t *testing.T, dir string) []string {
 	return out
 }
 
+// isReleaseRefusal is whether text is a refusal of a release of runtime: the fix line,
+// then the cause on lines indented two spaces, the last of them with a full stop.
+func isReleaseRefusal(text, runtime string) bool {
+	fix, cause, ok := strings.Cut(text, "\n")
+	if !ok || fix != "Check the source of "+runtime+"'s releases." || !strings.HasSuffix(cause, ".") {
+		return false
+	}
+	for _, line := range strings.Split(cause, "\n") {
+		if !strings.HasPrefix(line, "  ") {
+			return false
+		}
+	}
+	return true
+}
+
 // installedFiles are the files of an install of claude 2.1.320.
 var installedFiles = []string{"claude/", "claude/2.1.320/", "claude/2.1.320/bin/", "claude/2.1.320/bin/claude", "claude/2.1.320/integrity"}
 
@@ -184,7 +199,7 @@ func TestInstallRefuses(t *testing.T) {
 	}{
 		{"wrong integrity", func(t *testing.T, s *rt.Source) {
 			s.PublishWith("2.1.320", rt.PlainTarball(t, "2.1.320"), rt.Integrity([]byte("another tarball")))
-		}, "Check the source of the runtime's releases\nThe tarball of claude 2.1.320 does not match the checksum\n  sha512-"},
+		}, "Check the source of claude's releases.\n  The tarball of claude 2.1.320 does not match the checksum\n  sha512-"},
 		{"tarball changed after its checksum", func(t *testing.T, s *rt.Source) {
 			good := rt.PlainTarball(t, "2.1.320")
 			bad := bytes.Clone(good)
@@ -224,8 +239,8 @@ func TestInstallRefuses(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("err = %v, want one that contains %q", err, c.want)
 			}
-			if !strings.HasPrefix(err.Error(), "Check the source of the runtime's releases\n") {
-				t.Fatalf("err = %v, want one that starts with its fix", err)
+			if !isReleaseRefusal(err.Error(), "claude") {
+				t.Fatalf("err = %v, want the fix line, then the cause on indented lines", err)
 			}
 			if first, _, _ := strings.Cut(err.Error(), "\n"); len(first) > 100 {
 				t.Fatalf("the first line has %d characters, want at most 100: %s", len(first), first)
@@ -325,7 +340,7 @@ func TestOversizedTarballsAreRefused(t *testing.T) {
 			in := newInstaller(t)
 			in.src.Publish("2.1.320", rt.Tarball(t, c.entries...))
 			_, err := in.install()
-			if err == nil || !strings.Contains(err.Error(), c.want) || !strings.HasPrefix(err.Error(), "Check the source of the runtime's releases\n") {
+			if err == nil || !strings.Contains(err.Error(), c.want) || !isReleaseRefusal(err.Error(), "claude") {
 				t.Fatalf("err = %v, want one that starts with its fix and contains %q", err, c.want)
 			}
 			if got := files(t, in.folder); len(got) > 1 {

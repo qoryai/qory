@@ -100,7 +100,9 @@ func RegistryFetch(client *http.Client, host, arch, instance string) Fetch {
 		if err != nil {
 			return Release{}, err
 		}
-		rel.Signed, _ = signedName(runtime, rel.Version, arch)
+		// RegistryFetch returned at its start for a runtime or an architecture with no package.
+		signed, _ := signedName(runtime, rel.Version, arch)
+		rel.Signed = signed
 		rel.Program, rel.Folder = layout(runtime, arch)
 		return rel, nil
 	}

@@ -1,0 +1,36 @@
+[
+  {
+    "runtime": "claude",
+    "version": "2.1.327",
+    "arch": "amd64",
+    "signed": "@anthropic-ai/claude-code-linux-x64@2.1.327",
+    "integrity": "sha512-uJ24I+t47cpQjeo31ZrHepsFQ8QUsLjCxmDxLshMjYHEtoxhQdgKc4iuViQDaKpFqn3puR85gwHlLj4e7s+1iQ==",
+    "signatures": [
+      {
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+        "sig": "MEQCIAkF2YEF0MShyLhk1d2SFKmZu+2RRLpTdkHuZynnkpC2AiARvcCh4Y60eL8tURUrJg+8rUvAewAMcxaNe4302Y4h1A=="
+      },
+      {
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+        "sig": "MEUCIQCV0pi0gjuNU5ncxu197M2/m/9DW8Smk7h69yaEiFB5cQIgOR/XOYSxwNw9hRAlWVomBnKPxE+3Yy4rw5aT6/q0gsg="
+      }
+    ]
+  },
+  {
+    "runtime": "codex",
+    "version": "0.170.0",
+    "arch": "amd64",
+    "signed": "@openai/codex@0.170.0-linux-x64",
+    "integrity": "sha512-6cCZJaZL17tiTAvhd1Pirt8vsV1dP8CfG94+IHygUO4m24oYLQrIInJJLyKzcMv/uUonbu1dF2JmcXhA/s5bsg==",
+    "signatures": [
+      {
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+        "sig": "MEQCIA0y0nFCznW2jErLJd2jPtC3oBbbxhbAH4Imus3xKbRTAiBmciD4c+hA+YzNxiMoC2MzSYOwe3KiSUJqEuA8aDVvkg=="
+      },
+      {
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+        "sig": "MEUCIQDvATPeVLt5/zcXhyOsmYJ2gCNV4Ha69fEFtBqAZPEZIQIgIeTWTYCGQLV3MmVwkIiKtza8ARvhq74o0+j7HJ5d3B0="
+      }
+    ]
+  }
+]

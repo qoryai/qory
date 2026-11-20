@@ -1086,17 +1086,35 @@ it reads the tarball:
 - no signature, or a signature that does not verify:
 
   ```text
-  qory run: Check the source of the runtime's releases
-  npm's signature of codex 0.170.0 does not verify
-  The key is SHA256:<keyid>
+  qory run: Check the source of codex's releases.
+    npm's signature of codex 0.170.0 does not verify.
+    The key is SHA256:<keyid>.
   ```
 
-- only keys that qory does not have, or that expired: a newer qory has npm's new key.
+- only keys that qory does not have: a newer qory has npm's new key.
 
   ```text
   qory run: Update qory.
-  npm signed codex 0.170.0 with a key that this qory does not have.
-  The key is SHA256:<keyid>.
+    npm signed codex 0.170.0 with a key this qory does not have.
+    The key is SHA256:<keyid>.
+  ```
+
+- only keys that expired: a newer version of the runtime is signed by npm's current key.
+  With a pinned version, the fix is to pin a newer one:
+
+  ```text
+  qory run: Pin a newer version of codex.
+    npm signed codex <version> with a key that expired on 2025-01-29.
+    The key is SHA256:<keyid>.
+  ```
+
+  With no pin, the fix is to check where the release comes from, npm or the registry's
+  runtime cache:
+
+  ```text
+  qory run: Check the source of codex's releases.
+    npm signed codex <version> with a key that expired on 2025-01-29.
+    The key is SHA256:<keyid>.
   ```
 
 A version's folder that an earlier run installed is used only after the same check.
@@ -1138,8 +1156,8 @@ came from. For Codex, it also contains the other files of Codex's folder in the 
    lets anyone run it and `0644` otherwise; `bin/codex`, `bin/codex-code-mode-host`,
    `codex-resources/bwrap` and `codex-path/rg` are always `0755`. A link, a hard link, a
    path with a `.` or `..` segment, an entry twice, a file `integrity` at the folder's
-   top, more than 10,000 entries, or no `bin/codex` stops the run with `Check the source
-   of the runtime's releases`. A missing or empty `bin/codex-code-mode-host`,
+   top, more than 10,000 entries, or no `bin/codex` stops the run with the fix line
+   `Check the source of codex's releases.` A missing or empty `bin/codex-code-mode-host`,
    `codex-resources/bwrap` or `codex-path/rg` means that Codex moved its files, and stops
    the run with `Update qory.`, then `The tarball of codex <version> has no` and the
    missing file on the next line. The tarball may unpack to at most
@@ -1199,9 +1217,9 @@ qory run: the tarball of claude 2.1.320 does not match the checksum
 A tarball that does not match its sha512 checksum stops a person's run with:
 
 ```text
-qory run: Check the source of the runtime's releases
-The tarball of claude 2.1.320 does not match the checksum
-  sha512-<checksum>
+qory run: Check the source of claude's releases.
+  The tarball of claude 2.1.320 does not match the checksum
+  sha512-<checksum>.
 ```
 
 A version's folder that was not installed from the tarball with the release's checksum
