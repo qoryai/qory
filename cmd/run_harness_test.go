@@ -360,6 +360,9 @@ func TestACodexRunWithoutAWallStopsOnTheHookArguments(t *testing.T) {
 		{[]string{"--config=hooks.x=1"}, config("--config", "hooks.x")},
 		{[]string{"-c", "features={hooks=false}"}, above("-c", "features", "features.hooks")},
 		{[]string{"-c", "features.codex_hooks=true"}, config("-c", "features.codex_hooks")},
+		{[]string{"-c", `projects={"/work"={trust_level="trusted"}}`}, config("-c", "projects")},
+		{[]string{"-c", "projects./work.trust_level=trusted"}, config("-c", "projects./work.trust_level")},
+		{[]string{"--config=projects={}"}, config("--config", "projects")},
 		{[]string{"--enable", "unified_exec_tty"}, feature("--enable", "unified_exec_tty")},
 		{[]string{"--disable=codex_hooks"}, feature("--disable", "codex_hooks")},
 		{[]string{"--enable", "codex_hooks"}, feature("--enable", "codex_hooks")},
@@ -376,7 +379,7 @@ func TestACodexRunWithoutAWallStopsOnTheHookArguments(t *testing.T) {
 			t.Errorf("%q: line 1 of %d characters behind qory run:, want at most 100: %q", c.args, len(line), line)
 		}
 	}
-	for _, args := range [][]string{{"-c", "model=x"}, {"--enable", "some_other_feature"}} {
+	for _, args := range [][]string{{"-c", "model=x"}, {"-c", "x=projects"}, {"--enable", "some_other_feature"}} {
 		out, err := run(t, append([]string{"run", "codex", "--"}, args...)...)
 		if cmd.ExitCode(err) != 3 {
 			t.Fatalf("%q: %v (exit %d), want the program's exit 3\n%s", args, err, cmd.ExitCode(err), out)

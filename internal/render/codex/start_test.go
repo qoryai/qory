@@ -99,6 +99,7 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 		{[]string{"exec", "-c", " model_provider = x", "hi"}, "-c", "model_provider"},
 		{[]string{"exec", "-c", "model_providers.x.base_url=\"https://example.com\"", "hi"}, "-c", "model_providers.x.base_url"},
 		{[]string{"exec", "-c", "model_providers.x={}", "hi"}, "-c", "model_providers.x"},
+		{[]string{"exec", "-c", "projects./work.trust_level=trusted", "hi"}, "-c", "projects./work.trust_level"},
 		{[]string{"exec", "-c", "features.shell_snapshot=true", "hi"}, "-c", "features.shell_snapshot"},
 		{[]string{"exec", "-c", "features={shell_snapshot=true}", "hi"}, "-c", "features"},
 		{[]string{"exec", "-c", "hooks={state={}}", "hi"}, "-c", "hooks"},
@@ -448,6 +449,9 @@ func TestCheckArgsRefuseTheHookSettingsWithoutAWall(t *testing.T) {
 		{[]string{"exec", "--enable", "codex_hooks", "hi"}, feature("--enable", "codex_hooks")},
 		{[]string{"exec", "--disable", "hooks", "hi"}, feature("--disable", "hooks")},
 		{[]string{"--search", "exec", "--enable", "x", "-c", "hooks.Stop=[]"}, config("-c", "hooks.Stop")},
+		{[]string{"exec", "-c", `projects={"/work"={trust_level="trusted"}}`, "hi"}, config("-c", "projects")},
+		{[]string{"exec", "-c", "projects./work.trust_level=trusted", "hi"}, config("-c", "projects./work.trust_level")},
+		{[]string{"exec", "--config=projects={}", "hi"}, config("--config", "projects")},
 	} {
 		err := c.CheckArgs(tc.args)
 		if err == nil || err.Error() != tc.want {
@@ -462,6 +466,7 @@ func TestCheckArgsRefuseTheHookSettingsWithoutAWall(t *testing.T) {
 		{"exec", "--search", "hi"},
 		{"exec", "--enable", "some_other_feature", "hi"},
 		{"exec", "-c", "model=x", "hi"},
+		{"exec", "-c", "x=projects", "hi"},
 		{"exec", "-c", "features.apps=false", "--oss", "--profile", "p", "hi"},
 		{"exec", "--", "--dangerously-bypass-hook-trust", "--trust", "-c", "hooks.x=1"},
 	} {

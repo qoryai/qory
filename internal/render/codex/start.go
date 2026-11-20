@@ -167,10 +167,14 @@ var argReservedKeys = []reservedKey{{"model_reasoning_effort"}, {"skills"}, {"cl
 // or not: the hooks table, whose state contains the trusted hashes and whose events add
 // hooks, and the features that run hooks and that keep a shell with a terminal off,
 // unified_exec_tty and hooks with its legacy name codex_hooks
-// (codex-rs/features/src/lib.rs, FEATURES, and legacy.rs, ALIASES). A shell with a
-// terminal takes commands through write_stdin, for which Codex 0.170.0 runs no
-// PreToolUse hook.
-var trustKeys = []reservedKey{{"hooks"}, {"features", "hooks"}, {"features", "codex_hooks"}, {"features", "unified_exec_tty"}}
+// (codex-rs/features/src/lib.rs, FEATURES, and legacy.rs, ALIASES), and the projects
+// table. A shell with a terminal takes commands through write_stdin, for which Codex
+// 0.170.0 runs no PreToolUse hook. Codex 0.169.0 merges the --config values before it
+// reads projects for trust (codex-rs/config/src/loader/mod.rs), so a --config value of
+// projects.<folder>.trust_level = "trusted" trusts that folder for the session, and
+// Codex then reads the folder's .codex/config.toml, which can set features.hooks =
+// false.
+var trustKeys = []reservedKey{{"hooks"}, {"features", "hooks"}, {"features", "codex_hooks"}, {"features", "unified_exec_tty"}, {"projects"}}
 
 // trustFeatures are the features of [trustKeys] as the values of --enable and --disable.
 var trustFeatures = []string{"hooks", "codex_hooks", "unified_exec_tty"}

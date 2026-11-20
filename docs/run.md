@@ -4802,14 +4802,14 @@ folder, or changes a hook setting:
   then reads the folder's `.codex/config.toml`, which can set `features.hooks = false`. ``
 - `--config <key>=<value>` in the forms `--config`, `--config=`, `-c`, `-c<key>=<value>`
   and `-c=<key>=<value>`, where the key is `hooks`, `features.hooks`,
-  `features.codex_hooks` or `features.unified_exec_tty`, a key under one, such as
-  `hooks.Stop`, or the table `features` above them: ``Remove the `<flag>` flag and its
+  `features.codex_hooks`, `features.unified_exec_tty` or `projects`, a key under one, such
+  as `hooks.Stop`, or the table `features` above them: ``Remove the `<flag>` flag and its
   value from the run's Codex arguments.``, where `<flag>` is `-c` or `--config` as typed,
   and the next line ``In this run, qory reserves `<key>`; the run takes no value for it
   from the arguments.`` For a table above a reserved key, the next line is `` `<key>` is a
   table that contains `<reserved key>`, which qory reserves in this run. ``, such as, in a
-  run without a wall, `` `features` is a table that contains `features.hooks`, which
-  qory reserves in this run. ``
+  run without a wall, `` `features` is a table that contains `features.hooks`, which qory
+  reserves in this run. ``
 - `--enable <feature>` or `--disable <feature>`, also with `=`, of `hooks`, `codex_hooks`
   or `unified_exec_tty`: ``Remove the `<flag>` flag and its value from the run's Codex
   arguments.``, where `<flag>` is `--enable` or `--disable` as typed, and the next line

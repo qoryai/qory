@@ -2074,29 +2074,29 @@ Per runtime, the files written into its directory:
   arguments.`` and the next line `` `--trust` saves trust for a project folder with no
   trust setting, and Codex then reads the folder's `.codex/config.toml`, which can set
   `features.hooks = false`. ``; on a `--config` or `-c` key at `hooks`, `features.hooks`,
-  `features.codex_hooks` or `features.unified_exec_tty`, under one, or `features`, with
-  the `--config` lines; and on `--enable` or `--disable` of `hooks`, `codex_hooks` or
-  `unified_exec_tty`, with ``Remove the `<flag>` flag and its value from the run's Codex
-  arguments.``, where `<flag>` is `--enable` or `--disable` as typed, and the next line
-  ``In this run, qory reserves `features.<feature>`; the run takes no value for it from
-  the arguments.`` A key or feature in these lines has each control character written as
-  an escape. A hook in `settings/codex/config.toml` or `settings/codex/hooks.json` whose
-  `timeout` or `additionalContextLimit` is negative or fractional, such as 2.0, fails the
-  compose with ``Set `<key>` of the `<event>` hook to a whole number of 0 or more.`` and
-  the next line ``The hook is in the harness's `settings/codex/<file>`, and Codex ignores
-  the whole file otherwise.`` A hook group or a hook there that Codex 0.170.0 cannot
-  decode, such as a `command` hook with no `command` text or a `type` other than
-  `command`, `mcp_tool`, `prompt` and `agent`, fails the compose with ``Fix
-  `hooks.<event>[<group>].hooks[<hook>]` in `settings/codex/<file>`.``, the indexes
-  counted from 0, and the next line ``<cause>, and Codex reads no hook of a file with such
-  a hook.`` Codex has no allow list of skills, so the `Skill(harness:<name>)` rules in
-  `permissions.allow` of `settings/claude/settings.json` are the Codex list too. In the
-  home of a walled Codex run, `config.toml` disables every other skill by name, with a
-  `[[skills.config]]` entry with `enabled = false` after any entry the fragment has: each
-  skill of the home's `skills/` and of the checkout's `.codex/skills` and
-  `.agents/skills`, by its frontmatter `name` and its folder's name, and after the name of
-  each plugin above it. It also sets `skills.bundled.enabled = false` and
-  `cloud.skills.enabled = false`. Any other rule with a pattern, such as
+  `features.codex_hooks`, `features.unified_exec_tty` or `projects`, under one, or
+  `features`, with the `--config` lines; and on `--enable` or `--disable` of `hooks`,
+  `codex_hooks` or `unified_exec_tty`, with ``Remove the `<flag>` flag and its value from
+  the run's Codex arguments.``, where `<flag>` is `--enable` or `--disable` as typed, and
+  the next line ``In this run, qory reserves `features.<feature>`; the run takes no value
+  for it from the arguments.`` A key or feature in these lines has each control character
+  written as an escape. A hook in `settings/codex/config.toml` or
+  `settings/codex/hooks.json` whose `timeout` or `additionalContextLimit` is negative or
+  fractional, such as 2.0, fails the compose with ``Set `<key>` of the `<event>` hook to a
+  whole number of 0 or more.`` and the next line ``The hook is in the harness's
+  `settings/codex/<file>`, and Codex ignores the whole file otherwise.`` A hook group or a
+  hook there that Codex 0.170.0 cannot decode, such as a `command` hook with no `command`
+  text or a `type` other than `command`, `mcp_tool`, `prompt` and `agent`, fails the
+  compose with ``Fix `hooks.<event>[<group>].hooks[<hook>]` in `settings/codex/<file>`.``,
+  the indexes counted from 0, and the next line ``<cause>, and Codex reads no hook of a
+  file with such a hook.`` Codex has no allow list of skills, so the
+  `Skill(harness:<name>)` rules in `permissions.allow` of `settings/claude/settings.json`
+  are the Codex list too. In the home of a walled Codex run, `config.toml` disables every
+  other skill by name, with a `[[skills.config]]` entry with `enabled = false` after any
+  entry the fragment has: each skill of the home's `skills/` and of the checkout's
+  `.codex/skills` and `.agents/skills`, by its frontmatter `name` and its folder's name,
+  and after the name of each plugin above it. It also sets `skills.bundled.enabled =
+  false` and `cloud.skills.enabled = false`. Any other rule with a pattern, such as
   `Skill(harness:review-*)`, allows no skill. Every skill of the checkout's
   `.codex/skills` and `.agents/skills` also gets a `[[skills.config]]` entry with its
   `SKILL.md` path in the wall and `enabled = false`, after the name entries, so a checkout

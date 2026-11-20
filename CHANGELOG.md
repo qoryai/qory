@@ -681,9 +681,9 @@ release may change what an existing document does, and states it under Upgrading
   longer start an interactive shell with a terminal.
 - qory stops every Codex run, walled or not, before the agent starts, when its Codex
   arguments before `--` contain `--dangerously-bypass-hook-trust` or `--trust`, each also
-  with `=`, set `hooks`, `features.hooks`, `features.codex_hooks` or
-  `features.unified_exec_tty` with `-c` or `--config`, a key under one, such as
-  `hooks.Stop`, or the table `features`, or pass `hooks`, `codex_hooks` or
+  with `=`, set `hooks`, `features.hooks`, `features.codex_hooks`,
+  `features.unified_exec_tty` or `projects` with `-c` or `--config`, a key under one, such
+  as `hooks.Stop`, or the table `features`, or pass `hooks`, `codex_hooks` or
   `unified_exec_tty` to `--enable` or `--disable`. The error has two lines, ``Remove the
   `<flag>` flag and its value from the run's Codex arguments.`` and ``In this run, qory
   reserves `<key>`; the run takes no value for it from the arguments.``, where `<flag>` is
