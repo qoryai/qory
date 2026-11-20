@@ -24,8 +24,8 @@ func TestTwoInstallsOfOneVersionReadOneTarball(t *testing.T) {
 	in.src.Publish("2.1.320", rt.PlainTarball(t, "2.1.320"))
 	reading, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
-	fetch := func(ctx context.Context, runtime string) (runtimeinstall.Release, error) {
-		rel, err := in.src.Fetch(ctx, runtime)
+	fetch := func(ctx context.Context, runtime, version string) (runtimeinstall.Release, error) {
+		rel, err := in.src.Fetch(ctx, runtime, version)
 		open := rel.Open
 		rel.Open = func(ctx context.Context) (io.ReadCloser, error) {
 			once.Do(func() {
@@ -82,8 +82,8 @@ func TestAWaitingInstallEndsWithTheRun(t *testing.T) {
 	in.src.Publish("2.1.320", rt.PlainTarball(t, "2.1.320"))
 	reading, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
-	slow := func(ctx context.Context, runtime string) (runtimeinstall.Release, error) {
-		rel, err := in.src.Fetch(ctx, runtime)
+	slow := func(ctx context.Context, runtime, version string) (runtimeinstall.Release, error) {
+		rel, err := in.src.Fetch(ctx, runtime, version)
 		open := rel.Open
 		rel.Open = func(ctx context.Context) (io.ReadCloser, error) {
 			once.Do(func() {
@@ -167,11 +167,11 @@ func TestNpmFollowsARedirectOnlyToItsSchemeAndHost(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	host = strings.TrimPrefix(srv.URL, "http://")
-	_, err := runtimeinstall.NpmFetch(http.DefaultClient, srv.URL, "amd64")(context.Background(), "claude")
+	_, err := runtimeinstall.NpmFetch(http.DefaultClient, srv.URL, "amd64")(context.Background(), "claude", "")
 	if err == nil || !strings.Contains(err.Error(), "@anthropic-ai/claude-code-linux-x64 2.1.320 returned 404") {
 		t.Fatalf("a redirect within the host: err = %v, want the 404 of the platform's document, after the dist-tags", err)
 	}
-	_, err = runtimeinstall.NpmFetch(http.DefaultClient, srv.URL+"/https", "amd64")(context.Background(), "claude")
+	_, err = runtimeinstall.NpmFetch(http.DefaultClient, srv.URL+"/https", "amd64")(context.Background(), "claude", "")
 	if err == nil || !strings.Contains(err.Error(), "a redirect leads to another host or scheme") {
 		t.Fatalf("a redirect to https: err = %v, want the redirect refused", err)
 	}
