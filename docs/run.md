@@ -4764,16 +4764,53 @@ starts, with exit status 1, when a Codex argument before `--` is one of these:
   `chatgpt_base_url`, `experimental_realtime_*_base_url`, `skills` or `cloud.skills`, a
   key under one, or a table above one.
 - `--enable` or `--disable` of `plugins`, `apps` or `connectors`.
+- `--config <key>=<value>` or `-c` in any form that sets `features.hooks`,
+  `features.codex_hooks` or `features.unified_exec_tty`, a key under one, such as
+  `features.hooks.enabled`, or a table that sets one, such as `-c features={hooks=false}`;
+  or `--enable` or `--disable` of `hooks`, `codex_hooks` or `unified_exec_tty`.
 - `--oss`, `--local-provider`, `--profile`, `-p`, `--search`, `--ignore-user-config`,
   `--dangerously-bypass-hook-trust` or `--remote`.
 
-qory prints Forager's line, which contains the flag, such as ``✗ remove the -c that sets
-model_provider from the launch's arguments: the session sets that setting for Codex, or
-the setting changes where Codex sends its requests`` for `-c model_provider=x`. For
-`--config <key>=<value>` and `--config=<key>=<value>` with a key Forager sets, the line is
-``✗ remove the --config pair that sets <key> from the launch's arguments: the session sets
-<key>, and a later pair overrides the session's value``. Every other argument of an
-unwalled run passes unchanged.
+qory prints Forager's two lines: the fix, which contains the flag, then the cause. For
+`-c model_provider=x` they are:
+
+```
+✗ remove the -c that sets model_provider from the launch's arguments
+  the session sets that setting for Codex, or the setting changes where Codex sends its requests
+```
+
+For `--config <key>=<value>` and `--config=<key>=<value>` with a key Forager sets, they
+are:
+
+```
+✗ remove the --config pair that sets <key> from the launch's arguments
+  the session sets <key>, and a later pair overrides the session's value
+```
+
+For `features.hooks`, `features.codex_hooks` and `features.unified_exec_tty`, the first
+line contains the flag and the setting, and the second line is the same for all three.
+For `--disable hooks` they are:
+
+```
+✗ remove the --disable that sets features.hooks from the launch's arguments
+  the setting can turn off the hooks Codex runs before each tool call, or make Codex run no hook for a command sent to a shell with a terminal
+```
+
+A `--config features={...}` pair sets the whole `features` table, so Codex drops the
+feature settings that earlier `--config` pairs set. The session passes
+`features.plugins=false` and `features.apps=false` in such pairs. Forager's lines contain
+`features.plugins`, the first of the two, and the run stops. For
+`--config features={hooks=false}` they are:
+
+```
+✗ remove the --config pair that sets features.plugins from the launch's arguments
+  the session sets features.plugins, and a later pair overrides the session's value
+```
+
+For `-c features={hooks=false}`, qory prints the hook lines, with `-c` and
+`features.hooks` in the first line.
+
+Every other argument of an unwalled run passes unchanged.
 
 ### A run that may write works in a copy
 

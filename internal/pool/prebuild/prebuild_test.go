@@ -1147,8 +1147,8 @@ func TestLaunchCommands(t *testing.T) {
 	}
 	// The session gets nothing of this machine's: no environment, no variable and no
 	// model key, which a bare runtime behind a wall does not take.
-	if j.Env != nil || !reflect.ValueOf(j.Variables).IsZero() || j.ModelCredential != "" || j.HarnessHome != "" || len(j.Harness) != 0 || len(j.Setup) != 0 || j.Interactive {
-		t.Errorf("the session got env %q, variables %+v, model key %v, harness %q %v, setup %v", j.Env, j.Variables, j.ModelCredential != "", j.HarnessHome, j.Harness, j.Setup)
+	if j.Env != nil || !reflect.ValueOf(j.Variables).IsZero() || j.ModelProviderCredentialName != "" || j.HarnessHome != "" || len(j.Harness) != 0 || len(j.Setup) != 0 || j.Interactive {
+		t.Errorf("the session got env %q, variables %+v, model key %v, harness %q %v, setup %v", j.Env, j.Variables, j.ModelProviderCredentialName != "", j.HarnessHome, j.Harness, j.Setup)
 	}
 	if len(e.built) != 1 {
 		t.Fatalf("built %d times", len(e.built))
