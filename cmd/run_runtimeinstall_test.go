@@ -722,14 +722,15 @@ func TestAnOrphanContainerKeepsItsVersionWithNoWall(t *testing.T) {
 }
 
 // signatureCases are the npm signatures of claude 2.1.320 that stop an install, with the
-// cause of each, and the fix line that a person's run prints before it.
+// cause of each, and the fix line that a person's run prints before it. The cause's first
+// line has no indent here; a person's run indents it two spaces.
 var signatureCases = []struct {
 	name, fix, cause string
 	sign             func(signed, integrity string) any
 }{
-	{"no signature", "Check the source of the runtime's releases", "npm has no signature of claude 2.1.320",
+	{"no signature", "Check the source of claude's releases.", "npm has no signature of claude 2.1.320.",
 		func(string, string) any { return nil }},
-	{"a key qory does not have", "Update qory.", "npm signed claude 2.1.320 with a key that this qory does not have.\nThe key is SHA256:another.",
+	{"a key qory does not have", "Update qory.", "npm signed claude 2.1.320 with a key that this qory does not have.\n  The key is SHA256:another.",
 		func(s, i string) any {
 			return []map[string]string{{"keyid": "SHA256:another", "sig": rt.Sign(s + ":" + i)}}
 		}},
@@ -810,7 +811,7 @@ func TestADispatchedRunShowsTheCauseOfAOneLineInstallError(t *testing.T) {
 
 // TestAPersonsRunShowsTheFixAndTheCauseOfAFailedInstall runs claude in a checkout on a
 // person's machine, with no run key, on an npm whose signature of claude 2.1.320 stops
-// the install: qory run prints the fix line, then the cause.
+// the install: qory run prints the fix line, then the cause on indented lines.
 func TestAPersonsRunShowsTheFixAndTheCauseOfAFailedInstall(t *testing.T) {
 	for _, c := range signatureCases {
 		t.Run(c.name, func(t *testing.T) {
@@ -828,7 +829,7 @@ func TestAPersonsRunShowsTheFixAndTheCauseOfAFailedInstall(t *testing.T) {
 			if err == nil || cmd.ExitCode(err) != 1 {
 				t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 			}
-			wants(t, out+err.Error(), c.fix+"\n"+c.cause)
+			wants(t, out+err.Error(), c.fix+"\n  "+c.cause)
 		})
 	}
 }

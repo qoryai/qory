@@ -212,7 +212,7 @@ func TestTheRegistryRefusesAPinnedTagThatIsNotThePin(t *testing.T) {
 // registry's runtime cache, whose signature is npm's signature of 2.1.319: the install
 // stops because the signature does not verify, and reads no tarball and no layer.
 func TestAPinnedVersionWithABadSignatureStops(t *testing.T) {
-	const want = "Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID
+	const want = "Check the source of claude's releases.\n  npm's signature of claude 2.1.320 does not verify.\n  The key is " + rt.KeyID + "."
 	const other = "@anthropic-ai/claude-code-linux-x64@2.1.319"
 	t.Run("npm", func(t *testing.T) {
 		npm := rt.StartNpm(t)
@@ -274,7 +274,7 @@ func TestInstallRefusesAReleaseThatIsNotThePin(t *testing.T) {
 		_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
 			Keys: rt.Keys(), Fetch: src.Fetch, Runtime: "claude", Version: "2.1.300", Folder: t.TempDir(),
 		})
-		want := "Check the source of the runtime's releases\nThe source returned claude " + shown + ", and the pinned version is 2.1.300"
+		want := "Check the source of claude's releases.\n  The source returned claude " + shown + ", and the pinned version is 2.1.300."
 		if err == nil || err.Error() != want || src.Opens() != 0 {
 			t.Errorf("the install returned %v after %d opens, want %q", err, src.Opens(), want)
 		}

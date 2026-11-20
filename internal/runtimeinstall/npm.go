@@ -98,7 +98,7 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 			}
 			version = tags["latest"]
 			if !versionShape.MatchString(version) {
-				return Release{}, fmt.Errorf(textRelease+"The dist-tag latest of %s is %q, and a version is 1 to 64 letters, digits, ., + or -, the first a letter or a digit", pkg.tags, version)
+				return Release{}, fmt.Errorf(textRelease(runtime)+"\n  The dist-tag latest of %s is %q, and a version is 1 to 64 letters, digits, ., + or -, the first a letter or a digit.", pkg.tags, version)
 			}
 		}
 		platform, docVersion := pkg.platform(version, cpu)
@@ -119,18 +119,18 @@ func NpmFetch(client *http.Client, base, arch string) Fetch {
 			return Release{}, err
 		}
 		if doc.Version != docVersion {
-			return Release{}, fmt.Errorf(textRelease+"The document of %s has the version %q", what, doc.Version)
+			return Release{}, fmt.Errorf(textRelease(runtime)+"\n  The document of %s has the version %q.", what, doc.Version)
 		}
 		tarball, err := url.Parse(doc.Dist.Tarball)
 		if err != nil || tarball.Scheme != root.Scheme || tarball.Host != root.Host || tarball.User != nil {
-			return Release{}, fmt.Errorf(textRelease+"The tarball of %s is not on %s", what, root.Host)
+			return Release{}, fmt.Errorf(textRelease(runtime)+"\n  The tarball of %s is not on %s.", what, root.Host)
 		}
 		// npm may add members to a signature, so the decode ignores them. Install refuses a
 		// document with no signatures.
 		var sigs []Signature
 		if len(doc.Dist.Signatures) > 0 && string(doc.Dist.Signatures) != "null" {
 			if sigs, err = decodeSignatures(doc.Dist.Signatures, false); err != nil {
-				return Release{}, fmt.Errorf(textRelease+"The dist.signatures of %s\n  are not npm's signatures: %v", what, err)
+				return Release{}, fmt.Errorf(textRelease(runtime)+"\n  The dist.signatures of %s\n  are not npm's signatures: %v.", what, err)
 			}
 		}
 		signed, ok := signedName(runtime, version, arch)
@@ -174,10 +174,10 @@ func (n *npm) document(ctx context.Context, path string, limit int64, what strin
 		return fmt.Errorf("Run again\nThe read of %s from %s stopped:\n  %w", what, n.root.Host, err)
 	}
 	if int64(len(body)) > limit {
-		return fmt.Errorf(textRelease+"%s has more than %d bytes", upper(what), limit)
+		return fmt.Errorf(textRelease(n.runtime)+"\n  %s has more than %d bytes.", upper(what), limit)
 	}
 	if err := json.Unmarshal(body, v); err != nil {
-		return fmt.Errorf(textRelease+"%s is not JSON", upper(what))
+		return fmt.Errorf(textRelease(n.runtime)+"\n  %s is not JSON.", upper(what))
 	}
 	return nil
 }
@@ -188,7 +188,7 @@ func (n *npm) document(ctx context.Context, path string, limit int64, what strin
 func (n *npm) get(ctx context.Context, u, accept, what string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, fmt.Errorf(textRelease+"%s has no URL qory can request:\n  %w", upper(what), err)
+		return nil, fmt.Errorf(textRelease(n.runtime)+"\n  %s has no URL qory can request:\n  %w.", upper(what), err)
 	}
 	if accept != "" {
 		req.Header.Set("Accept", accept)
@@ -206,7 +206,7 @@ func (n *npm) get(ctx context.Context, u, accept, what string) (*http.Response, 
 	}
 	drain(resp)
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, &npmNotFound{fmt.Sprintf(textRelease+"%s returned 404: npm has no such %s release", upper(what), n.runtime)}
+		return nil, &npmNotFound{fmt.Sprintf(textRelease(n.runtime)+"\n  %s returned 404: npm has no such %s release.", upper(what), n.runtime)}
 	}
 	return nil, fmt.Errorf("Check that this machine reaches %s\n%s returned %d", n.root.Host, what, resp.StatusCode)
 }

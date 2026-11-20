@@ -1086,17 +1086,17 @@ it reads the tarball:
 - no signature, or a signature that does not verify:
 
   ```text
-  qory run: Check the source of the runtime's releases
-  npm's signature of codex 0.170.0 does not verify
-  The key is SHA256:<keyid>
+  qory run: Check the source of codex's releases.
+    npm's signature of codex 0.170.0 does not verify.
+    The key is SHA256:<keyid>.
   ```
 
 - only keys that qory does not have: a newer qory has npm's new key.
 
   ```text
   qory run: Update qory.
-  npm signed codex 0.170.0 with a key that this qory does not have.
-  The key is SHA256:<keyid>.
+    npm signed codex 0.170.0 with a key that this qory does not have.
+    The key is SHA256:<keyid>.
   ```
 
 - only keys that expired: a newer version of the runtime is signed by npm's current key.
@@ -1217,9 +1217,9 @@ qory run: the tarball of claude 2.1.320 does not match the checksum
 A tarball that does not match its sha512 checksum stops a person's run with:
 
 ```text
-qory run: Check the source of the runtime's releases
-The tarball of claude 2.1.320 does not match the checksum
-  sha512-<checksum>
+qory run: Check the source of claude's releases.
+  The tarball of claude 2.1.320 does not match the checksum
+  sha512-<checksum>.
 ```
 
 A version's folder that was not installed from the tarball with the release's checksum

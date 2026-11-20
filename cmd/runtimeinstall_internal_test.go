@@ -208,7 +208,7 @@ func TestTheInstallCausesStandAlone(t *testing.T) {
 		err  error
 		want string
 	}{
-		{install(t, noTarball), "Check the source of the runtime's releases\nThe source of the runtime's releases returned no tarball\n  of claude 2.1.320"},
+		{install(t, noTarball), "Check the source of claude's releases.\n  The source of the runtime's releases returned no tarball\n  of claude 2.1.320."},
 		{noURL(t), "Set the address of Qory Apiary to an https URL\nThe run's address of Qory Apiary is not an http or https URL\n  with a host and no user"},
 	} {
 		if person := installFailed(c.err).Error(); person != c.want {

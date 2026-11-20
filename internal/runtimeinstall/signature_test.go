@@ -63,47 +63,47 @@ func TestNpmsSignatureIsCheckedBeforeTheInstall(t *testing.T) {
 		want string
 	}{
 		{"no signatures", func(string, string) any { return nil },
-			"Check the source of the runtime's releases\nnpm has no signature of claude 2.1.320"},
+			"Check the source of claude's releases.\n  npm has no signature of claude 2.1.320."},
 		{"an empty list", func(string, string) any { return []any{} },
-			"Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: it has no signature"},
+			"Check the source of claude's releases.\n  The dist.signatures of " + what + "\n  are not npm's signatures: it has no signature."},
 		{"a key qory does not have", func(s, i string) any {
 			return []runtimeinstall.Signature{{KeyID: "SHA256:another", Sig: rt.Sign(s + ":" + i)}}
-		}, "Update qory.\nnpm signed claude 2.1.320 with a key that this qory does not have.\nThe key is SHA256:another."},
+		}, "Update qory.\n  npm signed claude 2.1.320 with a key that this qory does not have.\n  The key is SHA256:another."},
 		{"a bad signature", func(string, string) any {
 			return []runtimeinstall.Signature{{KeyID: rt.KeyID, Sig: "MEUCIQDnotasignature"}}
-		}, "Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID},
+		}, "Check the source of claude's releases.\n  npm's signature of claude 2.1.320 does not verify.\n  The key is " + rt.KeyID + "."},
 		{"a bad signature, then a key qory does not have", func(s, i string) any {
 			return []runtimeinstall.Signature{{KeyID: rt.KeyID, Sig: "MEUCIQDnotasignature"}, {KeyID: "SHA256:another", Sig: rt.Sign(s + ":" + i)}}
-		}, "Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID},
+		}, "Check the source of claude's releases.\n  npm's signature of claude 2.1.320 does not verify.\n  The key is " + rt.KeyID + "."},
 		{"a signature of another version", func(_, i string) any { return sig("@anthropic-ai/claude-code-linux-x64@2.1.319:" + i) },
-			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID},
+			"Check the source of claude's releases.\n  npm's signature of claude 2.1.320 does not verify.\n  The key is " + rt.KeyID + "."},
 		{"a signature of another checksum", func(s, _ string) any { return sig(s + ":" + rt.Integrity([]byte("another tarball"))) },
-			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID},
+			"Check the source of claude's releases.\n  npm's signature of claude 2.1.320 does not verify.\n  The key is " + rt.KeyID + "."},
 		{"more than 16 signatures", func(string, string) any { return many },
-			"Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: it has 17 signatures, and qory reads at most 16"},
+			"Check the source of claude's releases.\n  The dist.signatures of " + what + "\n  are not npm's signatures: it has 17 signatures, and qory reads at most 16."},
 		{"a keyid of more than 128 bytes", func(string, string) any {
 			return []map[string]string{{"keyid": strings.Repeat("k", 129), "sig": "x"}}
-		}, "Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has a keyid of more than 128 bytes"},
+		}, "Check the source of claude's releases.\n  The dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has a keyid of more than 128 bytes."},
 		{"a keyid with a line break", func(string, string) any {
 			return []map[string]string{{"keyid": "SHA256:a\nUpdate qory.", "sig": "x"}}
-		}, "Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has a keyid with a control character"},
+		}, "Check the source of claude's releases.\n  The dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has a keyid with a control character."},
 		{"a sig of more than 1 KiB", func(string, string) any {
 			return []map[string]string{{"keyid": rt.KeyID, "sig": strings.Repeat("s", 1025)}}
-		}, "Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has a sig of more than 1024 bytes"},
+		}, "Check the source of claude's releases.\n  The dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has a sig of more than 1024 bytes."},
 		{"upper-case names", func(s, i string) any {
 			return []map[string]string{{"KEYID": rt.KeyID, "SIG": rt.Sign(s + ":" + i)}}
-		}, "Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has no keyid or no sig"},
+		}, "Check the source of claude's releases.\n  The dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has no keyid or no sig."},
 		{"a member twice", func(s, i string) any {
 			return []json.RawMessage{json.RawMessage(`{"keyid":"SHA256:another","keyid":"` + rt.KeyID + `","sig":"` + rt.Sign(s+":"+i) + `"}`)}
-		}, "Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 is not an object of keyid and sig"},
+		}, "Check the source of claude's releases.\n  The dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 is not an object of keyid and sig."},
 		{"no sig", func(string, string) any { return []map[string]string{{"keyid": rt.KeyID}} },
-			"Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has no keyid or no sig"},
+			"Check the source of claude's releases.\n  The dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has no keyid or no sig."},
 		{"an empty keyid", func(string, string) any { return []map[string]string{{"keyid": "", "sig": "x"}} },
-			"Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has no keyid or no sig"},
+			"Check the source of claude's releases.\n  The dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 has no keyid or no sig."},
 		{"a keyid that is no string", func(string, string) any { return []map[string]any{{"keyid": 1, "sig": "x"}} },
-			"Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 is not an object of keyid and sig"},
+			"Check the source of claude's releases.\n  The dist.signatures of " + what + "\n  are not npm's signatures: its signature 1 is not an object of keyid and sig."},
 		{"no list", func(string, string) any { return map[string]string{"keyid": rt.KeyID} },
-			"Check the source of the runtime's releases\nThe dist.signatures of " + what + "\n  are not npm's signatures: it is not a JSON array"},
+			"Check the source of claude's releases.\n  The dist.signatures of " + what + "\n  are not npm's signatures: it is not a JSON array."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			npm := rt.StartNpm(t)
@@ -278,7 +278,7 @@ func TestTheBuiltInKeysVerifyNpmsSignatures(t *testing.T) {
 			if len(r.Signatures) != 2 {
 				t.Fatalf("%d signatures, want 2", len(r.Signatures))
 			}
-			bad := "Check the source of the runtime's releases\nnpm's signature of " + r.Runtime + " " + r.Version + " does not verify\nThe key is "
+			bad := "Check the source of " + r.Runtime + "'s releases.\n  npm's signature of " + r.Runtime + " " + r.Version + " does not verify.\n  The key is "
 			for i, s := range r.Signatures {
 				rel := runtimeinstall.Release{Version: r.Version, Signed: signed, Integrity: r.Integrity, Signatures: []runtimeinstall.Signature{s}}
 				if err := runtimeinstall.Verify(rel, keys, now, r.Runtime, false); err != nil {
@@ -286,8 +286,8 @@ func TestTheBuiltInKeysVerifyNpmsSignatures(t *testing.T) {
 				}
 				changed := rel
 				changed.Signatures = []runtimeinstall.Signature{{KeyID: s.KeyID, Sig: altered(t, s.Sig)}}
-				if err := runtimeinstall.Verify(changed, keys, now, r.Runtime, false); err == nil || err.Error() != bad+s.KeyID {
-					t.Errorf("signature %d with a changed byte: %v, want %q", i+1, err, bad+s.KeyID)
+				if err := runtimeinstall.Verify(changed, keys, now, r.Runtime, false); err == nil || err.Error() != bad+s.KeyID+"." {
+					t.Errorf("signature %d with a changed byte: %v, want %q", i+1, err, bad+s.KeyID+".")
 				}
 				integrity, first := []byte(r.Integrity), len("sha512-")
 				integrity[first] = 'A'
@@ -296,8 +296,8 @@ func TestTheBuiltInKeysVerifyNpmsSignatures(t *testing.T) {
 				}
 				changed = rel
 				changed.Integrity = string(integrity)
-				if err := runtimeinstall.Verify(changed, keys, now, r.Runtime, false); err == nil || err.Error() != bad+s.KeyID {
-					t.Errorf("signature %d over a changed integrity: %v, want %q", i+1, err, bad+s.KeyID)
+				if err := runtimeinstall.Verify(changed, keys, now, r.Runtime, false); err == nil || err.Error() != bad+s.KeyID+"." {
+					t.Errorf("signature %d over a changed integrity: %v, want %q", i+1, err, bad+s.KeyID+".")
 				}
 			}
 		})
@@ -314,7 +314,7 @@ func TestAnInstallWithNoKeysUsesTheBuiltInKeys(t *testing.T) {
 	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
 		Fetch: runtimeinstall.NpmFetch(http.DefaultClient, npm.URL(), "amd64"), Runtime: "claude", Folder: t.TempDir(),
 	})
-	want := "Update qory.\nnpm signed claude 2.1.320 with a key that this qory does not have.\nThe key is " + rt.KeyID + "."
+	want := "Update qory.\n  npm signed claude 2.1.320 with a key that this qory does not have.\n  The key is " + rt.KeyID + "."
 	if err == nil || err.Error() != want {
 		t.Fatalf("the error is %v, want %q", err, want)
 	}
@@ -345,7 +345,7 @@ func TestAnInstallWithNoKeysPassesNpmsSignatures(t *testing.T) {
 			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
 				Fetch: runtimeinstall.NpmFetch(http.DefaultClient, npm.URL(), r.Arch), Runtime: r.Runtime, Folder: t.TempDir(),
 			})
-			want := "Check the source of the runtime's releases\nThe tarball of " + r.Runtime + " " + r.Version + " does not match the checksum\n  " + r.Integrity
+			want := "Check the source of " + r.Runtime + "'s releases.\n  The tarball of " + r.Runtime + " " + r.Version + " does not match the checksum\n  " + r.Integrity + "."
 			if err == nil || err.Error() != want {
 				t.Fatalf("the error is %v, want %q", err, want)
 			}
@@ -394,11 +394,11 @@ func TestTheRegistrysSignaturesAreReadStrictly(t *testing.T) {
 		{"no sig", text([]map[string]string{{"keyid": rt.KeyID}}), "", cache + bad + "its signature 1 has no keyid or no sig"},
 		{"no JSON", text("x"), "", cache + bad + "it is not a JSON array"},
 		{"a signature of another version", text(rt.Signatures("@anthropic-ai/claude-code-linux-x64@2.1.319", rt.Integrity(rt.PlainTarball(t, "2.1.320")))), "",
-			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID},
+			"Check the source of claude's releases.\n  npm's signature of claude 2.1.320 does not verify.\n  The key is " + rt.KeyID + "."},
 		{"a signature of the arm64 build", text(rt.Signatures("@anthropic-ai/claude-code-linux-arm64@2.1.320", rt.Integrity(rt.PlainTarball(t, "2.1.320")))), "",
-			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID},
+			"Check the source of claude's releases.\n  npm's signature of claude 2.1.320 does not verify.\n  The key is " + rt.KeyID + "."},
 		{"another integrity", text(rt.Signatures(signedClaude, rt.Integrity(rt.PlainTarball(t, "2.1.320")))), rt.Integrity([]byte("another tarball")),
-			"Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID},
+			"Check the source of claude's releases.\n  npm's signature of claude 2.1.320 does not verify.\n  The key is " + rt.KeyID + "."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFromRegistry(t)
@@ -437,7 +437,7 @@ func TestACachedInstallIsVerifiedAgain(t *testing.T) {
 	first.Release()
 	npm.SignWith(func(_, i string) any { return rt.Signatures("@anthropic-ai/claude-code-linux-x64@2.1.319", i) })
 	_, err = install()
-	want := "Check the source of the runtime's releases\nnpm's signature of claude 2.1.320 does not verify\nThe key is " + rt.KeyID
+	want := "Check the source of claude's releases.\n  npm's signature of claude 2.1.320 does not verify.\n  The key is " + rt.KeyID + "."
 	if err == nil || err.Error() != want {
 		t.Fatalf("the second install: %v, want %q", err, want)
 	}
