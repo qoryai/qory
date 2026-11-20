@@ -76,7 +76,7 @@ func TestARunCodeTakesNoStackRuntimeOrArguments(t *testing.T) {
 		{[]string{"--tier", "light=example-small"}, from},
 		{[]string{"--tier-effort", "light=low"}, from},
 		{[]string{"--", "-p", "hi"}, "leave out the arguments after --: a run from a run code starts its workflow with the arguments qory sets"},
-		{[]string{"--timeout", "1h"}, "leave out --timeout: a run from a run code takes its time limit from Qory Apiary's response to the code, else from its workflow"},
+		{[]string{"--timeout", "1h"}, "leave out --timeout: a run from a run code takes its time limit from Qory Apiary"},
 	} {
 		args := []string{"run"}
 		rest := []string{"--run-code-file", file, "--gateway", g.URL}
@@ -348,7 +348,7 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 // inputs.json, which contains the documents' inputs as they came and the member qory that
 // qory adds, with no harness extensions, mode 0600 in a folder
 // of mode 0700, which the agent may read and qory removes once the run ends. The
-// workflow's time_limit, 7h, is the session's time limit.
+// documents' time_limit_minutes, 420, is the session's time limit.
 func TestARunCodeStartsItsWorkflow(t *testing.T) {
 	want := codeDocuments(t, nil)
 	var doc struct {
@@ -357,7 +357,8 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 	if err := json.Unmarshal(want, &doc); err != nil {
 		t.Fatal(err)
 	}
-	r := runFromCodeWith(t, behindAWall(t), nil, func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 7h\n    access: write\n" }, func(d map[string]any) {
+	r := runFromCodeWith(t, behindAWall(t), nil, writesHello, func(d map[string]any) {
+		d["time_limit_minutes"] = 420
 		d["run_settings"] = map[string]any{"runtime": "claude", "model": "example-large", "provider_models": []any{map[string]any{"id": "example-large"}}}
 	})
 	if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
@@ -381,8 +382,8 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 	if _, err := os.Stat(r.inputDir); !os.IsNotExist(err) {
 		t.Errorf("the inputs are left after the run: %v", err)
 	}
-	if r.spec.Timeout <= 7*time.Hour-time.Minute || r.spec.Timeout > 7*time.Hour {
-		t.Errorf("the time limit left is %v, want 7h less the time before the join", r.spec.Timeout)
+	if r.spec.Timeout != 7*time.Hour {
+		t.Errorf("the time limit is %v, want the whole 7h", r.spec.Timeout)
 	}
 	if i := slices.Index(r.spec.Args, "--settings"); i < 0 || i+1 >= len(r.spec.Args) || !strings.Contains(r.spec.Args[i+1], `"model": "example-large"`) {
 		t.Errorf("Claude Code's settings have no model example-large: %q", r.spec.Args)
@@ -420,37 +421,47 @@ func TestARunCodeMapsTheTierBalanced(t *testing.T) {
 	wants(t, string(data), "model: example-small")
 }
 
-// TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours is a run from a run code whose
-// base sets no time_limit for its workflow: the session's time limit is 3 hours.
-func TestARunCodeWithoutAWorkflowTimeLimitRunsThreeHours(t *testing.T) {
-	r := runFromCodeWith(t, behindAWall(t), nil, writesHello, nil)
+// TestARunCodeWithoutATimeLimitHasNone is a run from a run code whose documents set no
+// time_limit_minutes: qory sets no default, and session.run.timeout of the machine's
+// forager.yaml does not apply either, so the session has no time limit.
+func TestARunCodeWithoutATimeLimitHasNone(t *testing.T) {
+	r := runFromCodeWith(t, func(code string) []string {
+		args := behindAWall(t)(code)
+		file := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, file, string(data)+"session:\n  run:\n    timeout: 5h\n")
+		return args
+	}, nil, writesHello, func(d map[string]any) { delete(d, "time_limit_minutes") })
 	if !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	if r.spec.Timeout <= 3*time.Hour-time.Minute || r.spec.Timeout > 3*time.Hour {
-		t.Errorf("the time limit left is %v, want 3h less the time before the join", r.spec.Timeout)
+	if r.spec.Timeout != 0 {
+		t.Errorf("the time limit is %v, want none", r.spec.Timeout)
 	}
 }
 
 // TestARunCodesTimeLimitMinutesIsTheSessionsTimeLimit is a run from a run code whose
-// documents set time_limit_minutes at the top: the session's time limit is that many
-// minutes, whether or not the workflow sets a time_limit, which applies only when the
-// documents set none.
+// documents set time_limit_minutes at the top: each session of the workflow, session 1,
+// stops at that many minutes, counted from the agent's start, whatever the workflow
+// declares.
 func TestARunCodesTimeLimitMinutesIsTheSessionsTimeLimit(t *testing.T) {
 	for _, c := range []struct {
 		name  string
 		stack func(string) string
 	}{
-		{"no workflow time limit", writesHello},
-		{"a workflow time limit of 7h", func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 7h\n    access: write\n" }},
+		{"a workflow with access write", writesHello},
+		{"a workflow with access and a tier", func(s string) string { return s + "workflows:\n  hello:\n    access: write\n    tier: thinking\n" }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := runFromCodeWith(t, behindAWall(t), nil, c.stack, func(d map[string]any) { d["time_limit_minutes"] = 45 })
 			if !r.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}
-			if r.spec.Timeout <= 45*time.Minute-time.Minute || r.spec.Timeout > 45*time.Minute {
-				t.Errorf("the time limit left is %v, want 45m less the time before the join", r.spec.Timeout)
+			if r.spec.Timeout != 45*time.Minute {
+				t.Errorf("the time limit is %v, want the whole 45m", r.spec.Timeout)
 			}
 		})
 	}
@@ -466,8 +477,8 @@ func TestARunCodeWithSharedRunAndFullSuiteRunsOneSession(t *testing.T) {
 	if !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	if r.spec.Timeout <= 60*time.Minute-time.Minute || r.spec.Timeout > 60*time.Minute {
-		t.Errorf("the time limit left is %v, want 60m less the time before the join", r.spec.Timeout)
+	if r.spec.Timeout != 60*time.Minute {
+		t.Errorf("the time limit is %v, want the whole 60m", r.spec.Timeout)
 	}
 }
 

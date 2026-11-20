@@ -11,7 +11,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/qoryai/forager/accesskey"
@@ -461,11 +460,6 @@ type Stack struct {
 
 // Workflow is the settings of one workflow of a stack, an entry of workflows.
 type Workflow struct {
-	// TimeLimitText is time_limit as written, a duration such as 7h or 45m.
-	TimeLimitText string `yaml:"time_limit,omitempty"`
-	// TimeLimit is TimeLimitText read as a duration, above zero, or 0 when the workflow
-	// sets none. It is set as the stack is validated.
-	TimeLimit time.Duration `yaml:"-"`
 	// Access is access as written, the access level the workflow declares for what a
 	// dispatched run of the workflow works on: read, write-no-push, or write, "" when the
 	// workflow sets none. [Stack.AccessOf] reads "" as read.
@@ -603,12 +597,6 @@ func WorkflowEntry(name string) string { return "workflow-" + name }
 // WorkflowEntries are the names a skill or command of the workflow name may have, in the
 // order a run looks them up: [WorkflowEntry], then name itself.
 func WorkflowEntries(name string) []string { return []string{WorkflowEntry(name), name} }
-
-// TimeLimitOf is the time_limit of the workflow name, 0 when the stack has no such
-// workflow or the workflow sets none.
-func (p *Stack) TimeLimitOf(name string) time.Duration {
-	return p.Workflows[name].TimeLimit
-}
 
 // AccessOf is the access level the workflow name declares, [AccessRead],
 // [AccessWriteNoPush] or [AccessWrite]; [AccessRead] when the stack has no such workflow
@@ -875,15 +863,6 @@ func (p *Stack) validate(compose bool) error {
 					fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 			}
 		}
-		if w.TimeLimitText == "" {
-			continue
-		}
-		d, err := time.ParseDuration(w.TimeLimitText)
-		if err != nil || d <= 0 {
-			return exports.Refuse(fmt.Sprintf("Set workflows.%s.time_limit to a duration above zero, such as 7h or 45m.", name), fmt.Sprintf("The value is %s.", exports.Value(w.TimeLimitText, true)), fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
-		}
-		w.TimeLimit = d
-		p.Workflows[name] = w
 	}
 	for _, name := range slices.Sorted(maps.Keys(p.RuntimePins)) {
 		if !slices.Contains(runtimeinstall.Runtimes(), name) {

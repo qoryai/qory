@@ -481,8 +481,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				defer homeLock.Release()
 			}
 			// A run from a run code takes its harness, runtime, compose flags, inputs and
-			// time limit from the documents of the answer to the code; its workflow's
-			// time_limit is known once the harness is composed, see prepareLaunch.
+			// time limit from the documents of the answer to the code.
 			var fromCode *codeRun
 			var in string
 			if code != nil {
@@ -542,7 +541,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// reads to mask the harness's text in the session's log and events.
 				composing.hidden, spec.HarnessHidden = fromCode.hidden, fromCode.hidden
 				composing.fromCode = true
-				timeout = provisioner.TimeLimit(fromCode.minutes, 0)
+				timeout = fromCode.sessionLimit()
 				var remove func()
 				in, remove, err = fromCode.inputsDir()
 				defer remove()
@@ -720,8 +719,23 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if machineSteps != "" {
 				writeMachineStep(run, machineSteps, said)
 			}
-			// The run's time limit counts from its open: the compose and the session.
+			// The run's setup, every step from its open to its agent's start, ends at
+			// setupDeadline, [setupBound] after the open, and each step runs on setupCtx.
+			// step is the step that runs, or ran last, which enter sets. Session 1's time limit
+			// counts from the join, see [sessionDeadline].
 			opened := time.Now()
+			setupDeadline := opened.Add(setupBound)
+			setupCtx, cancelSetup := context.WithDeadline(ctx, setupDeadline)
+			defer cancelSetup()
+			var step prepStep
+			// enter makes s the step that runs, unless setupCtx has ended: a step that ran on
+			// past the limit, as a compose does, stays the step that the line names, and the
+			// next step, which fails at once, does not take its place.
+			enter := func(s prepStep) {
+				if setupCtx.Err() == nil {
+					step = s
+				}
+			}
 			// closeRun closes the run with out, and returns what the close came to, nil when
 			// it failed, which Forager's line says.
 			closeRun := func(out session.Outcome) *session.Closed {
@@ -761,7 +775,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// compose, see [walledCodexHome].
 			var codexFrom codexParts
 			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
-				composing.writable = nil
+				composing.writable, composing.ctx = nil, setupCtx
 				for _, m := range spec.Mounts {
 					if !m.ReadOnly {
 						composing.writable = append(composing.writable, m.Path)
@@ -815,8 +829,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if extra, err = fromCode.workflowArgs(name, rep, in, run.System()); err != nil {
 						return false, err
 					}
-					// The time limit counts from the open, so the compose's time is in it.
-					timeout = provisioner.TimeLimit(fromCode.minutes, workflows[fromCode.workflow].TimeLimit)
 				}
 				// The documents' submit is the run's at level write, and a different one in the
 				// harness gets a line.
@@ -926,9 +938,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return nil
 			}
-			// stopped reports whether qory run was stopped or ran out of time.
+			// stopped reports whether qory run was stopped or its setup passed setupDeadline.
 			stopped := func() bool {
-				return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
+				return ctx.Err() != nil || !time.Now().Before(setupDeadline)
 			}
 			// branch is the branch of the run's work item, set by hostWork, nil for none.
 			var branch *preparation.WorkBranch
@@ -941,44 +953,38 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			controlPlane := remote || server != nil && !local
 			// makeCopy makes the copy of a walled run that may write, see [startCopy], within the
-			// run's time limit: the working folder's state is that of its commit at HEAD.
+			// run's setup: the working folder's state is that of its commit at HEAD.
 			makeCopy := func() error {
-				copyCtx, cancel := ctx, func() {}
-				if timeout > 0 {
-					copyCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-				}
-				defer cancel()
+				enter(stepCopy)
 				ref := ""
 				if branch != nil {
 					ref = branch.Ref
 				}
 				var err error
-				if copied, err = startCopy(copyCtx, at.root, spec.RunID, ref, remote && run.Repositories() == "", state, spec.RunsDir); err != nil {
+				if copied, err = startCopy(setupCtx, at.root, spec.RunID, ref, remote && run.Repositories() == "", state, spec.RunsDir); err != nil {
 					return &runLineError{codeLine(err)}
 				}
 				cleanups = append(cleanups, func() { copied.done(said) })
 				// .qory/artifacts is the store only outside a control plane.
 				if !controlPlane {
-					if err := copied.artifactsIn(copyCtx, said); err != nil {
+					if err := copied.artifactsIn(setupCtx, said); err != nil {
 						return &runLineError{codeLine(err)}
 					}
 				}
 				return nil
 			}
 			// installWork installs the program of the session's runtime, see [installRuntime],
-			// within the run's time limit, prints the installed version, and gives the
+			// within the run's setup, prints the installed version, and gives the
 			// session the install, see [useInstalledRuntime].
 			installWork := func() error {
-				installCtx, cancel := ctx, func() {}
-				if timeout > 0 {
-					installCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+				if installs(name) {
+					enter(stepInstall)
 				}
-				defer cancel()
 				var machine runtimeinstall.Machine
 				if code != nil {
 					machine = code.machine
 				}
-				in, err := installRuntime(installCtx, run, conf.Forager, machine, walled || remote, name, pins[name], pinFile, state, said)
+				in, err := installRuntime(setupCtx, run, conf.Forager, machine, walled || remote, name, pins[name], pinFile, state, said)
 				if err != nil {
 					err = installFailed(err)
 					if dispatched {
@@ -1021,9 +1027,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			hostWork := func() error {
 				if run.Repositories() != "" {
 					var err error
-					if branch, err = fromCode.readBranch(ctx, run, timeout, opened); err != nil {
+					enter(stepBranchRead)
+					if branch, err = fromCode.readBranch(ctx, run, setupDeadline); err != nil {
 						return &runLineError{err}
 					}
+					enter(stepFetch)
 					err = inStep(run, streams.errOut, event.StepFetch, fetchStepNameOn(branch, fromCode, runValues(run)), stopped, func(w io.Writer) error {
 						h, err := run.HostProxy()
 						if err != nil {
@@ -1032,14 +1040,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						secretmask.Default().AddURLPassword(h.proxy.URL)
 						// The host proxy closes with the fetch, before the compose starts.
 						defer h.close()
-						fetchCtx, cancel := ctx, func() {}
-						if timeout > 0 {
-							fetchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-						}
-						defer cancel()
 						target := fromCode.fetchTarget()
 						target.Branch = branch
-						if _, err := preparation.RunAt(fetchCtx, cwd, os.Environ(), runValues(run), target, h.proxy, w); err != nil {
+						if _, err := preparation.RunAt(setupCtx, cwd, os.Environ(), runValues(run), target, h.proxy, w); err != nil {
 							return &runLineError{err}
 						}
 						return nil
@@ -1051,6 +1054,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return &runLineError{err}
 				}
 				var freshHome bool
+				enter(stepCompose)
 				err := inStep(run, streams.errOut, event.StepCompose, composeStepName(runtime), stopped, func(w io.Writer) error {
 					var n *source.Named
 					if fromCode != nil {
@@ -1104,12 +1108,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// setup and the agent. The run's forwarder checks the POSTs from behind the
 				// wall from here on: nothing behind the wall has run yet.
 				if walled {
-					loadCtx, cancel := ctx, func() {}
-					if timeout > 0 {
-						loadCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-					}
-					done, err := checks.load(loadCtx, run, at.home, spec.RunID, &spec, remote || server != nil && !local)
-					cancel()
+					enter(stepPushChecks)
+					done, err := checks.load(setupCtx, run, at.home, spec.RunID, &spec, remote || server != nil && !local)
 					if err != nil {
 						return &runLineError{input(err)}
 					}
@@ -1127,12 +1127,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 				if branch != nil {
-					switchCtx, cancel := ctx, func() {}
-					if timeout > 0 {
-						switchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-					}
-					defer cancel()
-					if err := preparation.Switch(switchCtx, cwd, os.Environ(), branch, stderr); err != nil {
+					enter(stepSwitch)
+					if err := preparation.Switch(setupCtx, cwd, os.Environ(), branch, stderr); err != nil {
 						return &runLineError{err}
 					}
 				}
@@ -1155,11 +1151,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return nil
 			}
 			// codexHomeWork writes the Codex home of a walled Codex run, see [walledCodexHome],
-			// once hostWork has bound the checkout or its copy, and mounts it. The home goes in
-			// the copy's folder, <user cache>/qory/runs/<run id>, or, for a run with no copy,
-			// in a new folder at that path. Both go when the run ends, as the copy does; the
-			// home goes also when the copy stays.
+			// within the run's setup, once hostWork has bound the checkout or its copy, and
+			// mounts it. No call in it takes setupCtx: a write that passes setupDeadline runs
+			// to its end, and the check after the steps names it. The home goes in the copy's
+			// folder, <user cache>/qory/runs/<run id>, or, for a run with no copy, in a new
+			// folder at that path. Both go when the run ends, as the copy does; the home goes
+			// also when the copy stays.
 			codexHomeWork := func() error {
+				enter(stepCodexHome)
 				checkout, root := at.root, ""
 				if copied != nil {
 					checkout, root = copied.dir.Work(), copied.dir.Root()
@@ -1185,16 +1184,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return nil
 			}
 			// setupWork runs the setup of a walled run whose run configuration lists
-			// repositories, see [runSetup], within the run's time limit. A setup command that
+			// repositories, see [runSetup], within the run's setup. A setup command that
 			// exits otherwise than 0 is the run's error line, and a mount refusal of the
 			// setup container's places, or of the places AgentEnv checks, gets the line a
 			// join's mount refusal gets.
 			setupWork := func() error {
-				setupCtx, cancel := ctx, func() {}
-				if timeout > 0 {
-					setupCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-				}
-				defer cancel()
+				enter(stepSetupCommands)
 				err := runSetup(setupCtx, run, &spec, copied != nil && !copied.plain && !copied.readOnly)
 				var exited *session.SetupError
 				switch {
@@ -1214,57 +1209,46 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return err
 			}
 			// removeSetupWork removes the setup container of a read run, see [removeSetup],
-			// within the run's time limit. No host step is open: hostWork exited its steps,
-			// and FetchImage and Setup write theirs. A call cut short by the time limit or a
+			// within the run's setup. No host step is open: hostWork exited its steps,
+			// and FetchImage and Setup write theirs. A call cut short by setupDeadline or a
 			// signal ends as a setup cut short does: the switch after the preparation tests
 			// both before the error.
 			removeSetupWork := func() error {
-				removeCtx, cancel := ctx, func() {}
-				if timeout > 0 {
-					removeCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-				}
-				defer cancel()
-				return removeSetup(removeCtx, run)
+				enter(stepSetupRemoval)
+				return removeSetup(setupCtx, run)
 			}
 			// imageWork fetches the image of a walled run, see [fetchImage], within the
-			// run's time limit, once the harness is composed and before the setup, so the
-			// setup and the join start from the image the step fetched. With an engine
-			// proxy, the step holds the engine lock, which it waits for within the time
-			// limit too: see [withEngineLock].
+			// run's setup, once the harness is composed and before the setup commands, so
+			// they and the join start from the image the step fetched. With an engine
+			// proxy, the step holds the engine lock, which it waits for within the run's
+			// setup too: see [withEngineLock].
 			imageWork := func() error {
-				imageCtx, cancel := ctx, func() {}
-				if timeout > 0 {
-					imageCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-				}
-				defer cancel()
-				return withEngineLock(imageCtx, spec.engineProxyFile, code != nil, func() error {
-					return fetchImage(imageCtx, run, spec.EngineProxy, code != nil)
+				enter(stepImage)
+				return withEngineLock(setupCtx, spec.engineProxyFile, code != nil, func() error {
+					return fetchImage(setupCtx, run, spec.EngineProxy, code != nil)
 				})
 			}
-			// recordSetupWork records what the setup left changed, within the run's time limit:
+			// recordSetupWork records what the setup left changed, within the run's setup:
 			// in the copy, so the git session leaves it out, see [runCopy.recordSetup], or in the
 			// working folder of a run with no copy, so the push step leaves it out, see
 			// [preparation.RecordSetup].
 			recordSetupWork := func() error {
-				recordCtx, cancel := ctx, func() {}
-				if timeout > 0 {
-					recordCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-				}
-				defer cancel()
+				enter(stepSetupRecord)
 				if copied == nil {
-					if err := preparation.RecordSetup(recordCtx, cwd, os.Environ(), branch); err != nil {
+					if err := preparation.RecordSetup(setupCtx, cwd, os.Environ(), branch); err != nil {
 						return &runLineError{err}
 					}
 					return nil
 				}
-				if err := copied.recordSetup(recordCtx, run, &spec); err != nil {
+				if err := copied.recordSetup(setupCtx, run, &spec); err != nil {
 					return &runLineError{codeLine(err)}
 				}
 				return nil
 			}
-			// A run stopped or out of time before its session joins prepares nothing more.
+			// A run stopped, or past setupDeadline, before its session joins prepares nothing
+			// more.
 			var prepErr error
-			if ctx.Err() == nil && (timeout == 0 || time.Since(opened) < timeout) {
+			if ctx.Err() == nil && time.Now().Before(setupDeadline) {
 				prepErr = hostWork()
 				if prepErr == nil && walled && name == codex.Runtime {
 					prepErr = codexHomeWork()
@@ -1289,10 +1273,6 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					beforeJoin()
 				}
 			}
-			left := time.Duration(0)
-			if timeout > 0 {
-				left = timeout - time.Since(opened)
-			}
 			switch {
 			case ctx.Err() != nil:
 				closeRun(session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1})
@@ -1300,14 +1280,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				u.Fail(errors.New(cancelledBeforeJoin(got(), name)))
 				said("the record is in " + record)
 				return reported(&exitError{code: 1})
-			case timeout > 0 && left <= 0:
+			case !time.Now().Before(setupDeadline):
+				// A setup past its limit ends as a session at its time limit does: cancelled
+				// with timeout, exit 124.
 				closeRun(session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout})
 				lines.done(nil)
-				line := timedOutBeforeJoin(timeout, name)
-				if fromCode != nil {
-					line = fromCode.timedOutLine(timeout, name)
-				}
-				u.Fail(errors.New(line))
+				u.Fail(codeLine(setupPassed(step, name, setupBound, dispatched)))
 				said("the record is in " + record)
 				return reported(&exitError{code: exitTimeout})
 			case prepErr != nil:
@@ -1340,7 +1318,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return withRecord(streams.errOut, prepErr, record)
 			}
-			spec.Timeout = left
+			// Forager's limit of the session is the whole of session 1's time limit: the setup's
+			// time is not in it.
+			if timeout > 0 {
+				spec.Timeout = timeout
+			}
 			// Forager's session masks the runtime's output with the run's masker, on a
 			// terminal and on pipes.
 			spec.Stdout, spec.Stderr = streams.session()
@@ -1357,12 +1339,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// The agent's session is the run's first join, so the gateway numbers it 1.
 			suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, fullSuite: fullSuiteOf(fromCode), extensions: extensions, said: said})
 			closeRoute := route.open(1)
+			// Session 1's time limit counts from the agent's start, here, see [sessionDeadline].
+			deadline := sessionDeadline(time.Now(), timeout)
 			res, err := joinSession(run, ctx, spec.SessionSpec)
 			closeRoute()
 			out := sessionOutcome(res, err)
 			var suiteLimit time.Time
 			if timeout > 0 {
-				suiteLimit = opened.Add(timeout)
+				suiteLimit = deadline
 			}
 			out, suiteErr := suites.after(ctx, again, suiteLimit, res, out)
 			// pushWork is the push step of a run with an agent session that may write, see
@@ -1436,7 +1420,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if pushes {
 				var limit time.Time
 				if timeout > 0 {
-					limit = opened.Add(timeout)
+					limit = deadline
 				}
 				push := &sessionPush{
 					ctx: ctx, again: again, limit: limit, stopNow: stopNow,
@@ -1544,7 +1528,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().StringVar(&title, "title", "", "the run's title, for a person to read, reported when the run starts")
 	c.Flags().StringArrayVar(&subjects, "subject", nil, "what the run works on, type=<type>,ref=<ref>[,url=<url>][,title=<title>], such as type=ticket,ref=7; title takes the rest of the value, commas too; repeatable")
 	c.Flags().StringVar(&details, "details", "", "a JSON object of the run's details, read from this file, or - for stdin when stdin is not a terminal; at most 8192 bytes compacted, 4 levels deep")
-	c.Flags().DurationVar(&timeout, "timeout", 0, "stop the run after this long, counted from its open, compose included, such as 5h30m, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.ForagerFileName+": session.run.timeout)")
+	c.Flags().DurationVar(&timeout, "timeout", 0, "stop the run after this long, counted from the agent's start, such as 5h30m, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.ForagerFileName+": session.run.timeout)")
 	c.Flags().StringVar(&stopSignal, "stop-signal", "", "the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; "+config.ForagerFileName+": session.run.stop_signal)")
 	c.Flags().DurationVar(&grace, "stop-grace", 0, "the time between the stop signal and SIGKILL (default 10s; "+config.ForagerFileName+": session.run.stop_grace)")
 	c.Flags().StringVar(&o.name, "wall", "", "run the agent in a container whose one way out is the proxy: "+config.WallDocker+", or none ("+config.ForagerFileName+": wall.adapter)")
@@ -1863,12 +1847,6 @@ func cancelledBeforeJoin(got, runtime string) string {
 		return "the run was cancelled before " + agentName(runtime) + " started"
 	}
 	return "the run was cancelled: qory run got " + got + " before " + agentName(runtime) + " started"
-}
-
-// timedOutBeforeJoin is the line of a run that reached its time limit, limit, before
-// its session joined, and runtime the agent's name, "" when it is not known yet.
-func timedOutBeforeJoin(limit time.Duration, runtime string) string {
-	return fmt.Sprintf("give the run a longer --timeout: the run was cancelled at its time limit of %s, before %s started", limit, agentName(runtime))
 }
 
 // agentName is the runtime's name as a line says it, "the agent" when it is not known.

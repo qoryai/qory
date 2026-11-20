@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/qoryai/integrations/contracts"
 
@@ -219,29 +218,6 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 			t.Errorf("%s: %q, want %q", c.name, err, c.want)
 		}
 		noValue(t, c.name, err)
-	}
-}
-
-// TestTimeLimit takes the run settings' minutes first, then the workflow's time limit,
-// then 3 hours.
-func TestTimeLimit(t *testing.T) {
-	for _, c := range []struct {
-		minutes  int
-		workflow time.Duration
-		want     time.Duration
-	}{
-		{0, 0, 3 * time.Hour},
-		{45, 0, 45 * time.Minute},
-		{0, 7 * time.Hour, 7 * time.Hour},
-		{45, 7 * time.Hour, 45 * time.Minute},
-		{-1, 0, 3 * time.Hour},
-	} {
-		if got := provisioner.TimeLimit(c.minutes, c.workflow); got != c.want {
-			t.Errorf("TimeLimit(%d, %v) = %v, want %v", c.minutes, c.workflow, got, c.want)
-		}
-	}
-	if provisioner.FallbackTimeLimit != 3*time.Hour {
-		t.Errorf("the fallback is %v", provisioner.FallbackTimeLimit)
 	}
 }
 

@@ -170,9 +170,10 @@ release may change what an existing document does, and states it under Upgrading
   by the wall's engine program or else `docker`, and removes no version's folder when that
   program fails; a machine with no `docker` has no running container. Two runs that need
   one version read its tarball once. A 503 or 429 from the registry is retried until the
-  registry returns the file or the run ends, with its time limit, a cancel or SIGTERM. At
-  the first retry, and every 5 minutes after, `qory run` prints `<host> has not returned
-  Claude Code <version> (503); check pool.registry`, with `no response` in place of
+  registry returns the file or the run ends, with the limit of the steps before the
+  agent's start, a cancel or SIGTERM. At the first retry, and every 5 minutes after,
+  `qory run` prints `<host> has not returned Claude Code <version> (503); check
+  pool.registry`, with `no response` in place of
   the status when the request got none, and without the version while the run does not
   know it yet. A request waits at most 30 seconds to
   connect, 30 seconds for the TLS handshake, 60 seconds for the response's headers and
@@ -349,10 +350,6 @@ release may change what an existing document does, and states it under Upgrading
   consecutive lines or 200 characters of a harness file, in the session's log and
   events. A link that leads out of a module stops the run, exit 1. See A hidden harness
   in `docs/run.md` for what is not masked and Forager's limits.
-- Give a workflow of a stack a time limit with `workflows.<name>.time_limit` in its
-  `qory-stack.yaml`, such as `workflows: {example: {time_limit: 45m}}`. A run from a run
-  code takes its time limit from the `time_limit_minutes` of its documents, else from its
-  workflow's `time_limit`, else 3 hours.
 - Declare a workflow's access level with `workflows.<name>.access` in its
   `qory-stack.yaml`, `read` or `write`, and `read` when left out. qory stops on any
   other value.
@@ -456,13 +453,13 @@ release may change what an existing document does, and states it under Upgrading
   does not serve by its id. A target on another system, or a run with no
   `QORY_RUN_SYSTEM`, does not use `target_version`.
 - The harness section of a `qory.yaml` that defines a stack, without `extends`, may list
-  `workflows`, with the keys and checks of a `qory-stack.yaml`: `time_limit` and
-  `access`. A section that extends a stack takes the base's workflows, and one that also
+  `workflows`, with the keys and checks of a `qory-stack.yaml`, such as `access`. A
+  section that extends a stack takes the base's workflows, and one that also
   lists `workflows` stops with exit 2, `remove workflows or extends: a harness section
   that extends a stack takes the workflows of its base`.
 - A run from a run code composes a harness document with no `extends`, which defines a
-  stack, for the run's runtime, `run_settings.runtime`. The `workflows.<name>.time_limit`
-  of that stack applies to the run, as a base's does.
+  stack, for the run's runtime, `run_settings.runtime`. qory leaves out a `time_limit`
+  of a workflow there, which the run documents allow and a stack does not have.
 - `QORY_STATUS_FD=<n>` makes `qory run` also write qory's lines, masked, to the open
   descriptor `<n>`: the `✓`, `✗` and `⚠` lines, every `qory run:` line, Forager's lines
   among them, and the last error line, an error of the flags included, each only when
@@ -695,8 +692,12 @@ release may change what an existing document does, and states it under Upgrading
   refuses `fast` as it refuses any name that is not a tier, with the list of the tiers.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
-  qory stops a run whose documents have one. A run whose documents set no
-  `time_limit_minutes` keeps the limit of its workflow, else 3 hours. The documents can
+  qory stops a run whose documents have one. `time_limit_minutes` is the only time limit
+  of the run's session: a stack's workflow sets none. When the run documents have no
+  `time_limit_minutes`, qory sets no time limit for the session. Qory Apiary writes 180
+  minutes for a workflow with no Time limit. The limit counts from the agent's start, as
+  `--timeout` does. At the limit the session stops, and the
+  full suite's after step and the push step still run. The documents can
   also contain `shared_run` and `full_suite`. With `full_suite` true, the session runs the full
   test suite when it ends, as The full suite in `docs/run.md` describes; qory reads `shared_run`
   and changes nothing for it.
@@ -1128,10 +1129,12 @@ release may change what an existing document does, and states it under Upgrading
   the image of `wall.prebuild_image`, on the host before a run; a missing prebuild image
   fails the prebuild with the engine's error for the pull. See The engine proxy in
   `docs/run.md`.
-- The line of a run from a run code whose time limit came before the runtime started
-  contains `the workspace's harness` for a harness document that defines a stack, and `the
-  checkout's harness or the base it extends` for a run whose documents contain no
-  harness, in place of `the base of the checkout's harness, when it has one`.
+- The steps of a run before the agent's start, from the fetch of its repositories to the
+  setup commands, may take 30 minutes together, and no setting changes that. A run past
+  the limit closes `cancelled` with the reason `timeout`, exits 124, and prints a fix for
+  the step that was running, then `the run was cancelled during <step>:` and `the steps
+  before <runtime> starts may take at most 30 minutes`. A run from a control plane prints
+  these two lines alone. See Time limits in `docs/run.md`.
 - A run with a run key or a run code fetches every git source of its harness through the
   run's stack proxy: the stack, its modules, and the modules of the checkout's file,
   also when the checkout's file is the whole harness. The run's host proxy, with the
@@ -1261,11 +1264,11 @@ release may change what an existing document does, and states it under Upgrading
   `qory run: composed <n> entries from <m> modules for <runtime>` on stderr. You no longer
   run `qory harness compose` before `qory run`.
 - `qory run` opens the run at its gateway before it composes the harness, and closes the
-  run with the run's outcome once the session ends. `--timeout` counts from the open, so
-  it covers the compose and the session. A compose that fails closes the run as failed
+  run with the run's outcome once the session ends. `--timeout` counts from the agent's
+  start, so it covers the session alone. A compose that fails closes the run as failed
   with no session started (`no_session`), and qory prints the path of the run's record
-  after the error line. A signal or the time limit before the agent starts cancels the
-  run, exit 1 or 124.
+  after the error line. A signal, or the limit of the steps before the agent's start,
+  cancels the run before the agent starts, exit 1 or 124.
 - The record's `dev.qory.session.started` lists the harness's git sources, each with the
   full commit the compose used.
 - Given a run key, `qory run` reads a module or a stack that a file in the checkout lists
@@ -1750,8 +1753,8 @@ release may change what an existing document does, and states it under Upgrading
   `wall.engine_proxy_file`, so the engine pulls each run's image through the run's
   gateway.
 - A walled run's image step holds an exclusive lock of `wall.engine_proxy_file`, waiting
-  for it within the run's time limit, so one run at a time pulls through the engine's
-  proxy. Replace the file only while no run is going.
+  for it within the limit of the steps before the agent's start, so one run at a time
+  pulls through the engine's proxy. Replace the file only while no run is going.
 - `qory run` prints `***` in place of a URL's `X-Amz-Signature`, `X-Amz-Security-Token`,
   `Signature`, `sig`, `token` or `access_token` value in its `qory run: fetched` lines,
   in the errors of a fetch and in the last error line. A run given a run key or a run

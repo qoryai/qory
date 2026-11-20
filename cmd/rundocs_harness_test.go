@@ -316,14 +316,15 @@ func (r harnessRun) noHarnessFile(t *testing.T) {
 // fetches the base and the module through the run's stack proxy, which it closes before
 // the join, and opens no host proxy. Every line, step event and spec shows the names,
 // never an address, a ref or a path in the run's sources, and the harness list for the
-// session's start line has the names with their commits. The base's
-// workflows.hello.time_limit is the session's time limit.
+// session's start line has the names with their commits. The documents'
+// time_limit_minutes, 300, is the session's time limit.
 func TestARunCodeComposesTheWorkspacesHarnessThroughTheStackProxy(t *testing.T) {
 	r := codeHarness{
 		stack: func(s string) string {
-			return withTools(toolsURL, toolsRef)(s) + "workflows:\n  hello:\n    time_limit: 5h\n    access: write\n"
+			return withTools(toolsURL, toolsRef)(s) + "workflows:\n  hello:\n    access: write\n"
 		},
-		tools: toolsModule(),
+		change: func(d map[string]any) { d["time_limit_minutes"] = 300 },
+		tools:  toolsModule(),
 		before: func() []string {
 			writeFile(t, "qory.yaml", "harness:\n  modules:\n    - name: other\n      source: {path: ./nowhere}\n")
 			return nil
@@ -366,18 +367,19 @@ func TestARunCodeComposesTheWorkspacesHarnessThroughTheStackProxy(t *testing.T) 
 	if json.Unmarshal(data, &doc) != nil || statErr != nil || st.Mode().Perm() != 0o600 || doc.Harness.Extends.Git != r.url || doc.Harness.Extends.Ref != namedRef || doc.Harness.Extends.Path != r.folder {
 		t.Errorf("harness.yaml (%v) has:\n%s", statErr, data)
 	}
-	if r.spec.Timeout <= 5*time.Hour-time.Minute || r.spec.Timeout > 5*time.Hour {
-		t.Errorf("the time limit left is %v, want 5h less the time before the join", r.spec.Timeout)
+	if r.spec.Timeout != 5*time.Hour {
+		t.Errorf("the time limit is %v, want the whole 5h", r.spec.Timeout)
 	}
 	r.noAddress(t)
 }
 
 // TestARunCodeComposesAHarnessDocumentThatDefinesAStack is a run from a run code whose
 // documents contain a harness document with no extends, which defines a stack of the
-// module hello and its workflow hello, with a time_limit of 4h, once with run_settings
-// naming claude and once naming codex. qory composes it for that runtime, though the
-// document has no target, and starts that runtime's program. The workflow's time_limit is
-// the session's time limit, and no text shows an address.
+// module hello and its workflow hello, with a time_limit of 4h, which the run contract
+// still allows there, once with run_settings naming claude and once naming codex. qory
+// composes it for that runtime, though the document has no target, and starts that
+// runtime's program. The documents' time_limit_minutes, 45, is the session's time limit,
+// not the workflow's time_limit, and no text shows an address.
 func TestARunCodeComposesAHarnessDocumentThatDefinesAStack(t *testing.T) {
 	for _, runtime := range []string{"claude", "codex"} {
 		t.Run(runtime, func(t *testing.T) {
@@ -386,6 +388,7 @@ func TestARunCodeComposesAHarnessDocumentThatDefinesAStack(t *testing.T) {
 				// Codex starts a workflow by its skill, and the module hello ships a command.
 				files: map[string]string{"examples/hello/modules/hello/skills/workflow-hello/SKILL.md": "---\nname: workflow-hello\ndescription: Say hello.\n---\n\nSay hello.\n"},
 				change: func(d map[string]any) {
+					d["time_limit_minutes"] = 45
 					d["run_settings"] = map[string]any{"runtime": runtime}
 				},
 			}.run(t)
@@ -402,8 +405,8 @@ func TestARunCodeComposesAHarnessDocumentThatDefinesAStack(t *testing.T) {
 			if want := []session.HarnessSource{{Source: "module hello", Commit: r.commit}}; !slices.Equal(r.spec.Harness, want) {
 				t.Errorf("the harness list is %+v, want %+v", r.spec.Harness, want)
 			}
-			if r.spec.Timeout <= 4*time.Hour-time.Minute || r.spec.Timeout > 4*time.Hour {
-				t.Errorf("the time limit left is %v, want 4h less the time before the join", r.spec.Timeout)
+			if r.spec.Timeout != 45*time.Minute {
+				t.Errorf("the time limit is %v, want the whole 45m", r.spec.Timeout)
 			}
 			r.noAddress(t)
 		})
@@ -597,15 +600,16 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 
 // TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile is a run from a run code
 // whose documents contain no harness document, in a checkout whose qory.yaml extends a
-// stack of another repository, which sets the workflow's time limit: qory composes the
-// checkout's file, fetches the base through the run's stack proxy, which it closes
-// before the join, opens no host proxy and writes no harness.yaml. With the harness
-// hidden, every line, event and spec shows the base by its name; with it shown, the
-// fetch line shows the URL and the ref.
+// stack of another repository: qory composes the checkout's file, fetches the base
+// through the run's stack proxy, which it closes before the join, opens no host proxy
+// and writes no harness.yaml. The documents' time_limit_minutes, 300, is the session's
+// time limit. With the harness hidden, every line, event and spec shows the base by its
+// name; with it shown, the fetch line shows the URL and the ref.
 func TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile(t *testing.T) {
 	for _, shown := range []bool{false, true} {
 		t.Run(fmt.Sprintf("shown %v", shown), func(t *testing.T) {
-			r := codeHarness{checkout: true, shown: shown, stack: func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 5h\n    access: write\n" }}.run(t)
+			r := codeHarness{checkout: true, shown: shown, stack: func(s string) string { return s + "workflows:\n  hello:\n    access: write\n" },
+				change: func(d map[string]any) { d["time_limit_minutes"] = 300 }}.run(t)
 			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}
@@ -619,8 +623,8 @@ func TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile(t *testing.T) {
 				t.Errorf("the calls %q, %d tunnels, want the stack proxy opened and closed before the join, and no host proxy", r.calls, r.server.Tunnels())
 			}
 			r.noHarnessFile(t)
-			if r.spec.Timeout <= 5*time.Hour-time.Minute || r.spec.Timeout > 5*time.Hour {
-				t.Errorf("the time limit left is %v, want 5h less the time before the join", r.spec.Timeout)
+			if r.spec.Timeout != 5*time.Hour {
+				t.Errorf("the time limit is %v, want the whole 5h", r.spec.Timeout)
 			}
 			if shown {
 				return

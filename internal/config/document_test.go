@@ -115,7 +115,7 @@ func TestOnBaseRefusesWorkflows(t *testing.T) {
 		path := filepath.Join(tmp, "app-"+name, name)
 		for _, body := range []string{
 			"harness:\n  target: {runtime: claude}\n  modules:\n    - name: app\n  workflows:\n    fix: {access: write}\n",
-			"harness:\n  extends: {path: ../tree}\n  workflows:\n    fix: {time_limit: 45m}\n",
+			"harness:\n  extends: {path: ../tree}\n  workflows:\n    fix: {access: read}\n",
 		} {
 			writeRaw(t, path, body)
 			want := "Remove workflows from " + name + ", or leave out -f.\n  -f selects the base, and its workflows apply.\n  harness.workflows is in " + path + "."
