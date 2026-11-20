@@ -32,9 +32,9 @@ func TestLoadReadsTheRuntimePins(t *testing.T) {
 }
 
 // TestLoadRefusesABadRuntimePin refuses a pin that is not an exact version, latest and a
-// version with + among them, a version that YAML reads as a number, and a runtime that
-// qory does not install, each with the fix first, the cause, and the file last. The error
-// is compared whole.
+// version with + among them, a version that YAML reads as a number, also through an alias
+// to the version or to the whole entry, and a runtime that qory does not install, each
+// with the fix first, the cause, and the file last. The error is compared whole.
 func TestLoadRefusesABadRuntimePin(t *testing.T) {
 	isolate(t)
 	version := func(name, value string) string {
@@ -47,18 +47,22 @@ func TestLoadRefusesABadRuntimePin(t *testing.T) {
 			"  Without quotes, YAML reads the version as a number or a date, and an exact version is a string.\n" +
 			"  The value is " + value + ".\n  runtimes." + name + " is in "
 	}
-	for _, c := range []struct{ body, want string }{
-		{"  claude:\n    version: latest\n", version("claude", "latest")},
-		{"  codex:\n    version: v0.167.2\n", version("codex", "v0.167.2")},
-		{"  codex:\n    version: \"0.167 2\"\n", version("codex", "0.167 2")},
-		{"  claude: {}\n", version("claude", "")},
-		{"  claude:\n    version: 1.0.0+build.1\n", version("claude", "1.0.0+build.1")},
-		{"  claude:\n    version: 2.1\n", number("claude", "2.1")},
-		{"  codex:\n    version: 2\n", number("codex", "2")},
-		{"  claude:\n    version: 2024-01-01\n", number("claude", "2024-01-01")},
-		{"  gemini:\n    version: 1.0.0\n", "Remove gemini from runtimes.\n  qory installs and pins only claude and codex.\n  runtimes is in "},
+	// anchors puts YAML anchors in extensions, before runtimes, for a pin to alias.
+	const anchors = "extensions:\n  pins:\n    v: &v 2.1\n    p: &p {version: 2.1}\n"
+	for _, c := range []struct{ before, body, want string }{
+		{"", "  claude:\n    version: latest\n", version("claude", "latest")},
+		{"", "  codex:\n    version: v0.167.2\n", version("codex", "v0.167.2")},
+		{"", "  codex:\n    version: \"0.167 2\"\n", version("codex", "0.167 2")},
+		{"", "  claude: {}\n", version("claude", "")},
+		{"", "  claude:\n    version: 1.0.0+build.1\n", version("claude", "1.0.0+build.1")},
+		{"", "  claude:\n    version: 2.1\n", number("claude", "2.1")},
+		{"", "  codex:\n    version: 2\n", number("codex", "2")},
+		{"", "  claude:\n    version: 2024-01-01\n", number("claude", "2024-01-01")},
+		{"", "  gemini:\n    version: 1.0.0\n", "Remove gemini from runtimes.\n  qory installs and pins only claude and codex.\n  runtimes is in "},
+		{anchors, "  claude:\n    version: *v\n", number("claude", "2.1")},
+		{anchors, "  codex: *p\n", number("codex", "2.1")},
 	} {
-		path := write(t, withRuntimes(c.body))
+		path := write(t, valid+c.before+"runtimes:\n"+c.body)
 		_, err := Load(path)
 		if want := c.want + path + "."; err == nil || err.Error() != want {
 			t.Errorf("%q:\n%v\nwant:\n%s", c.body, err, want)

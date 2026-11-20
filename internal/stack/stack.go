@@ -506,6 +506,10 @@ func (r *RuntimePin) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			key, value := n.Content[i], n.Content[i+1]
+			// An alias, version: *v, has the tag of the node it points to.
+			if value.Kind == yaml.AliasNode {
+				value = value.Alias
+			}
 			switch {
 			case key.Value != "version":
 				unknown = append(unknown, fmt.Sprintf("line %d: field %s not found in type stack.RuntimePin", key.Line, key.Value))
