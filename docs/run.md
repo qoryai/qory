@@ -4735,6 +4735,10 @@ starts, with exit status 1, when a Codex argument before `--` is one of these:
   `chatgpt_base_url`, `experimental_realtime_*_base_url`, `skills` or `cloud.skills`, a
   key under one, or a table above one.
 - `--enable` or `--disable` of `plugins`, `apps` or `connectors`.
+- `--config <key>=<value>` or `-c` in any form that sets `features.hooks`,
+  `features.codex_hooks` or `features.unified_exec_tty`, a key under one, such as
+  `features.hooks.enabled`, or a table that sets one, such as `features={hooks=false}`;
+  or `--enable` or `--disable` of `hooks`, `codex_hooks` or `unified_exec_tty`.
 - `--oss`, `--local-provider`, `--profile`, `-p`, `--search`, `--ignore-user-config`,
   `--dangerously-bypass-hook-trust` or `--remote`.
 
@@ -4752,6 +4756,15 @@ are:
 ```
 ✗ remove the --config pair that sets <key> from the launch's arguments
   the session sets <key>, and a later pair overrides the session's value
+```
+
+For `features.hooks`, `features.codex_hooks` and `features.unified_exec_tty`, the first
+line contains the flag and the setting, and the second line is the same for all three.
+For `--disable hooks` they are:
+
+```
+✗ remove the --disable that sets features.hooks from the launch's arguments
+  the setting can turn off the hooks Codex runs before each tool call, or make Codex run no hook for a command sent to a shell with a terminal
 ```
 
 Every other argument of an unwalled run passes unchanged.

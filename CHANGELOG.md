@@ -788,9 +788,13 @@ release may change what an existing document does, and states it under Upgrading
     `run_configuration_invalid`. When the active key reaches its limit, the gateway moves
     the run to a key with no known reset first, then to the key that resets soonest.
     Before, the key with `chosen` came first whenever it was usable.
-  - In a run without a wall, qory prints the refusal of a Codex argument on two lines:
+  - In a run without a wall, qory prints the error for a Codex argument on two lines:
     the fix, which contains the flag, then the cause. Before, one line had both, split by
     a colon. See `docs/run.md`.
+  - A run without a wall stops before Codex starts, exit 1, when `-c`, `--config`,
+    `--enable` or `--disable` sets `features.hooks`, `features.codex_hooks` or
+    `features.unified_exec_tty`. The error has the fix first, then the cause: the
+    setting can turn off the hooks Codex runs before each tool call.
   - Each session's environment has `QORY_SESSION`, the session's number in the run,
     counted from 1. Without a wall, Forager's value replaces any other. A walled run that
     passes `QORY_SESSION` by `wall.env`, `--env` or the harness's `env` does not start,
