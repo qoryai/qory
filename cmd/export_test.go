@@ -286,6 +286,14 @@ func SetCopyStepLimit(limit time.Duration) func() {
 	return func() { copyStepLimit = before }
 }
 
+// SetSessionMinute makes a minute of the documents' time_limit_minutes last d, so a
+// test gives a session a limit of seconds, and returns the function that undoes it.
+func SetSessionMinute(d time.Duration) func() {
+	before := sessionMinute
+	sessionMinute = d
+	return func() { sessionMinute = before }
+}
+
 // SetPushTimes sets the time the push step has past a run's limit and after a signal, and
 // returns what restores the defaults.
 func SetPushTimes(limit, signal time.Duration) func() {
@@ -1045,6 +1053,13 @@ func (n *nowhere) Image() session.Image {
 func (n *nowhere) System() string       { return n.values.System }
 func (n *nowhere) Repositories() string { return n.values.Repositories }
 func (n *nowhere) Dir() string          { return n.dir }
+
+// SetSetupLimit makes d the limit of a run's setup in place of 30 minutes, and returns
+// what restores it.
+func SetSetupLimit(d time.Duration) func() {
+	setupBound = d
+	return func() { setupBound = setupLimit }
+}
 
 // SetBeforeJoin makes qory run call f once the harness is composed, before the run's
 // session joins, and returns what restores the default.

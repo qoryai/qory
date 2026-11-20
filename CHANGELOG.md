@@ -18,6 +18,32 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- In a home composed for codex alone, a Codex agent with a tier gets the tier's model as
+  `model` and its effort as `model_reasoning_effort` in `agents/<name>.toml`. An effort
+  outside `none`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra` stops the compose
+  with exit 2 and these two lines, which an effort outside the values of claude and
+  copilot agents also gets:
+
+  ```text
+  set tier <t>'s effort to one of <values>
+  <v> is not one for <runtime> agents (from <file>)
+  ```
+
+  A home composed for codex and another runtime writes no tier into the Codex agents,
+  since one tier map serves every runtime, and prints this `skipped` row:
+
+  ```text
+  skipped  tier <tier> for codex  (qory writes tiers into codex agents only in a home composed for codex alone; …)
+  ```
+- A Codex run without a wall runs the harness's hooks. Codex skips a hook of
+  `$CODEX_HOME` with no error unless `hooks.state` has its hash, so the home's
+  `config.toml` has a `trusted_hash` for each `command` hook of `hooks.json` and
+  `config.toml`. An `mcp_tool` hook, and a hook with U+2028 or U+2029 in its command,
+  status message or matcher, gets no hash, and the compose prints
+  `skipped  hooks.<event>[<group>].hooks[<hook>] in <file> for codex` for it. A
+  `CODEX_HOME` set in `harness.launch.codex.env` points Codex at a home other than the
+  one in the keys of the hashes, and Codex skips the hooks. See "Hooks on Codex" in
+  `docs/harness.md`.
 - A stack pins the version of a runtime that `qory run` installs:
   `runtimes: {codex: {version: 0.167.2}}` in a `qory-stack.yaml` or in the harness
   section of the checkout's `qory.yaml`, whose pin of a runtime wins over the base's. A
@@ -152,10 +178,12 @@ release may change what an existing document does, and states it under Upgrading
 - Every install of a runtime checks npm's signature of the version before it reads the
   tarball, with npm's public keys built into qory: from npm, `dist.signatures`; from a
   registry's runtime cache, the layer's annotation `dev.qory.runtime.signatures`. A
-  missing or bad signature stops the run with `Check the source of the runtime's
-  releases`; a signature only by a key qory does not have, or by an expired key, stops
-  it with `Update qory.` A layer without the annotation stops it with `Ask Qory Apiary's
-  instance admin to check the registry's runtime cache`.
+  missing or bad signature stops the run with `Check the source of <runtime>'s
+  releases.`; a signature only by a key qory does not have stops it with `Update qory.`;
+  a signature only by an expired key stops it with `Pin a newer version of <runtime>.`
+  for a pinned version, and with `Check the source of <runtime>'s releases.` with no
+  pin. A layer without the annotation stops it with `Ask Qory Apiary's instance admin to
+  check the registry's runtime cache`.
 - Every run of Claude Code installs the runtime's program before its session: from the
   runtime cache of the pool's registry, or of `pool.registry`, or else from npm, through
   the run's host proxy when the run has one. qory reads the registry's `newest`, or npm's
@@ -168,9 +196,10 @@ release may change what an existing document does, and states it under Upgrading
   by the wall's engine program or else `docker`, and removes no version's folder when that
   program fails; a machine with no `docker` has no running container. Two runs that need
   one version read its tarball once. A 503 or 429 from the registry is retried until the
-  registry returns the file or the run ends, with its time limit, a cancel or SIGTERM. At
-  the first retry, and every 5 minutes after, `qory run` prints `<host> has not returned
-  Claude Code <version> (503); check pool.registry`, with `no response` in place of
+  registry returns the file or the run ends, with the limit of the steps before the
+  agent's start, a cancel or SIGTERM. At the first retry, and every 5 minutes after,
+  `qory run` prints `<host> has not returned Claude Code <version> (503); check
+  pool.registry`, with `no response` in place of
   the status when the request got none, and without the version while the run does not
   know it yet. A request waits at most 30 seconds to
   connect, 30 seconds for the TLS handshake, 60 seconds for the response's headers and
@@ -348,10 +377,6 @@ release may change what an existing document does, and states it under Upgrading
   consecutive lines or 200 characters of a harness file, in the session's log and
   events. A link that leads out of a module stops the run, exit 1. See A hidden harness
   in `docs/run.md` for what is not masked and Forager's limits.
-- Give a workflow of a stack a time limit with `workflows.<name>.time_limit` in its
-  `qory-stack.yaml`, such as `workflows: {example: {time_limit: 45m}}`. A run from a run
-  code takes its time limit from the `time_limit_minutes` of its documents, else from its
-  workflow's `time_limit`, else 3 hours.
 - Declare a workflow's access level with `workflows.<name>.access` in its
   `qory-stack.yaml`, `read` or `write`, and `read` when left out. qory stops on any
   other value.
@@ -455,13 +480,13 @@ release may change what an existing document does, and states it under Upgrading
   does not serve by its id. A target on another system, or a run with no
   `QORY_RUN_SYSTEM`, does not use `target_version`.
 - The harness section of a `qory.yaml` that defines a stack, without `extends`, may list
-  `workflows`, with the keys and checks of a `qory-stack.yaml`: `time_limit` and
-  `access`. A section that extends a stack takes the base's workflows, and one that also
+  `workflows`, with the keys and checks of a `qory-stack.yaml`, such as `access`. A
+  section that extends a stack takes the base's workflows, and one that also
   lists `workflows` stops with exit 2, `remove workflows or extends: a harness section
   that extends a stack takes the workflows of its base`.
 - A run from a run code composes a harness document with no `extends`, which defines a
-  stack, for the run's runtime, `run_settings.runtime`. The `workflows.<name>.time_limit`
-  of that stack applies to the run, as a base's does.
+  stack, for the run's runtime, `run_settings.runtime`. qory leaves out a `time_limit`
+  of a workflow there, which the run documents allow and a stack does not have.
 - `QORY_STATUS_FD=<n>` makes `qory run` also write qory's lines, masked, to the open
   descriptor `<n>`: the `✓`, `✗` and `⚠` lines, every `qory run:` line, Forager's lines
   among them, and the last error line, an error of the flags included, each only when
@@ -651,6 +676,21 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The `config.toml` of a Codex home, and of a walled Codex run, sets
+  `features.unified_exec_tty = false`. A shell started with a terminal takes commands
+  through `write_stdin`, for which Codex runs no `PreToolUse` hook. A Codex agent can no
+  longer start an interactive shell with a terminal.
+- qory stops every Codex run, walled or not, before the agent starts, when its Codex
+  arguments before `--` contain `--dangerously-bypass-hook-trust`, also with `=`, set
+  `hooks`, `features.hooks`, `features.codex_hooks` or `features.unified_exec_tty` with
+  `-c` or `--config`, a key under one, such as `hooks.Stop`, or the table `features`, or
+  pass `hooks`, `codex_hooks` or `unified_exec_tty` to `--enable` or `--disable`. The
+  error has two lines, such as ``Remove `--config hooks.Stop` from the run's Codex
+  arguments.`` and ``A Codex run takes this key from qory and Forager, not from the
+  arguments.`` Before, a run without a wall stopped on most of them at Forager's check,
+  with Forager's lines, and passed a key under `hooks`. A walled run stopped on
+  `hooks.state` and `hooks={…}`, and passed the other keys under `hooks`, such as
+  `hooks.Stop`.
 - A run from a run code whose explore documents contain no `run_settings` stops before
   anything is installed or fetched, with `The run settings set no runtime, so the run
   did not start; the code is used.` and `qory runs one of claude and codex.` Until now,
@@ -778,8 +818,12 @@ release may change what an existing document does, and states it under Upgrading
   refuses `fast` as it refuses any name that is not a tier, with the list of the tiers.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
-  qory stops a run whose documents have one. A run whose documents set no
-  `time_limit_minutes` keeps the limit of its workflow, else 3 hours. The documents can
+  qory stops a run whose documents have one. `time_limit_minutes` is the only time limit
+  of the run's session: a stack's workflow sets none. When the run documents have no
+  `time_limit_minutes`, qory sets no time limit for the session. Qory Apiary writes 180
+  minutes for a workflow with no Time limit. The limit counts from the agent's start, as
+  `--timeout` does. At the limit the session stops, and the
+  full suite's after step and the push step still run. The documents can
   also contain `shared_run` and `full_suite`. With `full_suite` true, the session runs the full
   test suite when it ends, as The full suite in `docs/run.md` describes; qory reads `shared_run`
   and changes nothing for it.
@@ -892,11 +936,10 @@ release may change what an existing document does, and states it under Upgrading
     Before, the key with `chosen` came first whenever it was usable.
   - In a run without a wall, qory prints the error for a Codex argument on two lines:
     the fix, which contains the flag, then the cause. See `docs/run.md`.
-  - A run without a wall stops before Codex starts, exit 1, when `-c`, `--config`,
-    `--enable` or `--disable` sets `features.hooks`, `features.codex_hooks` or
-    `features.unified_exec_tty`. The second line of the error is ``the setting can turn
-    off the hooks Codex runs before each tool call, or make Codex run no hook for a
-    command sent to a shell with a terminal``.
+  - Forager stops a run without a wall before Codex starts, exit 1, when `-c`,
+    `--config`, `--enable` or `--disable` sets `features.hooks`, `features.codex_hooks`
+    or `features.unified_exec_tty`. qory stops these arguments first, with the lines of
+    a walled run: see the entry "qory stops every Codex run, walled or not" above.
   - Each session's environment has `QORY_SESSION`, the session's number in the run,
     counted from 1. Without a wall, Forager's value replaces any other. A walled run that
     passes `QORY_SESSION` by `wall.env`, `--env` or the harness's `env` does not start,
@@ -1211,10 +1254,12 @@ release may change what an existing document does, and states it under Upgrading
   the image of `wall.prebuild_image`, on the host before a run; a missing prebuild image
   fails the prebuild with the engine's error for the pull. See The engine proxy in
   `docs/run.md`.
-- The line of a run from a run code whose time limit came before the runtime started
-  contains `the workspace's harness` for a harness document that defines a stack, and `the
-  checkout's harness or the base it extends` for a run whose documents contain no
-  harness, in place of `the base of the checkout's harness, when it has one`.
+- The steps of a run before the agent's start, from the fetch of its repositories to the
+  setup commands, may take 30 minutes together, and no setting changes that. A run past
+  the limit closes `cancelled` with the reason `timeout`, exits 124, and prints a fix for
+  the step that was running, then `the run was cancelled during <step>:` and `the steps
+  before <runtime> starts may take at most 30 minutes`. A run from a control plane prints
+  these two lines alone. See Time limits in `docs/run.md`.
 - A run with a run key or a run code fetches every git source of its harness through the
   run's stack proxy: the stack, its modules, and the modules of the checkout's file,
   also when the checkout's file is the whole harness. The run's host proxy, with the
@@ -1344,11 +1389,11 @@ release may change what an existing document does, and states it under Upgrading
   `qory run: composed <n> entries from <m> modules for <runtime>` on stderr. You no longer
   run `qory harness compose` before `qory run`.
 - `qory run` opens the run at its gateway before it composes the harness, and closes the
-  run with the run's outcome once the session ends. `--timeout` counts from the open, so
-  it covers the compose and the session. A compose that fails closes the run as failed
+  run with the run's outcome once the session ends. `--timeout` counts from the agent's
+  start, so it covers the session alone. A compose that fails closes the run as failed
   with no session started (`no_session`), and qory prints the path of the run's record
-  after the error line. A signal or the time limit before the agent starts cancels the
-  run, exit 1 or 124.
+  after the error line. A signal, or the limit of the steps before the agent's start,
+  cancels the run before the agent starts, exit 1 or 124.
 - The record's `dev.qory.session.started` lists the harness's git sources, each with the
   full commit the compose used.
 - Given a run key, `qory run` reads a module or a stack that a file in the checkout lists
@@ -1494,12 +1539,13 @@ release may change what an existing document does, and states it under Upgrading
   takes its settings from qory and Forager, not from the arguments.``, and `--search`,
   with ``Remove `--search` from the run's Codex arguments.`` and the next line ``A Codex
   run takes its web search setting from qory and Forager, not from the arguments.``
-- A walled Codex run refuses `--dangerously-bypass-hook-trust` before `--`, with ``Remove
-  `--dangerously-bypass-hook-trust` from the run's Codex arguments.`` and the next line
-  ``A Codex run takes its hook trust from qory and Forager, not from the arguments.``, and
-  `--remote` and `--remote-auth-token-env`, also with `=`, with ``Remove `--remote` from
-  the run's Codex arguments.`` and the next line ``A Codex run takes its app server from
-  qory and Forager, not from the arguments.`` (`--remote-auth-token-env` likewise).
+- A Codex run, walled or not, stops on `--dangerously-bypass-hook-trust` before `--`,
+  with ``Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.`` and
+  the next line ``A Codex run takes its hook trust from qory and Forager, not from the
+  arguments.`` A walled Codex run stops on `--remote` and `--remote-auth-token-env`, also
+  with `=`, with ``Remove `--remote` from the run's Codex arguments.`` and the next line
+  ``A Codex run takes its app server from qory and Forager, not from the arguments.``
+  (`--remote-auth-token-env` likewise).
 - A walled Codex run refuses `--config` keys at `skills` or `cloud.skills`, under one,
   or above one, such as `-c skills.bundled.enabled=true` or `-c cloud={}`, with the
   `--config` line.
@@ -1510,7 +1556,7 @@ release may change what an existing document does, and states it under Upgrading
   `experimental_realtime_*_base_url`, `skills` or `cloud.skills`, a key under one or a
   table above one; when it enables or disables `plugins`, `apps` or `connectors`; or
   when it is `--oss`, `--local-provider`, `--profile`, `-p`, `--search`,
-  `--ignore-user-config`, `--dangerously-bypass-hook-trust` or `--remote`. qory prints
+  `--ignore-user-config` or `--remote`. qory prints
   Forager's two lines, such as ``✗ remove the -c that sets model_provider from the
   launch's arguments`` and the next line ``the session sets that setting for Codex, or the
   setting changes where Codex sends its requests`` for `-c model_provider=x`, or
@@ -1833,8 +1879,8 @@ release may change what an existing document does, and states it under Upgrading
   `wall.engine_proxy_file`, so the engine pulls each run's image through the run's
   gateway.
 - A walled run's image step holds an exclusive lock of `wall.engine_proxy_file`, waiting
-  for it within the run's time limit, so one run at a time pulls through the engine's
-  proxy. Replace the file only while no run is going.
+  for it within the limit of the steps before the agent's start, so one run at a time
+  pulls through the engine's proxy. Replace the file only while no run is going.
 - `qory run` prints `***` in place of a URL's `X-Amz-Signature`, `X-Amz-Security-Token`,
   `Signature`, `sig`, `token` or `access_token` value in its `qory run: fetched` lines,
   in the errors of a fetch and in the last error line. A run given a run key or a run

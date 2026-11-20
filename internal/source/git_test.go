@@ -1,6 +1,7 @@
 package source_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -577,6 +578,20 @@ func TestResolveGitRefusesAnExportListLinkedOutOfTheClone(t *testing.T) {
 	_, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: "main", Module: "core"}, source.Options{})
 	if want := "qory.yaml in " + url + " at main links outside the repository"; err == nil || err.Error() != want {
 		t.Errorf("err = %v, want %s", err, want)
+	}
+}
+
+// TestResolveStopsAGitCommandWhenItsContextEnds is a fetch whose Context ended already,
+// with no timeout: git is stopped, and the error is a FetchError that wraps the
+// context's cause.
+func TestResolveStopsAGitCommandWhenItsContextEnds(t *testing.T) {
+	url, _, _ := remote(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: "v1"}, source.Options{Context: ctx})
+	var fetch *source.FetchError
+	if !errors.As(err, &fetch) || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "was stopped: context canceled") {
+		t.Fatalf("err = %v, want a FetchError that wraps the context's end", err)
 	}
 }
 

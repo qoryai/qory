@@ -333,6 +333,9 @@ type Options struct {
 	Cache string
 	// Timeout is the longest one git command may run, 0 for no limit.
 	Timeout time.Duration
+	// Context, when set, stops every git command of the resolve once it ends, as qory run's
+	// setup limit does; nil stops none.
+	Context context.Context
 	// Memo is shared by every source of one compose, so one URL at one ref resolves once,
 	// to one commit; nil resolves each source on its own.
 	Memo *Memo
@@ -944,7 +947,8 @@ func cacheName(v string) string {
 
 // git runs one git command in dir and returns its combined output. A command still
 // running after opts.Timeout is killed and the error says so; a timeout of zero is no
-// limit.
+// limit. A command still running when opts.Context ends is killed too, and the error
+// wraps the context's cause.
 //
 // With opts.Git nil, git runs through [hostgit.Command], with every prompt off, the
 // terminal's, an askpass program's and ssh's, so a remote that wants a password or an
@@ -957,7 +961,11 @@ func cacheName(v string) string {
 // parent; its folder is one of the run's cache, which nothing but this compose writes. The output has the proxy's password hidden.
 func git(dir string, opts Options, args ...string) ([]byte, error) {
 	timeout := opts.Timeout
-	ctx, cancel := context.Background(), func() {}
+	parent := opts.Context
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := parent, func() {}
 	if timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 	}
@@ -973,8 +981,16 @@ func git(dir string, opts Options, args ...string) ([]byte, error) {
 		// for a repository no higher than dir, so the configuration of a repository
 		// above it sets no proxy, URL or header.
 		cmd.Env = append(proxygit.Env(cmd.Env, p), "GIT_CEILING_DIRECTORIES="+filepath.Dir(dir))
+		// A helper git started stops with git; a process left holding the output is not
+		// waited for past a second.
+		cmd.WaitDelay = time.Second
+		hostgit.Group(cmd)
 		out, err := cmd.CombinedOutput()
+		hostgit.StopGroup(cmd)
 		out = []byte(proxygit.Hide(string(out), p))
+		if parent.Err() != nil {
+			return out, fmt.Errorf("git %s was stopped: %w", args[0], context.Cause(parent))
+		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return out, fmt.Errorf("git %s ran past %s and was stopped", args[0], timeout)
 		}
@@ -991,7 +1007,13 @@ func git(dir string, opts Options, args ...string) ([]byte, error) {
 	if os.Getenv("GIT_SSH_COMMAND") == "" {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
 	}
+	cmd.WaitDelay = time.Second
+	hostgit.Group(cmd)
 	out, err := cmd.CombinedOutput()
+	hostgit.StopGroup(cmd)
+	if parent.Err() != nil {
+		return out, fmt.Errorf("git %s was stopped: %w", args[0], context.Cause(parent))
+	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return out, fmt.Errorf("git %s ran past %s and was stopped", args[0], timeout)
 	}

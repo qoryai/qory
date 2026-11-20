@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
@@ -24,7 +25,7 @@ func declares(access string) func(string) string {
 	return func(s string) string {
 		s += "workflows:\n  hello:\n"
 		if access == "" {
-			return s + "    time_limit: 1h\n"
+			return s + "    tier: light\n"
 		}
 		return s + "    access: " + access + "\n"
 	}
@@ -830,19 +831,21 @@ func checkRemovalStopped(t *testing.T, r codeRun, out session.Outcome, code int)
 	}
 }
 
-// TestATimeLimitDuringTheSetupContainersRemovalEndsAsInASetup is a read run whose time
-// limit ends while RemoveSetup runs: RemoveSetup's context ends at the limit, and the run
-// takes the path of a setup that the limit cut short: cancelled with timeout, exit 124,
-// and the line of the time limit, with no read_needs_setup_removed.
-func TestATimeLimitDuringTheSetupContainersRemovalEndsAsInASetup(t *testing.T) {
+// TestASetupLimitDuringTheSetupContainersRemovalEndsAsInASetup is a read run whose setup's
+// limit, made 15s here, ends while RemoveSetup runs: RemoveSetup's context ends at the
+// limit, and the run takes the path of a setup that the limit cut short: cancelled with
+// timeout, exit 124, and the line of the setup's limit, which names the removal, with no
+// read_needs_setup_removed. The session's time limit of 1h does not change it.
+func TestASetupLimitDuringTheSetupContainersRemovalEndsAsInASetup(t *testing.T) {
 	listsRepositories(t)
 	removesSetupWith(t, func(ctx context.Context) error {
 		<-ctx.Done()
 		return fmt.Errorf("the removal stopped: %w", ctx.Err())
 	})
-	r, _ := readRun(t, func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 15s\n" }, readImage, "")
+	defer cmd.SetSetupLimit(15 * time.Second)()
+	r, _ := readRunDocuments(t, nil, func(s string) string { return s + "workflows:\n  hello: {}\n" }, func(d map[string]any) { d["time_limit_minutes"] = 60 }, readImage, "")
 	checkRemovalStopped(t, r, session.Outcome{State: "cancelled", Reason: "timeout", ExitCode: 124}, 124)
-	wants(t, r.out+r.err.Error(), "the run was cancelled at its time limit of 15s, before ")
+	wants(t, r.out+r.err.Error(), "✗ the run was cancelled during the removal of the setup container:\n  the steps before ")
 	lacks(t, r.out+r.err.Error(), "read_needs_setup_removed")
 }
 

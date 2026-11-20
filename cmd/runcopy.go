@@ -493,7 +493,7 @@ var runRecordContainer = func(ctx context.Context, c gitContainer) (int, error) 
 // opens the copy. The container's lines go nowhere. When the container does not start, fails or
 // runs past that limit, each such repository is other and the setup's end is unknown, so the git
 // session keeps the copy for such a repository and for a path under the setup's ignore rules. A
-// stop or the run's time limit that ends ctx is the error.
+// stop or the end of the run's setup, [setupLimit], that ends ctx is the error.
 func (c *runCopy) recordRepositories(ctx context.Context, run openedRun, spec *runSpec) error {
 	gs, needed, err := c.dir.RecordSession(ctx, c.repos, c.out)
 	if err != nil {

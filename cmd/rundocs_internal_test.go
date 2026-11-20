@@ -19,30 +19,45 @@ import (
 	"github.com/qoryai/qory/internal/report"
 )
 
-// TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet is the line of a run from a run code
-// whose time limit came before the runtime started: its fix is a longer limit in Qory
-// Apiary or in the workflows of the harness, never --timeout, which such a run does not
-// take. The workflows are in the base of a harness document with extends, in a harness
-// document that defines a stack, and in the checkout's harness or its base for a run
-// without a harness document.
-func TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet(t *testing.T) {
-	const line = "set a longer Time limit for the workflow example on the Workflows page in Qory Apiary, or a longer workflows.example.time_limit in %s: the run was cancelled at its time limit of 45m0s, before claude started"
-	for _, c := range []struct {
-		harness string
-		defines bool
-		where   string
-	}{
-		{"{}\n", false, "the base of the workspace's harness"},
-		{"{}\n", true, "the workspace's harness"},
-		{"", false, "the checkout's harness or the base it extends"},
-	} {
-		r := &codeRun{workflow: "example", defines: c.defines}
-		if c.harness != "" {
-			r.harness = []byte(c.harness)
+// TestASetupPastItsLimitNamesItsStep is the line of a run whose setup passed its limit
+// of 30 minutes: for each step, line 1 is the fix, with at most 100 characters with
+// "qory run: ", which is longer than "✗ ", and the cause names the step, then the runtime
+// and the limit. A dispatched run shows the cause alone, whose line 1 has at most 100
+// characters too, also for a runtime not known yet or with a long name, and no line names
+// Qory Apiary.
+func TestASetupPastItsLimitNamesItsStep(t *testing.T) {
+	if setupLimit != 30*time.Minute {
+		t.Errorf("the setup's limit is %s, want 30m0s", setupLimit)
+	}
+	runtimes := map[string]string{"claude": "claude", "": "the agent", "a-runtime-with-a-name-of-forty-characters": "a-runtime-with-a-name-of-forty-characters"}
+	for step := stepNone; step <= stepSetupRecord; step++ {
+		s, ok := setupSteps[step]
+		if !ok {
+			t.Fatalf("step %d has no name", step)
 		}
-		if got, want := r.timedOutLine(45*time.Minute, "claude"), fmt.Sprintf(line, c.where); got != want {
-			t.Errorf("got  %q\nwant %q", got, want)
+		for runtime, shown := range runtimes {
+			cause := "the run was cancelled during " + s.name + ":\nthe steps before " + shown + " starts may take at most 30 minutes"
+			for _, dispatched := range []bool{false, true} {
+				got := setupPassed(step, runtime, 30*time.Minute, dispatched).Error()
+				want := s.fix + "\n" + cause
+				if dispatched {
+					want = cause
+				}
+				if got != want {
+					t.Errorf("step %d, %q, dispatched %v:\ngot  %q\nwant %q", step, runtime, dispatched, got, want)
+				}
+				first, _, _ := strings.Cut(got, "\n")
+				if n := len("qory run: " + first); n > 100 {
+					t.Errorf("step %d, %q, dispatched %v: line 1 has %d characters with qory run: %q", step, runtime, dispatched, n, first)
+				}
+				if strings.Contains(got, "Qory Apiary") || strings.HasSuffix(got, ".") {
+					t.Errorf("step %d, %q, dispatched %v: %q", step, runtime, dispatched, got)
+				}
+			}
 		}
+	}
+	if got, want := setupPassed(stepFetch, "", time.Second, true).Error(), "the run was cancelled during the fetch of the run's repositories:\nthe steps before the agent starts may take at most 1s"; got != want {
+		t.Errorf("a setup past a limit of 1s before the runtime is known:\ngot  %q\nwant %q", got, want)
 	}
 }
 
@@ -546,7 +561,9 @@ func TestAHarnessDocumentWithASourceQoryDoesNotFetchStops(t *testing.T) {
 // TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime is a harness document
 // with no extends, whose section defines a stack with workflows: harnessChecked checks
 // its modules and no base, and qory writes it with target.runtime set to the run's
-// runtime, run_settings.runtime, the workflows as the documents have them.
+// runtime, run_settings.runtime, the workflows as the documents have them but for
+// time_limit, which qory leaves out: a run's time limit is the documents'
+// time_limit_minutes alone.
 func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing.T) {
 	defined := func(git string) *contracts.HarnessDocument {
 		return &contracts.HarnessDocument{Harness: contracts.HarnessSection{
@@ -577,13 +594,19 @@ func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing
 			t.Fatal(err)
 		}
 		h := doc.Harness
-		if !r.defines || h.Extends != nil || h.Target.Runtime != settings.Runtime || len(h.Modules) != 1 || h.Workflows["example"] != (contracts.HarnessWorkflow{Access: "write", TimeLimit: "45m"}) {
-			t.Errorf("run settings %+v: defines %v, harness.yaml has:\n%s", settings, r.defines, r.harness)
+		if h.Extends != nil || h.Target.Runtime != settings.Runtime || len(h.Modules) != 1 || h.Workflows["example"] != (contracts.HarnessWorkflow{Access: "write"}) {
+			t.Errorf("run settings %+v: harness.yaml has:\n%s", settings, r.harness)
+		}
+		if strings.Contains(string(r.harness), "time_limit") {
+			t.Errorf("harness.yaml has a time_limit:\n%s", r.harness)
 		}
 	}
 	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
-	if err != nil || r.defines || strings.Contains(string(r.harness), "target") {
-		t.Errorf("a document with extends: %v, defines %v, harness.yaml has:\n%s", err, r != nil && r.defines, r.harness)
+	if err != nil {
+		t.Fatalf("a document with extends: %v", err)
+	}
+	if strings.Contains(string(r.harness), "target") {
+		t.Errorf("a document with extends: harness.yaml has:\n%s", r.harness)
 	}
 }
 
@@ -790,6 +813,31 @@ func TestFullSuiteOfTheDocumentsIsTheRunsFullSuite(t *testing.T) {
 		if r.fullSuite != c.want || fullSuiteOf(r) != c.want {
 			t.Errorf("%s: fullSuite %v, want %v", c.name, r.fullSuite, c.want)
 		}
+	}
+}
+
+// TestALaterSessionStartGivesALaterDeadline is [sessionDeadline] for session 1, whose clock
+// starts at its join, and for a later session, whose clock starts when it starts: each
+// deadline is its start plus its limit, so a later start gives a later deadline. A limit
+// of 0 or below gives no deadline.
+func TestALaterSessionStartGivesALaterDeadline(t *testing.T) {
+	joined := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
+	first := sessionDeadline(joined, 30*time.Minute)
+	if want := joined.Add(30 * time.Minute); !first.Equal(want) {
+		t.Errorf("session 1 ends at %v, want %v", first, want)
+	}
+	second := sessionDeadline(first.Add(5*time.Minute), 60*time.Minute)
+	if want := joined.Add(95 * time.Minute); !second.Equal(want) {
+		t.Errorf("session 2 ends at %v, want %v", second, want)
+	}
+	if !second.After(first) {
+		t.Errorf("session 2 ends at %v, not after session 1 at %v", second, first)
+	}
+	if got := sessionDeadline(joined, 0); !got.IsZero() {
+		t.Errorf("a session with no limit ends at %v, want no deadline", got)
+	}
+	if got := sessionDeadline(joined, -time.Minute); !got.IsZero() {
+		t.Errorf("a session with a negative limit ends at %v, want no deadline", got)
 	}
 }
 

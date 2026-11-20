@@ -886,9 +886,9 @@ func runGit(ctx context.Context, p *proxygit.Proxy, make func(context.Context) (
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	// A process left holding the output is not waited for past this.
 	cmd.WaitDelay = time.Second
-	group(cmd)
+	hostgit.Group(cmd)
 	err = cmd.Run()
-	stopGroup(cmd)
+	hostgit.StopGroup(cmd)
 	if err != nil {
 		switch {
 		case errors.Is(context.Cause(call), errLimit):

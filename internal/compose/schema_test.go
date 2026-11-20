@@ -15,7 +15,8 @@ import (
 
 // TestSchemas validates every fixture document against the contract's schemas: a
 // qory.yaml that composes passes config.schema.json, one refused for its apiVersion, a
-// kind, its qory key, its workflows, its runtimes or its bind fails it,
+// kind, its qory key, its workflows, its runtimes, its bind or a key it does not read
+// fails it,
 // every module manifest passes module.schema.json unless the fixture expects it refused,
 // every MCP server file passes
 // mcp.schema.json unless the fixture expects it refused, the stack a fixture extends,
@@ -63,6 +64,9 @@ func TestSchemas(t *testing.T) {
 		// the schemas state the same rule for the document that has the plan.
 		planOnNoWrite := strings.HasPrefix(fix, "Remove `plan` from ")
 		wantInvalid = wantInvalid || planOnNoWrite && fileHas(filepath.Join(dir, "qory.yaml"), "plan:")
+		// A key the file does not read is refused by the decoder, and the schema of that file
+		// allows no such key either.
+		wantInvalid = wantInvalid || fix == "Remove the key, or rename it to one qory.yaml reads."
 		err := composeSchema.Validate(document(t, filepath.Join(dir, "qory.yaml")))
 		if wantInvalid && err == nil {
 			t.Errorf("%s: the document passed the schema; want a failure", dir)
@@ -72,7 +76,8 @@ func TestSchemas(t *testing.T) {
 		}
 		if f := filepath.Join(dir, "stack", "qory-stack.yaml"); fileExists(f) {
 			wantBadStack := (strings.HasPrefix(fix, "Set workflows.") || pinRefused) && strings.Contains(string(errText), " is in stack/qory-stack.yaml.") ||
-				planOnNoWrite && fileHas(f, "plan:")
+				planOnNoWrite && fileHas(f, "plan:") ||
+				fix == "Remove the key, or rename it to one qory-stack.yaml reads." && strings.Contains(string(errText), " of stack/qory-stack.yaml.")
 			err := stackSchema.Validate(document(t, f))
 			if wantBadStack && err == nil {
 				t.Errorf("%s passed the schema; want a failure", f)

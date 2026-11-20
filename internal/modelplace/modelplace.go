@@ -86,12 +86,12 @@ func RunEffort(name string) (runtimes.ValuedPlace, bool) {
 	return run, true
 }
 
-// AgentEffort is the frontmatter key an agent's file of the runtime named name takes its
-// effort value in, with the values it accepts there, and true; false when its descriptor
-// has no place for an agent's effort.
+// AgentEffort is the key an agent's file of the runtime named name takes its effort value
+// in, a frontmatter key or a TOML key, with the values it accepts there, and true; false
+// when its descriptor has no place for an agent's effort.
 func AgentEffort(name string) (runtimes.AgentPlace, bool) {
 	p, ok := Of(name)
-	if !ok || p.Effort == nil || p.Effort.Agent == nil || p.Effort.Agent.Frontmatter == "" {
+	if !ok || p.Effort == nil || p.Effort.Agent == nil || p.Effort.Agent.Frontmatter == "" && p.Effort.Agent.TOML == "" {
 		return runtimes.AgentPlace{}, false
 	}
 	return *p.Effort.Agent, true

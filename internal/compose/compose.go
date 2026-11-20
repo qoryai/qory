@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -273,6 +274,9 @@ type Options struct {
 	// Git, when set, fetches every git source through a run's stack proxy, see
 	// [source.Git]; nil fetches with the person's git.
 	Git *source.Git
+	// Context, when set, stops every git command of the compose once it ends, see
+	// [source.Options.Context]; nil stops none.
+	Context context.Context
 	// Env are the configuration's variables, written over what the modules export.
 	Env map[string]string
 	// Base is the base stack [LoadBase] resolved, recorded in the result and enforced on
@@ -347,7 +351,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		if pl.Name == "" {
 			who = "module at " + ps.Shown()
 		}
-		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo, Git: opts.Git}
+		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Context: opts.Context, Memo: opts.Memo, Git: opts.Git}
 		if opts.Git != nil && opts.Git.Named != nil {
 			so.Name = opts.Git.Named.Module(pl.Name)
 		}

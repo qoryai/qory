@@ -408,18 +408,31 @@ When the run ends, qory says how, and its exit status goes with it:
   exit 1. The line contains `the agent` in place of `<runtime>` when qory had not read the
   runtime yet: when the signal came late in the run's open or during the fetch of the
   run's repositories, and when the compose failed after the signal.
-- `✗ give the run a longer --timeout: the run was cancelled at its time limit of <d>,
-  before <runtime> started`: the limit came before the runtime started, exit 124. The
-  line contains `the agent` in place of `<runtime>` when the limit came during the fetch
-  of the run's repositories, and when the compose failed after the limit.
-  A run from a run code, which takes no `--timeout`, prints `✗ set a longer Time limit
-  for the workflow <workflow> on the Workflows page in Qory Apiary, or a longer
-  workflows.<workflow>.time_limit in the
-  base of the workspace's harness: the run was cancelled at its time limit of <d>, before
-  <runtime> started` instead. The line contains `the workspace's harness` for a harness
-  that defines a stack, and `the checkout's harness or the base it extends` for a run
-  whose documents contain no harness (see [What the run takes from the
-  response](#what-the-run-takes-from-the-response)).
+- `✗ <fix>`, then `the run was cancelled during <step>:` and `the steps before <runtime>
+  starts may take at most 30 minutes`: the steps before the agent's start ran past their
+  limit of 30 minutes (see [Time limits](#time-limits)), exit 124. `<step>` is the step
+  that was running, and line 1 is what to do about it:
+
+  | `<step>` | Line 1 |
+  |---|---|
+  | the read of the work item's branch | `check this machine's connection to the gateway, then start the run again` |
+  | the fetch of the run's repositories | `check the gateway's connection to the repositories' host, then start the run again` |
+  | the compose of the harness | `check the connection to the harness's git hosts, or use fewer or smaller modules` |
+  | the install of the runtime | `set pool.registry in forager.yaml to a runtime cache, then start the run again` |
+  | the load of the push checks | `check that this machine's container engine responds, then start the run again` |
+  | the switch to the work item's branch | `check the disk that holds the checkout, then start the run again` |
+  | the copy of the checkout | `make the checkout smaller, with less history, Git LFS content and .qory/artifacts` |
+  | the write of the Codex home | `check your cache directory's disk, or use fewer or smaller Codex skills, rules and agents` |
+  | the fetch of the run's image | `pull the run's image on this machine before the run, or start fewer runs at once` |
+  | the setup commands | `move slow work of the lifecycle commands in devcontainer.json into the run's image` |
+  | the removal of the setup container | `check that this machine's container engine responds, then start the run again` |
+  | the record of what the setup changed | `make the setup commands change fewer files in the checkout, then start the run again` |
+
+  The line contains `the agent` in place of `<runtime>` when the limit came during the
+  read of the work item's branch or the fetch of the run's repositories, and when the
+  compose failed after the limit. A run from
+  a control plane prints the cause alone, from `the run was cancelled`, and a run from a
+  run code ends it with `; the code is used`.
 - `✗ the run failed: its events could not be recorded, and <runtime> was stopped`: the
   gateway could not take an event the session sent, exit 1.
 - `✗ the run was lost: it lost contact with the gateway for 1m30s, and <runtime> was
@@ -812,7 +825,7 @@ session:
   instance:                # optional
     name: build-01         # how the server shows this machine; the host name by default
   run:                     # optional
-    timeout: 5h30m         # stop a run that runs this long, compose included
+    timeout: 5h30m         # stop the agent this long after it starts
     stop_signal: SIGINT    # requests it to stop; the runtime's descriptor's, else SIGTERM
     stop_grace: 30s        # between that signal and SIGKILL; 10s
 wall:                      # start the runtime in a container; optional
@@ -916,7 +929,7 @@ that a request to npm follows one to the same scheme and host.
 
 A request waits at most 30 seconds to connect and 30 seconds to finish the TLS handshake,
 60 seconds for the response's headers, and 60 seconds for the next byte of a response's
-body. A run without a time limit stops with the error of the request that waited longer,
+body. A run stops with the error of the request that waited longer,
 for example:
 
 ```text
@@ -950,7 +963,8 @@ response, `qory run` sends the same request again after 2, 4 and 8 seconds, then
 15 seconds, or after the response's `Retry-After` up to 30 seconds. The registry returns
 503 while it fills its cache of a new version. Only the end of the run
 stops the tries: `qory run` sends the request again until the registry returns the file, or
-until the run's time limit passes, you cancel it (SIGINT) or it gets SIGTERM. At the first
+until the steps before the agent's start pass their limit of 30 minutes, you cancel it
+(SIGINT) or it gets SIGTERM. At the first
 retry, and every 5 minutes after that, `qory run` prints one line on stderr, with the
 status of the last response, or `no response`:
 
@@ -958,10 +972,10 @@ status of the last response, or `no response`:
 qory run: registry.example.com has not returned Claude Code (503); check pool.registry
 ```
 
-A run that ends while it waits ends as a run does before its session starts: at the time
-limit with `give the run a longer --timeout: the run was cancelled at its time limit of
-<limit>, before claude started` and exit 124, and at SIGINT or SIGTERM with `the run was
-cancelled: qory run got SIGTERM before claude started` and exit 1.
+A run that ends while it waits ends as a run does before its session starts: at the limit
+of 30 minutes with `the run was cancelled during the install of the runtime:` and exit
+124, and at SIGINT or SIGTERM with `the run was cancelled: qory run got SIGTERM before
+claude started` and exit 1.
 
 When the registry returns 401 with a Bearer challenge, `qory run` gets a token from the
 challenge's realm. The realm must be the token route of the Qory Apiary instance that
@@ -1088,17 +1102,35 @@ it reads the tarball:
 - no signature, or a signature that does not verify:
 
   ```text
-  qory run: Check the source of the runtime's releases
-  npm's signature of codex 0.170.0 does not verify
-  The key is SHA256:<keyid>
+  qory run: Check the source of codex's releases.
+    npm's signature of codex 0.170.0 does not verify.
+    The key is SHA256:<keyid>.
   ```
 
-- only keys that qory does not have, or that expired: a newer qory has npm's new key.
+- only keys that qory does not have: a newer qory has npm's new key.
 
   ```text
   qory run: Update qory.
-  npm signed codex 0.170.0 with a key that this qory does not have.
-  The key is SHA256:<keyid>.
+    npm signed codex 0.170.0 with a key this qory does not have.
+    The key is SHA256:<keyid>.
+  ```
+
+- only keys that expired: a newer version of the runtime is signed by npm's current key.
+  With a pinned version, the fix is to pin a newer one:
+
+  ```text
+  qory run: Pin a newer version of codex.
+    npm signed codex <version> with a key that expired on 2025-01-29.
+    The key is SHA256:<keyid>.
+  ```
+
+  With no pin, the fix is to check where the release comes from, npm or the registry's
+  runtime cache:
+
+  ```text
+  qory run: Check the source of codex's releases.
+    npm signed codex <version> with a key that expired on 2025-01-29.
+    The key is SHA256:<keyid>.
   ```
 
 A version's folder that an earlier run installed is used only after the same check.
@@ -1140,8 +1172,8 @@ came from. For Codex, it also contains the other files of Codex's folder in the 
    lets anyone run it and `0644` otherwise; `bin/codex`, `bin/codex-code-mode-host`,
    `codex-resources/bwrap` and `codex-path/rg` are always `0755`. A link, a hard link, a
    path with a `.` or `..` segment, an entry twice, a file `integrity` at the folder's
-   top, more than 10,000 entries, or no `bin/codex` stops the run with `Check the source
-   of the runtime's releases`. A missing or empty `bin/codex-code-mode-host`,
+   top, more than 10,000 entries, or no `bin/codex` stops the run with the fix line
+   `Check the source of codex's releases.` A missing or empty `bin/codex-code-mode-host`,
    `codex-resources/bwrap` or `codex-path/rg` means that Codex moved its files, and stops
    the run with `Update qory.`, then `The tarball of codex <version> has no` and the
    missing file on the next line. The tarball may unpack to at most
@@ -1168,8 +1200,9 @@ running container. When the program fails in another way, the install removes no
 version's folder.
 
 Two runs that need the same version do not both read its tarball. The run that finds no
-folder takes the lock `<runtimes>/<runtime>/.lock-<version>` and reads the tarball; the other
-waits for that lock, as long as its time limit allows, and then uses the folder. The
+folder takes the lock `<runtimes>/<runtime>/.lock-<version>` and reads the tarball; the
+other waits for that lock, as long as the limit of the steps before the agent's start
+allows, and then uses the folder. The
 lock `.lock` is not held during a download.
 
 Forager checks only the version's folder, so before an install, `qory run` checks the
@@ -1201,9 +1234,9 @@ qory run: the tarball of claude 2.1.320 does not match the checksum
 A tarball that does not match its sha512 checksum stops a person's run with:
 
 ```text
-qory run: Check the source of the runtime's releases
-The tarball of claude 2.1.320 does not match the checksum
-  sha512-<checksum>
+qory run: Check the source of claude's releases.
+  The tarball of claude 2.1.320 does not match the checksum
+  sha512-<checksum>.
 ```
 
 A version's folder that was not installed from the tarball with the release's checksum
@@ -1231,14 +1264,24 @@ A denied connection is recorded, and the session goes on. Only a time limit you 
 a session.
 
 Set it with `--timeout 5h30m`, or with `session.run.timeout`. The limit counts from the
-run's open, so it covers the compose and the session. When the limit is reached:
+agent's start, so it covers the agent's session alone: not the steps before the agent's
+start, which have a separate limit of 30 minutes, and not the full suite's after step (see [The full
+suite](#the-full-suite)). When the limit is reached:
 
-- the runtime is stopped, or does not start when the compose took the time,
+- the runtime is stopped,
 - `dev.qory.run.exited` records the limit as the reason,
 - `qory run` exits 124, as `timeout(1)` does.
 
-A compose that is running when the limit is reached runs to its end; the runtime does
-not start after it.
+The steps before the agent's start, from the run's open to the join, may take 30 minutes
+together: the fetch of the run's repositories, the compose, the install of the runtime, the
+copy, the fetch of the run's image, the setup commands and the record of what they changed.
+No setting changes this limit. When it is reached, the step that is running stops, the
+runtime does not start, `dev.qory.run.exited` records `cancelled` with the reason `timeout`,
+and `qory run` exits 124 with a line that names the step (see [What `qory run`
+does](#what-qory-run-does)). The compose stops at the limit too: qory stops the git command
+that fetches a source of the harness. Setup commands that run inside the agent's container, with
+`wall.setup: inside`, run in the join, so the session's time limit covers them in place of
+this one.
 
 A walled write run in a copy can run past the limit: its setup removal has up to 2 minutes, and its git session
 up to 5 minutes, plus a minute for each 20,000 files, folders and links in the copy and a minute for each 2 GiB
@@ -1246,12 +1289,16 @@ its files take on disk, at most 60 minutes.
 
 `--timeout 0` lifts the limit `forager.yaml` sets.
 
-A run from a run code takes its limit from elsewhere, in this order:
-`time_limit_minutes` in the run's documents, then
-`workflows.<name>.time_limit` of the run's workflow in the stack that the harness
-defines, or in the `qory-stack.yaml` of the stack that it extends, then 3 hours.
-`--timeout` stops it with exit 2, and `session.run.timeout` does not
-apply to it (see [The run key from a run code](#the-run-key-from-a-run-code)).
+A run from a run code takes the time limit of its session only from `time_limit_minutes`
+in the run's documents, counted from the agent's start as for any run. Qory Apiary writes it
+from the Time limit of the run's workflow on the Workflows page, and writes 180 minutes for
+a workflow with no Time limit. Documents with no `time_limit_minutes` give the session no
+time limit: qory sets none, and a stack sets none. At the limit the session stops as
+any run stops at its limit, and the steps after the agent's exit still run: the full
+suite's after step (see [The full suite](#the-full-suite)) and the push step of a write run
+(see [The push step of a write run](#the-push-step-of-a-write-run)). `--timeout` stops the
+run with exit 2, and `session.run.timeout` does not apply to it (see [The run key from a run
+code](#the-run-key-from-a-run-code)).
 
 ### How the runtime is stopped
 
@@ -2447,8 +2494,7 @@ Each of these errors stops the run before the code is sent, exit 2:
   from Qory Apiary's response to the code`
 - `leave out the arguments after --: a run from a run code starts its workflow with the
   arguments qory sets`
-- `leave out --timeout: a run from a run code takes its time limit from Qory Apiary's
-  response to the code, else from its workflow`
+- `leave out --timeout: a run from a run code takes its time limit from Qory Apiary`
 
 These stop it after the redemption, exit 1. The code is used, so each needs a new one:
 
@@ -4147,8 +4193,9 @@ before the copy step and the push step.
 `harness.extensions.software-factory.command_limits_minutes.full_suite`, a whole number from 1 to
 60; qory reads it from the harness composed at `target_version`, so a commit on the work item's
 branch does not change it. Any other value is read as 60. The limit is the time limit of the
-after step, which includes starting the step. The run's `--timeout` covers the agent's runtime
-alone, so a run can last `--timeout` plus the limit. A step past the limit is cut. When the
+after step, which includes starting the step. The session's time limit counts from the agent's
+start and does not cover the after step (see [Time limits](#time-limits)), so a run can last that
+limit plus the suite's limit, after the steps before the agent's start. A step past the limit is cut. When the
 script had written `ran <commit>`, the suite ends `timeout` and is red. When it had not, for
 example because a clone hung, the command never started, and the suite did not start.
 
@@ -5116,6 +5163,13 @@ resolved. A
 walled read run whose harness ships `settings/codex/read-access.rules` gets those rules
 as `rules/read-access.rules`; a run with any other access gets none.
 
+`config.toml` also sets `features.unified_exec_tty = false`, as the composed home's
+`config.toml` does for a run without a wall. With a terminal, a shell that the agent starts
+takes later commands through `write_stdin`, for which Codex 0.170.0 runs no `PreToolUse` hook,
+so the harness's guard would not run for them. A call with `tty: true` fails with
+``TTY execution is disabled by config; omit `tty` or set it to false.``, and an agent
+cannot start an interactive shell.
+
 A walled Codex run copies the composed home's `skills/`, `rules/` and `agents/` with every
 link replaced by the file or folder it leads to, since Codex 0.167.2 passes over a
 `SKILL.md` that is a link. A link whose target lies outside the composed home, the folders
@@ -5131,21 +5185,37 @@ starts with ``remove the run's folder, or start the run again with another id`` 
 next line ``A walled Codex run writes its Codex home in a new folder, <folder>, and that
 folder exists``.
 
-### Codex arguments a run refuses
+### Codex arguments that stop a run
 
-qory and Forager set the model provider, the settings and the hooks of a walled Codex
-run. Forager puts its `--config` flags ahead of the run's Codex arguments, and Codex
-takes the last flag for a key. So a walled Codex run stops before the agent starts, with
-exit status 1, when an argument before `--` is one of these:
+qory and Forager set the model provider, the settings and the hooks of a Codex run.
+Forager puts its `--config` flags ahead of the run's Codex arguments, and Codex takes the
+last flag for a key.
 
+qory stops every Codex run, walled or not, before the agent starts, with exit status 1,
+when an argument before `--` turns off the trust of the hooks or changes a hook setting:
+
+- `--dangerously-bypass-hook-trust`, also with `=`: ``Remove
+  `--dangerously-bypass-hook-trust` from the run's Codex arguments.`` and the next line
+  ``A Codex run takes its hook trust from qory and Forager, not from the arguments.``
 - `--config <key>=<value>` in the forms `--config`, `--config=`, `-c`, `-c<key>=<value>`
-  and `-c=<key>=<value>`, where the key is a key qory or Forager sets, `skills` or
-  `cloud.skills`, a key under one, or a table above one, such as `cloud`. The line is
-  ``Remove `--config <key>` from the run's Codex arguments.`` and the next line ``A Codex
-  run takes this key from qory and Forager, not from the arguments.``
-- `--enable <feature>` or `--disable <feature>`, also with `=`, for every feature:
-  ``Remove `--enable <feature>` from the run's Codex arguments.`` and the next line ``A
-  Codex run takes this key from qory and Forager, not from the arguments.``
+  and `-c=<key>=<value>`, where the key is `hooks`, `features.hooks`,
+  `features.codex_hooks` or `features.unified_exec_tty`, a key under one, such as
+  `hooks.Stop`, or the table `features` above them: ``Remove `--config <key>` from the
+  run's Codex arguments.`` and the next line ``A Codex run takes this key from qory and
+  Forager, not from the arguments.``
+- `--enable <feature>` or `--disable <feature>`, also with `=`, of `hooks`, `codex_hooks`
+  or `unified_exec_tty`: ``Remove `--enable <feature>` from the run's Codex arguments.``
+  and the next line ``A Codex run takes this key from qory and Forager, not from the
+  arguments.``
+
+qory also stops a walled Codex run in the same way when an argument before `--` is one of
+these:
+
+- `--config <key>=<value>` in the same forms, where the key is another key qory or
+  Forager sets, `skills` or `cloud.skills`, a key under one, or a table above one, such
+  as `cloud`, with the `--config` lines.
+- `--enable <feature>` or `--disable <feature>`, also with `=`, for every other feature,
+  with the `--enable` lines.
 - `--oss` or `--local-provider`: ``Remove `<flag>` from the run's Codex arguments.`` and
   the next line ``A Codex run takes its model provider from qory and Forager, not from the
   arguments.``
@@ -5157,9 +5227,6 @@ exit status 1, when an argument before `--` is one of these:
   not from the arguments.``
 - `--search`: ``Remove `--search` from the run's Codex arguments.`` and the next line ``A
   Codex run takes its web search setting from qory and Forager, not from the arguments.``
-- `--dangerously-bypass-hook-trust`: ``Remove `--dangerously-bypass-hook-trust` from the
-  run's Codex arguments.`` and the next line ``A Codex run takes its hook trust from qory
-  and Forager, not from the arguments.``
 - `--remote <addr>` or `--remote-auth-token-env <name>`, also with `=`: ``Remove
   `--remote` from the run's Codex arguments.`` and the next line ``A Codex run takes its
   app server from qory and Forager, not from the arguments.``, or the same with
@@ -5168,8 +5235,9 @@ exit status 1, when an argument before `--` is one of these:
 A key or feature in the line has each control character written as an escape, such as
 `\n`. Arguments after `--` pass unchanged.
 
-An unwalled Codex run gets a shorter check, from Forager: the run stops before Codex
-starts, with exit status 1, when a Codex argument before `--` is one of these:
+A Codex run without a wall gets a shorter check of its other arguments, from Forager: the
+run stops before Codex starts, with exit status 1, when a Codex argument before `--` is
+one of these:
 
 - `--config <key>=<value>` or `-c` in any form, where the key is a key Forager sets for
   Codex, such as `model_provider`, `web_search` or `features.apps`, or `model_providers`,
@@ -5177,12 +5245,8 @@ starts, with exit status 1, when a Codex argument before `--` is one of these:
   `chatgpt_base_url`, `experimental_realtime_*_base_url`, `skills` or `cloud.skills`, a
   key under one, or a table above one.
 - `--enable` or `--disable` of `plugins`, `apps` or `connectors`.
-- `--config <key>=<value>` or `-c` in any form that sets `features.hooks`,
-  `features.codex_hooks` or `features.unified_exec_tty`, a key under one, such as
-  `features.hooks.enabled`, or a table that sets one, such as `-c features={hooks=false}`;
-  or `--enable` or `--disable` of `hooks`, `codex_hooks` or `unified_exec_tty`.
-- `--oss`, `--local-provider`, `--profile`, `-p`, `--search`, `--ignore-user-config`,
-  `--dangerously-bypass-hook-trust` or `--remote`.
+- `--oss`, `--local-provider`, `--profile`, `-p`, `--search`, `--ignore-user-config` or
+  `--remote`.
 
 qory prints Forager's two lines: the fix, which contains the flag, then the cause. For
 `-c model_provider=x` they are:
@@ -5200,30 +5264,7 @@ are:
   the session sets <key>, and a later pair overrides the session's value
 ```
 
-For `features.hooks`, `features.codex_hooks` and `features.unified_exec_tty`, the first
-line contains the flag and the setting, and the second line is the same for all three.
-For `--disable hooks` they are:
-
-```
-✗ remove the --disable that sets features.hooks from the launch's arguments
-  the setting can turn off the hooks Codex runs before each tool call, or make Codex run no hook for a command sent to a shell with a terminal
-```
-
-A `--config features={...}` pair sets the whole `features` table, so Codex drops the
-feature settings that earlier `--config` pairs set. The session passes
-`features.plugins=false` and `features.apps=false` in such pairs. Forager's lines contain
-`features.plugins`, the first of the two, and the run stops. For
-`--config features={hooks=false}` they are:
-
-```
-✗ remove the --config pair that sets features.plugins from the launch's arguments
-  the session sets features.plugins, and a later pair overrides the session's value
-```
-
-For `-c features={hooks=false}`, qory prints the hook lines, with `-c` and
-`features.hooks` in the first line.
-
-Every other argument of an unwalled run passes unchanged.
+Every other argument of a run without a wall passes unchanged.
 
 ### A run that may write works in a copy
 
@@ -5777,8 +5818,8 @@ because a process in the container can still write the checkout. qory closes the
 start the run again from the work item in Qory Apiary: the setup container of this read run was not removed, so a process in the container can write the checkout: <error> (read_needs_setup_removed); the code is used
 ```
 
-A time limit or a signal that ends the removal closes the run as it closes a setup that
-it cuts short: `cancelled` with `timeout`, exit 124, or `cancelled` with `interrupted`,
+The limit of the steps before the agent's start, or a signal, that ends the removal closes
+the run as it closes a setup that it cuts short: `cancelled` with `timeout`, exit 124, or `cancelled` with `interrupted`,
 exit 1.
 
 A read-write mount from `--mount` or `wall.mounts` stops a read run after the compose, exit 2,

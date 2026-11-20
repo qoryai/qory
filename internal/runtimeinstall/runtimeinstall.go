@@ -188,9 +188,11 @@ func (i *Installed) Release() {
 // Program is the path of the runtime's program: <Dir>/bin/<Runtime>.
 func (i Installed) Program() string { return filepath.Join(i.Dir, "bin", i.Runtime) }
 
-// textRelease is the first line of each refusal of what the fetch returned: the fix. The
-// cause follows on the second line.
-const textRelease = "Check the source of the runtime's releases\n"
+// textRelease is the first line of each refusal of what the fetch of runtime returned:
+// the fix. The cause follows on lines indented two spaces, each sentence with a full stop.
+func textRelease(runtime string) string {
+	return "Check the source of " + runtime + "'s releases."
+}
 
 // Install installs the runtime o names, as the package's documentation says, and
 // returns it. It takes as long as ctx allows. Every error's text starts with what to
@@ -221,14 +223,14 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 		if !versionShape.MatchString(got) {
 			got = strconv.Quote(got)
 		}
-		return Installed{}, fmt.Errorf(textRelease+"The source returned %s %s, and the pinned version is %s", o.Runtime, got, o.Version)
+		return Installed{}, fmt.Errorf(textRelease(o.Runtime)+"\n  The source returned %s %s, and the pinned version is %s.", o.Runtime, got, o.Version)
 	}
 	if !versionShape.MatchString(rel.Version) {
-		return Installed{}, fmt.Errorf(textRelease+"The newest %s has the version %q, and a version is 1 to 64 letters, digits, ., + or -, the first a letter or a digit", o.Runtime, rel.Version)
+		return Installed{}, fmt.Errorf(textRelease(o.Runtime)+"\n  The newest %s has the version %q, and a version is 1 to 64 letters, digits, ., + or -, the first a letter or a digit.", o.Runtime, rel.Version)
 	}
 	sum, err := sha512Of(rel.Integrity)
 	if err != nil {
-		return Installed{}, fmt.Errorf(textRelease+"The checksum of %s %s is not sha512- and 64 bytes in base64", o.Runtime, rel.Version)
+		return Installed{}, fmt.Errorf(textRelease(o.Runtime)+"\n  The checksum of %s %s is not sha512- and 64 bytes in base64.", o.Runtime, rel.Version)
 	}
 	keys := o.Keys
 	if keys == nil {
@@ -236,7 +238,7 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 			return Installed{}, fmt.Errorf("Update qory.\n%w", err)
 		}
 	}
-	if err := verify(rel, keys, time.Now(), o.Runtime+" "+rel.Version); err != nil {
+	if err := verify(rel, keys, time.Now(), o.Runtime, o.Version != ""); err != nil {
 		return Installed{}, err
 	}
 	f := folder{base: filepath.Join(o.Folder, o.Runtime), runtime: o.Runtime}
@@ -257,7 +259,7 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 		return in, nil
 	case rel.Open == nil:
 		in.Release()
-		return Installed{}, fmt.Errorf(textRelease+"The source of the runtime's releases returned no tarball\n  of %s %s", o.Runtime, rel.Version)
+		return Installed{}, fmt.Errorf(textRelease(o.Runtime)+"\n  The source of the runtime's releases returned no tarball\n  of %s %s.", o.Runtime, rel.Version)
 	}
 	// A second run that needs the version waits here for the run that reads its tarball,
 	// and then finds the folder.

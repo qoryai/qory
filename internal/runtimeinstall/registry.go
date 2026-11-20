@@ -100,7 +100,9 @@ func RegistryFetch(client *http.Client, host, arch, instance string) Fetch {
 		if err != nil {
 			return Release{}, err
 		}
-		rel.Signed, _ = signedName(runtime, rel.Version, arch)
+		// RegistryFetch returned at its start for a runtime or an architecture with no package.
+		signed, _ := signedName(runtime, rel.Version, arch)
+		rel.Signed = signed
 		rel.Program, rel.Folder = layout(runtime, arch)
 		return rel, nil
 	}
@@ -412,8 +414,8 @@ func (b *checkedBlob) Close() error { return b.body.Close() }
 // seconds replaces the wait, up to 30 seconds. The registry waits only 30 seconds for
 // its cache to start serving, so a first fill of a version, two tarballs of about
 // 170 MB with up to 10 minutes each, gets 503 until it is done. The tries of one fetch
-// go on until the registry returns the file or the fetch's context ends: the run's time limit,
-// its cancel or SIGTERM. A test replaces the wait.
+// go on until the registry returns the file or the fetch's context ends: the end of the
+// run's setup, its cancel or SIGTERM. A test replaces the wait.
 var (
 	retryWaits = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 	retryEvery = 15 * time.Second

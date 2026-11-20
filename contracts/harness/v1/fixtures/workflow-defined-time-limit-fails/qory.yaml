@@ -7,4 +7,5 @@ harness:
       source: {path: modules/core}
   workflows:
     fix:
-      time_limit: 7 hours
+      access: write
+      time_limit: 45m

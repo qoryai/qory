@@ -44,10 +44,10 @@ func (codex) Install(version string) string { return "@openai/codex@" + version 
 // prompt, such as "$HOME is unset", stays as given.
 //
 // Arguments that set the model provider, a profile, a feature, web search, hook trust, a
-// remote app server, or a key of [reservedKeys] or [argReservedKeys] with --config or -c,
-// or that skip qory's config.toml, are refused, see [checkArgs].
+// remote app server, or a key of [reservedKeys], [argReservedKeys] or [trustKeys] with
+// --config or -c, or that skip qory's config.toml, are refused, see [checkArgs].
 func (codex) WalledArgs(args []string, home string) ([]string, error) {
-	if err := checkArgs(args); err != nil {
+	if err := checkArgs(args, true); err != nil {
 		return nil, err
 	}
 	i := slices.Index(args, "exec")
@@ -109,17 +109,18 @@ func StartDirs(args []string) []string {
 	return dirs
 }
 
-// textConfigArg is the refusal of a walled run whose Codex arguments set a key of
-// [reservedKeys] or [argReservedKeys] with --config or -c, with the key as given for its
-// %s.
+// textConfigArg is the refusal of a run whose Codex arguments set a key of [trustKeys],
+// or, in a walled run, of [reservedKeys] or [argReservedKeys], with --config or -c, with
+// the key as given for its %s.
 const textConfigArg = "Remove `--config %s` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
 
 // textProviderArg is the refusal of a walled run whose Codex arguments contain --oss or
 // --local-provider, with the flag for its %s.
 const textProviderArg = "Remove `%s` from the run's Codex arguments.\n  A Codex run takes its model provider from qory and Forager, not from the arguments."
 
-// textFeatureArg is the refusal of a walled run whose Codex arguments contain --enable or
-// --disable, with the flag and the feature as given for its two %s.
+// textFeatureArg is the refusal of a run whose Codex arguments contain --enable or
+// --disable of a feature of [trustFeatures], or of any feature in a walled run, with the
+// flag and the feature as given for its two %s.
 const textFeatureArg = "Remove `%s %s` from the run's Codex arguments.\n  A Codex run takes this key from qory and Forager, not from the arguments."
 
 // textProfileArg is the refusal of a walled run whose Codex arguments contain --profile
@@ -133,7 +134,7 @@ const textIgnoreConfigArg = "Remove `--ignore-user-config` from the run's Codex 
 // textSearchArg is the refusal of a walled run whose Codex arguments contain --search.
 const textSearchArg = "Remove `--search` from the run's Codex arguments.\n  A Codex run takes its web search setting from qory and Forager, not from the arguments."
 
-// textHookTrustArg is the refusal of a walled run whose Codex arguments contain
+// textHookTrustArg is the refusal of a run whose Codex arguments contain
 // --dangerously-bypass-hook-trust.
 const textHookTrustArg = "Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.\n  A Codex run takes its hook trust from qory and Forager, not from the arguments."
 
@@ -149,8 +150,38 @@ const textRemoteArg = "Remove `%s` from the run's Codex arguments.\n  A Codex ru
 // harness sets which skills a run has.
 var argReservedKeys = []reservedKey{{"model_reasoning_effort"}, {"skills"}, {"cloud", "skills"}}
 
-// checkArgs refuses args, a walled run's Codex arguments, when one before -- changes
-// what Forager and qory set for the run, naming the first in args:
+// trustKeys are the key paths that the Codex arguments of every run may not set, walled
+// or not: the hooks table, whose state contains the trusted hashes and whose events add
+// hooks, and the features that run hooks and that keep a shell with a terminal off,
+// unified_exec_tty and hooks with its legacy name codex_hooks
+// (codex-rs/features/src/lib.rs, FEATURES, and legacy.rs, ALIASES). A shell with a
+// terminal takes commands through write_stdin, for which Codex 0.170.0 runs no
+// PreToolUse hook.
+var trustKeys = []reservedKey{{"hooks"}, {"features", "hooks"}, {"features", "codex_hooks"}, {"features", "unified_exec_tty"}}
+
+// trustFeatures are the features of [trustKeys] as the values of --enable and --disable.
+var trustFeatures = []string{"hooks", "codex_hooks", "unified_exec_tty"}
+
+// CheckArgs returns an error for args, the Codex arguments of a run without a wall, as
+// [checkArgs] does for every run. A walled run gets the whole check from [codex.WalledArgs].
+func (codex) CheckArgs(args []string) error {
+	return checkArgs(args, false)
+}
+
+// checkArgs returns an error for args, a run's Codex arguments, when one before --
+// changes the hooks that qory sets for the run, naming the first in args:
+//
+//   - --dangerously-bypass-hook-trust, with which Codex runs hooks that were never
+//     trusted (codex-rs/utils/cli/src/shared_options.rs, bypass_hook_trust);
+//   - --config or -c that sets a key of [trustKeys], in the forms --config <k=v>,
+//     --config=<k=v>, -c <k=v>, -c<k=v> and -c=<k=v>
+//     (codex-rs/utils/cli/src/config_override.rs);
+//   - --enable or --disable of a feature of [trustFeatures], in the forms
+//     --enable <feature> and --enable=<feature>, which Codex reads as --config
+//     features.<feature>=true or false (codex-rs/cli/src/main.rs, FeatureToggles).
+//
+// With walled, it also returns an error for args when one before -- changes what Forager
+// and qory set for a walled run:
 //
 //   - --oss, which starts Codex on an open-source model provider, or --local-provider,
 //     which names one, in the forms --local-provider <name> and --local-provider=<name>
@@ -162,8 +193,6 @@ var argReservedKeys = []reservedKey{{"model_reasoning_effort"}, {"skills"}, {"cl
 //   - --profile, which lays $CODEX_HOME/<name>.config.toml over the settings, in the
 //     forms --profile <name>, --profile=<name>, -p <name>, -p<name> and -p=<name>
 //     (the same file, config_profile_v2). -p is --profile in codex and in codex exec;
-//   - --dangerously-bypass-hook-trust, with which Codex runs hooks that were never
-//     trusted (codex-rs/utils/cli/src/shared_options.rs, bypass_hook_trust);
 //   - --remote, which connects Codex to another app server, in the forms --remote <addr>
 //     and --remote=<addr>, and --remote-auth-token-env, which names the variable of that
 //     server's token, in the same two forms (codex-rs/cli/src/main.rs,
@@ -190,13 +219,17 @@ var argReservedKeys = []reservedKey{{"model_reasoning_effort"}, {"skills"}, {"cl
 // long flag by a shortened name: its parser does not turn on infer_long_args. Of its
 // short flags, only -h and -V take no value, and both print and exit, so no other flag
 // comes before -c or -p in one word.
-func checkArgs(args []string) error {
+func checkArgs(args []string, walled bool) error {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		var pair string
 		switch {
 		case a == "--":
 			return nil
+		case a == "--dangerously-bypass-hook-trust" || strings.HasPrefix(a, "--dangerously-bypass-hook-trust="):
+			return errors.New(textHookTrustArg)
+		case !walled && !strings.HasPrefix(a, "--enable") && !strings.HasPrefix(a, "--disable") && !strings.HasPrefix(a, "--config") && !strings.HasPrefix(a, "-c"):
+			continue
 		case a == "--oss" || strings.HasPrefix(a, "--oss="):
 			return fmt.Errorf(textProviderArg, "--oss")
 		case a == "--ignore-user-config" || strings.HasPrefix(a, "--ignore-user-config="):
@@ -205,8 +238,6 @@ func checkArgs(args []string) error {
 			return errors.New(textSearchArg)
 		case a == "--local-provider" || strings.HasPrefix(a, "--local-provider="):
 			return fmt.Errorf(textProviderArg, "--local-provider")
-		case a == "--dangerously-bypass-hook-trust" || strings.HasPrefix(a, "--dangerously-bypass-hook-trust="):
-			return errors.New(textHookTrustArg)
 		case a == "--remote" || strings.HasPrefix(a, "--remote="):
 			return fmt.Errorf(textRemoteArg, "--remote")
 		case a == "--remote-auth-token-env" || strings.HasPrefix(a, "--remote-auth-token-env="):
@@ -215,11 +246,14 @@ func checkArgs(args []string) error {
 			return errors.New(textProfileArg)
 		case a == "--enable" || a == "--disable":
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				return fmt.Errorf(textFeatureArg, a, shownArg(args[i+1]))
+				i++
+				if walled || slices.Contains(trustFeatures, args[i]) {
+					return fmt.Errorf(textFeatureArg, a, shownArg(args[i]))
+				}
 			}
 			continue
 		case strings.HasPrefix(a, "--enable=") || strings.HasPrefix(a, "--disable="):
-			if flag, feature, _ := strings.Cut(a, "="); feature != "" {
+			if flag, feature, _ := strings.Cut(a, "="); feature != "" && (walled || slices.Contains(trustFeatures, feature)) {
 				return fmt.Errorf(textFeatureArg, flag, shownArg(feature))
 			}
 			continue
@@ -240,7 +274,7 @@ func checkArgs(args []string) error {
 		if !ok {
 			continue
 		}
-		if key = strings.TrimSpace(key); reservedArg(key) {
+		if key = strings.TrimSpace(key); reservedArg(key, walled) {
 			return fmt.Errorf(textConfigArg, shownArg(key))
 		}
 	}
@@ -253,13 +287,18 @@ func checkArgs(args []string) error {
 func shownArg(name string) string { return module.Escape(accesskey.ShownName(name, false)) }
 
 // reservedArg reports whether key, a dotted key path of a --config flag, is a path of
-// [reservedKeys] or [argReservedKeys], lies under one, or lies above one.
-func reservedArg(key string) bool {
+// [trustKeys], or with walled of [reservedKeys] or [argReservedKeys], lies under one, or
+// lies above one.
+func reservedArg(key string, walled bool) bool {
 	if key == "use_legacy_landlock" {
 		key = "features.use_legacy_landlock"
 	}
 	names := strings.Split(key, ".")
-	for _, k := range slices.Concat(reservedKeys, argReservedKeys) {
+	keys := trustKeys
+	if walled {
+		keys = slices.Concat(trustKeys, reservedKeys, argReservedKeys)
+	}
+	for _, k := range keys {
 		if overlaps(k, names) {
 			return true
 		}
