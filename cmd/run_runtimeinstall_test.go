@@ -700,7 +700,7 @@ func TestACodexHomeWritePastTheSetupLimitIsTheOneNamed(t *testing.T) {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
 	}
 	wants(t, r.out, "✗ the run was cancelled during the write of the Codex home:\n  the steps before codex starts may take at most 5s\n")
-	lacks(t, r.out, "during the fetch of the run's image", "check the disk")
+	lacks(t, r.out, "during the fetch of the run's image", "smaller Codex skills")
 	if len(r.closes) != 1 || r.closes[0].State != event.StateCancelled || r.closes[0].Reason != event.ReasonTimeout || r.closes[0].ExitCode != 124 {
 		t.Errorf("the closes: %+v, want one cancelled with timeout and 124", r.closes)
 	}
