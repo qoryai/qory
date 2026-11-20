@@ -12,6 +12,7 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/render"
+	"github.com/qoryai/qory/internal/render/codex"
 	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/ui"
 )
@@ -218,6 +219,20 @@ func tierRows(res *compose.Result, runtimes []render.Runtime, root string) [][2]
 				rows = append(rows, [2]string{"skipped", "effort " + exports.Value(t.Effort, false) + " of tier " + name + " for " + rt.Name() + "  (qory writes no effort into " + rt.Name() + " agents; " + w + " " + verb + " at the session's effort)"})
 			}
 		}
+	}
+	return rows
+}
+
+// untrustedHookRows are the rows of a compose for each Codex hook that the home's
+// config.toml has no trusted hash for, see [codex.UntrustedHooks], when runtimes has
+// codex. A walled run binds every hook at /etc/codex, where Codex runs it.
+func untrustedHookRows(res *compose.Result, runtimes []render.Runtime, home string) [][2]string {
+	if !slices.ContainsFunc(runtimes, func(rt render.Runtime) bool { return rt.Name() == codex.Runtime }) {
+		return nil
+	}
+	var rows [][2]string
+	for _, hook := range codex.UntrustedHooks(res, home) {
+		rows = append(rows, [2]string{"skipped", hook + " for codex  (qory writes no trusted hash for an mcp_tool hook; Codex skips it in a run without a wall)"})
 	}
 	return rows
 }

@@ -121,7 +121,12 @@ func (codex) Reserved() []render.Reserved {
 // model and the tier's effort, when the entry sets one, as model_reasoning_effort, and a
 // [features] table with shell_tool = false for an agent that declares no shell tool, see
 // [keepsShell]. A home composed for Codex and another runtime gets no tier, see
-// [render.AloneModel], and an agent whose tier has no map gets neither key. The
+// [render.AloneModel], and an agent whose tier has no map gets neither key.
+//
+// config.toml also gets features.unified_exec_tty = false, so the agent cannot start a
+// shell with a terminal and send it commands with write_stdin, for which Codex 0.170.0
+// runs no PreToolUse hook; and a hooks.state table with a trusted_hash for each command
+// hook of hooks.json and config.toml, see [trustedHooks]. The
 // instructions written as AGENTS.md end with the names the session registers, see
 // [render.Addressing]: a Codex home registers them as the modules wrote them, and the
 // file states that. Codex reads a project .codex only in a project the user has marked
@@ -165,6 +170,18 @@ func (codex) Render(res *compose.Result, dir, home string) error {
 		}
 		render.PutServers(m, "mcp_servers", res.MCPFor(home))
 		render.DropEnv(m, setKey)
+		// A fragment may set neither features nor hooks.state, see [reservedKeys].
+		m["features"] = map[string]any{"unified_exec_tty": false}
+		hooks, _ := m["hooks"].(map[string]any)
+		fromJSON, _ := res.SettingsFor(Runtime, "hooks.json", home)["hooks"].(map[string]any)
+		state := trustedHooks(filepath.Join(home, Runtime), map[string]map[string]any{"hooks.json": fromJSON, "config.toml": hooks})
+		if len(state) > 0 {
+			if hooks == nil {
+				hooks = map[string]any{}
+				m["hooks"] = hooks
+			}
+			hooks["state"] = state
+		}
 	})
 	if err != nil {
 		return err
