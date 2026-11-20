@@ -686,11 +686,11 @@ release may change what an existing document does, and states it under Upgrading
   pass `hooks`, `codex_hooks` or `unified_exec_tty` to `--enable` or `--disable`. The
   error has two lines, such as ``Remove the `--config` flag and its value from the run's
   Codex arguments.`` and ``A Codex run takes `hooks.Stop` from qory and Forager, not from
-  the arguments.`` The key is on the second line, so the first line stays within 100
-  characters behind `qory run: ` whatever the length of the key. Before, a run without a
-  wall stopped on most of them at Forager's check, with Forager's lines, and passed a key
-  under `hooks`. A walled run stopped on `hooks.state` and `hooks={…}`, and passed the
-  other keys under `hooks`, such as `hooks.Stop`.
+  the arguments.`` The key is on the second line, so the first line has the same length
+  for every key. Before, a run without a wall stopped on most of them at Forager's check,
+  with Forager's lines, and passed a key under `hooks`. A walled run stopped on
+  `hooks.state` and `hooks={…}`, and passed the other keys under `hooks`, such as
+  `hooks.Stop`.
 - A run from a run code whose explore documents contain no `run_settings` stops before
   anything is installed or fetched, with `The run settings set no runtime, so the run
   did not start; the code is used.` and `qory runs one of claude and codex.` Until now,

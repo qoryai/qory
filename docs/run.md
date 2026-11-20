@@ -4831,10 +4831,9 @@ these:
   app server from qory and Forager, not from the arguments.``, or the same with
   `--remote-auth-token-env`.
 
-The key or feature is on the second line, so the first line stays within 100
-characters behind `qory run: ` whatever the length of the key. A key or feature has each
-control character written as an escape, such as `\n`. Arguments after `--` pass
-unchanged.
+The key or feature is on the second line, so the first line has the same length for
+every key. A key or feature has each control character written as an escape, such as
+`\n`. Arguments after `--` pass unchanged.
 
 A Codex run without a wall gets a shorter check of its other arguments, from Forager: the
 run stops before Codex starts, with exit status 1, when a Codex argument before `--` is

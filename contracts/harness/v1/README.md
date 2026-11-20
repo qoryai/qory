@@ -2043,17 +2043,18 @@ Per runtime, the files written into its directory:
   Codex arguments before `--` set one of these keys, `model_reasoning_effort`, `skills` or
   `cloud.skills`, a key under one, or a table above one, such as `cloud`, with `--config`,
   `--config=`, `-c`, `-c<key>=<value>` or `-c=<key>=<value>`, stops before the agent
-  starts with ``Remove `--config <key>` from the run's Codex arguments.`` and the next
-  line ``A Codex run takes this key from qory and Forager, not from the arguments.`` A
-  fragment may still set `model_reasoning_effort`. Such a run also stops on `--oss` or
-  `--local-provider` before `--`, with ``Remove `<flag>` from the run's Codex arguments.``
-  and the next line ``A Codex run takes its model provider from qory and Forager, not from
-  the arguments.``, and on `--profile` or `-p`, with ``Remove `--profile` from the run's
-  Codex arguments.`` and the next line ``A Codex run takes its settings from qory and
-  Forager, not from a profile.``, and on `--enable` or `--disable` with any feature, which
-  Codex reads as `--config features.<feature>=true` or `false`, with ``Remove `--enable
-  <feature>` from the run's Codex arguments.`` and the next line ``A Codex run takes this
-  key from qory and Forager, not from the arguments.`` (`--disable <feature>` likewise).
+  starts with ``Remove the `--config` flag and its value from the run's Codex
+  arguments.`` and the next line ``A Codex run takes `<key>` from qory and Forager, not
+  from the arguments.`` A fragment may still set `model_reasoning_effort`. Such a run
+  also stops on `--oss` or `--local-provider` before `--`, with ``Remove `<flag>` from the
+  run's Codex arguments.`` and the next line ``A Codex run takes its model provider from
+  qory and Forager, not from the arguments.``, and on `--profile` or `-p`, with ``Remove
+  `--profile` from the run's Codex arguments.`` and the next line ``A Codex run takes its
+  settings from qory and Forager, not from a profile.``, and on `--enable` or `--disable`
+  with any feature, which Codex reads as `--config features.<feature>=true` or `false`,
+  with ``Remove the `--enable` flag and its value from the run's Codex arguments.`` and
+  the next line ``A Codex run takes the feature `<feature>` from qory and Forager, not
+  from the arguments.`` (`--disable` likewise).
   It stops on `--ignore-user-config` with ``Remove `--ignore-user-config` from the run's
   Codex arguments.`` and the next line ``A Codex run takes its settings from qory and
   Forager, not from the arguments.``, and on `--search` with ``Remove `--search` from the
