@@ -4674,6 +4674,13 @@ resolved. A
 walled read run whose harness ships `settings/codex/read-access.rules` gets those rules
 as `rules/read-access.rules`; a run with any other access gets none.
 
+`config.toml` also sets `features.unified_exec_tty = false`, as the composed home's
+`config.toml` does for a run without a wall. With a terminal, a shell that the agent starts
+takes later commands through `write_stdin`, for which Codex 0.170.0 runs no `PreToolUse` hook,
+so the harness's guard would not see them. Codex refuses `tty: true` with ``TTY execution is
+disabled by config; omit `tty` or set it to false.``, and an agent cannot start an
+interactive shell.
+
 A walled Codex run copies the composed home's `skills/`, `rules/` and `agents/` with every
 link replaced by the file or folder it leads to, since Codex 0.167.2 passes over a
 `SKILL.md` that is a link. A link whose target lies outside the composed home, the folders

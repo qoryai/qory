@@ -15,9 +15,25 @@ release may change what an existing document does, and states it under Upgrading
 - qory needs git 2.36 or later.
 - Compose again each home outside the checkout that has a module in the checkout. Until
   then, `--check` exits 6 with a `kind` row for each of the module's entries.
+- Compose each Codex home again. Until then, `--check` exits 6: the home's `config.toml`
+  gains `features.unified_exec_tty = false` and the hashes of the harness's hooks, and
+  the agents of a home composed for codex alone gain their tiers.
 
 ### Added
 
+- In a home composed for codex alone, a Codex agent with a tier gets the tier's model as
+  `model` and its effort as `model_reasoning_effort` in `agents/<name>.toml`. An effort
+  outside `none`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra` stops the compose
+  with exit 2. A home composed for codex and another runtime writes no tier into the
+  Codex agents, since one tier map serves every runtime, and keeps the `skipped` row
+  `tier <tier> for codex`.
+- A Codex run without a wall runs the harness's hooks. Codex skips a hook of
+  `$CODEX_HOME` with no error unless `hooks.state` has its hash, so the home's
+  `config.toml` now has a `trusted_hash` for each `command` hook of `hooks.json` and
+  `config.toml`. An `mcp_tool` hook gets no hash, and the compose prints
+  `skipped  hooks.<event>[<group>].hooks[<hook>] in <file> for codex` for it. A
+  `CODEX_HOME` set in `harness.launch.codex.env` points Codex at a home that the hashes
+  do not name, and Codex skips the hooks. See "Hooks on Codex" in `docs/harness.md`.
 - A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
   the type whose launch version sets what the workflow's session may push. A module
   declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: one
@@ -633,6 +649,10 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The `config.toml` of a Codex home, and of a walled Codex run, sets
+  `features.unified_exec_tty = false`. A shell started with a terminal takes commands
+  through `write_stdin`, for which Codex runs no `PreToolUse` hook. A Codex agent can no
+  longer start an interactive shell with a terminal.
 - A run from a run code whose explore documents contain no `run_settings` stops before
   anything is installed or fetched, with `The run settings set no runtime, so the run
   did not start; the code is used.` and `qory runs one of claude and codex.` Until now,
