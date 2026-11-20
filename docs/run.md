@@ -1055,8 +1055,8 @@ A runtime that the stack does not pin installs its newest version. When the regi
 returns 404 for the version's tag, or npm returns 404 for the version's document, the
 run stops before its session. A run on a person's machine prints the fix, with the name
 of the file that pins the version, then the cause. When the pin comes from a base fetched
-over git, the fix shows the checkout's `qory.yaml`, because the base's file is in a cache
-clone; a pin in the checkout's `qory.yaml` wins over the base's:
+over git, the fix shows the checkout's `qory.yaml` or `harness.yaml`, because the base's
+file is in a cache clone; a pin in that file wins over the base's:
 
 ```text
 qory run: Set runtimes.codex.version in qory.yaml to a version the registry has.
