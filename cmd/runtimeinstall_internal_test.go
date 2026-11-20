@@ -216,10 +216,10 @@ func TestTheInstallCausesStandAlone(t *testing.T) {
 	}
 }
 
-// TestTheDispatchedCauseOfTheLongestPinFits is the line a dispatched run prints for a
-// pin that the registry does not have, with the longest runtime name of
-// runtimeinstall.Runtimes() and a pin of 48 characters, the longest one a stack may set:
-// with "qory run: ", the line has at most 100 characters.
+// TestTheDispatchedCauseOfTheLongestPinFits is the line a run from a run code prints for
+// a pin that the registry does not have, with the longest runtime name of
+// runtimeinstall.Runtimes() and a pin of 32 characters, the longest one a stack may set:
+// with "qory run: " and [codeUsed], the line has at most 100 characters.
 func TestTheDispatchedCauseOfTheLongestPinFits(t *testing.T) {
 	runtime := ""
 	for _, r := range runtimeinstall.Runtimes() {
@@ -227,13 +227,13 @@ func TestTheDispatchedCauseOfTheLongestPinFits(t *testing.T) {
 			runtime = r
 		}
 	}
-	pin := "1" + strings.Repeat("0", 47)
+	pin := "1" + strings.Repeat("0", 31)
 	if !runtimeinstall.ValidVersion(pin) || runtimeinstall.ValidVersion(pin+"0") {
 		t.Fatalf("the longest pin a stack may set is not %d characters", len(pin))
 	}
 	err := fmt.Errorf(textNotPublished, runtime, "qory-stack.yaml", runtime, pin)
-	line := "qory run: " + causeOnly(installFailed(err)).Error()
-	if want := "qory run: the registry has no " + runtime + " " + pin; line != want {
+	line := "qory run: " + causeOnly(installFailed(err)).Error() + codeUsed
+	if want := "qory run: the registry has no " + runtime + " " + pin + "; the code is used"; line != want {
 		t.Fatalf("a dispatched run shows %q, want %q", line, want)
 	}
 	if len(line) > 100 {

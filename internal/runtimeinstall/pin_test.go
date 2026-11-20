@@ -210,9 +210,9 @@ func TestTheRegistryRefusesAPinnedTagThatIsNotThePin(t *testing.T) {
 
 // TestInstallRefusesAPinThatIsNotAnExactVersion pins versions that are not exact: a
 // dist-tag, a path, a first character that is not a digit, a +, which no OCI tag has,
-// and a version of 49 characters. Install refuses each before it fetches.
+// and a version of 33 characters. Install refuses each before it fetches.
 func TestInstallRefusesAPinThatIsNotAnExactVersion(t *testing.T) {
-	for _, pin := range []string{"latest", "newest", "../2.1.320", "-1", "2.1.320/x", "1.0.0+build.1", "1" + strings.Repeat("0", 48)} {
+	for _, pin := range []string{"latest", "newest", "../2.1.320", "-1", "2.1.320/x", "1.0.0+build.1", "1" + strings.Repeat("0", 32)} {
 		t.Run(pin, func(t *testing.T) {
 			src := &rt.Source{}
 			src.Publish("2.1.320", rt.PlainTarball(t, "2.1.320"))
@@ -245,12 +245,12 @@ func TestInstallRefusesAReleaseThatIsNotThePin(t *testing.T) {
 }
 
 // TestValidVersion takes an exact version, a digit first, and refuses a dist-tag, an
-// empty version, a path, a version with + and a version of more than 48 characters.
+// empty version, a path, a version with + and a version of more than 32 characters.
 func TestValidVersion(t *testing.T) {
 	for v, want := range map[string]bool{
 		"2.1.320": true, "0.167.2": true, "0.99.0-alpha.20": true, "1.0.0+build.1": false,
 		"latest": false, "": false, "v1.0.0": false, "../1": false, "1/2": false,
-		"1" + strings.Repeat("0", 47): true, "1" + strings.Repeat("0", 48): false,
+		"1" + strings.Repeat("0", 31): true, "1" + strings.Repeat("0", 32): false,
 	} {
 		if got := runtimeinstall.ValidVersion(v); got != want {
 			t.Errorf("ValidVersion(%q) = %v, want %v", v, got, want)

@@ -32,14 +32,14 @@ func TestLoadReadsTheRuntimePins(t *testing.T) {
 }
 
 // TestLoadRefusesABadRuntimePin refuses a pin that is not an exact version, latest, a
-// version with + and one of 49 characters among them, a version that YAML reads as a number, also through an alias
+// version with + and one of 33 characters among them, a version that YAML reads as a number, also through an alias
 // to the version or to the whole entry, and a runtime that qory does not install, each
 // with the fix first, the cause, and the file last. The error is compared whole.
 func TestLoadRefusesABadRuntimePin(t *testing.T) {
 	isolate(t)
 	version := func(name, value string) string {
 		return "Set runtimes." + name + ".version to an exact version, or remove runtimes." + name + ".\n" +
-			"  An exact version starts with a digit, followed by up to 47 letters, digits, . or -. A runtime with no pin installs its latest version.\n" +
+			"  An exact version starts with a digit, followed by up to 31 letters, digits, . or -. A runtime with no pin installs its latest version.\n" +
 			"  The value is \"" + value + "\".\n  runtimes." + name + " is in "
 	}
 	number := func(name, value string) string {
@@ -55,7 +55,7 @@ func TestLoadRefusesABadRuntimePin(t *testing.T) {
 		{"", "  codex:\n    version: \"0.167 2\"\n", version("codex", "0.167 2")},
 		{"", "  claude: {}\n", version("claude", "")},
 		{"", "  claude:\n    version: 1.0.0+build.1\n", version("claude", "1.0.0+build.1")},
-		{"", "  codex:\n    version: 1" + strings.Repeat("a", 48) + "\n", version("codex", "1"+strings.Repeat("a", 48))},
+		{"", "  codex:\n    version: 1" + strings.Repeat("a", 32) + "\n", version("codex", "1"+strings.Repeat("a", 32))},
 		{"", "  claude:\n    version: 2.1\n", number("claude", "2.1")},
 		{"", "  codex:\n    version: 2\n", number("codex", "2")},
 		{"", "  claude:\n    version: 2024-01-01\n", number("claude", "2024-01-01")},
@@ -137,8 +137,8 @@ func TestExtendTakesTheNearerPinOfEachRuntime(t *testing.T) {
 }
 
 // TestTheSchemaTakesTheRuntimePins validates stacks with runtimes against
-// stack.schema.json: an exact version of claude or codex passes, one of 48 characters
-// too, and a pin that Load refuses fails, one of 49 characters too.
+// stack.schema.json: an exact version of claude or codex passes, one of 32 characters
+// too, and a pin that Load refuses fails, one of 33 characters too.
 func TestTheSchemaTakesTheRuntimePins(t *testing.T) {
 	s, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/stack.schema.json")
 	if err != nil {
@@ -151,8 +151,8 @@ func TestTheSchemaTakesTheRuntimePins(t *testing.T) {
 		{"  claude:\n    version: 2.1.300\n", true},
 		{"  codex:\n    version: 0.99.0-alpha.20\n", true},
 		{"  claude:\n    version: \"2.1\"\n", true},
-		{"  claude:\n    version: 1" + strings.Repeat("a", 47) + "\n", true},
-		{"  claude:\n    version: 1" + strings.Repeat("a", 48) + "\n", false},
+		{"  claude:\n    version: 1" + strings.Repeat("a", 31) + "\n", true},
+		{"  claude:\n    version: 1" + strings.Repeat("a", 32) + "\n", false},
 		{"  claude:\n    version: 2.1\n", false},
 		{"  claude:\n    version: 2024-01-01\n", false},
 		{"  claude:\n    version: 1.0.0+build.1\n", false},

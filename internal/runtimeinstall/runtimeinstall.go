@@ -51,11 +51,11 @@ var (
 	// first a letter or a digit, so the version is one folder name and never . or ..;
 	// Forager takes 1 to 64 of the same characters.
 	versionShape = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$`)
-	// pinShape is a version a stack may pin: a digit, then up to 47 letters, digits, . or
-	// -, 48 characters at most, so that a dispatched run's line of a pin the registry does
-	// not have fits in 100 characters. It has no +, which an OCI tag, the registry's tag
-	// <version>, does not allow.
-	pinShape = regexp.MustCompile(`^[0-9][0-9A-Za-z.-]{0,47}$`)
+	// pinShape is a version a stack may pin: a digit, then up to 31 letters, digits, . or
+	// -, 32 characters at most, so that the line of a run from a run code for a pin the
+	// registry does not have, "; the code is used" included, fits in 100 characters. It
+	// has no +, which an OCI tag, the registry's tag <version>, does not allow.
+	pinShape = regexp.MustCompile(`^[0-9][0-9A-Za-z.-]{0,31}$`)
 	// runtimeShape is a runtime's name, as Forager's descriptor schema has it.
 	runtimeShape = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 	// digestShape is a sha256 digest.
@@ -205,7 +205,7 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 	}
 	if o.Version != "" && !ValidVersion(o.Version) {
 		return Installed{}, fmt.Errorf("Pin an exact version of %s, such as 2.1.320\n"+
-			"The pinned version is %q, and an exact version starts with a digit, followed by up to 47 letters, digits, . or -.", o.Runtime, o.Version)
+			"The pinned version is %q, and an exact version starts with a digit, followed by up to 31 letters, digits, . or -.", o.Runtime, o.Version)
 	}
 	if o.Progress != nil {
 		ctx = context.WithValue(ctx, progressKey{}, o.Progress)
