@@ -759,6 +759,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var level string
 			// extensions is the composed harness report's extensions, which the suite's time limit reads.
 			var extensions map[string]any
+			// pins are the composed stack's pins of the runtimes' versions, which the install
+			// reads, and pinFile is the file in its fix line for a git base, see [composed].
+			var pins map[string]stack.RuntimePin
+			var pinFile string
 			// link is the transcript link of a run whose agent starts on a fresh home, see
 			// [transcriptLinkFor].
 			var link transcriptLink
@@ -789,7 +793,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				// The report on disk can be another run's by now, so the run reads what it composed.
 				rep, harness, workflows := c.rep, c.harness, c.workflows
-				extensions = rep.Extensions
+				extensions, pins, pinFile = rep.Extensions, c.runtimes, c.pinFile
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
 					return false, err
@@ -1010,7 +1014,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if code != nil {
 					machine = code.machine
 				}
-				in, err := installRuntime(installCtx, run, conf.Forager, machine, walled || remote, name, state, said)
+				in, err := installRuntime(installCtx, run, conf.Forager, machine, walled || remote, name, pins[name], pinFile, state, said)
 				if err != nil {
 					err = installFailed(err)
 					if dispatched {
