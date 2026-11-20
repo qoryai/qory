@@ -4,6 +4,8 @@ package cmd_test
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"io/fs"
 	"maps"
@@ -41,9 +43,9 @@ func denyConfig(extra string) string {
 
 // guardSteps is the script of the stub upstream for a guard test in the folder dir: it
 // makes dir/free and dir/locked, writes a file into each with apply_patch and with a
-// shell command, starts a shell with a terminal, starts a shell without one and sends it
-// a write with write_stdin, starts an agent with spawn_agent, lists the files under dir,
-// and ends with a message.
+// shell command, starts a shell with a terminal, starts a command that runs on without
+// one and sends it a write with write_stdin, starts an agent with spawn_agent, lists the
+// files under dir, and ends with a message.
 func guardSteps(t *testing.T, dir string) string {
 	t.Helper()
 	patch := func(name string) string {
@@ -56,8 +58,8 @@ func guardSteps(t *testing.T, dir string) string {
 		{"call": "exec_command", "args": map[string]any{"cmd": "echo from-shell > " + dir + "/locked/echo.txt"}},
 		{"call": "exec_command", "args": map[string]any{"cmd": "echo from-shell > " + dir + "/free/echo.txt"}},
 		{"call": "exec_command", "args": map[string]any{"cmd": "sh", "tty": true, "yield_time_ms": 1000}},
-		{"call": "exec_command", "args": map[string]any{"cmd": "sh", "yield_time_ms": 1000}},
-		{"call": "write_stdin", "args": map[string]any{"session_id": "__SESSION__", "chars": "echo from-stdin > " + dir + "/locked/stdin.txt; exit\n", "yield_time_ms": 1500}},
+		{"call": "exec_command", "args": map[string]any{"cmd": "sleep 30", "yield_time_ms": 200}},
+		{"call": "write_stdin", "args": map[string]any{"session_id": "__SESSION__", "chars": "echo from-stdin > " + dir + "/locked/stdin.txt\n", "yield_time_ms": 500}},
 		{"call": "spawn_agent", "ns": "multi_agent_v1", "args": map[string]any{"message": "say done"}},
 		{"call": "exec_command", "args": map[string]any{"cmd": "find " + dir + " -type f"}},
 		{"text": "done"},
@@ -71,8 +73,9 @@ func guardSteps(t *testing.T, dir string) string {
 
 // checkGuard checks the tool outputs that the model got in a run of [guardSteps] in dir,
 // those of the last request: the apply_patch and the shell write to locked/ and
-// spawn_agent are each blocked by the hook, the shell with a terminal is refused, and the
-// files under dir after the run are the two in free/ alone.
+// spawn_agent are each blocked by the hook, the shell with a terminal is refused, the
+// write_stdin to the command without a terminal fails because its stdin is closed, and
+// the files under dir after the run are the two in free/ alone.
 func checkGuard(t *testing.T, outputs []string, dir string) {
 	t.Helper()
 	all := strings.Join(outputs, "\n---\n")
@@ -80,6 +83,7 @@ func checkGuard(t *testing.T, outputs []string, dir string) {
 		"blocked by PreToolUse hook: denied by the test hook: locked/ is read-only. Command: *** Begin Patch\n*** Add File: " + dir + "/locked/patch.txt",
 		"Command blocked by PreToolUse hook: denied by the test hook: locked/ is read-only. Command: echo from-shell > " + dir + "/locked/echo.txt",
 		"TTY execution is disabled by config",
+		"write_stdin failed: stdin is closed for this session; rerun exec_command with tty=true to keep stdin open",
 		"Tool call blocked by PreToolUse hook: denied by the test hook: no background agents. Tool: spawn_agent",
 	} {
 		if !strings.Contains(all, want) {
@@ -167,7 +171,12 @@ func TestACodexWithoutAWallRunsTheTrustedHooks(t *testing.T) {
 			env["OPENAI_API_KEY"] = "sk-test-fake"
 			env["QORY_TEST_UPSTREAM_PLAIN"] = "1"
 			env["QORY_TEST_UPSTREAM_SCRIPT"] = guardSteps(t, dir)
-			args := []string{"run", "--rm", "--network", "none", "--user", strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()),
+			// A test that stops before docker run ends leaves no container behind.
+			var id [4]byte
+			_, _ = rand.Read(id[:])
+			container := "qory-test-codex-guard-" + hex.EncodeToString(id[:])
+			t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", container).Run() })
+			args := []string{"run", "--rm", "--name", container, "--network", "none", "--user", strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()),
 				"--mount", "type=bind,src=" + parent + ",dst=" + parent, "--mount", "type=bind,src=" + bin + ",dst=/upstream,readonly", "--workdir", root}
 			for _, name := range slices.Sorted(maps.Keys(env)) {
 				args = append(args, "--env", name+"="+env[name])
@@ -268,8 +277,8 @@ func walledGuard(t *testing.T, packages []string, script string, extra map[strin
 		}
 		return s + "workflows:\n  hello:\n    time_limit: 5m\n    access: read\n"
 	}, func(d map[string]any) {
-		// Codex 0.170.0 offers spawn_agent to a model such as gpt-5.5, as a run without a
-		// wall in TestACodexWithoutAWallRunsTheTrustedHooks starts it.
+		// Codex 0.170.0 lists spawn_agent among the tools of a model such as gpt-5.5, the
+		// model of TestACodexWithoutAWallRunsTheTrustedHooks.
 		d["run_settings"] = map[string]any{"runtime": "codex", "model": "gpt-5.5", "provider_models": []any{map[string]any{"id": "gpt-5.5"}}}
 	}, extra, nil)
 	records := filepath.Join(r.open.RunsDir, r.open.RunID)

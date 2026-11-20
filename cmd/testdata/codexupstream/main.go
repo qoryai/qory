@@ -6,17 +6,18 @@
 // /tmp/upstream.jsonl made empty. With QORY_TEST_UPSTREAM_PLAIN=1 it serves plain HTTP on
 // 127.0.0.1:8080 in place of HTTPS, for a Codex container in its network namespace, and
 // needs no authority. It appends one JSON line per request to that file before it
-// answers: a POST to /v1/responses with a streamed message with the text Hi, and every
-// other request with 404. Each line has the method, the path, the SHA-256 of the
+// returns the response: a streamed message with the text Hi for a POST to /v1/responses,
+// and 404 for every other request. Each line has the method, the path, the SHA-256 of the
 // Authorization header's bearer value, the chatgpt-account-id header, the text of each
 // input message, and the output of each tool call in the input.
 //
-// QORY_TEST_UPSTREAM_SCRIPT, a JSON list of steps, makes the stub answer the requests to
-// /v1/responses with one step each, in order, and with the message Hi after the last. A
+// QORY_TEST_UPSTREAM_SCRIPT, a JSON list of steps, makes the stub return one step for
+// each request to /v1/responses, in order, and the message Hi after the last. A
 // step is one of {"call": <tool>, "args": {...}, "ns": <namespace>}, a function call;
 // {"custom": <tool>, "input": <text>}, a custom tool call such as apply_patch; and
 // {"text": <text>}, a message. An argument "__SESSION__" becomes the session id of the
-// last "session ID <n>" in a tool output of the request, as write_stdin needs.
+// last "session ID <n>" in a tool output of the request, as write_stdin needs. A step
+// with "__SESSION__" and no such tool output gets status 400, which ends the Codex run.
 package main
 
 import (
@@ -56,7 +57,7 @@ type entry struct {
 	Outputs []string `json:"outputs,omitempty"`
 }
 
-// step is one answer of the script, see the package's documentation.
+// step is one response of the script, see the package's documentation.
 type step struct {
 	Call   string         `json:"call"`
 	Args   map[string]any `json:"args"`
@@ -66,7 +67,7 @@ type step struct {
 	Text   string         `json:"text"`
 }
 
-// stub logs each request and answers it, with the next step of script while one is left.
+// stub logs each request and returns a response: the next step of script while one is left.
 type stub struct {
 	mu     sync.Mutex
 	script []step
@@ -125,6 +126,13 @@ func (s *stub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		n := s.next
 		s.mu.Unlock()
 		if next != nil {
+			if session == "" && needsSession(*next) {
+				fmt.Fprintf(os.Stderr, "upstream: step %d needs a session ID, and no tool output has one\n", n)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprintf(w, `{"error":{"message":"stub: step %d needs a session ID, and no tool output has one","type":"invalid_request_error"}}`, n)
+				return
+			}
 			answerStep(w, *next, n, session)
 			return
 		}
@@ -136,8 +144,8 @@ func (s *stub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, `{"error":{"message":"stub: not found","type":"invalid_request_error"}}`)
 }
 
-// write appends e to the log, before the answer, so the log has the request once the
-// client has the answer.
+// write appends e to the log, before the response, so the log has the request once the
+// client has the response.
 func (s *stub) write(e entry) {
 	b, _ := json.Marshal(e)
 	s.mu.Lock()
@@ -151,13 +159,13 @@ func (s *stub) write(e entry) {
 	f.Close()
 }
 
-// answer streams a Responses answer with one assistant message, the text Hi.
+// answer streams a response of the Responses API with one assistant message, the text Hi.
 func answer(w http.ResponseWriter) {
 	stream(w, "resp_test_1", map[string]any{"type": "message", "role": "assistant", "id": "msg_test_1",
 		"content": []any{map[string]any{"type": "output_text", "text": "Hi"}}})
 }
 
-// stream streams a Responses answer with the id given and one output item.
+// stream streams a response of the Responses API with the id given and one output item.
 func stream(w http.ResponseWriter, id string, item map[string]any) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -172,8 +180,18 @@ func stream(w http.ResponseWriter, id string, item map[string]any) {
 	}
 }
 
-// answerStep streams a Responses answer with the one output item of st, the script's
-// step number n, with each argument "__SESSION__" replaced by session.
+// needsSession reports whether an argument of st is "__SESSION__".
+func needsSession(st step) bool {
+	for _, v := range st.Args {
+		if v == "__SESSION__" {
+			return true
+		}
+	}
+	return false
+}
+
+// answerStep streams a response of the Responses API with the one output item of st,
+// the script's step number n, with each argument "__SESSION__" replaced by session.
 func answerStep(w http.ResponseWriter, st step, n int, session string) {
 	id := fmt.Sprint(n)
 	var item map[string]any
