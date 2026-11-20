@@ -1091,11 +1091,19 @@ it reads the tarball:
   The key is SHA256:<keyid>
   ```
 
-- only keys that qory does not have, or that expired: a newer qory has npm's new key.
+- only keys that qory does not have: a newer qory has npm's new key.
 
   ```text
   qory run: Update qory.
   npm signed codex 0.170.0 with a key that this qory does not have.
+  The key is SHA256:<keyid>.
+  ```
+
+- only keys that expired: a newer version of the runtime is signed by npm's current key.
+
+  ```text
+  qory run: Pin a newer version of codex. Its release is signed only by an npm key that expired on 2025-01-29.
+  npm signed codex 0.170.0 with a key that expired on 2025-01-29.
   The key is SHA256:<keyid>.
   ```
 
