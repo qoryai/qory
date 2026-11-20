@@ -101,6 +101,48 @@ func TestDiscoverStackRefusesAnAncestorsPin(t *testing.T) {
 	}
 }
 
+// TestSelectedDocumentRefusesAnAncestorsPin is the check of a document that compose -f
+// selects. An ancestor's qory.yaml that pins a runtime is refused, the fix first and the
+// file last, by an absolute path and by a relative one. The checkout's qory.yaml that pins,
+// a qory.yaml outside the checkout's ancestors that pins, an ancestor's qory-stack.yaml
+// that pins, and an ancestor's qory.yaml with no pin pass.
+func TestSelectedDocumentRefusesAnAncestorsPin(t *testing.T) {
+	isolated(t)
+	base := t.TempDir()
+	root := filepath.Join(base, "code", "app")
+	other := filepath.Join(base, "other")
+	for _, dir := range []string{root, other} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const pins = "harness:\n  runtimes:\n    claude:\n      version: 2.1.300\n"
+	ancestor := filepath.Join(filepath.Dir(root), "qory.yaml")
+	write(t, ancestor, pins)
+	want := "Move runtimes to the checkout's qory.yaml or to the base qory-stack.yaml.\n" +
+		"  Only the checkout's qory.yaml and the base stack pin a runtime's version.\n" +
+		"  harness.runtimes is in " + ancestor + "."
+	t.Chdir(root)
+	for _, path := range []string{ancestor, filepath.Join("..", "qory.yaml")} {
+		if err := config.SelectedDocument(root, path); err == nil || err.Error() != want {
+			t.Errorf("%s: %v\nwant:\n%s", path, err, want)
+		}
+	}
+	unpinned := filepath.Join(base, "qory.yaml")
+	write(t, unpinned, "harness:\n  extends: {path: ./stack}\n")
+	stackFile := filepath.Join(base, "code", "qory-stack.yaml")
+	write(t, stackFile, "runtimes:\n  claude:\n    version: 2.1.300\n")
+	own := filepath.Join(root, "qory.yaml")
+	write(t, own, pins)
+	elsewhere := filepath.Join(other, "qory.yaml")
+	write(t, elsewhere, pins)
+	for _, path := range []string{own, elsewhere, stackFile, unpinned} {
+		if err := config.SelectedDocument(root, path); err != nil {
+			t.Errorf("%s: %v, want no error", path, err)
+		}
+	}
+}
+
 // TestComposeRefusesAPinWrittenAsANumber pins codex in the checkout's qory.yaml to an
 // unquoted 2.1, a YAML number: Compose refuses it, the fix first and the file last.
 func TestComposeRefusesAPinWrittenAsANumber(t *testing.T) {

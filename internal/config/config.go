@@ -649,8 +649,10 @@ func composeIn(dir string, owned bool) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if owned && f.Harness != nil && len(f.Harness.RuntimePins) > 0 {
-			return "", pinOutsideCheckout(path)
+		if owned {
+			if err := ancestorPin(path, f); err != nil {
+				return "", err
+			}
 		}
 		if f.Harness.composes() {
 			found = append(found, path)
@@ -663,6 +665,51 @@ func composeIn(dir string, owned bool) (string, error) {
 		return found[0], nil
 	}
 	return "", exports.Refuse(fmt.Sprintf("Remove %s, or the harness section of %s.", stack.FileName, filepath.Base(path)), fmt.Sprintf("%s contains both, and a directory contains one of the two.", exports.HidePath(dir)))
+}
+
+// SelectedDocument is the refusal of the qory.yaml or harness.yaml at path, which compose
+// -f selected, when the file is in an ancestor directory of the checkout at root and its
+// harness section pins a runtime, as [DiscoverStack] refuses an ancestor's document that
+// pins; nil for any other file. A file that cannot be read is that error.
+func SelectedDocument(root, path string) error {
+	if !IsDocument(path) {
+		return nil
+	}
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(resolved(filepath.Dir(path)), resolved(root))
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	f, err := read(path)
+	if err != nil {
+		return err
+	}
+	return ancestorPin(path, f)
+}
+
+// resolved is path with its links resolved, or path when that fails, so that a folder
+// reached through a link, such as /tmp on macOS, compares equal to its target.
+func resolved(path string) string {
+	if r, err := filepath.EvalSymlinks(path); err == nil {
+		return r
+	}
+	return path
+}
+
+// ancestorPin is the refusal of f, the qory.yaml at path in an ancestor directory and the
+// compose document, when its harness section pins a runtime; nil otherwise.
+func ancestorPin(path string, f file) error {
+	if f.Harness != nil && len(f.Harness.RuntimePins) > 0 {
+		return pinOutsideCheckout(path)
+	}
+	return nil
 }
 
 // LoadStack reads the document at path as [DiscoverStack] or -f selected it: a

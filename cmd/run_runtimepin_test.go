@@ -186,6 +186,23 @@ func TestAPinTheRegistryDoesNotHaveStopsAPersonsRun(t *testing.T) {
 	}
 }
 
+// TestComposeOfAnAncestorsPinWithFStops selects with -f the qory.yaml of the checkout's
+// parent folder, which defines a stack with a target and pins claude: qory harness
+// compose stops with the fix first and the file last, as for that file found by discovery.
+func TestComposeOfAnAncestorsPinWithFStops(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	ancestor := filepath.Join(filepath.Dir(root), "qory.yaml")
+	writeFile(t, ancestor, "apiVersion: qory.dev/v1alpha1\nharness:\n  target: {runtime: claude}\n  runtimes:\n    claude:\n      version: 2.1.300\n")
+	out, err := run(t, "harness", "compose", "-f", ancestor, "--no-links")
+	if err == nil {
+		t.Fatalf("the compose passed\n%s", out)
+	}
+	wants(t, out+err.Error(), "Move runtimes to the checkout's qory.yaml or to the base qory-stack.yaml.\n"+
+		"  Only the checkout's qory.yaml and the base stack pin a runtime's version.\n"+
+		"  harness.runtimes is in "+ancestor+".")
+}
+
 // TestAPinInTheUsersFileStopsTheCompose pins claude in the user's qory.yaml: qory harness
 // compose stops with the fix first and the file last, and composes once the pin is gone.
 // A pin in the qory.yaml of the checkout's parent folder, which is not the compose

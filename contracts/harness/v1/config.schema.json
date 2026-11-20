@@ -120,7 +120,7 @@
           "type": "object"
         },
         "runtimes": {
-          "description": "The version qory run installs of each runtime, by the runtime's name, claude or codex: an exact version, such as 2.1.320. A runtime no layer pins installs its latest version. Only the checkout's file sets it, beside extends or in the stack it defines, and its pin of a runtime wins over the base stack's; qory stops with an error on it in the user's file, and in an ancestor's file that discovery selects to compose; in another ancestor's file, qory leaves it unread.",
+          "description": "The version qory run installs of each runtime, by the runtime's name, claude or codex: an exact version, such as 2.1.320. A runtime no layer pins installs its latest version. Only the checkout's file sets it, beside extends or in the stack it defines, and its pin of a runtime wins over the base stack's; qory stops with an error on it in the user's file, and in an ancestor's file that discovery or -f selects to compose; in another ancestor's file, qory leaves it unread.",
           "type": "object",
           "propertyNames": {"enum": ["claude", "codex"]},
           "additionalProperties": {

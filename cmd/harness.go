@@ -956,8 +956,17 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 		if p, fetched, err = compose.LoadReference(ref, fetchOpts); err != nil {
 			return nil, composeError(err)
 		}
-	} else if p, err = config.LoadStack(file); err != nil {
-		return nil, input(err)
+	} else {
+		// A document that -f selects in an ancestor directory is refused for a pin, as
+		// [config.DiscoverStack] refuses it.
+		if o.file != "" {
+			if err := config.SelectedDocument(root, file); err != nil {
+				return nil, input(err)
+			}
+		}
+		if p, err = config.LoadStack(file); err != nil {
+			return nil, input(err)
+		}
 	}
 	retired.add(p.File, p.RetiredAPIVersion)
 	// A stack named with -f, in a checkout whose own document extends one, is that
