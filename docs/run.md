@@ -4799,9 +4799,10 @@ when an argument before `--` turns off the trust of the hooks or changes a hook 
 - `--config <key>=<value>` in the forms `--config`, `--config=`, `-c`, `-c<key>=<value>`
   and `-c=<key>=<value>`, where the key is `hooks`, `features.hooks`,
   `features.codex_hooks` or `features.unified_exec_tty`, a key under one, such as
-  `hooks.Stop`, or the table `features` above them: ``Remove the `--config` flag and its
+  `hooks.Stop`, or the table `features` above them: ``Remove the `<flag>` flag and its
   value from the run's Codex arguments.`` and the next line ``A Codex run takes `<key>`
-  from qory and Forager, not from the arguments.``
+  from qory and Forager, not from the arguments.``, where `<flag>` is `-c` or `--config`
+  as typed.
 - `--enable <feature>` or `--disable <feature>`, also with `=`, of `hooks`, `codex_hooks`
   or `unified_exec_tty`: ``Remove the `--enable` flag and its value from the run's Codex
   arguments.`` and the next line ``A Codex run takes the feature `<feature>` from qory
@@ -4831,9 +4832,9 @@ these:
   app server from qory and Forager, not from the arguments.``, or the same with
   `--remote-auth-token-env`.
 
-The key or feature is on the second line, so the first line has the same length for
-every key. A key or feature has each control character written as an escape, such as
-`\n`. Arguments after `--` pass unchanged.
+The key or feature is on the second line, so the first line does not grow with the key.
+A key or feature has each control character written as an escape, such as `\n`.
+Arguments after `--` pass unchanged.
 
 A Codex run without a wall gets a shorter check of its other arguments, from Forager: the
 run stops before Codex starts, with exit status 1, when a Codex argument before `--` is

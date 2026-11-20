@@ -684,10 +684,11 @@ release may change what an existing document does, and states it under Upgrading
   `hooks`, `features.hooks`, `features.codex_hooks` or `features.unified_exec_tty` with
   `-c` or `--config`, a key under one, such as `hooks.Stop`, or the table `features`, or
   pass `hooks`, `codex_hooks` or `unified_exec_tty` to `--enable` or `--disable`. The
-  error has two lines, such as ``Remove the `--config` flag and its value from the run's
-  Codex arguments.`` and ``A Codex run takes `hooks.Stop` from qory and Forager, not from
-  the arguments.`` The key is on the second line, so the first line has the same length
-  for every key. Before, a run without a wall stopped on most of them at Forager's check,
+  error has two lines, ``Remove the `<flag>` flag and its value from the run's Codex
+  arguments.`` and ``A Codex run takes `<key>` from qory and Forager, not from the
+  arguments.``, where `<flag>` is `-c` or `--config` as typed and `<key>` is the key, such
+  as `hooks.Stop`. The key is on the second line, so the first line does not grow with
+  the key. Before, a run without a wall stopped on most of them at Forager's check,
   with Forager's lines, and passed a key under `hooks`. A walled run stopped on
   `hooks.state` and `hooks={…}`, and passed the other keys under `hooks`, such as
   `hooks.Stop`.
@@ -1431,8 +1432,9 @@ release may change what an existing document does, and states it under Upgrading
   `model_reasoning_effort`, a key under one, or a table above one, such as `-c
   features.shell_snapshot=true` or `--config model_providers={}`, in the forms `--config`,
   `--config=`, `-c`, `-c<key>=<value>` and `-c=<key>=<value>`, with ``Remove the
-  `--config` flag and its value from the run's Codex arguments.`` and the next line ``A
-  Codex run takes `<key>` from qory and Forager, not from the arguments.`` The run stops
+  `<flag>` flag and its value from the run's Codex arguments.`` and the next line ``A
+  Codex run takes `<key>` from qory and Forager, not from the arguments.``, where `<flag>`
+  is `-c` or `--config` as typed. The run stops
   before the agent starts, with exit status 1. Forager puts its `--config` flags first,
   and Codex takes the last one for a key. An unwalled run gets Forager's shorter check, in
   the entry for unwalled Codex runs.

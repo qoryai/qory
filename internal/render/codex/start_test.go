@@ -84,32 +84,32 @@ func TestWalledArgsRefuseAReservedConfigKey(t *testing.T) {
 	}
 	w, home := rt.(render.Walled), ""
 	for _, c := range []struct {
-		args []string
-		key  string
+		args      []string
+		flag, key string
 	}{
-		{[]string{"exec", "--config", "model_provider=x", "hi"}, "model_provider"},
-		{[]string{"exec", "--config=model_provider=x", "hi"}, "model_provider"},
-		{[]string{"exec", "-c", "model_provider=x", "hi"}, "model_provider"},
-		{[]string{"exec", "-cmodel_provider=x", "hi"}, "model_provider"},
-		{[]string{"exec", "-c=model_provider=x", "hi"}, "model_provider"},
-		{[]string{"-c", "model_provider=x", "exec", "hi"}, "model_provider"},
-		{[]string{"exec", "hi", "-c", "model_provider=x"}, "model_provider"},
-		{[]string{"-c", "model_provider=x"}, "model_provider"},
-		{[]string{"exec", "-c", " model_provider = x", "hi"}, "model_provider"},
-		{[]string{"exec", "-c", "model_providers.x.base_url=\"https://example.com\"", "hi"}, "model_providers.x.base_url"},
-		{[]string{"exec", "-c", "model_providers.x={}", "hi"}, "model_providers.x"},
-		{[]string{"exec", "-c", "features.shell_snapshot=true", "hi"}, "features.shell_snapshot"},
-		{[]string{"exec", "-c", "features={shell_snapshot=true}", "hi"}, "features"},
-		{[]string{"exec", "-c", "hooks={state={}}", "hi"}, "hooks"},
-		{[]string{"exec", "-c", "hooks.state.x=1", "hi"}, "hooks.state.x"},
-		{[]string{"exec", "--config=hooks.Stop=[]", "hi"}, "hooks.Stop"},
-		{[]string{"exec", "-c", "experimental_realtime_ws_base_url=x", "hi"}, "experimental_realtime_ws_base_url"},
-		{[]string{"exec", "-c", "model_reasoning_effort=high", "hi"}, "model_reasoning_effort"},
-		{[]string{"exec", "-c", "use_legacy_landlock=true", "hi"}, "use_legacy_landlock"},
-		{[]string{"exec", "-c", "model_verbosity=low", "-c", "web_search=live", "hi"}, "web_search"},
+		{[]string{"exec", "--config", "model_provider=x", "hi"}, "--config", "model_provider"},
+		{[]string{"exec", "--config=model_provider=x", "hi"}, "--config", "model_provider"},
+		{[]string{"exec", "-c", "model_provider=x", "hi"}, "-c", "model_provider"},
+		{[]string{"exec", "-cmodel_provider=x", "hi"}, "-c", "model_provider"},
+		{[]string{"exec", "-c=model_provider=x", "hi"}, "-c", "model_provider"},
+		{[]string{"-c", "model_provider=x", "exec", "hi"}, "-c", "model_provider"},
+		{[]string{"exec", "hi", "-c", "model_provider=x"}, "-c", "model_provider"},
+		{[]string{"-c", "model_provider=x"}, "-c", "model_provider"},
+		{[]string{"exec", "-c", " model_provider = x", "hi"}, "-c", "model_provider"},
+		{[]string{"exec", "-c", "model_providers.x.base_url=\"https://example.com\"", "hi"}, "-c", "model_providers.x.base_url"},
+		{[]string{"exec", "-c", "model_providers.x={}", "hi"}, "-c", "model_providers.x"},
+		{[]string{"exec", "-c", "features.shell_snapshot=true", "hi"}, "-c", "features.shell_snapshot"},
+		{[]string{"exec", "-c", "features={shell_snapshot=true}", "hi"}, "-c", "features"},
+		{[]string{"exec", "-c", "hooks={state={}}", "hi"}, "-c", "hooks"},
+		{[]string{"exec", "-c", "hooks.state.x=1", "hi"}, "-c", "hooks.state.x"},
+		{[]string{"exec", "--config=hooks.Stop=[]", "hi"}, "--config", "hooks.Stop"},
+		{[]string{"exec", "-c", "experimental_realtime_ws_base_url=x", "hi"}, "-c", "experimental_realtime_ws_base_url"},
+		{[]string{"exec", "-c", "model_reasoning_effort=high", "hi"}, "-c", "model_reasoning_effort"},
+		{[]string{"exec", "-c", "use_legacy_landlock=true", "hi"}, "-c", "use_legacy_landlock"},
+		{[]string{"exec", "-c", "model_verbosity=low", "-c", "web_search=live", "hi"}, "-c", "web_search"},
 	} {
 		got, err := w.WalledArgs(c.args, home)
-		want := "Remove the `--config` flag and its value from the run's Codex arguments.\n  A Codex run takes `" + c.key + "` from qory and Forager, not from the arguments."
+		want := "Remove the `" + c.flag + "` flag and its value from the run's Codex arguments.\n  A Codex run takes `" + c.key + "` from qory and Forager, not from the arguments."
 		if err == nil || err.Error() != want || got != nil {
 			t.Errorf("WalledArgs(%q) = %q, %v, want %q", c.args, got, err, want)
 		}
@@ -295,11 +295,14 @@ func TestWalledArgsRefuseSkills(t *testing.T) {
 		{"cloud.skills={}", "cloud.skills"},
 		{"cloud={}", "cloud"},
 	} {
-		want := "Remove the `--config` flag and its value from the run's Codex arguments.\n  A Codex run takes `" + c.key + "` from qory and Forager, not from the arguments."
-		for _, args := range [][]string{{"-c", c.pair}, {"--config=" + c.pair}, {"-c=" + c.pair}} {
-			got, err := w.WalledArgs(args, home)
+		for _, f := range []struct {
+			flag string
+			args []string
+		}{{"-c", []string{"-c", c.pair}}, {"--config", []string{"--config=" + c.pair}}, {"-c", []string{"-c=" + c.pair}}} {
+			want := "Remove the `" + f.flag + "` flag and its value from the run's Codex arguments.\n  A Codex run takes `" + c.key + "` from qory and Forager, not from the arguments."
+			got, err := w.WalledArgs(f.args, home)
 			if err == nil || err.Error() != want || got != nil {
-				t.Errorf("WalledArgs(%q) = %q, %v, want %q", args, got, err, want)
+				t.Errorf("WalledArgs(%q) = %q, %v, want %q", f.args, got, err, want)
 			}
 		}
 	}
@@ -323,7 +326,7 @@ func TestWalledArgsRefusalsEscapeControlCharacters(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"-c", "features.x\n\x1b[2Jy=1"}, "Remove the `--config` flag and its value from the run's Codex arguments.\n  A Codex run takes `features.x\\n\\x1b[2Jy` from qory and Forager, not from the arguments."},
+		{[]string{"-c", "features.x\n\x1b[2Jy=1"}, "Remove the `-c` flag and its value from the run's Codex arguments.\n  A Codex run takes `features.x\\n\\x1b[2Jy` from qory and Forager, not from the arguments."},
 		{[]string{"--enable", "x\ay"}, "Remove the `--enable` flag and its value from the run's Codex arguments.\n  A Codex run takes the feature `x\\ay` from qory and Forager, not from the arguments."},
 		{[]string{"--disable=x\ry"}, "Remove the `--disable` flag and its value from the run's Codex arguments.\n  A Codex run takes the feature `x\\ry` from qory and Forager, not from the arguments."},
 	} {
@@ -334,9 +337,10 @@ func TestWalledArgsRefusalsEscapeControlCharacters(t *testing.T) {
 	}
 }
 
-// TestArgsRefusalsKeepALongKeyOffLineOne is a refused --config key and a refused feature
-// of 200 characters, in a run without a wall and in a walled run: line 1 of the text is at
-// most 100 characters behind "qory run: ", and the cause line has the whole key or
+// TestArgsRefusalsKeepALongKeyOffLineOne is a refused key of 200 characters with -c and
+// with --config, and a refused feature of 200 characters with --enable and --disable, in a
+// run without a wall and in a walled run: line 1 of the text has the flag as typed and is
+// at most 100 characters behind "qory run: ", and the cause line has the whole key or
 // feature.
 func TestArgsRefusalsKeepALongKeyOffLineOne(t *testing.T) {
 	rt, err := render.Lookup("codex")
@@ -345,12 +349,15 @@ func TestArgsRefusalsKeepALongKeyOffLineOne(t *testing.T) {
 	}
 	long := "hooks." + strings.Repeat("x", 194)
 	feature := strings.Repeat("f", 200)
-	check := func(name string, err error, value string) {
+	check := func(name string, err error, flag, value string) {
 		t.Helper()
 		if err == nil {
 			t.Fatalf("%s: no error, want a stop", name)
 		}
 		first, cause, _ := strings.Cut(err.Error(), "\n")
+		if !strings.Contains(first, "`"+flag+"`") {
+			t.Errorf("%s: line 1 %q, want it to contain `%s`", name, first, flag)
+		}
 		if line := "qory run: " + first; len(line) > 100 {
 			t.Errorf("%s: line 1 of %d characters behind qory run:, want at most 100: %q", name, len(line), line)
 		}
@@ -358,31 +365,36 @@ func TestArgsRefusalsKeepALongKeyOffLineOne(t *testing.T) {
 			t.Errorf("%s: cause line %q, want it to contain `%s`", name, cause, value)
 		}
 	}
-	check("CheckArgs -c", rt.(render.ArgsChecker).CheckArgs([]string{"-c", long + "=1"}), long)
+	c := rt.(render.ArgsChecker)
+	check("CheckArgs -c", c.CheckArgs([]string{"-c", long + "=1"}), "-c", long)
+	check("CheckArgs --config", c.CheckArgs([]string{"--config", long + "=1"}), "--config", long)
 	w := rt.(render.Walled)
+	_, err = w.WalledArgs([]string{"-c" + long + "=1"}, "")
+	check("WalledArgs -c", err, "-c", long)
 	_, err = w.WalledArgs([]string{"--config=" + long + "=1"}, "")
-	check("WalledArgs --config", err, long)
+	check("WalledArgs --config", err, "--config", long)
 	_, err = w.WalledArgs([]string{"--enable", feature}, "")
-	check("WalledArgs --enable", err, feature)
+	check("WalledArgs --enable", err, "--enable", feature)
 	_, err = w.WalledArgs([]string{"--disable=" + feature}, "")
-	check("WalledArgs --disable", err, feature)
+	check("WalledArgs --disable", err, "--disable", feature)
 }
 
 // TestCheckArgsRefuseTheHookSettingsWithoutAWall is each argument that the check of a run
 // without a wall refuses: --dangerously-bypass-hook-trust in both forms, --config and
 // -c at features.unified_exec_tty, features.codex_hooks, a key under hooks and the
 // features table above them, and --enable and --disable of unified_exec_tty,
-// codex_hooks and hooks. Each is refused with the text of a walled run: line 1 is at most
-// 100 characters behind "qory run: ", and the cause line at most 100. --search, another feature, another key and every argument
-// after -- pass, as a walled run alone refuses them.
+// codex_hooks and hooks. Each is refused with the text of a walled run, with the flag as
+// typed and the whole key or feature, and line 1 is at most 100 characters behind
+// "qory run: ". --search, another feature, another key and every argument after -- pass,
+// as a walled run alone refuses them.
 func TestCheckArgsRefuseTheHookSettingsWithoutAWall(t *testing.T) {
 	rt, err := render.Lookup("codex")
 	if err != nil {
 		t.Fatal(err)
 	}
 	c := rt.(render.ArgsChecker)
-	config := func(key string) string {
-		return "Remove the `--config` flag and its value from the run's Codex arguments.\n  A Codex run takes `" + key + "` from qory and Forager, not from the arguments."
+	config := func(flag, key string) string {
+		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  A Codex run takes `" + key + "` from qory and Forager, not from the arguments."
 	}
 	feature := func(flag, name string) string {
 		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  A Codex run takes the feature `" + name + "` from qory and Forager, not from the arguments."
@@ -394,16 +406,16 @@ func TestCheckArgsRefuseTheHookSettingsWithoutAWall(t *testing.T) {
 	}{
 		{[]string{"exec", "--dangerously-bypass-hook-trust", "hi"}, hooks},
 		{[]string{"--dangerously-bypass-hook-trust=true", "exec", "hi"}, hooks},
-		{[]string{"exec", "-c", "features.unified_exec_tty=true", "hi"}, config("features.unified_exec_tty")},
-		{[]string{"exec", "--config=hooks.x=1", "hi"}, config("hooks.x")},
-		{[]string{"exec", "-c", "features={unified_exec_tty=true}", "hi"}, config("features")},
-		{[]string{"exec", "-c", "features.codex_hooks=true", "hi"}, config("features.codex_hooks")},
-		{[]string{"exec", "-cfeatures.hooks=false", "hi"}, config("features.hooks")},
+		{[]string{"exec", "-c", "features.unified_exec_tty=true", "hi"}, config("-c", "features.unified_exec_tty")},
+		{[]string{"exec", "--config=hooks.x=1", "hi"}, config("--config", "hooks.x")},
+		{[]string{"exec", "-c", "features={unified_exec_tty=true}", "hi"}, config("-c", "features")},
+		{[]string{"exec", "-c", "features.codex_hooks=true", "hi"}, config("-c", "features.codex_hooks")},
+		{[]string{"exec", "-cfeatures.hooks=false", "hi"}, config("-c", "features.hooks")},
 		{[]string{"exec", "--enable", "unified_exec_tty", "hi"}, feature("--enable", "unified_exec_tty")},
 		{[]string{"exec", "--disable=codex_hooks", "hi"}, feature("--disable", "codex_hooks")},
 		{[]string{"exec", "--enable", "codex_hooks", "hi"}, feature("--enable", "codex_hooks")},
 		{[]string{"exec", "--disable", "hooks", "hi"}, feature("--disable", "hooks")},
-		{[]string{"--search", "exec", "--enable", "x", "-c", "hooks.Stop=[]"}, config("hooks.Stop")},
+		{[]string{"--search", "exec", "--enable", "x", "-c", "hooks.Stop=[]"}, config("-c", "hooks.Stop")},
 	} {
 		err := c.CheckArgs(tc.args)
 		if err == nil || err.Error() != tc.want {
@@ -412,11 +424,6 @@ func TestCheckArgsRefuseTheHookSettingsWithoutAWall(t *testing.T) {
 		}
 		if line := "qory run: " + strings.Split(err.Error(), "\n")[0]; len(line) > 100 {
 			t.Errorf("CheckArgs(%q): line 1 of %d characters behind qory run:, want at most 100: %q", tc.args, len(line), line)
-		}
-		for _, line := range strings.Split(err.Error(), "\n")[1:] {
-			if len(line) > 100 {
-				t.Errorf("CheckArgs(%q): a line of %d characters, want at most 100: %q", tc.args, len(line), line)
-			}
 		}
 	}
 	for _, args := range [][]string{

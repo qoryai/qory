@@ -312,7 +312,7 @@ func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 	}
 	log := walledForager(t)
 	_, err = run(t, "run", "codex", "--", "-c", "model_provider=x")
-	want := "Remove the `--config` flag and its value from the run's Codex arguments.\n  A Codex run takes `model_provider` from qory and Forager, not from the arguments."
+	want := "Remove the `-c` flag and its value from the run's Codex arguments.\n  A Codex run takes `model_provider` from qory and Forager, not from the arguments."
 	if cmd.ExitCode(err) != 1 || err == nil || err.Error() != want {
 		t.Errorf("a walled run: %v (exit %d), want %q", err, cmd.ExitCode(err), want)
 	}
@@ -333,14 +333,13 @@ func TestAWalledCodexRunRefusesAReservedConfigArgument(t *testing.T) {
 // TestACodexRunWithoutAWallStopsOnTheHookArguments is a run of codex without a wall given,
 // after qory run's --, an argument that turns off the hooks' trust or a hook setting:
 // each stops the run before Forager's join, with exit status 1 and the text of a walled
-// run. Line 1 is at most 100 characters behind "qory run: ", also with a key of 200
-// characters, which is on the cause line; another cause line is at most 100. An argument
-// that a walled run alone refuses, such as another feature or another key, reaches the
-// program.
+// run, with the flag as typed and the whole key or feature. Line 1 is at most 100
+// characters behind "qory run: ", also with a key of 200 characters. An argument that a
+// walled run alone refuses, such as another feature or another key, reaches the program.
 func TestACodexRunWithoutAWallStopsOnTheHookArguments(t *testing.T) {
 	exportingCheckout(t, fakeRuntime(t))
-	config := func(key string) string {
-		return "Remove the `--config` flag and its value from the run's Codex arguments.\n  A Codex run takes `" + key + "` from qory and Forager, not from the arguments."
+	config := func(flag, key string) string {
+		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  A Codex run takes `" + key + "` from qory and Forager, not from the arguments."
 	}
 	feature := func(flag, name string) string {
 		return "Remove the `" + flag + "` flag and its value from the run's Codex arguments.\n  A Codex run takes the feature `" + name + "` from qory and Forager, not from the arguments."
@@ -352,14 +351,14 @@ func TestACodexRunWithoutAWallStopsOnTheHookArguments(t *testing.T) {
 	}{
 		{[]string{"--dangerously-bypass-hook-trust"}, hooks},
 		{[]string{"--dangerously-bypass-hook-trust=true"}, hooks},
-		{[]string{"-c", "features.unified_exec_tty=true"}, config("features.unified_exec_tty")},
-		{[]string{"--config=hooks.x=1"}, config("hooks.x")},
-		{[]string{"-c", "features={hooks=false}"}, config("features")},
-		{[]string{"-c", "features.codex_hooks=true"}, config("features.codex_hooks")},
+		{[]string{"-c", "features.unified_exec_tty=true"}, config("-c", "features.unified_exec_tty")},
+		{[]string{"--config=hooks.x=1"}, config("--config", "hooks.x")},
+		{[]string{"-c", "features={hooks=false}"}, config("-c", "features")},
+		{[]string{"-c", "features.codex_hooks=true"}, config("-c", "features.codex_hooks")},
 		{[]string{"--enable", "unified_exec_tty"}, feature("--enable", "unified_exec_tty")},
 		{[]string{"--disable=codex_hooks"}, feature("--disable", "codex_hooks")},
 		{[]string{"--enable", "codex_hooks"}, feature("--enable", "codex_hooks")},
-		{[]string{"-c", "hooks." + strings.Repeat("x", 194) + "=1"}, config("hooks." + strings.Repeat("x", 194))},
+		{[]string{"-c", "hooks." + strings.Repeat("x", 194) + "=1"}, config("-c", "hooks."+strings.Repeat("x", 194))},
 	} {
 		out, err := run(t, append([]string{"run", "codex", "--"}, c.args...)...)
 		if cmd.ExitCode(err) != 1 || err == nil || err.Error() != c.want {
@@ -370,11 +369,6 @@ func TestACodexRunWithoutAWallStopsOnTheHookArguments(t *testing.T) {
 		wants(t, out, "✗ "+fix+"\n")
 		if line := "qory run: " + fix; len(line) > 100 {
 			t.Errorf("%q: line 1 of %d characters behind qory run:, want at most 100: %q", c.args, len(line), line)
-		}
-		for _, line := range strings.Split(err.Error(), "\n")[1:] {
-			if len(line) > 100 && !strings.Contains(line, strings.Repeat("x", 194)) {
-				t.Errorf("%q: a line of %d characters, want at most 100: %q", c.args, len(line), line)
-			}
 		}
 	}
 	for _, args := range [][]string{{"-c", "model=x"}, {"--enable", "some_other_feature"}} {

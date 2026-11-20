@@ -111,8 +111,9 @@ func StartDirs(args []string) []string {
 
 // textConfigArg is the refusal of a run whose Codex arguments set a key of [trustKeys],
 // or, in a walled run, of [reservedKeys] or [argReservedKeys], with --config or -c, with
-// the key as given for its %s. The key is on the cause line, so line 1 has a fixed length.
-const textConfigArg = "Remove the `--config` flag and its value from the run's Codex arguments.\n  A Codex run takes `%s` from qory and Forager, not from the arguments."
+// the flag as typed, --config or -c, and the key as given for its two %s. The key is on
+// the cause line, so line 1 is at most as long as with --config.
+const textConfigArg = "Remove the `%s` flag and its value from the run's Codex arguments.\n  A Codex run takes `%s` from qory and Forager, not from the arguments."
 
 // textProviderArg is the refusal of a walled run whose Codex arguments contain --oss or
 // --local-provider, with the flag for its %s.
@@ -223,7 +224,7 @@ func (codex) CheckArgs(args []string) error {
 func checkArgs(args []string, walled bool) error {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		var pair string
+		var pair, flag string
 		switch {
 		case a == "--":
 			return nil
@@ -263,11 +264,11 @@ func checkArgs(args []string, walled bool) error {
 				continue
 			}
 			i++
-			pair = args[i]
+			pair, flag = args[i], a
 		case strings.HasPrefix(a, "--config="):
-			pair = strings.TrimPrefix(a, "--config=")
+			pair, flag = strings.TrimPrefix(a, "--config="), "--config"
 		case strings.HasPrefix(a, "-c"):
-			pair = strings.TrimPrefix(strings.TrimPrefix(a, "-c"), "=")
+			pair, flag = strings.TrimPrefix(strings.TrimPrefix(a, "-c"), "="), "-c"
 		default:
 			continue
 		}
@@ -276,7 +277,7 @@ func checkArgs(args []string, walled bool) error {
 			continue
 		}
 		if key = strings.TrimSpace(key); reservedArg(key, walled) {
-			return fmt.Errorf(textConfigArg, shownArg(key))
+			return fmt.Errorf(textConfigArg, flag, shownArg(key))
 		}
 	}
 	return nil
