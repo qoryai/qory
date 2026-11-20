@@ -474,8 +474,13 @@ func Load(root string, own bool) (Config, error) {
 	if c.Forager, err = LoadForager(); err != nil {
 		return c, err
 	}
+	user, err := UserDir()
+	if err != nil {
+		return c, err
+	}
 	for _, path := range files {
-		f, err := c.apply(path, own || filepath.Dir(path) != root, filepath.Dir(path) == root)
+		dir := filepath.Dir(path)
+		f, err := c.apply(path, own || dir != root, dir == root, user != "" && dir == user)
 		if err != nil {
 			return c, err
 		}
@@ -503,7 +508,7 @@ func LoadUser() (Config, error) {
 	if err != nil || path == "" {
 		return c, err
 	}
-	_, err = c.apply(path, true, false)
+	_, err = c.apply(path, true, false, true)
 	return c, err
 }
 
@@ -627,9 +632,9 @@ func closedAtRoot(path string) error {
 
 // composeIn returns the one document dir holds for a compose, "" for none, and an error
 // for both. With owned, dir is an ancestor's, a file the current user does not own does
-// not count, and a qory.yaml whose harness section pins a runtime is refused, as
-// [Config.apply] refuses it. A qory.yaml that cannot be read is that error, so a mistake
-// in it is reported where it is.
+// not count, and a qory.yaml whose harness section pins a runtime is refused, since it
+// would be the compose document: a pin makes the harness section compose. A qory.yaml
+// that cannot be read is that error, so a mistake in it is reported where it is.
 func composeIn(dir string, owned bool) (string, error) {
 	var found []string
 	if path := filepath.Join(dir, stack.FileName); exists(path) && (!owned || ownedFile(path)) {
@@ -770,8 +775,9 @@ func ownedFile(path string) bool {
 	return err == nil && stack.OwnedByCurrentUser(info)
 }
 
-// pinOutsideCheckout is the refusal of harness.runtimes in the file at path, the user's
-// file or an ancestor's: only the checkout root's file and the base stack pin a runtime.
+// pinOutsideCheckout is the refusal of harness.runtimes in the file at path: the user's
+// file, or an ancestor's that is the compose document. Only the checkout root's file and
+// the base stack pin a runtime.
 func pinOutsideCheckout(path string) error {
 	return exports.Refuse("Move runtimes to the checkout's "+FileName+" or to the base "+stack.FileName+".",
 		"Only the checkout's "+FileName+" and the base stack pin a runtime's version.",
@@ -782,10 +788,12 @@ func pinOutsideCheckout(path string) error {
 // machine false, only the worktree section, the qory key and the tiers are taken: the
 // other harness keys, git and env are the machine's and left out. With root, the file is
 // the checkout root's, and its tiers are the repository's map; any other file's are the
-// machine's. Only the checkout root's file pins a runtime's version: harness.runtimes in
-// any other file is refused. A refusal prints a value the file sets as [exports.Value]
-// prints it, and a variable's or a tier's name as [accesskey.ShownName] prints it.
-func (c *Config) apply(path string, machine, root bool) (file, error) {
+// machine's. With user, the file is the user's, in [UserDir], and harness.runtimes in it
+// is refused. An ancestor's harness.runtimes is left unread, as its other compose keys
+// are; [composeIn] refuses it when that file is the compose document. A refusal prints a
+// value the file sets as [exports.Value] prints it, and a variable's or a tier's name as
+// [accesskey.ShownName] prints it.
+func (c *Config) apply(path string, machine, root, user bool) (file, error) {
 	f, err := read(path)
 	if err != nil {
 		return f, err
@@ -800,7 +808,7 @@ func (c *Config) apply(path string, machine, root bool) (file, error) {
 	if err := c.applyWorktree(path, f.Worktree); err != nil {
 		return f, err
 	}
-	if f.Harness != nil && len(f.Harness.RuntimePins) > 0 && !root {
+	if f.Harness != nil && len(f.Harness.RuntimePins) > 0 && user {
 		return f, pinOutsideCheckout(path)
 	}
 	if f.Harness != nil && f.Harness.Tiers != nil {

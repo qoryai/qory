@@ -186,26 +186,27 @@ func TestAPinTheRegistryDoesNotHaveStopsAPersonsRun(t *testing.T) {
 	}
 }
 
-// TestAPinInTheUsersFileOrAnAncestorsStopsTheCompose pins claude in the user's qory.yaml,
-// then in the qory.yaml of the checkout's parent folder: qory harness compose stops on
-// each with the fix first and the file last, and composes once the pin is gone.
-func TestAPinInTheUsersFileOrAnAncestorsStopsTheCompose(t *testing.T) {
+// TestAPinInTheUsersFileStopsTheCompose pins claude in the user's qory.yaml: qory harness
+// compose stops with the fix first and the file last, and composes once the pin is gone.
+// A pin in the qory.yaml of the checkout's parent folder, which is not the compose
+// document, is left unread, and the compose passes.
+func TestAPinInTheUsersFileStopsTheCompose(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
+	const pins = "apiVersion: qory.dev/v1alpha1\nharness:\n  runtimes:\n    claude:\n      version: 2.1.300\n"
 	user := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml")
-	for _, path := range []string{user, filepath.Join(filepath.Dir(root), "qory.yaml")} {
-		writeFile(t, path, "apiVersion: qory.dev/v1alpha1\nharness:\n  runtimes:\n    claude:\n      version: 2.1.300\n")
-		out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links")
-		if err == nil {
-			t.Fatalf("%s: the compose passed\n%s", path, out)
-		}
-		wants(t, out+err.Error(), "Move runtimes to the checkout's qory.yaml or to the base qory-stack.yaml.\n"+
-			"  Only the checkout's qory.yaml and the base stack pin a runtime's version.\n"+
-			"  harness.runtimes is in "+path+".")
-		if err := os.Remove(path); err != nil {
-			t.Fatal(err)
-		}
+	writeFile(t, user, pins)
+	out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links")
+	if err == nil {
+		t.Fatalf("the compose passed\n%s", out)
 	}
+	wants(t, out+err.Error(), "Move runtimes to the checkout's qory.yaml or to the base qory-stack.yaml.\n"+
+		"  Only the checkout's qory.yaml and the base stack pin a runtime's version.\n"+
+		"  harness.runtimes is in "+user+".")
+	if err := os.Remove(user); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(filepath.Dir(root), "qory.yaml"), pins)
 	if out, err := run(t, "harness", "compose", "--runtime", "claude", "--no-links"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}

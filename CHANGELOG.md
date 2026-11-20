@@ -27,7 +27,8 @@ release may change what an existing document does, and states it under Upgrading
   error on a version that does not start with a digit, `latest` among them, a version with
   `+`, a version that YAML reads as a number or a date, such as an unquoted `2.1`, and a
   runtime other than `claude` and `codex`. qory stops with an error on `harness.runtimes`
-  in the user's `qory.yaml` or an ancestor's. A pinned version that the registry does not have stops the run before its
+  in the user's `qory.yaml`, and in an ancestor's `qory.yaml` that discovery selects to
+  compose; in another ancestor's file, qory leaves the pin unread. A pinned version that the registry does not have stops the run before its
   session with `Set runtimes.<runtime>.version in <file> to a version the registry has.`
   and the cause, `The registry has no <runtime> <version>.`; `<file>` is the checkout's
   `qory.yaml` or `harness.yaml` for a pin of a base fetched over git. A dispatched run prints the cause

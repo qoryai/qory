@@ -9,18 +9,20 @@ import (
 )
 
 // TestOnlyTheCheckoutsFilePinsARuntime pins codex in the checkout root's qory.yaml,
-// which Load takes and Compose reads as the document's pin from that file, and then in
-// the user's file and in an ancestor's, which Load refuses, the fix first and the file
-// last, with the checkout's file, read or not. LoadUser refuses the user's file too.
+// which Load takes and Compose reads as the document's pin from that file. A pin of claude
+// in an ancestor's qory.yaml is left unread: Load passes, and the document's pins stay the
+// checkout's. A pin in the user's file is refused by Load, the fix first and the file
+// last, with the checkout's file, read or not, and by LoadUser.
 func TestOnlyTheCheckoutsFilePinsARuntime(t *testing.T) {
 	home := isolated(t)
 	root := filepath.Join(t.TempDir(), "code", "app")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	const pins = "harness:\n  runtimes:\n    codex:\n      version: 0.167.2\n"
+	const pins = "harness:\n  runtimes:\n    claude:\n      version: 2.1.300\n"
 	own := filepath.Join(root, "qory.yaml")
 	write(t, own, "harness:\n  extends: {path: ../base}\n  runtimes:\n    codex:\n      version: 0.167.2\n")
+	write(t, filepath.Join(filepath.Dir(root), "qory.yaml"), pins)
 	for _, readOwn := range []bool{true, false} {
 		if _, err := config.Load(root, readOwn); err != nil {
 			t.Fatalf("own %v: %v", readOwn, err)
@@ -30,31 +32,53 @@ func TestOnlyTheCheckoutsFilePinsARuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := p.RuntimePins["codex"]; got.Version != "0.167.2" || got.From != own {
-		t.Fatalf("the document's pin is %+v, want 0.167.2 from %s", got, own)
+	if got := p.RuntimePins["codex"]; len(p.RuntimePins) != 1 || got.Version != "0.167.2" || got.From != own {
+		t.Fatalf("the document's pins are %+v, want codex 0.167.2 from %s alone", p.RuntimePins, own)
 	}
 	user := filepath.Join(home, ".config", "qory", "qory.yaml")
-	ancestor := filepath.Join(filepath.Dir(root), "qory.yaml")
-	refusal := func(path string) string {
-		return "Move runtimes to the checkout's qory.yaml or to the base qory-stack.yaml.\n" +
-			"  Only the checkout's qory.yaml and the base stack pin a runtime's version.\n" +
-			"  harness.runtimes is in " + path + "."
+	write(t, user, pins)
+	want := "Move runtimes to the checkout's qory.yaml or to the base qory-stack.yaml.\n" +
+		"  Only the checkout's qory.yaml and the base stack pin a runtime's version.\n" +
+		"  harness.runtimes is in " + user + "."
+	for _, readOwn := range []bool{true, false} {
+		if _, err := config.Load(root, readOwn); err == nil || err.Error() != want {
+			t.Errorf("own %v:\n%v\nwant:\n%s", readOwn, err, want)
+		}
 	}
-	for _, path := range []string{user, ancestor} {
-		write(t, path, pins)
-		for _, readOwn := range []bool{true, false} {
-			if _, err := config.Load(root, readOwn); err == nil || err.Error() != refusal(path) {
-				t.Errorf("%s, own %v:\n%v\nwant:\n%s", path, readOwn, err, refusal(path))
-			}
+	if _, err := config.LoadUser(); err == nil || err.Error() != want {
+		t.Errorf("LoadUser:\n%v\nwant:\n%s", err, want)
+	}
+}
+
+// TestANestedCheckoutLeavesTheOuterPinUnread is a checkout inside another repository,
+// such as a git submodule, each with a qory.yaml, the outer one pinning codex: Load of
+// the inner checkout passes, DiscoverStack finds the inner qory.yaml, and its compose has
+// no pin.
+func TestANestedCheckoutLeavesTheOuterPinUnread(t *testing.T) {
+	isolated(t)
+	outer := filepath.Join(t.TempDir(), "outer")
+	inner := filepath.Join(outer, "vendor", "inner")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(outer, "qory.yaml"), "harness:\n  extends: {path: ../base}\n  runtimes:\n    codex:\n      version: 0.167.2\n")
+	own := filepath.Join(inner, "qory.yaml")
+	write(t, own, "harness:\n  extends: {path: ../base}\n")
+	for _, readOwn := range []bool{true, false} {
+		if _, err := config.Load(inner, readOwn); err != nil {
+			t.Fatalf("own %v: %v", readOwn, err)
 		}
-		if path == user {
-			if _, err := config.LoadUser(); err == nil || err.Error() != refusal(path) {
-				t.Errorf("LoadUser:\n%v\nwant:\n%s", err, refusal(path))
-			}
-		}
-		if err := os.Remove(path); err != nil {
-			t.Fatal(err)
-		}
+	}
+	found, err := config.DiscoverStack(inner)
+	if err != nil || found != own {
+		t.Fatalf("DiscoverStack returned %q, %v, want %s", found, err, own)
+	}
+	p, err := config.Compose(found)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.RuntimePins) != 0 {
+		t.Fatalf("the inner checkout's pins are %+v, want none", p.RuntimePins)
 	}
 }
 
