@@ -83,7 +83,7 @@ type suiteEnd struct {
 	// extensions are lines under harness.extensions in the checkout's qory.yaml, each
 	// indented 4 spaces or more.
 	extensions string
-	// noFullSuite is whether the run documents have full_suite false.
+	// noFullSuite is whether the session runs no full suite: SetFullSuite(true) is left out.
 	noFullSuite bool
 	// after, when not nil, is the end of the after step in place of the script's.
 	after *session.AfterResult
