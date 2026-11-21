@@ -647,8 +647,11 @@ func TestALaterSessionNeedsProofThatTheSessionBeforeStopped(t *testing.T) {
 // TestACodexHomeThatStaysEndsTheRunBeforeTheNextSession is a run of two Codex sessions
 // whose Codex home of session 1 cannot be removed: the run closes failed, exit 1, with the
 // line that starts with the removal by hand and then has the cause, and session 2 does not
-// join.
+// join. It skips under root, which removes a folder from a folder of mode 0500.
 func TestACodexHomeThatStaysEndsTheRunBeforeTheNextSession(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root removes a folder from a folder of mode 0500")
+	}
 	r := runLoop(t, loopSetup{
 		answers: []string{laterAnswer(2, "codex", "example-provider-2", 30)},
 		change:  func(d map[string]any) { d["run_settings"] = map[string]any{"runtime": "codex"} },
