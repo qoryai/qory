@@ -411,7 +411,8 @@ func TestAPointOfSpacesIsNoValidReport(t *testing.T) {
 	for name, c := range map[string]struct{ point, cause string }{
 		"a space": {" ", format}, "a tab": {"\t", format}, "U+00A0": {"\u00a0", trimmed}, "U+00A0 and a space": {"\u00a0 ", trimmed},
 		"U+200B": {"\u200b", format}, "U+3164": {"\u3164", trimmed}, "U+034F": {"\u034f", trimmed},
-		"U+FEFF": {"\ufeff", format}, "the four": {"\u200b \u3164\u034f\ufeff", format},
+		"U+FEFF": {"\ufeff", format}, "U+200B, U+3164, U+034F and U+FEFF": {"\u200b \u3164\u034f\ufeff", format},
+		"U+3164 and U+034F": {"\u3164\u034f", trimmed},
 	} {
 		point := c.point
 		t.Run(name, func(t *testing.T) {
@@ -439,9 +440,9 @@ func TestAPointOfSpacesIsNoValidReport(t *testing.T) {
 	}
 }
 
-// TestAPointHasTheCharacterRuleOfALine is a point of a report: a plain point and one with
-// U+200D in an emoji sequence pass, and one with U+200B and one with the tag character
-// U+E0041 fail the report format, as any text that is not one line of text does.
+// TestAPointHasTheCharacterRuleOfALine checks that a plain point and one with U+200D in
+// an emoji sequence pass, and that one with U+200B and one with the tag character U+E0041
+// fail the report format, as any text that is not one line of text does.
 func TestAPointHasTheCharacterRuleOfALine(t *testing.T) {
 	const format = "Reviewer code-reviewer wrote a report that does not match the report format: at '/findings/0/point'"
 	for _, c := range []struct {

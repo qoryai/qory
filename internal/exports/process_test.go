@@ -1598,6 +1598,30 @@ left_out: {type: integer, x-qory-fill: pushed-commits-left-out}`
 			t.Errorf("the first line has %d characters: %s", len(first), first)
 		}
 	}
+	// A written-out copy of the reference with a mark is no primitive reference: the mark is
+	// a key that the primitives' definition lacks, so the member takes the reference by $ref.
+	var primitive struct {
+		Defs map[string]map[string]any `json:"$defs"`
+	}
+	if err := json.Unmarshal(primitives.Schema, &primitive); err != nil {
+		t.Fatal(err)
+	}
+	written := primitive.Defs["reference"]
+	written["x-qory-fill"] = "pushed-head"
+	member, err := json.Marshal(written)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := json.Marshal(primitive.Defs["line"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyType := custom("structured", "size_limit: 1, max_files: 1, json_schema: {type: object, $defs: {line: "+string(line)+", reference: {$ref: '"+reference+"'}}, properties: {target: {$ref: '#/$defs/reference'}, head: "+string(member)+"}}"+send)
+	e := factory(t, withTypes(copyType))
+	want := shapeFix + "pushed-head on property head" + inType + "a primitive reference.\n  The type is in " + filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName) + "."
+	if err := e.Verify(); err == nil || !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("a written-out copy with a mark: %v", err)
+	}
 	// A mark on the root of the schema is below the top level too.
 	root := custom("structured", "size_limit: 1, max_files: 1, json_schema: {x-qory-fill: pushed-branch, properties: {target: {$ref: '"+reference+"'}}}"+send)
 	if err := factory(t, withTypes(root)).Verify(); err == nil || !strings.HasPrefix(err.Error(), belowFix) {

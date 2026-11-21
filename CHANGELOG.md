@@ -703,11 +703,12 @@ release may change what an existing document does, and states it under Upgrading
 - A top-level property of a type with `deliver` can have the keyword `x-qory-fill` with
   one of these values, each on one property at most: `pushed-commits` on a list whose
   `items` are the primitive `reference` (the commits qory pushed to the target, oldest
-  first), `pushed-head` and `pushed-base` on a `reference`, `pushed-branch` and
-  `pushed-base-branch` on a string, and `pushed-commits-left-out` on an integer. qory
-  stops the command with the fix on the first line when `x-qory-fill` is below the top
-  level, on a property of another shape, a value that qory does not fill, or in a type
-  without `deliver`.
+  first), `pushed-head` and `pushed-base` on a `reference` that the property takes
+  through a `$ref`, to the primitives or to a local `$defs` `reference`, `pushed-branch`
+  and `pushed-base-branch` on a string, and `pushed-commits-left-out` on an integer.
+  qory stops the command with the fix on the first line when `x-qory-fill` is below the
+  top level, on a property of another shape, a value that qory does not fill, or in a
+  type without `deliver`.
 - A stage of the `process` of a `process.yaml` can have `outputs`, a list of objects with
   `type`, the name of an entry of `artifact_types`, and `required`, `true` or `false`,
   `false` when left out. An output has no other key. qory stops the command with the fix
@@ -1802,8 +1803,8 @@ release may change what an existing document does, and states it under Upgrading
   as U+E0041 passed. Each `$defs` `line` and `text` now has the pattern of the primitives.
   The checks of `qory run verdict` and of the review round stop the same characters.
   The `point` of a finding in `review-report.schema.json` is a `line` too: before, it
-  stopped only line breaks, so a tab, U+200B and U+E0041 passed, and a report with such a
-  point now does not match the format.
+  stopped only line breaks and a point of spaces, so a tab, U+200B and U+E0041 passed,
+  and a report with such a point now does not match the format.
 - The hand-off drops a `description` that has a character that a text does not have: a control
   character other than tab, line feed and carriage return, U+2028, U+2029, or a Cf character
   other than U+200C and U+200D, such as U+200B or the tag character U+E0041. It prints

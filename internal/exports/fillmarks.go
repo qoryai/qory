@@ -29,7 +29,8 @@ var fillShapes = []struct{ value, needs string }{
 // [isPrimitiveReference] passes, a reference is what that function passes, and a string
 // or an integer is the "type" of that name written on the property.
 // shortcut: the "type" and the "items" are read on the property, not through a $ref or an
-// allOf; replace it when a type needs to write them elsewhere.
+// allOf, and a reference with a mark is a $ref, not a written-out copy, which the mark
+// makes unequal to the primitives' definition; replace it when a type needs either.
 func fillHasShape(root, member map[string]any, value string) bool {
 	switch value {
 	case "pushed-commits":

@@ -133,7 +133,7 @@ func TestCheckStopsTheRuleCharactersInTheMembers(t *testing.T) {
 		{"text.title", "Add\u200Bit", false},
 		{"text.title", "\u200C\u200D  　", false},
 		{"text.title", "\u200C\u200Da", true},
-		{"text.title", "Add it", false},
+		{"text.title", "Add\u2028it", false},
 		{"draft.title", "Add " + family, true},
 		{"draft.title", "Add\U000E0041it", false},
 		{"draft.title", "Add\u200Bit", false},
@@ -146,7 +146,7 @@ func TestCheckStopsTheRuleCharactersInTheMembers(t *testing.T) {
 		{"text.description", "Adds\u200Cit", true},
 		{"text.description", "Adds\U000E0041it", false},
 		{"text.description", "Adds\u200Bit", false},
-		{"text.description", "Adds it", false},
+		{"text.description", "Adds\u2028it", false},
 	} {
 		err := submission.Check([]byte(with(c.member, c.value)))
 		if (err == nil) != c.ok {
