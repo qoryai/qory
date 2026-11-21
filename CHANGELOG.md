@@ -687,10 +687,13 @@ release may change what an existing document does, and states it under Upgrading
   `primitives.schema.json#/$defs/reference`, in an `allOf`, or through a definition under
   `$defs`, or as a written-out copy of that definition. In a written-out copy, each
   definition that it refers to under `$defs` is the definition of that name in the
-  primitives. A schema with an `$id`, an `$anchor` or a `$dynamicAnchor` anywhere fails,
-  because it changes where a `$ref` points. A `$schema` other than
-  `https://json-schema.org/draft/2020-12/schema` fails too, because draft-07 ignores the
-  keys next to a `$ref`. A `deliver` that breaks a rule stops the command with the fix on
+  primitives. A schema fails when `$id`, `$anchor` or `$dynamicAnchor` is a key anywhere
+  in it, also as the name of a property or a definition, because `$id` changes where a
+  `$ref` points. It fails when `$schema` is anything other than
+  `https://json-schema.org/draft/2020-12/schema`, with or without a final `#`, because
+  draft-07 ignores the keys next to a `$ref`. It fails when a `$ref` into `$defs` has a
+  name with a character other than a letter, a digit, `_` or `-`, because the compiler
+  decodes `%`, `~` and `/` in a JSON Pointer. A `deliver` that breaks a rule stops the command with the fix on
   the first line, at most 100 characters, and the type name on the second line, such as
   ``Add a top-level `target` of the primitive `reference` to the schema, or remove
   `deliver`.``

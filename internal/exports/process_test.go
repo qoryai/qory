@@ -1385,8 +1385,8 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		// A key in a list of subschemas counts as well.
 		{structured(send, "{allOf: [{$id: 'https://example.test/x'}], properties: {target: {$ref: '"+reference+"'}}}"), idFix + place, true},
 		{structured(send, "{anyOf: [{$anchor: a}], properties: {target: {$ref: '"+reference+"'}}}"), idFix + place, true},
-		// The compiler decodes %, ~ and / in the name of a $ref into $defs, so the name that
-		// the check reads must have letters, digits, _ and - only.
+		// The compiler decodes %, ~ and / in the name of a $ref into $defs, so the name
+		// that the check reads must have letters, digits, _ and - only.
 		{structured(send, "{$defs: {'r%65': {$ref: '"+reference+"'}, re: {type: number}}, properties: {target: {$ref: '#/$defs/r%65'}}}"), fix + other + place, true},
 		{structured(send, "{$defs: {'a~1b': {$ref: '"+reference+"'}, 'a/b': {type: number}}, properties: {target: {$ref: '#/$defs/a~1b'}}}"), fix + other + place, true},
 		{structured(send, "{$defs: {'a~0b': {$ref: '"+reference+"'}, 'a~b': {type: number}}, properties: {target: {$ref: '#/$defs/a~0b'}}}"), fix + other + place, true},

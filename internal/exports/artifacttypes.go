@@ -354,10 +354,10 @@ func localName(ref string) (string, bool) {
 	return name, true
 }
 
-// localDefinitionsAreThePrimitives reports whether each definition of root under "#/$defs/"
-// that node refers to, directly or through another such definition, is the definition of
-// the same name in the primitives schema. A $ref whose name is not plain ([localName])
-// fails.
+// localDefinitionsAreThePrimitives reports whether each definition of root under
+// [defsPrefix] that node refers to, directly or through another such definition, is the
+// definition of the same name in the primitives schema. A $ref whose name is not plain
+// ([localName]) fails.
 func localDefinitionsAreThePrimitives(root map[string]any, node any, checked map[string]bool) bool {
 	switch v := node.(type) {
 	case map[string]any:
