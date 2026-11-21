@@ -687,8 +687,6 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
-- An `artifact_types` message with a long key shows the key shortened on its first
-  line and in full on its last line.
 - A run from a run code runs the step `workflow`, in place of `explore`: it starts the
   workflow that the run documents set, whichever workflow of the process Qory Apiary
   starts. The documents name what the run is for in `subject`, with a `kind`, such as
@@ -698,6 +696,8 @@ release may change what an existing document does, and states it under Upgrading
   and only such a run works on the branch `qory/<work item id>`. Documents with the step
   `explore` or the member `work_item` stop the run after the redemption, exit 1, with `it
   breaks documents.schema.json`.
+- An `artifact_types` message whose first line has more than 98 characters shows each
+  long key or type name shortened on that line and in full on its last line.
 - The `config.toml` of a Codex home, and of a walled Codex run, sets
   `web_search = "disabled"`. Without the key, Codex 0.169.0 turns web search on: cached,
   or live in a run with `--sandbox danger-full-access`, such as a walled run.
