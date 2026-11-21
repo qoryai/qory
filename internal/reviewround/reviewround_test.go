@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"unicode"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
@@ -557,6 +558,37 @@ func TestAHiddenPointHasQorysTextInTheVerdict(t *testing.T) {
 		Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]}`)}}})
 	if p := d.Open.Reviewers[0].Findings[0].Point; p != "The full suite failed." {
 		t.Errorf("the suite's point is %q", p)
+	}
+}
+
+// TestPlainLineLeavesNoStoppedCharacter: for every code point that is not a surrogate, the
+// line that plainLine makes of a text with it has no character that the verdict's $defs line
+// stops, so the point passes the verdict schema.
+func TestPlainLineLeavesNoStoppedCharacter(t *testing.T) {
+	data, err := os.ReadFile("../../contracts/harness/v1/verdict.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const url = "https://qory.dev/contracts/harness/v1/verdict.schema.json"
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource(url, doc); err != nil {
+		t.Fatal(err)
+	}
+	line, err := c.Compile(url + "#/$defs/line")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if r >= 0xd800 && r <= 0xdfff {
+			continue
+		}
+		if got := plainLine("a"+string(r)+"b", 500); line.Validate(got) != nil {
+			t.Errorf("%U: plainLine leaves %q, which the verdict line stops", r, got)
+		}
 	}
 }
 
