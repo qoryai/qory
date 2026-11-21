@@ -32,7 +32,9 @@ var fillShapes = []struct{ value, needs string }{
 // shortcut: the "type" and the "items" are read on the property, not through a $ref or an
 // allOf, a "type" in a local definition that a reference goes through is not read, and a
 // reference with a mark is a $ref, not a written-out copy, which the mark makes unequal
-// to the primitives' definition; replace it when a type needs any of these.
+// to the primitives' definition; only "type" is read, so "enum", "const", "not" and
+// bounds such as "minLength" or "maximum" are not, and a member that nothing can
+// satisfy passes; replace it when a type needs any of these.
 func fillHasShape(root, member map[string]any, value string) bool {
 	switch value {
 	case "pushed-commits":
@@ -46,11 +48,20 @@ func fillHasShape(root, member map[string]any, value string) bool {
 }
 
 // isReferenceMember reports whether node is the primitive reference by
-// [isPrimitiveReference] and has no "type" beside it but "object".
+// [isPrimitiveReference] and has no "type" beside it but "object", on the node and on
+// each entry of its allOf.
+// shortcut: an allOf inside an allOf entry is not read; replace it when a type needs it.
 func isReferenceMember(root map[string]any, node any) bool {
 	member, _ := node.(map[string]any)
 	kind, has := member["type"]
-	return isPrimitiveReference(root, node, map[string]bool{}) && (!has || kind == "object")
+	if !isPrimitiveReference(root, node, map[string]bool{}) || (has && kind != "object") {
+		return false
+	}
+	all, _ := member["allOf"].([]any)
+	return !slices.ContainsFunc(all, func(entry any) bool {
+		entryType, has := entry.(map[string]any)["type"]
+		return has && entryType != "object"
+	})
 }
 
 // checkFillMarks checks the [fillKey] of the json_schema root of the artifact type label,

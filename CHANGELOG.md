@@ -690,14 +690,16 @@ release may change what an existing document does, and states it under Upgrading
   `$ref` to `primitives.schema.json#/$defs/reference`, in an `allOf`, or through a
   definition under `$defs`, or as a written-out copy of that definition. In a
   written-out copy, each definition that it refers to under `$defs` is the definition of
-  that name in the primitives. Its name is in the `required` list of the root, and only
-  the root list counts. A schema fails when `$id`, `$anchor` or `$dynamicAnchor` is a
-  key anywhere in it, also as the name of a property or a definition, because `$id`
-  changes where a `$ref` points. It fails when the root `$schema` is anything other than
-  `https://json-schema.org/draft/2020-12/schema`, with or without a final `#`, because
-  draft-07 ignores the keys next to a `$ref`. It fails when the `$ref` that leads to the
-  `target` goes through a `$defs` name with a character other than a letter, a digit,
-  `_` or `-`, because the compiler decodes `%`, `~0` and `~1` and splits a name at `/`.
+  that name in the primitives. The `target` has no `type` beside the reference but
+  `object`, on the property or in an `allOf` entry. Its name is in the `required` list
+  of the root, and only the root list counts. A schema fails when `$id`, `$anchor` or
+  `$dynamicAnchor` is a key anywhere in it, also as the name of a property or a
+  definition, because `$id` changes where a `$ref` points. It fails when the root
+  `$schema` is anything other than `https://json-schema.org/draft/2020-12/schema`, with or
+  without a final `#`, because draft-07 ignores the keys next to a `$ref`. It fails when
+  the `$ref` that leads to the `target` goes through a `$defs` name with a character
+  other than a letter, a digit, `_` or `-`, because the compiler decodes `%`, `~0` and
+  `~1` and splits a name at `/`.
   A `deliver` that breaks a rule stops the command with the fix on the first line, at
   most 100 characters, and the type name on the second line, such as ``Add a top-level
   `target` of the primitive `reference` to the schema, or remove `deliver`.``
@@ -1805,8 +1807,7 @@ release may change what an existing document does, and states it under Upgrading
   as U+E0041 passed. Each `$defs` `line` and `text` has the pattern of the primitives.
   The checks of `qory run verdict` and of the review round stop the same characters.
   The `point` of a finding in `review-report.schema.json` is a `line` too: a tab, U+200B
-  and U+E0041 in a point fail the report format. Until this change, the point stopped
-  only line breaks and a point of spaces.
+  and U+E0041 in a point fail the report format.
 - The hand-off drops a `description` that has a character that a text does not have: a control
   character other than tab, line feed and carriage return, U+2028, U+2029, or a Cf character
   other than U+200C and U+200D, such as U+200B or the tag character U+E0041. It prints

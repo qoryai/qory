@@ -315,9 +315,10 @@ func checkDeliverTarget(label string, schema *yaml.Node) string {
 	if has {
 		cause = "The top-level target in json_schema of " + label + " is not the primitive reference."
 	}
-	if has && isPrimitiveReference(root, target, map[string]bool{}) {
+	if has && isReferenceMember(root, target) {
 		// shortcut: only the root required list counts, so a type that states it through
-		// an allOf fails; replace it when a type needs that.
+		// an allOf fails; only "type" is read on the target, so "enum", "const", "not"
+		// and bounds that nothing can satisfy pass; replace it when a type needs either.
 		if required, _ := root["required"].([]any); !slices.Contains(required, any("target")) {
 			return typeRefusal("Add target to required. Qory Apiary cannot deliver a document without its destination.", "json_schema of "+label+" has no required with target.")
 		}

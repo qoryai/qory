@@ -1442,6 +1442,10 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		{structured(send, "{properties: {target: {$ref: '#/$defs/r'}}, $defs: {r: {type: string}}}"), fix + other + place, true},
 		{structured(send, "{$defs: {r: {$ref: '#/$defs/r'}}, properties: {target: {$ref: '#/$defs/r'}}}"), fix + other + place, true},
 		{structured(send, "{allOf: [{properties: {target: {$ref: '"+reference+"'}}}]}"), fix + gone + place, true},
+		// A type beside the reference that no document has fails; type object passes.
+		{structured(send, "{properties: {target: {$ref: '"+reference+"', type: string}}}"), fix + other + place, true},
+		{structured(send, "{properties: {target: {allOf: [{$ref: '"+reference+"'}, {type: string}]}}}"), fix + other + place, true},
+		{structured(send, "{properties: {target: {$ref: '"+reference+"', type: object}}}"), "", true},
 	} {
 		e := factory(t, withTypes(c.body))
 		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
