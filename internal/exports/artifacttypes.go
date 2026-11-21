@@ -73,7 +73,7 @@ const typeSchemaURL = "https://qory.dev/contracts/harness/v1/artifact-type"
 const maxSchemaError = 300
 
 // typeKeys is every key an entry of artifact_types may have.
-var typeKeys = []string{"name", "base_view", "size_limit", "max_files", "json_schema", "withdrawable"}
+var typeKeys = []string{"name", "base_view", "size_limit", "max_files", "json_schema", "withdrawable", "deliver"}
 
 // typeSchemaDrafts is what $schema may be set to in a custom type's JSON Schema, each
 // with and without a # at its end.
@@ -121,7 +121,7 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 // checkArtifactType checks entry i of artifact_types, counted from 0. An entry is a name
 // alone, or a name with base_view, size_limit and max_files, and with json_schema
 // exactly when base_view is structured. Either also may have withdrawable, true or
-// false. It returns the entry's name, "" for none of the right form, and the first thing
+// false, and a structured type may have deliver ([checkDeliver]). It returns the entry's name, "" for none of the right form, and the first thing
 // to fix in the entry, for a message, with [FilePlace] for the file in one written fix
 // first; "" for an entry
 // that passes. qory has no list of standard types, so a name alone passes in any name
@@ -135,7 +135,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 	for j := 0; j+1 < len(entry.Content); j += 2 {
 		key := entry.Content[j]
 		if key.Kind != yaml.ScalarNode || !slices.Contains(typeKeys, key.Value) {
-			return "", fmt.Sprintf("Remove the key %s from %s.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, and withdrawable.\n  The entry is in %s.", scalarText(key), label, FilePlace)
+			return "", fmt.Sprintf("Remove the key %s from %s.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, withdrawable, and deliver.\n  The entry is in %s.", scalarText(key), label, FilePlace)
 		}
 		if seen[key.Value] {
 			return "", fmt.Sprintf("Remove the second %s from %s.\n  The entry has the key twice.\n  The entry is in %s.", key.Value, label, FilePlace)
@@ -165,7 +165,16 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 		}
 		return name, fmt.Sprintf("Set withdrawable of %s to true or false.\n  withdrawable is %s.\n  The type is in %s.", label, shown, FilePlace)
 	}
+	deliver := value(entry, "deliver")
+	if deliver != nil {
+		if why := checkDeliver(label, deliver); why != "" {
+			return name, why
+		}
+	}
 	if !seen["base_view"] && !seen["size_limit"] && !seen["max_files"] && !seen["json_schema"] {
+		if deliver != nil {
+			return name, notDelivered(label, "the type is a standard type")
+		}
 		return name, ""
 	}
 	var missing []string
@@ -194,15 +203,114 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 		return name, fmt.Sprintf("Set max_files of %s to a whole number from 1 to %d.\n  max_files is %s.\n  The type is in %s.", label, maxTypeFiles, numberText(files), FilePlace)
 	}
 	schema := value(entry, "json_schema")
+	if deliver != nil && !structured {
+		return name, notDelivered(label, "base_view is "+view.Value)
+	}
 	switch {
 	case !structured && schema != nil:
 		return name, fmt.Sprintf("Remove json_schema from %s, or set its base_view to structured.\n  Only a structured type has a JSON Schema, and base_view is %s.\n  The type is in %s.", label, view.Value, FilePlace)
 	case structured && schema == nil:
 		return name, fmt.Sprintf("Add json_schema to %s.\n  A structured type has a JSON Schema.\n  The type is in %s.", label, FilePlace)
 	case structured:
-		return name, checkTypeSchema(label, schema, patterns)
+		if why := checkTypeSchema(label, schema, patterns); why != "" || deliver == nil {
+			return name, why
+		}
+		return name, checkDeliverTarget(label, schema)
 	}
 	return name, ""
+}
+
+// deliverSends is each value deliver.send may have, the values of submit.send: when the
+// type's versions are sent.
+var deliverSends = []string{"end_of_run", "after_gate"}
+
+// checkDeliver checks n, the deliver of the artifact type label: an object with send, one
+// of [deliverSends], and no other key. It returns the fix for a message with [FilePlace]
+// for the file, "" for a deliver that passes. Whether the type may have a deliver is
+// [notDelivered] and [checkDeliverTarget].
+func checkDeliver(label string, n *yaml.Node) string {
+	sends := strings.Join(deliverSends, " or ")
+	if n.Kind != yaml.MappingNode {
+		return fmt.Sprintf("Set deliver of %s to an object with send, or remove it.\n  deliver is %s.\n  The type is in %s.", label, nodeKind(n), FilePlace)
+	}
+	seen := map[string]bool{}
+	for j := 0; j+1 < len(n.Content); j += 2 {
+		key := n.Content[j]
+		if key.Kind != yaml.ScalarNode || key.Value != "send" {
+			return fmt.Sprintf("Remove the key %s from deliver of %s.\n  deliver has only send.\n  The type is in %s.", scalarText(key), label, FilePlace)
+		}
+		if seen[key.Value] {
+			return fmt.Sprintf("Remove the second send from deliver of %s.\n  deliver has the key twice.\n  The type is in %s.", label, FilePlace)
+		}
+		seen[key.Value] = true
+	}
+	send := value(n, "send")
+	switch {
+	case send == nil:
+		return fmt.Sprintf("Add send to deliver of %s, %s.\n  deliver has no send.\n  The type is in %s.", label, sends, FilePlace)
+	case send.Kind == yaml.ScalarNode && send.Tag != "!!str" && nodeKind(send) == "a string":
+		// A value with an explicit tag: YAML reads it as no string.
+		return fmt.Sprintf("Set send in deliver of %s to a quoted string.\n  YAML reads %s as a value that is not a string.\n  The type is in %s.", label, scalarText(send), FilePlace)
+	case send.Kind != yaml.ScalarNode || send.Tag != "!!str":
+		return fmt.Sprintf("Set send in deliver of %s to %s.\n  send is %s.\n  The type is in %s.", label, sends, nodeKind(send), FilePlace)
+	case !slices.Contains(deliverSends, send.Value):
+		return fmt.Sprintf("Set send in deliver of %s to %s.\n  send is %s.\n  The type is in %s.", label, sends, scalarText(send), FilePlace)
+	}
+	return ""
+}
+
+// notDelivered is the refusal of a deliver on the artifact type label that is not a
+// structured type with a json_schema; cause says what the type is.
+func notDelivered(label, cause string) string {
+	return fmt.Sprintf("Remove deliver from %s, or make it a structured type with a json_schema.\n  Only a structured type is sent, and %s.\n  The type is in %s.", label, cause, FilePlace)
+}
+
+// primitiveReference is the $ref that a schema writes for the definition reference of the
+// primitives schema.
+const primitiveReference = primitives.URL + "#/$defs/reference"
+
+// checkDeliverTarget checks that schema, the json_schema of the artifact type label, a
+// compiled JSON Schema, has a top-level property target that is the primitive reference:
+// the property is a $ref to [primitiveReference], or to a definition of the schema's
+// $defs that is, or has one in its allOf. It returns the fix for a message with
+// [FilePlace] for the file, "" for a type that passes.
+func checkDeliverTarget(label string, schema *yaml.Node) string {
+	doc, why := jsonValue(schema, "json_schema of "+label)
+	if why != "" {
+		return why
+	}
+	root, _ := doc.(map[string]any)
+	props, _ := root["properties"].(map[string]any)
+	target, has := props["target"]
+	cause := label + " has no top-level target in json_schema."
+	if has {
+		cause = "The top-level target in json_schema of " + label + " is not the primitive reference."
+	}
+	if has && isPrimitiveReference(root, target, 0) {
+		return ""
+	}
+	return fmt.Sprintf("Add a top-level `target` of the primitive `reference` to the schema, or remove `deliver`.\n  %s\n  The type is in %s.", cause, FilePlace)
+}
+
+// isPrimitiveReference reports whether node, a member of root, a JSON Schema, is the
+// primitive reference: a $ref to [primitiveReference], a $ref to a definition under
+// "#/$defs/" of root that is, or an allOf with an entry that is. depth stops a loop of
+// definitions.
+func isPrimitiveReference(root map[string]any, node any, depth int) bool {
+	m, _ := node.(map[string]any)
+	if m == nil || depth > 8 {
+		return false
+	}
+	if ref, _ := m["$ref"].(string); ref == primitiveReference {
+		return true
+	} else if name, local := strings.CutPrefix(ref, "#/$defs/"); local {
+		defs, _ := root["$defs"].(map[string]any)
+		if isPrimitiveReference(root, defs[name], depth+1) {
+			return true
+		}
+	}
+	all, _ := m["allOf"].([]any)
+	return slices.ContainsFunc(all, func(entry any) bool { return isPrimitiveReference(root, entry, depth+1) })
 }
 
 // wholeNumber reports whether n is a whole number from 1 to most, written as one: 1.0

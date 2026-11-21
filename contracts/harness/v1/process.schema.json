@@ -69,12 +69,21 @@
         "size_limit": {"description": "The most bytes of all files of one version.", "type": "integer", "minimum": 1},
         "max_files": {"description": "The most files of one version.", "type": "integer", "minimum": 1, "maximum": 20},
         "json_schema": {"description": "The JSON Schema of a structured type's file.", "type": "object"},
-        "withdrawable": {"description": "Whether a run may withdraw a name of the type. Optional, and true when the entry has none. A standard type and a custom type may both set it.", "type": "boolean"}
+        "withdrawable": {"description": "Whether a run may withdraw a name of the type. Optional, and true when the entry has none. A standard type and a custom type may both set it.", "type": "boolean"},
+        "deliver": {
+          "description": "When qory sends the versions of the type to the target that the document names. Optional: without it, qory stores the type and never sends it. Only a custom structured type has it, and its json_schema has a top-level property target that is the primitive reference, $ref https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference, written directly, in an allOf, or through a definition under $defs. qory checks that property, which this schema cannot state.",
+          "type": "object",
+          "required": ["send"],
+          "additionalProperties": false,
+          "properties": {
+            "send": {"description": "When qory sends a version: end_of_run at the end of the run; after_gate after the gate of the run's stage passes, and until then qory stores the version and sends nothing.", "enum": ["end_of_run", "after_gate"]}
+          }
+        }
       },
       "oneOf": [
         {
           "description": "A standard type: the name alone, or the name and withdrawable.",
-          "not": {"anyOf": [{"required": ["base_view"]}, {"required": ["size_limit"]}, {"required": ["max_files"]}, {"required": ["json_schema"]}]}
+          "not": {"anyOf": [{"required": ["base_view"]}, {"required": ["size_limit"]}, {"required": ["max_files"]}, {"required": ["json_schema"]}, {"required": ["deliver"]}]}
         },
         {"$ref": "#/$defs/custom_document"},
         {"$ref": "#/$defs/custom_image"},
@@ -85,19 +94,19 @@
     },
     "custom_document": {
       "required": ["base_view", "size_limit", "max_files"],
-      "properties": {"base_view": {"const": "document"}, "size_limit": {"maximum": 10485760}, "json_schema": false}
+      "properties": {"base_view": {"const": "document"}, "size_limit": {"maximum": 10485760}, "json_schema": false, "deliver": false}
     },
     "custom_image": {
       "required": ["base_view", "size_limit", "max_files"],
-      "properties": {"base_view": {"const": "image"}, "size_limit": {"maximum": 52428800}, "json_schema": false}
+      "properties": {"base_view": {"const": "image"}, "size_limit": {"maximum": 52428800}, "json_schema": false, "deliver": false}
     },
     "custom_video": {
       "required": ["base_view", "size_limit", "max_files"],
-      "properties": {"base_view": {"const": "video"}, "size_limit": {"maximum": 2147483648}, "json_schema": false}
+      "properties": {"base_view": {"const": "video"}, "size_limit": {"maximum": 2147483648}, "json_schema": false, "deliver": false}
     },
     "custom_file": {
       "required": ["base_view", "size_limit", "max_files"],
-      "properties": {"base_view": {"const": "file"}, "size_limit": {"maximum": 1073741824}, "json_schema": false}
+      "properties": {"base_view": {"const": "file"}, "size_limit": {"maximum": 1073741824}, "json_schema": false, "deliver": false}
     },
     "custom_structured": {
       "description": "A structured type has one file, and the one base view with a json_schema.",
