@@ -2015,7 +2015,7 @@ Per runtime, the files written into its directory:
   text (§Launching); neither is linked into the checkout, whose
   `.claude/rules/qory-harness.md` and `.claude/agents` register the bare names.
 - **codex**: `config.toml` with the model, the servers as `[mcp_servers.<name>]` tables,
-  `features.unified_exec_tty = false`, a `hooks.state."<file>:<event>:<group>:<hook>"`
+  `features.unified_exec_tty = false`, `web_search = "disabled"`, a `hooks.state."<file>:<event>:<group>:<hook>"`
   table with the `trusted_hash` of each `command` hook of `hooks.json` and `config.toml`
   that has no U+2028 or U+2029 in its command, status message or matcher, `<file>` being
   the file in the home's `codex` folder with links resolved and each name in the case on

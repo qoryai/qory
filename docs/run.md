@@ -4769,6 +4769,10 @@ so the harness's guard would not run for them. A call with `tty: true` fails wit
 ``TTY execution is disabled by config; omit `tty` or set it to false.``, and an agent
 cannot start an interactive shell.
 
+`config.toml` also sets `web_search = "disabled"`, as the composed home's `config.toml` does
+for a run without a wall, so the model gets no web search tool. Without the key, Codex turns
+web search on in cached mode.
+
 A walled Codex run copies the composed home's `skills/`, `rules/` and `agents/` with every
 link replaced by the file or folder it leads to, since Codex 0.167.2 passes over a
 `SKILL.md` that is a link. A link whose target lies outside the composed home, the folders

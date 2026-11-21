@@ -3,18 +3,23 @@ package cmd_test
 import (
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/qoryai/qory/cmd"
 )
 
+// topWebSearchOff matches web_search = "disabled" on a line of its own with no indent,
+// where the TOML encoder puts a key of the top level, before the first table.
+var topWebSearchOff = regexp.MustCompile(`(?m)\A[^\[]*^web_search = "disabled"$`)
+
 // TestComposeTrustsTheCodexCommandHooks composes for codex a module with a PreToolUse
 // command hook in config.toml, and an mcp_tool hook and a Stop command hook with U+2028
-// in hooks.json. The home's config.toml has features.unified_exec_tty = false and a
-// trusted_hash for the PreToolUse hook, keyed by the config.toml of the home's codex
-// folder. The other two hooks get no hash and a skipped row each. --check then finds the
-// home current.
+// in hooks.json. The home's config.toml has web_search = "disabled" at the top level,
+// features.unified_exec_tty = false and a trusted_hash for the PreToolUse hook, keyed by
+// the config.toml of the home's codex folder. The other two hooks get no hash and a
+// skipped row each. --check then finds the home current.
 func TestComposeTrustsTheCodexCommandHooks(t *testing.T) {
 	root := tierCheckout(t)
 	tierModule(t, root, "codex", nil)
@@ -43,6 +48,9 @@ func TestComposeTrustsTheCodexCommandHooks(t *testing.T) {
 		if !strings.Contains(config, want) {
 			t.Errorf("config.toml lacks %q:\n%s", want, config)
 		}
+	}
+	if !topWebSearchOff.MatchString(config) {
+		t.Errorf("config.toml lacks web_search = \"disabled\" at the top level:\n%s", config)
 	}
 	if strings.Count(config, "trusted_hash") != 1 {
 		t.Errorf("config.toml has %d trusted hashes, want 1:\n%s", strings.Count(config, "trusted_hash"), config)

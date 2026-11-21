@@ -676,6 +676,8 @@ release may change what an existing document does, and states it under Upgrading
 ### Changed
 
 - The `config.toml` of a Codex home, and of a walled Codex run, sets
+  `web_search = "disabled"`, so a Codex agent has no web search tool.
+- The `config.toml` of a Codex home, and of a walled Codex run, sets
   `features.unified_exec_tty = false`. A shell started with a terminal takes commands
   through `write_stdin`, for which Codex runs no `PreToolUse` hook. A Codex agent can no
   longer start an interactive shell with a terminal.

@@ -115,8 +115,9 @@ func checkHomeMounts(t *testing.T, spec session.SessionSpec) string {
 // TestAWalledCodexRunMountsAFreshCodexHome is two walled Codex runs of a person, in a
 // copy: each session mounts a writable home at /var/lib/qory-codex-home and each part of
 // the home read-only at its target, with CODEX_HOME fixed at the home. config.toml marks
-// the copy untrusted, a write run's rules/ has no read-access.rules, the two runs get
-// different homes, and each run's folders are gone once it ends.
+// the copy untrusted and turns web search off, a write run's rules/ has no
+// read-access.rules, the two runs get different homes, and each run's folders are gone
+// once it ends.
 func TestAWalledCodexRunMountsAFreshCodexHome(t *testing.T) {
 	exportingCheckout(t, fakeRuntime(t))
 	walledForager(t)
@@ -137,6 +138,9 @@ func TestAWalledCodexRunMountsAFreshCodexHome(t *testing.T) {
 		homes = append(homes, home)
 		work := filepath.Join(filepath.Dir(home), "work")
 		wants(t, s.config, "[projects.\""+work+"\"]\n    trust_level = \"untrusted\"\n", "[projects.\"/workspace\"]\n    trust_level = \"untrusted\"\n")
+		if !topWebSearchOff.MatchString(s.config) {
+			t.Errorf("the bound config.toml lacks web_search = \"disabled\" at the top level:\n%s", s.config)
+		}
 		if slices.Contains(s.rules, codex.ReadRulesName) {
 			t.Errorf("a write run's rules: %q", s.rules)
 		}
