@@ -128,8 +128,11 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 		return r, ctx.Err()
 	}
 	printProgramLines(w, end.stderr)
+	stdout, unusable := withoutUnusableTitle(end.stdout, input.Draft)
 	rec := contracts.ReadSubmitRun(contracts.SubmitEnd{Started: end.startErr == "", TimedOut: end.timedOut, Exit: end.exit},
-		end.stdout, r.System, input.Draft, append([]string{r.Base.Commit}, commits...))
+		stdout, r.System, input.Draft, append([]string{r.Base.Commit}, commits...))
+	rec.Invalid = append(rec.Invalid, unusable...)
+	slices.SortFunc(rec.Invalid, func(a, b contracts.SubmitLineError) int { return a.Line - b.Line })
 	for i, bad := range rec.Invalid {
 		if i == maxLeftOut {
 			break
@@ -285,3 +288,41 @@ func shownText(line string) string {
 
 // shownErrorText is s as [shownError] shows an error.
 func shownErrorText(s string) string { return shownError(errors.New(s)) }
+
+// The reasons for a draft_title line that qory leaves out, as [textProgramLeftOut] lists them.
+const (
+	reasonTitleChar  = "the title has the character %U, which a title does not have, at character %d"
+	reasonTitleBlank = "the title has no character that is not a space, U+200C or U+200D"
+)
+
+// withoutUnusableTitle is stdout, the lines of a submit program, with the first draft_title
+// line blanked out when its title is not one that the submission format stores: the title of
+// the contract is a line with a character that shows. It also returns that line as a line
+// that qory cannot use, with its number. A blank line keeps the numbers of the others, and the
+// contract's reader then finds the draft incomplete and records program-failed, as for any
+// draft line it leaves out. A draft of none has no draft lines to read, so nothing is left
+// out. The contract's own checks of the title, such as its length, stay with its reader.
+func withoutUnusableTitle(stdout, draft string) (string, []contracts.SubmitLineError) {
+	if draft == contracts.SubmitDraftNone {
+		return stdout, nil
+	}
+	lines := strings.Split(stdout, "\n")
+	for i, line := range lines[:len(lines)-1] {
+		key, title, ok := strings.Cut(strings.TrimSuffix(line, "\r"), " ")
+		if !ok || title == "" || key != contracts.SubmitKeyDraftTitle || strings.ContainsFunc(title, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+			continue
+		}
+		var reason string
+		if at := controlAt(title); at > 0 {
+			reason = fmt.Sprintf(reasonTitleChar, []rune(title)[at-1], at)
+		} else if !visibleTitle(title) {
+			reason = reasonTitleBlank
+		} else {
+			// The first line of the key is the one that the reader uses.
+			return stdout, nil
+		}
+		lines[i] = ""
+		return strings.Join(lines, "\n"), []contracts.SubmitLineError{{Line: i + 1, Reason: reason}}
+	}
+	return stdout, nil
+}
