@@ -30,6 +30,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
+	"github.com/qoryai/qory/internal/primitives"
 	"github.com/qoryai/qory/internal/reportfile"
 	"github.com/qoryai/qory/internal/runapi"
 )
@@ -636,7 +637,7 @@ var reportSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
 func plainLine(text string, limit int) string {
 	var b strings.Builder
 	for _, r := range text {
-		if excluded(r) {
+		if primitives.StopsLine(r) {
 			r = ' '
 		}
 		b.WriteRune(r)
@@ -686,21 +687,4 @@ func refused(r rune) bool {
 func hidden(r rune) bool {
 	return unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) || unicode.Is(unicode.Cf, r) ||
 		unicode.Is(unicode.Variation_Selector, r) || r == 0xfffc
-}
-
-// excluded reports whether the line of contracts/harness/v1/verdict.schema.json excludes
-// r: a control character, a bidirectional control, a line or paragraph separator, or one
-// of the format characters that the line lists.
-func excluded(r rune) bool {
-	switch {
-	case r <= 0x1f, r >= 0x7f && r <= 0x9f:
-		return true
-	case r == 0x00ad, r == 0x061c, r == 0x180e, r == 0x200b, r == 0x200e, r == 0x200f,
-		r == 0x2028, r == 0x2029, r == 0xfeff:
-		return true
-	case r >= 0x202a && r <= 0x202e, r >= 0x2060 && r <= 0x2064, r >= 0x2066 && r <= 0x2069,
-		r >= 0xfff9 && r <= 0xfffb:
-		return true
-	}
-	return false
 }

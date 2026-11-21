@@ -12,9 +12,9 @@
     "summary": {"description": "One or two sentences on what a workspace made from the template does, at most 200 characters.", "type": "string", "maxLength": 200, "pattern": "\\S"},
     "description": {"description": "How a workspace made from the template works, at most 1200 characters and 80 words.", "type": "string", "maxLength": 1200, "pattern": "^\\s*\\S+(\\s+\\S+){0,79}\\s*$"},
     "type": {"description": "The workspace type a workspace made from the template has: a workspace type key, such as qory.software.", "type": "string", "pattern": "\\S"},
-    "stack": {"description": "The stack the template's workflows run on: a name that exports.stacks of the same repository lists. Each workflow of a stage is declared under workflows in that stack's qory-stack.yaml.", "type": "string", "pattern": "^[^./\\\\@\\p{Cc}][^/\\\\@\\p{Cc}]*$"},
+    "stack": {"description": "The stack the template's workflows run on: a name that exports.stacks of the same repository lists. Each workflow of a stage is declared under workflows in that stack's qory-stack.yaml.", "type": "string", "pattern": "^[^./\\\\@\\p{Cc}][^/\\\\@\\p{Cc}]*$", "allOf": [{"$ref": "#/$defs/line"}]},
     "process": {
-      "description": "The process document of a workspace made from the template, a qory.process/v1 document. qory checks its schema, that its stages are a list, that each workflow of a stage is a non-empty string of one line that the stack declares, and that each stage name has no line break or other control character, and checks nothing else in it. This schema checks the same, except whether the stack declares a workflow.",
+      "description": "The process document of a workspace made from the template, a qory.process/v1 document. qory checks its schema, that its stages are a list, that each workflow of a stage is a non-empty string of one line of text that the stack declares, and that each stage name is one line of text (no control character, no U+2028 or U+2029, and no format character but U+200C and U+200D), and checks nothing else in it. This schema checks the same, except whether the stack declares a workflow.",
       "type": "object",
       "required": ["schema", "stages"],
       "properties": {
@@ -23,7 +23,20 @@
           "type": "array",
           "items": {
             "properties": {
-              "name": {"description": "A stage name has no line break or other control character.", "pattern": "^\\P{Cc}*$"},
+              "name": {"description": "A stage name is one line of text, as $defs line defines it.", "$ref": "#/$defs/line"},
+              "outputs": {
+                "description": "The artifact types the stage produces. Optional. Each type is listed in artifact_types of the same file and once in the stage, which qory checks and this schema cannot state.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["type"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "type": {"description": "The name of an entry of artifact_types.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+                    "required": {"description": "Whether the stage must produce the type. Optional, and false when the output has none.", "type": "boolean", "default": false}
+                  }
+                }
+              },
               "sequence": {
                 "items": {
                   "properties": {
@@ -69,12 +82,21 @@
         "size_limit": {"description": "The most bytes of all files of one version.", "type": "integer", "minimum": 1},
         "max_files": {"description": "The most files of one version.", "type": "integer", "minimum": 1, "maximum": 20},
         "json_schema": {"description": "The JSON Schema of a structured type's file.", "type": "object"},
-        "withdrawable": {"description": "Whether a run may withdraw a name of the type. Optional, and true when the entry has none. A standard type and a custom type may both set it.", "type": "boolean"}
+        "withdrawable": {"description": "Whether a run may withdraw a name of the type. Optional, and true when the entry has none. A standard type and a custom type may both set it.", "type": "boolean"},
+        "deliver": {
+          "description": "Marks a type that Apiary delivers to the target in the run documents. Optional: a type without it is stored and never delivered. Only a custom structured type has it, and its json_schema is an object schema with a top-level property target that is the primitive reference and is in the root required list, $ref https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference, written directly, in an allOf, or through a definition under $defs, or a written-out copy of that definition in any of these places. A top-level property may have x-qory-fill with one of pushed-commits, pushed-head, pushed-base, pushed-branch, pushed-base-branch or pushed-commits-left-out, which qory fills from its push. qory checks the property and the marks, which this schema cannot state.",
+          "type": "object",
+          "required": ["send"],
+          "additionalProperties": false,
+          "properties": {
+            "send": {"description": "When Apiary delivers a version: end_of_run at the end of the run; after_gate after the gate of the run's stage passes, and until then qory stores the version.", "enum": ["end_of_run", "after_gate"]}
+          }
+        }
       },
       "oneOf": [
         {
           "description": "A standard type: the name alone, or the name and withdrawable.",
-          "not": {"anyOf": [{"required": ["base_view"]}, {"required": ["size_limit"]}, {"required": ["max_files"]}, {"required": ["json_schema"]}]}
+          "not": {"anyOf": [{"required": ["base_view"]}, {"required": ["size_limit"]}, {"required": ["max_files"]}, {"required": ["json_schema"]}, {"required": ["deliver"]}]}
         },
         {"$ref": "#/$defs/custom_document"},
         {"$ref": "#/$defs/custom_image"},
@@ -85,29 +107,36 @@
     },
     "custom_document": {
       "required": ["base_view", "size_limit", "max_files"],
-      "properties": {"base_view": {"const": "document"}, "size_limit": {"maximum": 10485760}, "json_schema": false}
+      "properties": {"base_view": {"const": "document"}, "size_limit": {"maximum": 10485760}, "json_schema": false, "deliver": false}
     },
     "custom_image": {
       "required": ["base_view", "size_limit", "max_files"],
-      "properties": {"base_view": {"const": "image"}, "size_limit": {"maximum": 52428800}, "json_schema": false}
+      "properties": {"base_view": {"const": "image"}, "size_limit": {"maximum": 52428800}, "json_schema": false, "deliver": false}
     },
     "custom_video": {
       "required": ["base_view", "size_limit", "max_files"],
-      "properties": {"base_view": {"const": "video"}, "size_limit": {"maximum": 2147483648}, "json_schema": false}
+      "properties": {"base_view": {"const": "video"}, "size_limit": {"maximum": 2147483648}, "json_schema": false, "deliver": false}
     },
     "custom_file": {
       "required": ["base_view", "size_limit", "max_files"],
-      "properties": {"base_view": {"const": "file"}, "size_limit": {"maximum": 1073741824}, "json_schema": false}
+      "properties": {"base_view": {"const": "file"}, "size_limit": {"maximum": 1073741824}, "json_schema": false, "deliver": false}
     },
     "custom_structured": {
-      "description": "A structured type has one file, and the one base view with a json_schema.",
+      "description": "A structured type has one file, and the one base view with a json_schema. A type with deliver has a size_limit of at most 786432 bytes.",
       "required": ["base_view", "size_limit", "max_files", "json_schema"],
-      "properties": {"base_view": {"const": "structured"}, "size_limit": {"maximum": 1048576}, "max_files": {"maximum": 1}}
+      "properties": {"base_view": {"const": "structured"}, "size_limit": {"maximum": 1048576}, "max_files": {"maximum": 1}},
+      "if": {"required": ["deliver"]},
+      "then": {"properties": {"size_limit": {"maximum": 786432}}}
     },
     "workflow": {
       "description": "A workflow of a stage: a string of one line, not empty or white space alone, that the stack declares under workflows.",
       "type": "string",
-      "pattern": "^\\P{Cc}*[^\\p{Cc}\\p{Z}]\\P{Cc}*$"
+      "pattern": "^\\P{Cc}*[^\\p{Cc}\\p{Z}]\\P{Cc}*$",
+      "allOf": [{"$ref": "#/$defs/line"}]
+    },
+    "line": {
+      "description": "One line of text: no control character (so no tab, line feed or carriage return), no U+2028 or U+2029, and no format character (Unicode category Cf) but U+200C and U+200D, the joiners of emoji. The pattern is the one of $defs line in primitives.schema.json. It does not apply to a value that is no string.",
+      "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\ud804\udcbd\ud804\udccd\ud80d\udc30-\ud80d\udc3f\ud82f\udca0-\ud82f\udca3\ud834\udd73-\ud834\udd7a\udb40\udc01\udb40\udc20-\udb40\udc7f]*$"
     }
   }
 }

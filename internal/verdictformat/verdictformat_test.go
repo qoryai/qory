@@ -7,9 +7,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
+	"github.com/qoryai/qory/internal/primitives"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/verdictformat"
 )
@@ -226,20 +228,39 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-// TestExcludedIsTheSchemasCharacters keeps [verdictformat.Excluded] and the pattern of
-// the schema's $defs line in step, tab, line feed and carriage return included,
-// character by character, through U+FFFF and for a character past it.
-func TestExcludedIsTheSchemasCharacters(t *testing.T) {
+// TestLineRuleIsTheSchemasCharacters keeps [primitives.StopsLine] and the pattern of the
+// schema's $defs line in step, tab, line feed and carriage return included, for every
+// code point that is not a surrogate, the tag characters past U+FFFF too.
+func TestLineRuleIsTheSchemasCharacters(t *testing.T) {
 	schema := compiled(t)
-	for r := rune(0); r <= 0x10000; r++ {
+	for r := rune(0); r <= unicode.MaxRune; r++ {
 		if r >= 0xd800 && r <= 0xdfff {
 			continue
 		}
 		doc := map[string]any{"verdict": "escalate", "points": []any{
 			map[string]any{"text": "a" + string(r), "action": "run_again"},
 		}}
-		if passed := schema.Validate(doc) == nil; passed == verdictformat.Excluded(r) {
-			t.Errorf("%U: the schema passes it: %v, Excluded: %v", r, passed, verdictformat.Excluded(r))
+		if passed := schema.Validate(doc) == nil; passed == primitives.StopsLine(r) {
+			t.Errorf("%U: the schema passes it: %v, StopsLine: %v", r, passed, primitives.StopsLine(r))
+		}
+	}
+}
+
+// TestPointsWithATagOrAZeroWidthCharacterAreStopped is a point whose text has a tag
+// character or a zero width space: the schema stops it, and a joiner in an emoji sequence
+// passes.
+func TestPointsWithATagOrAZeroWidthCharacterAreStopped(t *testing.T) {
+	schema := compiled(t)
+	family := "\U0001F468\u200d\U0001F469"
+	for text, valid := range map[string]bool{
+		"Fix a\U000E0041b": false, "Fix a\u200bb": false, "Fix a\u0600b": false,
+		"Fix a\u200cb": true, "Fix " + family: true,
+	} {
+		doc := map[string]any{"verdict": "escalate", "points": []any{
+			map[string]any{"text": text, "action": "run_again"},
+		}}
+		if got := schema.Validate(doc) == nil; got != valid {
+			t.Errorf("%q: the schema's result is %v", text, got)
 		}
 	}
 }
