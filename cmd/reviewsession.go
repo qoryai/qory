@@ -80,24 +80,24 @@ func newReviewSession(in reviewSessionInput) (reviewSessionSpec, error) {
 		return reviewSessionSpec{}, fmt.Errorf("Name each reviewer with lower-case letters, digits and hyphens.\nThe reviewer is %s.", strconv.Quote(name))
 	}
 	if tier := in.Reviewer.Tier; tier != "" && !module.IsTier(tier) {
-		return reviewSessionSpec{}, fmt.Errorf("Give the reviewer %s a tier of %s.\nThe tier is %s.", name, strings.Join(module.Tiers, ", "), strconv.Quote(tier))
+		return reviewSessionSpec{}, fmt.Errorf("Give a reviewer a tier of %s.\nThe tier of %s is %s.", strings.Join(module.Tiers, ", "), name, strconv.Quote(tier))
 	}
 	if in.TimeLimit < 0 {
-		return reviewSessionSpec{}, fmt.Errorf("Give the reviewer %s a time limit of 0 or more.\nThe limit is %s.", name, in.TimeLimit)
+		return reviewSessionSpec{}, fmt.Errorf("Give a reviewer a time limit of 0 or more.\nThe limit of %s is %s.", name, in.TimeLimit)
 	}
 	copyRoot := in.Copy.Root()
 	if !cleanAbs(copyRoot) {
-		return reviewSessionSpec{}, fmt.Errorf("Give the reviewer %s the copy that reviewcopy made.\nThe copy's folder is %s.", name, strconv.Quote(copyRoot))
+		return reviewSessionSpec{}, fmt.Errorf("Give a reviewer the copy that reviewcopy made.\nThe copy of %s is at %s.", name, strconv.Quote(copyRoot))
 	}
 	if !cleanAbs(in.ReportRoot) {
-		return reviewSessionSpec{}, fmt.Errorf("Give the reviewer %s an absolute, clean report folder.\nThe folder is %s.", name, strconv.Quote(in.ReportRoot))
+		return reviewSessionSpec{}, fmt.Errorf("Give a reviewer an absolute, clean report folder.\nThe folder of %s is %s.", name, strconv.Quote(in.ReportRoot))
 	}
 	if within(copyRoot, in.ReportRoot) || within(in.ReportRoot, copyRoot) {
-		return reviewSessionSpec{}, fmt.Errorf("Give the reviewer %s a report folder apart from its copy.\nThe report folder %s and the copy %s overlap.", name, strconv.Quote(in.ReportRoot), strconv.Quote(copyRoot))
+		return reviewSessionSpec{}, fmt.Errorf("Give a reviewer a report folder apart from its copy.\nFor %s, the report folder %s and the copy %s overlap.", name, strconv.Quote(in.ReportRoot), strconv.Quote(copyRoot))
 	}
 	report := filepath.Join(in.ReportRoot, reviewReportName)
 	if why := reviewPathProblem(report); why != "" {
-		return reviewSessionSpec{}, fmt.Errorf("Give the reviewer %s a report folder that the harness accepts.\nThe report path %s %s.", name, strconv.Quote(report), why)
+		return reviewSessionSpec{}, fmt.Errorf("Give a reviewer a report folder that the harness accepts.\nFor %s, the report path %s %s.", name, strconv.Quote(report), why)
 	}
 	spec := reviewSessionSpec{
 		Reviewer:  name,

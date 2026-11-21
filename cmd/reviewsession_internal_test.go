@@ -91,6 +91,10 @@ func TestNewReviewSessionRefuses(t *testing.T) {
 		_, err := newReviewSession(in)
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: error %v, want %q", c.name, err, c.want)
+			continue
+		}
+		if first, _, _ := strings.Cut(err.Error(), "\n"); len(first) > 100 {
+			t.Errorf("%s: first line has %d characters", c.name, len(first))
 		}
 	}
 }
