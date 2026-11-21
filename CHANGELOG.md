@@ -472,8 +472,9 @@ release may change what an existing document does, and states it under Upgrading
 - A run from a run code whose documents set `target_version` fetches the repository at
   the target's `address`, its `system` and `path`, the first entry of
   `QORY_RUN_REPOSITORIES`, at that commit, by its id, in place of the head of its default
-  branch, onto a local branch with the default branch's name and no upstream. When the documents contain no harness document, the compose reads
-  the checkout's `qory.yaml` or `harness.yaml` as Qory Apiary checked it. Each of these
+  branch, onto a local branch with the default branch's name and no upstream. When the
+  documents contain no harness document, the compose reads the checkout's `qory.yaml` or
+  `harness.yaml` as Qory Apiary checked it. Each of these
   stops the run before the compose, exit 1: a target on the run's system that is a later
   entry of `QORY_RUN_REPOSITORIES`, that the list does not contain, or with an empty
   list; a version that is not a commit id; and a commit that the server does not have or
