@@ -74,6 +74,9 @@ func checkFillMarks(label string, root map[string]any) string {
 		if !has {
 			continue
 		}
+		if name == "target" {
+			return typeRefusal("Remove x-qory-fill from target. target is the destination; qory fills only other members.", "json_schema of "+label+" has x-qory-fill on target.")
+		}
 		shown := accesskey.ShownName(name, false)
 		i := slices.IndexFunc(fillShapes, func(s struct{ value, needs string }) bool { return s.value == raw })
 		if i < 0 {

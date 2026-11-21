@@ -686,7 +686,8 @@ release may change what an existing document does, and states it under Upgrading
   stage passes; a type without `deliver` is stored and never delivered. Only a
   structured type has `deliver`, with a `size_limit` of at most 786432 bytes, and its
   `json_schema` has a root `type` of `object` or none and a top-level property `target`
-  that is the primitive `reference`, written as a `$ref` to
+  that is the primitive `reference` and is in the `required` list of the root, which is
+  the only place that counts, written as a `$ref` to
   `primitives.schema.json#/$defs/reference`, in an `allOf`, or through a definition
   under `$defs`, or as a written-out copy of that definition. In a written-out copy,
   each definition that it refers to under `$defs` is the definition of that name in the
@@ -706,14 +707,15 @@ release may change what an existing document does, and states it under Upgrading
   first), `pushed-head` and `pushed-base` on a `reference` that the property takes
   through a `$ref`, to the primitives or to a local `$defs` `reference`, `pushed-branch`
   and `pushed-base-branch` on a string, and `pushed-commits-left-out` on an integer.
-  qory stops the command with the fix on the first line when `x-qory-fill` is below the
-  top level, on a property of another shape, a value that qory does not fill, or in a
-  type without `deliver`.
-- A stage of the `process` of a `process.yaml` can have `outputs`, a list of objects with
-  `type`, the name of an entry of `artifact_types`, and `required`, `true` or `false`,
-  `false` when left out. An output has no other key. qory stops the command with the fix
-  on the first line when a stage has an output type that `artifact_types` does not list;
-  the message has the stage and the type.
+  qory stops the command with the fix on the first line when `x-qory-fill` is on
+  `target`, below the top level, on a property of another shape, a value that qory does
+  not fill, or in a type without `deliver`.
+- A stage of the `process` of a `process.yaml` can have `outputs`, a list of objects
+  with `type`, the name of an entry of `artifact_types`, and `required`, `true` or
+  `false`, `false` when left out. An output has no other key. qory stops the command
+  with the fix on the first line when a stage has an output type that `artifact_types`
+  does not list, or when a stage lists a type twice; the message has the stage and the
+  type.
 
 ### Changed
 

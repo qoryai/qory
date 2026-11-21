@@ -25,7 +25,7 @@
             "properties": {
               "name": {"description": "A stage name is one line of text, as $defs line defines it.", "$ref": "#/$defs/line"},
               "outputs": {
-                "description": "The artifact types the stage produces. Optional. Each type is listed in artifact_types of the same file, which qory checks and this schema cannot state.",
+                "description": "The artifact types the stage produces. Optional. Each type is listed in artifact_types of the same file and once in the stage, which qory checks and this schema cannot state.",
                 "type": "array",
                 "items": {
                   "type": "object",
@@ -84,7 +84,7 @@
         "json_schema": {"description": "The JSON Schema of a structured type's file.", "type": "object"},
         "withdrawable": {"description": "Whether a run may withdraw a name of the type. Optional, and true when the entry has none. A standard type and a custom type may both set it.", "type": "boolean"},
         "deliver": {
-          "description": "Marks a type that Apiary delivers to the target in the run documents. Optional: a type without it is stored and never delivered. Only a custom structured type has it, and its json_schema is an object schema with a top-level property target that is the primitive reference, $ref https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference, written directly, in an allOf, or through a definition under $defs, or a written-out copy of that definition in any of these places. A top-level property may have x-qory-fill with one of pushed-commits, pushed-head, pushed-base, pushed-branch, pushed-base-branch or pushed-commits-left-out, which qory fills from its push. qory checks the property and the marks, which this schema cannot state.",
+          "description": "Marks a type that Apiary delivers to the target in the run documents. Optional: a type without it is stored and never delivered. Only a custom structured type has it, and its json_schema is an object schema with a top-level property target that is the primitive reference and is in the root required list, $ref https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference, written directly, in an allOf, or through a definition under $defs, or a written-out copy of that definition in any of these places. A top-level property may have x-qory-fill with one of pushed-commits, pushed-head, pushed-base, pushed-branch, pushed-base-branch or pushed-commits-left-out, which qory fills from its push. qory checks the property and the marks, which this schema cannot state.",
           "type": "object",
           "required": ["send"],
           "additionalProperties": false,

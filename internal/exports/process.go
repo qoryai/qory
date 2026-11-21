@@ -327,6 +327,7 @@ func checkOutputs(shown string, stages, types *yaml.Node) error {
 		if outputs.Kind != yaml.SequenceNode {
 			return processRefusal(shown, "Set outputs of the stage to a list, or remove it.", "outputs of stage "+label+" is "+nodeKind(outputs)+".")
 		}
+		once := map[string]bool{}
 		for j, entry := range outputs.Content {
 			at := fmt.Sprintf("entry %d of outputs of stage %s", j+1, label)
 			if entry.Kind != yaml.MappingNode {
@@ -357,6 +358,14 @@ func checkOutputs(shown string, stages, types *yaml.Node) error {
 			if req := value(entry, "required"); req != nil && !isBool(req) {
 				return processRefusal(shown, "Set required of the entry of outputs to true or false.", "required of "+at+" is "+nodeKind(req)+".")
 			}
+			if once[typ.Value] {
+				fix := fmt.Sprintf("List each output type of stage %s once: %s appears twice.", label, typ.Value)
+				if len(fix) > 100 {
+					fix = "List each output type of the stage once."
+				}
+				return processRefusal(shown, fix, capital(at)+" has the type "+typ.Value+", which an earlier entry has.")
+			}
+			once[typ.Value] = true
 		}
 	}
 	return nil

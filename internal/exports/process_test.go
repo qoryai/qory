@@ -1317,10 +1317,13 @@ func TestVerifyResolvesTheReferencesToThePrimitives(t *testing.T) {
 func TestVerifyChecksDeliver(t *testing.T) {
 	const reference = "https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference"
 	const limits = "size_limit: 1, max_files: 1"
+	// structured has the schema with required: [target], as a delivered type needs.
 	structured := func(extra, schema string) string {
-		return custom("structured", limits+", json_schema: "+schema+extra)
+		return custom("structured", limits+", json_schema: {required: [target], "+schema[1:]+extra)
 	}
 	withTarget := "{type: object, properties: {target: {$ref: '" + reference + "'}}}"
+	delivered := "{required: [target], " + withTarget[1:]
+	const requiredFix = "Add target to required. Qory Apiary cannot deliver a document without its destination.\n  json_schema of artifact type a-type has no required with target."
 	const primitivesID = "https://qory.dev/contracts/harness/v1/primitives.schema.json"
 	const (
 		idFix    = "Remove $id, $anchor and $dynamicAnchor from the json_schema, or remove `deliver`.\n  json_schema of artifact type a-type has one. A $ref under such a key can resolve to a different schema."
@@ -1394,9 +1397,13 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		{structured(send, "{$defs: {'a/b': {$ref: '"+reference+"'}, a: {b: {type: number}}}, properties: {target: {$ref: '#/$defs/a/b'}}}"), fix + other + place, true},
 		{structured(send, "{$defs: {line: "+string(line)+", 're%66erence': "+string(written)+", reference: {type: number}}, properties: {target: {$ref: '#/$defs/re%66erence'}}}"), fix + other + place, true},
 		// The size of a type with deliver is at most 786432 bytes.
-		{custom("structured", "size_limit: 786432, max_files: 1, json_schema: "+withTarget+send), "", true},
-		{custom("structured", "size_limit: 786433, max_files: 1, json_schema: "+withTarget+send), "Set size_limit of artifact type a-type to at most 786432.\n  A type with deliver is sent in one version of at most 786432 bytes, and size_limit is 786433." + place, false},
+		{custom("structured", "size_limit: 786432, max_files: 1, json_schema: "+delivered+send), "", true},
+		{custom("structured", "size_limit: 786433, max_files: 1, json_schema: "+delivered+send), "Set size_limit of artifact type a-type to at most 786432.\n  A type with deliver is sent in one version of at most 786432 bytes, and size_limit is 786433." + place, false},
 		{custom("structured", "size_limit: 1048576, max_files: 1, json_schema: "+withTarget), "", true},
+		// A type with deliver has target in the required list of the root.
+		{custom("structured", limits+", json_schema: "+withTarget+send), requiredFix + place, true},
+		{custom("structured", limits+", json_schema: {required: [title], "+withTarget[1:]+send), requiredFix + place, true},
+		{custom("structured", limits+", json_schema: {allOf: [{required: [target]}], "+withTarget[1:]+send), requiredFix + place, true},
 		// The root of the schema is an object, and a $schema below the root is no draft.
 		{structured(send, "{type: array, properties: {target: {$ref: '"+reference+"'}}}"), typeFix + place, true},
 		{structured(send, "{type: [object, 'null'], properties: {target: {$ref: '"+reference+"'}}}"), typeFix + place, true},
@@ -1513,6 +1520,7 @@ func TestVerifyChecksOutputs(t *testing.T) {
 		{"[{required: true}]", types, "Add type to the entry of outputs, the name of an entry of artifact_types.\n  Entry 1 of outputs of stage Check has no type." + place, false},
 		{"[{type: 5}]", types, "Set type of the entry of outputs to a quoted string, a name from artifact_types.\n  type of entry 1 of outputs of stage Check is a number." + place, false},
 		{"[{type: Bad_Name}]", types, "Set type of the entry of outputs to a name such as reply-draft, at most 64 bytes.\n  type of entry 1 of outputs of stage Check is \"Bad_Name\"." + place, false},
+		{"[{type: mockup}, {type: spec}, {type: mockup, required: true}]", types, "List each output type of stage Check once: mockup appears twice.\n  Entry 3 of outputs of stage Check has the type mockup, which an earlier entry has." + place, true},
 		{"[{type: mockup, required: maybe}]", types, "Set required of the entry of outputs to true or false.\n  required of entry 1 of outputs of stage Check is a string." + place, false},
 	} {
 		body := withOutputs(c.outputs, c.types)
@@ -1531,6 +1539,15 @@ func TestVerifyChecksOutputs(t *testing.T) {
 		if got := schemaPasses(t, body); got != c.schemaOK {
 			t.Errorf("%q: process.schema.json passes it: %v", c.outputs, got)
 		}
+	}
+	// A line 1 that a long stage name would push past 100 characters leaves the names to
+	// line 2.
+	long := strings.Repeat("s", 50)
+	body := strings.Replace(withOutputs("[{type: mockup}, {type: mockup}]", types), "name: Check", "name: "+long, 1)
+	e := factory(t, body)
+	want := "List each output type of the stage once.\n  Entry 2 of outputs of stage " + long + " has the type mockup, which an earlier entry has.\n  The file is " + filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName) + "."
+	if err := e.Verify(); err == nil || err.Error() != want {
+		t.Errorf("a long stage name: %v\nwant:\n%s", err, want)
 	}
 }
 
@@ -1551,7 +1568,7 @@ func TestVerifyChecksFillMarks(t *testing.T) {
 	// schema is a schema whose $defs reference is the primitive reference, with the
 	// property target and the properties members.
 	schema := func(members string) string {
-		return "{type: object, $defs: {reference: {$ref: '" + reference + "'}}, properties: {target: {$ref: '#/$defs/reference'}, " + members + "}}"
+		return "{type: object, required: [target], $defs: {reference: {$ref: '" + reference + "'}}, properties: {target: {$ref: '#/$defs/reference'}, " + members + "}}"
 	}
 	const all = `commits: {type: array, items: {$ref: '#/$defs/reference'}, x-qory-fill: pushed-commits},
 head: {$ref: '#/$defs/reference', x-qory-fill: pushed-head},
@@ -1598,6 +1615,13 @@ left_out: {type: integer, x-qory-fill: pushed-commits-left-out}`
 			t.Errorf("the first line has %d characters: %s", len(first), first)
 		}
 	}
+	// A mark on target fails, whatever its value.
+	onTarget := custom("structured", "size_limit: 1, max_files: 1, json_schema: {required: [target], properties: {target: {$ref: '"+reference+"', x-qory-fill: pushed-head}}}"+send)
+	e := factory(t, withTypes(onTarget))
+	targetFix := "Remove x-qory-fill from target. target is the destination; qory fills only other members.\n  json_schema of artifact type a-type has x-qory-fill on target.\n  The type is in " + filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName) + "."
+	if err := e.Verify(); err == nil || err.Error() != targetFix {
+		t.Errorf("a mark on target: %v\nwant:\n%s", err, targetFix)
+	}
 	// A written-out copy of the reference with a mark is no primitive reference: the
 	// mark is a key that the primitives' definition lacks, so the member takes the
 	// reference by $ref.
@@ -1617,14 +1641,14 @@ left_out: {type: integer, x-qory-fill: pushed-commits-left-out}`
 	if err != nil {
 		t.Fatal(err)
 	}
-	copyType := custom("structured", "size_limit: 1, max_files: 1, json_schema: {type: object, $defs: {line: "+string(line)+", reference: {$ref: '"+reference+"'}}, properties: {target: {$ref: '#/$defs/reference'}, head: "+string(member)+"}}"+send)
-	e := factory(t, withTypes(copyType))
+	copyType := custom("structured", "size_limit: 1, max_files: 1, json_schema: {type: object, required: [target], $defs: {line: "+string(line)+", reference: {$ref: '"+reference+"'}}, properties: {target: {$ref: '#/$defs/reference'}, head: "+string(member)+"}}"+send)
+	e = factory(t, withTypes(copyType))
 	want := shapeFix + "pushed-head on property head" + inType + "a primitive reference.\n  The type is in " + filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName) + "."
 	if err := e.Verify(); err == nil || !strings.HasSuffix(err.Error(), want) {
 		t.Errorf("a written-out copy with a mark: %v", err)
 	}
 	// A mark on the root of the schema is below the top level too.
-	root := custom("structured", "size_limit: 1, max_files: 1, json_schema: {x-qory-fill: pushed-branch, properties: {target: {$ref: '"+reference+"'}}}"+send)
+	root := custom("structured", "size_limit: 1, max_files: 1, json_schema: {x-qory-fill: pushed-branch, required: [target], properties: {target: {$ref: '"+reference+"'}}}"+send)
 	if err := factory(t, withTypes(root)).Verify(); err == nil || !strings.HasPrefix(err.Error(), belowFix) {
 		t.Errorf("a mark on the root: %v", err)
 	}
