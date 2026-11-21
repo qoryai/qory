@@ -23,7 +23,7 @@ import (
 const (
 	textNextNoAnswer = "Check the gateway's connection to Qory Apiary, then take the work item in again.\n  The next-session request after session %d had no successful response within %s.\n  %s"
 	textNextRefused  = "Contact support: the next-session request after session %d failed.\n  %s"
-	textNextUnread   = "Update qory: the answer to the next-session request after session %d does not pass qory's checks.\n  %s."
+	textNextUnread   = "Update qory.\n  The answer to the next-session request after session %d does not pass qory's checks.\n  %s."
 	textNextNoBody   = "Update qory: qory could not write the next-session request after session %d.\n  %s"
 )
 

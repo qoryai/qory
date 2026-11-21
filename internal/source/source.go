@@ -345,14 +345,14 @@ type SealedError struct {
 	Name string
 }
 
-// Error has the source, by its name for a named stack's source; it is masked as
-// [FetchError.Error] is.
+// Error is the fix on line 1, and on line 2 the source, by its name for a named stack's
+// source; it is masked as [FetchError.Error] is.
 func (e *SealedError) Error() string {
 	what := e.Name
 	if what == "" {
 		what = secretmask.Default().Replace(fmt.Sprintf("%s at %s", exports.URL(e.URL), exports.Value(e.Ref, false)))
 	}
-	return "set the stage's workflows in Qory Apiary to runtimes whose harness modules session 1 fetched: " + what + " is not in the run's cache, since the run's first compose did not fetch it"
+	return "set the stage's workflows in Qory Apiary to runtimes whose modules session 1 fetched.\n  " + what + " is not in the run's cache, since the run's first compose did not fetch it"
 }
 
 // put records what url at ref resolved to. A nil memo records nothing.

@@ -326,7 +326,7 @@ func TestAnAnswerOutsideItsSchemaEndsTheRun(t *testing.T) {
 	if ended != "" || err == nil {
 		t.Fatalf("askNextSession: %q, %v, want an error", ended, err)
 	}
-	if err.Error() != "Update qory: the answer to the next-session request after session 1 does not pass qory's checks.\n  The answer does not match next-session-answer.schema.json." {
+	if err.Error() != "Update qory.\n  The answer to the next-session request after session 1 does not pass qory's checks.\n  The answer does not match next-session-answer.schema.json." {
 		t.Errorf("the error is %q", err)
 	}
 	if link.sends() != 1 {

@@ -1485,7 +1485,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// the next join.
 				if codexRoot != "" {
 					if stayed, err := removeCodexHome(codexRoot, func(string) {}); err != nil {
-						return &runLineError{fmt.Errorf(textLaterCodexHome, exports.Value(stayed, false), n-1, n, exports.HideError(err), codeUsed)}
+						return &runLineError{fmt.Errorf(textLaterCodexHome, n-1, exports.Value(stayed, false), n, exports.HideError(err), codeUsed)}
 					}
 				}
 				// The session's inputs.json replaces the one before, in the inputs folder and in
@@ -1506,7 +1506,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					}
 					dir := filepath.Join(run.Dir(), fmt.Sprintf(laterHarnessDir, n))
 					if err := os.Mkdir(dir, 0o700); err != nil {
-						return fmt.Errorf("check the run's folder %s: qory run could not write the workspace's harness there: %w%s", exports.Value(run.Dir(), false), exports.HideError(err), codeUsed)
+						return fmt.Errorf("Check the run's folder.\n  qory run could not write the workspace's harness in %s: %w%s", exports.Value(run.Dir(), false), exports.HideError(err), codeUsed)
 					}
 					file, err := fromCode.writeHarness(dir)
 					if err != nil {

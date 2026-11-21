@@ -124,9 +124,9 @@ func TestAPushBetweenSessionsNeedsProofThatTheAgentStopped(t *testing.T) {
 		walled, kept bool
 		want         string
 	}{
-		{false, false, "run the stage behind a wall: "},
-		{false, true, "run the stage behind a wall: "},
-		{true, true, "take the work item in again in Qory Apiary: a container of the session may still run"},
+		{false, false, "Run the stage behind a wall.\n  Without one, "},
+		{false, true, "Run the stage behind a wall.\n  Without one, "},
+		{true, true, "Take the work item in again in Qory Apiary.\n  A container of the session may still run"},
 	} {
 		err := agentStopProof(c.walled, c.kept, "qory pushed nothing")
 		var line *runLineError

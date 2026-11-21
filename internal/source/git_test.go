@@ -629,7 +629,7 @@ func TestASealedMemoResolvesWithNoLookup(t *testing.T) {
 		t.Errorf("main resolved to %s with warning %q, %v; want %s", r.Commit, r.Warning, err, second)
 	}
 	var sealed *source.SealedError
-	if !errors.As(tagErr, &sealed) || !strings.HasPrefix(tagErr.Error(), "set the stage's workflows in Qory Apiary to runtimes whose harness modules session 1 fetched: ") || !strings.Contains(tagErr.Error(), "is not in the run's cache") {
+	if !errors.As(tagErr, &sealed) || !strings.HasPrefix(tagErr.Error(), "set the stage's workflows in Qory Apiary to runtimes whose modules session 1 fetched.\n  ") || !strings.Contains(tagErr.Error(), "is not in the run's cache") {
 		t.Errorf("v1: %v, want a SealedError", tagErr)
 	}
 	if len(commands) != 0 {

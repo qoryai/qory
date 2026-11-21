@@ -2858,8 +2858,8 @@ processes stopped: the run has a wall, and no container of the run is kept. With
 proof the run closes `failed` before the next session, a run without a push step too, with
 a line that ends `so session <n> does not start; the code is used`. A read run with no wall
 has no such proof, so it ends after session 1 when Qory Apiary starts a session 2. A push
-between two sessions needs the same proof; without it the push step fails with `take the
-work item in again in Qory Apiary: a container of the session may still run
+between two sessions needs the same proof; without it the push step fails with `qory run:
+Take the work item in again in Qory Apiary.`, then `A container of the session may still run
 and write the working folder, so qory pushed nothing`.
 
 qory sends the next-session request again after no response, a refusal of the gateway's, a
@@ -2884,9 +2884,9 @@ doubles. Then:
   that is the checkout's file, which the branch may have changed, or a step before the
   session that fails, such as the runtime's install: the run closes `failed`, exit 1, with
   the step's line, and the session does not join. A Codex home of the session before that
-  qory cannot remove ends the run so, with `qory run: remove <folder> by hand, then take the
-  work item in again: qory could not remove the Codex home of session <n-1> before session
-  <n>: <error>`.
+  qory cannot remove ends the run so, with `qory run: Remove the Codex home of session <n-1>
+  by hand, then take the work item in again.`, then `qory could not remove <folder> before
+  session <n>: <error>`.
 
 Each push step that pushes commits stores a version of the artifact `submission`, from
 the hand-off file as it is after the session before that step (see [The submit step](#the-submit-step)).
@@ -4223,7 +4223,7 @@ qory serves no path on the route. Each answer is JSON, `{"error": <code>, "messa
 
 In a run of several sessions, the route serves each session while it joins, by the number
 the gateway gives it: one more than the session before. A session that the gateway numbers
-otherwise ends the run `failed`, with `qory run: update qory or Forager: the gateway
+otherwise ends the run `failed`, with `qory run: Update qory or Forager.`, then `The gateway
 numbered the session <n>, and qory served session <m> on its route`.
 
 The run's proxy answers some requests itself, in the same form, such as `503` for a request

@@ -389,7 +389,7 @@ func TestARunOfSeveralSessionsEndsAsItsAnswersAndSessionsSay(t *testing.T) {
 		}}, joins: 1, state: event.StatePaused, exit: 1},
 		"numbered otherwise": {s: loopSetup{result: func(int) (*session.Result, error) {
 			return &session.Result{State: event.StateSucceeded, Session: 2}, nil
-		}}, joins: 1, state: event.StateFailed, exit: 1, line: "qory run: update qory or Forager: the gateway numbered the session 2, and qory served session 1 on its route; the code is used\n"},
+		}}, joins: 1, state: event.StateFailed, exit: 1, line: "qory run: Update qory or Forager.\n  The gateway numbered the session 2, and qory served session 1 on its route; the code is used\n"},
 		"not_found": {s: loopSetup{nowhere: refused(http.StatusNotFound, "not_found")}, joins: 1, state: event.StateFailed, exit: 1,
 			line: "qory run: Contact support: the next-session request after session 1 failed.\n  Qory Apiary returned 404: Example text.\n"},
 		"run_ended": {s: loopSetup{nowhere: refused(http.StatusConflict, "run_ended")}, joins: 1, state: event.StateSucceeded,
@@ -400,7 +400,7 @@ func TestARunOfSeveralSessionsEndsAsItsAnswersAndSessionsSay(t *testing.T) {
 			d["access"] = "write"
 			d["harness"].(map[string]any)["harness"].(map[string]any)["workflows"].(map[string]any)["edit"] = map[string]any{"access": "write"}
 		}}, joins: 1, requests: 1, state: event.StateFailed, exit: 1,
-			line: "qory run: set one access for every workflow of the stage in Qory Apiary: the workflow edit has write, and session 1 has read; the code is used\n"},
+			line: "qory run: Set one access for every workflow of the stage in Qory Apiary.\n  The workflow edit has write, and session 1 has read; the code is used\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := runLoop(t, c.s)
@@ -633,7 +633,7 @@ func TestALaterSessionNeedsProofThatTheSessionBeforeStopped(t *testing.T) {
 		if len(r.closes) != 1 || r.closes[0].State != event.StateFailed {
 			t.Errorf("the run closed with %+v, want failed", r.closes)
 		}
-		wants(t, r.out, "qory run: take the work item in again in Qory Apiary: a container of the session may still run and write the working folder, so session 2 does not start; the code is used\n")
+		wants(t, r.out, "qory run: Take the work item in again in Qory Apiary.\n  A container of the session may still run and write the working folder, so session 2 does not start; the code is used\n")
 	})
 	t.Run("end", func(t *testing.T) {
 		r := runLoop(t, loopSetup{answers: []string{`{"next":"end"}`}, nowhere: kept})
@@ -674,7 +674,7 @@ func TestACodexHomeThatStaysEndsTheRunBeforeTheNextSession(t *testing.T) {
 	if len(r.closes) != 1 || r.closes[0].State != event.StateFailed {
 		t.Errorf("the run closed with %+v, want failed", r.closes)
 	}
-	wants(t, r.out, "qory run: remove ", " by hand, then take the work item in again: qory could not remove the Codex home of session 1 before session 2: ", "; the code is used\n")
+	wants(t, r.out, "qory run: Remove the Codex home of session 1 by hand, then take the work item in again.\n  qory could not remove ", " before session 2: ", "; the code is used\n")
 }
 
 // TestALaterSessionComposesTheBaseOfTheHarnessFromTheRunsCache is a run whose harness
