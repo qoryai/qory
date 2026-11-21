@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"maps"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"github.com/qoryai/forager/session"
 
 	"github.com/qoryai/qory/cmd"
+	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/proxygit/proxygittest"
 )
 
@@ -139,6 +141,62 @@ func TestTheNextSessionStartsAfterThePushOfTheSessionBefore(t *testing.T) {
 		if n != want {
 			t.Errorf("the run made the call %q %d times, want %d: %q", call, n, want, r.calls)
 		}
+	}
+}
+
+// TestALaterSessionTurnsOnPushChecksThatSession1DidNotHave is a walled write run of two
+// sessions whose home has no push check for session 1 and a check of submission for session
+// 2. As Forager does, the run takes the check only before a join: the run sets it once,
+// before session 1, session 1's push runs no check, and session 2's push runs its check and
+// stores the version.
+func TestALaterSessionTurnsOnPushChecksThatSession1DidNotHave(t *testing.T) {
+	docker, log := checkDocker(t, 0, "")
+	p, requests := sharedPushRepo(t, laterAnswer(2, "claude", "example-provider-2", 30))
+	walledBy(t, docker)
+	var mu sync.Mutex
+	loads, joins, sets := 0, 0, 0
+	t.Cleanup(cmd.SetLoadPushChecks(func(string) ([]compose.PushCheck, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		loads++
+		if loads == 1 {
+			return nil, nil
+		}
+		return []compose.PushCheck{{Type: "submission", Module: "hello", Command: []string{"bin/check"}}}, nil
+	}))
+	p.onSetCheck = func(func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error {
+		mu.Lock()
+		defer mu.Unlock()
+		sets++
+		if joins > 0 {
+			return errors.New("Set the check before the run's first join: a join passed its checks.")
+		}
+		return nil
+	}
+	var checkedBeforeSecond string
+	r := p.run(t, func(d string) {
+		mu.Lock()
+		joins++
+		n := joins
+		mu.Unlock()
+		if n == 2 {
+			checkedBeforeSecond = checkLog(t, log)
+		}
+		writeFile(t, filepath.Join(d, "s"+strconv.Itoa(n)+".txt"), "s\n")
+		commitAll(t, d, "Add file "+strconv.Itoa(n))
+	}, numbered())
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if joins != 2 || requests() != 2 || sets != 1 {
+		t.Fatalf("%d joins, %d next-session requests and %d sets of the check, want 2, 2 and 1\n%s", joins, requests(), sets, r.out)
+	}
+	if checkedBeforeSecond != "" {
+		t.Errorf("session 1's push ran a check:\n%s", checkedBeforeSecond)
+	}
+	if !strings.Contains(checkLog(t, log), "/qory-push-check/files/submission.json") {
+		t.Errorf("session 2's push ran no check of submission:\n%s", checkLog(t, log))
+	}
+	if posts, _, stored := p.api.counts(); posts != 2 || stored != 2 {
+		t.Errorf("%d POST and %d versions, want 2 and 2\n%s", posts, stored, r.out)
 	}
 }
 

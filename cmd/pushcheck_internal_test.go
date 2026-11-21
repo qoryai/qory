@@ -708,7 +708,7 @@ func TestACheckThatIsNotSetStopsWithItsLine(t *testing.T) {
 		true:  "Take the work item in again in Qory Apiary.\n  Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: Call SetRunAPICheck before Setup: the setup started; the code is used",
 	} {
 		p := &runPushChecks{checker: &pushcheck.Checker{}, fromCode: fromCode}
-		err := p.set(run)
+		err := p.set(run, false)
 		if err == nil || err.Error() != want {
 			t.Errorf("from a run code %v: %v, want %q", fromCode, err, want)
 		}

@@ -708,8 +708,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return withRecord(streams.errOut, err, record)
 			}
-			// A walled run whose composed home has push checks checks each POST of its run
-			// API from behind the wall, see [runPushChecks].
+			// A walled run whose composed home has push checks, and a walled run of several
+			// sessions with a control plane, checks each POST of its run API from behind the
+			// wall, see [runPushChecks].
 			checks := &runPushChecks{report: said, fromCode: code != nil}
 			run, err := openRun(ctx, spec.OpenSpec)
 			if err != nil {
@@ -1205,7 +1206,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return &runLineError{input(err)}
 					}
 					cleanups = append(cleanups, done)
-					if err := checks.set(run); err != nil {
+					if err := checks.set(run, fromCode != nil && fromCode.shared && controlPlane); err != nil {
 						return &runLineError{err}
 					}
 				}
