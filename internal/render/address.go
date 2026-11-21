@@ -166,10 +166,11 @@ func sortedNames(m map[string]string) []string {
 // of each Markdown file that does, so the module's files stay live wherever nothing had
 // to change. An entry of a module the home holds a copy of, see [compose.Module.Copy], is
 // a copy instead, files and directories, with the references of each Markdown file that
-// holds one resolved. An agent with a tier or paths is written as [AgentFront] returns
-// it. Every kind directory in keep is created, with no entry of that kind as well,
-// so a checkout link to it resolves. Entries of any other kind are left out, and it is
-// the caller's job to pass every kind the runtime reads from the directory.
+// holds one resolved. An agent with a tier or paths, and a reviewer of a review session,
+// is written as [AgentFront] returns it. Every kind directory in keep is created, with no
+// entry of that kind as well, so a checkout link to it resolves. Entries of any other
+// kind are left out, and it is the caller's job to pass every kind the runtime reads from
+// the directory.
 func PlaceEntries(res *compose.Result, dir string, addr Address, keep ...string) error {
 	wanted := map[string]bool{}
 	for _, k := range keep {
@@ -191,7 +192,7 @@ func PlaceEntries(res *compose.Result, dir string, addr Address, keep ...string)
 			name += ".md"
 		}
 		dst := filepath.Join(dir, name)
-		if e.Kind == "agents" && (e.Tier != "" || e.Paths != nil) {
+		if e.Kind == "agents" && (e.Tier != "" || e.Paths != nil || IsReviewAgent(res, e)) {
 			data, err := readSource(res, e)
 			if errors.Is(err, errLeftOut) {
 				continue

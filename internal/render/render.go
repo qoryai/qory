@@ -221,14 +221,19 @@ func TierFront(res *compose.Result, e compose.Entry, data []byte) []byte {
 }
 
 // AgentFront returns an agent file as a runtime that reads the file whole gets it: with
-// its tier written as [TierFront] writes it, when the agent has one, and without the
-// frontmatter key paths, which qory reads and not every runtime accepts.
+// its tier written as [TierFront] writes it, when the agent has one, without the
+// frontmatter key paths, which qory reads and not every runtime accepts, and, for a
+// reviewer of a review session, see [IsReviewAgent], without Bash, as [WithoutBash]
+// writes it. Only Claude Code's agent files are written through it.
 func AgentFront(res *compose.Result, e compose.Entry, data []byte) []byte {
 	if e.Tier != "" {
 		data = TierFront(res, e, data)
 	}
 	if e.Paths != nil {
 		data = module.SetFront(data, "paths", "")
+	}
+	if IsReviewAgent(res, e) {
+		data = WithoutBash(data)
 	}
 	return data
 }

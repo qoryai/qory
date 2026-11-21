@@ -20,13 +20,12 @@ const textReviewNeedsNoNestedDocker = "Remove the Docker daemon from the run's i
 // readSessionTools are the tools of a Claude Code session whose workflow has
 // access: read: Read, Grep and Glob read the checkout, Skill loads the workflow's skill,
 // Write writes the report, Agent starts the reviewer agents of the skill, and Bash runs
-// the commands that [reviewBashAllow] allows. It has no edit tool. The reviewer agents
-// get no Bash: the agent file's tools decide that, not this list.
+// the commands that [reviewBashAllow] allows. It has no edit tool. The agent files of
+// the reviewers deny Bash, see render.WithoutBash, so the agents that Agent starts
+// have no Bash, whatever this list says.
 //
-// shortcut: whether --tools also limits the agents that Agent starts is not verified;
-// the walled reviewer test checks it when the join is wired.
-// shortcut: an agent file of the review group keeps a Bash that it lists or inherits,
-// until internal/render/render.go removes it when it writes the agent file.
+// shortcut: the walled test that a reviewer agent cannot run a command runs when the
+// join is wired.
 var readSessionTools = []string{"Read", "Grep", "Glob", "Skill", "Write", "Agent", "Bash"}
 
 // readSessionSpec is spec adjusted for a session whose workflow has access: read: the
