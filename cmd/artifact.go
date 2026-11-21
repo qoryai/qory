@@ -178,7 +178,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 
 				shown, err := sourcetext.EscapeJSON(snapshot.Raw)
 				if err != nil {
-					return fmt.Errorf("Contact support: the work item in the run API's response has a string that is not valid UTF-8 or JSON text, so qory cannot write its hidden characters visibly: %w", err)
+					return fmt.Errorf("Contact support: the run API sent a work item that is not valid JSON text. %w", err)
 				}
 
 				_, err = fmt.Fprintln(c.OutOrStdout(), string(shown))
@@ -349,7 +349,7 @@ func pullArtifacts(c *cobra.Command, client *runapi.Client, artifactType string,
 
 	shown, err := sourcetext.EscapeJSON(index.Raw)
 	if err != nil {
-		return fmt.Errorf("Contact support: the artifact index in the run API's response has a string that is not valid UTF-8 or JSON text, so qory cannot write its hidden characters visibly: %w", err)
+		return fmt.Errorf("Contact support: the run API sent an artifact index that is not valid JSON text. %w", err)
 	}
 
 	if err := store.writeIndex(shown); err != nil {
@@ -1387,11 +1387,11 @@ func (s *artifactStore) fetch(ctx context.Context, client *runapi.Client, artifa
 
 		name := sourcetext.Escape(file.Filename)
 		if !runapi.LocalFilename(name) {
-			return fmt.Errorf("Check the artifact index of this run. %q cannot be a file's name in a directory, once its hidden characters are written as <U+XXXX>.", file.Filename)
+			return fmt.Errorf("Rename the file %q in its artifact, then pull again. With its hidden characters written as <U+XXXX>, its name is longer than %d bytes.", file.Filename, runapi.MaxFilename)
 		}
 
 		if other, ok := named[name]; ok && other != file.Filename {
-			return fmt.Errorf("Check the artifact index of this run. The files %q and %q of the version %s have the same name, %q, once their hidden characters are written as <U+XXXX>.", other, file.Filename, version.ID, name)
+			return fmt.Errorf("Rename one of the files %q and %q in its artifact, then pull again. With their hidden characters written as <U+XXXX>, both have the name %q in the version %s.", other, file.Filename, name, version.ID)
 		}
 
 		named[name] = file.Filename

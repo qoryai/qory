@@ -277,7 +277,7 @@ func TestWorkItemShowStopsOnTextThatIsNotUTF8InARun(t *testing.T) {
 	server.snapshot = "{\"version\":1,\"ticket\":{\"title\":\"\xff\"}}"
 
 	out, err := run(t, "work-item", "show")
-	if err == nil || !strings.HasPrefix(err.Error(), "Contact support: the work item in the run API's response") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Contact support: the run API sent a work item that is not valid JSON text. ") {
 		t.Errorf("err = %v", err)
 	}
 
@@ -1842,7 +1842,7 @@ func TestArtifactPullStopsOnAnIndexThatIsNotUTF8(t *testing.T) {
 	server.index = "{\"version\":1,\"artifacts\":[],\"x\":\"\xff\"}"
 
 	_, err := run(t, "artifact", "pull")
-	if err == nil || !strings.HasPrefix(err.Error(), "Contact support: the artifact index in the run API's response") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Contact support: the run API sent an artifact index that is not valid JSON text. ") {
 		t.Errorf("err = %v", err)
 	}
 
@@ -1913,7 +1913,7 @@ func TestArtifactPullChecksTheDigestBeforeEscaping(t *testing.T) {
 func TestArtifactPullDownloadsAnEscapedFileAgain(t *testing.T) {
 	inCheckout(t)
 	server := startRunAPI(t)
-	hiddenFixture(server, map[string]string{"a.md": "x" + rlo, "b.md": "plain\n"})
+	hiddenFixture(server, map[string]string{"a.md": "x" + rlo, "b.md": "plain\n", "c" + rlo: "named\n"})
 
 	for range 2 {
 		if _, err := run(t, "artifact", "pull"); err != nil {
@@ -1921,8 +1921,8 @@ func TestArtifactPullDownloadsAnEscapedFileAgain(t *testing.T) {
 		}
 	}
 
-	if server.downloads != 3 {
-		t.Errorf("downloads = %d, want 3: a.md twice and b.md once", server.downloads)
+	if server.downloads != 4 {
+		t.Errorf("downloads = %d, want 4: a.md twice, and b.md and the file of a hidden name once", server.downloads)
 	}
 }
 
@@ -1932,7 +1932,7 @@ func TestArtifactPullStopsOnTwoFilesOfOneEscapedName(t *testing.T) {
 	hiddenFixture(server, map[string]string{"a" + rlo: "one", "a<U+202E>": "two"})
 
 	_, err := run(t, "artifact", "pull")
-	want := fmt.Sprintf("Check the artifact index of this run. The files %q and %q of the version av_h1 have the same name, %q, once their hidden characters are written as <U+XXXX>.",
+	want := fmt.Sprintf("Rename one of the files %q and %q in its artifact, then pull again. With their hidden characters written as <U+XXXX>, both have the name %q in the version av_h1.",
 		"a<U+202E>", "a"+rlo, "a<U+202E>")
 
 	if err == nil || err.Error() != want {
@@ -1963,8 +1963,8 @@ func TestArtifactPullStopsOnAnEscapedNameThatIsTooLong(t *testing.T) {
 	hiddenFixture(server, map[string]string{name: "x"})
 
 	_, err := run(t, "artifact", "pull")
-	if err == nil || !strings.HasPrefix(err.Error(), "Check the artifact index of this run. ") ||
-		!strings.Contains(err.Error(), "cannot be a file's name in a directory, once its hidden characters") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Rename the file ") ||
+		!strings.Contains(err.Error(), "in its artifact, then pull again. With its hidden characters written as <U+XXXX>, its name is longer than 255 bytes.") {
 		t.Errorf("err = %v", err)
 	}
 }
