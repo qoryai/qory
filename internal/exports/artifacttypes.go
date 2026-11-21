@@ -120,14 +120,14 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 	return nil
 }
 
-// checkArtifactType checks entry i of artifact_types, counted from 0. An entry is a name
-// alone, or a name with base_view, size_limit and max_files, and with json_schema
+// checkArtifactType checks entry i of artifact_types, counted from 0. An entry is a
+// name alone, or a name with base_view, size_limit and max_files, and with json_schema
 // exactly when base_view is structured. Either also may have withdrawable, true or
-// false, and a structured type may have deliver ([checkDeliver]). It returns the entry's
-// name, "" for none of the right form, and the first thing to fix in the entry, for a
-// message, with [FilePlace] for the file, fix first; "" for an entry that passes. qory has
-// no list of standard types, so a name alone passes in any name of the right form.
-// patterns is the budget of the file's patterns.
+// false, and a structured type may have deliver ([checkDeliver]). It returns the
+// entry's name, "" for none of the right form, and the first thing to fix in the entry,
+// for a message, with [FilePlace] for the file, fix first; "" for an entry that passes.
+// qory has no list of standard types, so a name alone passes in any name of the right
+// form. patterns is the budget of the file's patterns.
 func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, why string) {
 	label := fmt.Sprintf("entry %d of artifact_types", i+1)
 	if entry.Kind != yaml.MappingNode {

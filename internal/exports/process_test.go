@@ -1598,8 +1598,9 @@ left_out: {type: integer, x-qory-fill: pushed-commits-left-out}`
 			t.Errorf("the first line has %d characters: %s", len(first), first)
 		}
 	}
-	// A written-out copy of the reference with a mark is no primitive reference: the mark is
-	// a key that the primitives' definition lacks, so the member takes the reference by $ref.
+	// A written-out copy of the reference with a mark is no primitive reference: the
+	// mark is a key that the primitives' definition lacks, so the member takes the
+	// reference by $ref.
 	var primitive struct {
 		Defs map[string]map[string]any `json:"$defs"`
 	}

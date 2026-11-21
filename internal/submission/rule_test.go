@@ -97,7 +97,8 @@ func TestSchemaHasThePrimitivesRule(t *testing.T) {
 		if got := textDef.Validate(s) == nil; got != !primitives.StopsText(r) {
 			t.Fatalf("%U: $defs text passes it: %v, StopsText: %v", r, got, primitives.StopsText(r))
 		}
-		// A title is a line with a character that shows: ShowsInTitle lists the characters.
+		// A title is a line with a character that shows: ShowsInTitle lists the
+		// characters.
 		if got := lineDef.Validate(s) == nil && visibleDef.Validate(s) == nil; got != primitives.ShowsInTitle(r) {
 			t.Fatalf("%U: a title of it is valid: %v, ShowsInTitle: %v", r, got, primitives.ShowsInTitle(r))
 		}

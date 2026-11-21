@@ -298,10 +298,11 @@ func nulAt(text string) int {
 	return 0
 }
 
-// stoppedAt is the 1-based position of the first character of description that the text rule
-// of the contract stops, 0 for none: a control character other than tab, line feed and
-// carriage return, U+2028, U+2029, or a Cf character other than U+200C and U+200D. The
-// description is Markdown, so the rule is [primitives.StopsText], not the rule of a title.
+// stoppedAt is the 1-based position of the first character of description that the text
+// rule of the contract stops, 0 for none: a control character other than tab, line feed
+// and carriage return, U+2028, U+2029, or a Cf character other than U+200C and U+200D.
+// The description is Markdown, so the rule is [primitives.StopsText], not the rule of a
+// title.
 func stoppedAt(description string) int {
 	i := 0
 	for _, r := range description {

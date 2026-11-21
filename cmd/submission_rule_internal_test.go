@@ -51,11 +51,12 @@ func TestVisibleTitleIsTheContractsVisibleRule(t *testing.T) {
 	}
 }
 
-// TestAHandoffDescriptionWithAStoppedCharacterDropsTheText is a description with a character
-// that the contract's text rule stops: U+200B, the tag character U+E0041, U+2028, and a control
-// character other than tab, line feed and carriage return. The text is dropped with a line that
-// has the code point and the position, and the stored submission matches the format. Tab, line
-// feed, carriage return, U+200C and an emoji sequence stay.
+// TestAHandoffDescriptionWithAStoppedCharacterDropsTheText is a description with a
+// character that the contract's text rule stops: U+200B, the tag character U+E0041,
+// U+2028, and a control character other than tab, line feed and carriage return. The
+// text is dropped with a line that has the code point and the position, and the stored
+// submission matches the format. Tab, line feed, carriage return, U+200C and an emoji
+// sequence stay.
 func TestAHandoffDescriptionWithAStoppedCharacterDropsTheText(t *testing.T) {
 	for _, c := range []struct {
 		name, description string
@@ -97,11 +98,11 @@ func TestAHandoffDescriptionWithAStoppedCharacterDropsTheText(t *testing.T) {
 	}
 }
 
-// TestADraftTitleLineWithAStoppedCharacterIsLeftOut is a submit program whose draft_title line
-// has U+200B, a tag character, a control-free title of only spaces and joiners, or a good
-// title. The unusable line is left out and listed with its number and cause, the draft is
-// program-failed as for any draft line that qory leaves out, and the stored submission
-// matches the format; a good title is stored.
+// TestADraftTitleLineWithAStoppedCharacterIsLeftOut is a submit program whose
+// draft_title line has U+200B, a tag character, a control-free title of only spaces and
+// joiners, or a good title. The unusable line is left out and listed with its number
+// and cause, the draft is program-failed as for any draft line that qory leaves out,
+// and the stored submission matches the format; a good title is stored.
 func TestADraftTitleLineWithAStoppedCharacterIsLeftOut(t *testing.T) {
 	program := func(title string) *submitProgram {
 		return &submitProgram{command: []string{programScript(t, `printf 'draft_number 7\n'
