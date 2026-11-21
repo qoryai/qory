@@ -274,19 +274,23 @@ const primitiveReference = primitives.URL + "#/$defs/reference"
 // checkDeliverTarget checks that schema, the json_schema of the artifact type label, a
 // compiled JSON Schema, has a top-level property target that is the primitive reference:
 // the property is a $ref to [primitiveReference], or to a definition of the schema's
-// $defs that is, a written-out copy of the definition whose local definitions are those of
-// the primitives, or an allOf that has one. A schema whose $id is the address of the
-// primitives schema fails: the compiler does not report the same address twice, so
-// definitions in the schema would stand for the primitives'. It returns the fix for a message with
-// [FilePlace] for the file, "" for a type that passes.
+// $defs that is, a written-out copy of the definition whose local definitions are those
+// of the primitives, or an allOf that has one. The check reads a $ref as a path into
+// $defs of the root and as the address of the primitives, so it fails a schema that
+// changes where a $ref resolves, or how a draft reads it: a $schema other than draft
+// 2020-12, and an $id, $anchor or $dynamicAnchor anywhere in the schema. It returns the
+// fix for a message with [FilePlace] for the file, "" for a type that passes.
 func checkDeliverTarget(label string, schema *yaml.Node) string {
 	doc, why := jsonValue(schema, "json_schema of "+label)
 	if why != "" {
 		return why
 	}
 	root, _ := doc.(map[string]any)
-	if id, _ := root["$id"].(string); strings.TrimSuffix(id, "#") == primitives.URL {
-		return fmt.Sprintf("Remove the $id of the primitives schema from the json_schema, or remove `deliver`.\n  json_schema of %s has that address as an $id.\n  The type is in %s.", label, FilePlace)
+	if draft, has := root["$schema"]; has && !slices.Contains(typeSchemaDrafts[:2], fmt.Sprint(draft)) {
+		return typeRefusal("Remove $schema from the json_schema, or set it to the 2020-12 draft, or remove `deliver`.", "json_schema of "+label+" has another draft, and draft-07 ignores the keys next to a $ref.")
+	}
+	if hasResolutionKey(root) {
+		return typeRefusal("Remove $id, $anchor and $dynamicAnchor from the json_schema, or remove `deliver`.", "json_schema of "+label+" has one, and the check of deliver cannot tell where a $ref under it points.")
 	}
 	props, _ := root["properties"].(map[string]any)
 	target, has := props["target"]
@@ -294,10 +298,28 @@ func checkDeliverTarget(label string, schema *yaml.Node) string {
 	if has {
 		cause = "The top-level target in json_schema of " + label + " is not the primitive reference."
 	}
-	if has && isPrimitiveReference(root, target, 0) {
+	if has && isPrimitiveReference(root, target, map[string]bool{}) {
 		return ""
 	}
 	return fmt.Sprintf("Add a top-level `target` of the primitive `reference` to the schema, or remove `deliver`.\n  %s\n  The type is in %s.", cause, FilePlace)
+}
+
+// hasResolutionKey reports whether node, a decoded JSON Schema, has the key $id, $anchor
+// or $dynamicAnchor in any object.
+// shortcut: a property or a definition with one of these names fails too, and a value
+// of enum or const is read as a schema; replace it when a type needs such a name.
+func hasResolutionKey(node any) bool {
+	switch v := node.(type) {
+	case map[string]any:
+		for key, member := range v {
+			if key == "$id" || key == "$anchor" || key == "$dynamicAnchor" || hasResolutionKey(member) {
+				return true
+			}
+		}
+	case []any:
+		return slices.ContainsFunc(v, hasResolutionKey)
+	}
+	return false
 }
 
 // primitiveDefinitions is $defs of the primitives schema, as JSON decoded into Go values.
@@ -364,17 +386,19 @@ func roundTrip(node any) any {
 // out as a member does under $defs reference of the schemas of the harness, with the
 // definitions that it refers to in $defs of root as the primitives have them; a $ref to a
 // definition under "#/$defs/" of root that is one of these; or an allOf with an entry
-// that is. depth stops a loop of definitions.
-func isPrimitiveReference(root map[string]any, node any, depth int) bool {
+// that is. visited has the definitions already tried, so a loop of definitions ends and
+// each definition is read once.
+func isPrimitiveReference(root map[string]any, node any, visited map[string]bool) bool {
 	m, _ := node.(map[string]any)
-	if m == nil || depth > 8 {
+	if m == nil {
 		return false
 	}
 	if ref, _ := m["$ref"].(string); ref == primitiveReference {
 		return true
-	} else if name, local := strings.CutPrefix(ref, "#/$defs/"); local {
+	} else if name, local := strings.CutPrefix(ref, "#/$defs/"); local && !visited[name] {
+		visited[name] = true
 		defs, _ := root["$defs"].(map[string]any)
-		if isPrimitiveReference(root, defs[name], depth+1) {
+		if isPrimitiveReference(root, defs[name], visited) {
 			return true
 		}
 	}
@@ -383,7 +407,7 @@ func isPrimitiveReference(root map[string]any, node any, depth int) bool {
 		return true
 	}
 	all, _ := m["allOf"].([]any)
-	return slices.ContainsFunc(all, func(entry any) bool { return isPrimitiveReference(root, entry, depth+1) })
+	return slices.ContainsFunc(all, func(entry any) bool { return isPrimitiveReference(root, entry, visited) })
 }
 
 // wholeNumber reports whether n is a whole number from 1 to most, written as one: 1.0
