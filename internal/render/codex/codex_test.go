@@ -218,7 +218,8 @@ func composeModule(t *testing.T, files map[string]string) *compose.Result {
 }
 
 // TestConfigTrustsEachCommandHook builds a home reached through a link, for a module with
-// [hookSettings]. config.toml has features.unified_exec_tty = false, and in hooks.state a
+// [hookSettings]. config.toml has features.unified_exec_tty = false, web_search =
+// "disabled" at the top level, and in hooks.state a
 // trusted_hash for each command hook, keyed by the file with the link resolved, the
 // event's snake-case label and the hook's places. Each hash is the SHA-256 of the
 // identity JSON written out here, as Codex computes it. The mcp_tool hook gets no key,
@@ -282,8 +283,9 @@ func TestConfigTrustsEachCommandHook(t *testing.T) {
 		{stage, newHome, filepath.Join(base, "real", "new", "harness", "codex")},
 	} {
 		var config struct {
-			Features map[string]any `toml:"features"`
-			Hooks    struct {
+			Features  map[string]any `toml:"features"`
+			WebSearch string         `toml:"web_search"`
+			Hooks     struct {
 				State map[string]struct {
 					TrustedHash string `toml:"trusted_hash"`
 				} `toml:"state"`
@@ -294,6 +296,9 @@ func TestConfigTrustsEachCommandHook(t *testing.T) {
 		}
 		if !reflect.DeepEqual(config.Features, map[string]any{"unified_exec_tty": false}) {
 			t.Errorf("%s: features %v, want unified_exec_tty = false alone", c.home, config.Features)
+		}
+		if config.WebSearch != "disabled" {
+			t.Errorf("%s: web_search %q, want \"disabled\"", c.home, config.WebSearch)
 		}
 		got := map[string]string{}
 		for key, s := range config.Hooks.State {
