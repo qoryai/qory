@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -1181,6 +1183,9 @@ func TestArtifactTypesSchemaMatchesTheReader(t *testing.T) {
 	}
 }
 
+// surrogatePair is a pair of JSON escapes for one character past U+FFFF.
+var surrogatePair = regexp.MustCompile(`\\u(?i:d[89ab][0-9a-f]{2})\\u(?i:d[c-f][0-9a-f]{2})`)
+
 // TestContractSchemasPassAsCustomTypes is each structured format of the contract,
 // acceptance-criteria.schema.json, verification.schema.json, branch.schema.json,
 // questions.schema.json, review-comments.schema.json, proposal-sources.schema.json and
@@ -1210,10 +1215,17 @@ func TestContractSchemasPassAsCustomTypes(t *testing.T) {
 		if err := json.Compact(&one, raw); err != nil {
 			t.Fatal(err)
 		}
+		// YAML reads no surrogate pair: a character past U+FFFF is \UXXXXXXXX in a
+		// double-quoted string, as a factory writes it.
+		inYAML := surrogatePair.ReplaceAllStringFunc(one.String(), func(pair string) string {
+			hi, _ := strconv.ParseUint(pair[2:6], 16, 32)
+			lo, _ := strconv.ParseUint(pair[8:12], 16, 32)
+			return fmt.Sprintf(`\U%08x`, 0x10000+(hi-0xd800)<<10+(lo-0xdc00))
+		})
 		entry := func(schema string) string {
 			return withTypes("\n  - name: " + c.name + "\n    base_view: structured\n    size_limit: " + c.sizeLimit + "\n    max_files: 1\n    json_schema: " + schema)
 		}
-		body := entry(one.String())
+		body := entry(inYAML)
 		if err := factory(t, body).Verify(); err != nil {
 			t.Errorf("%s: %v", file, err)
 		}
@@ -1231,7 +1243,7 @@ func TestContractSchemasPassAsCustomTypes(t *testing.T) {
 		if err := processSchema.Validate(doc); err != nil {
 			t.Errorf("%s in process.schema.json: %v", file, err)
 		}
-		broken := entry(strings.Replace(one.String(), `"type":"object"`, `"type":"objekt"`, 1))
+		broken := entry(strings.Replace(inYAML, `"type":"object"`, `"type":"objekt"`, 1))
 		if err := factory(t, broken).Verify(); err == nil || !strings.Contains(err.Error(), "so that it compiles as a JSON Schema.\n  The schema does not compile: ") {
 			t.Errorf("%s, a schema that does not compile: %v", file, err)
 		}
