@@ -109,7 +109,7 @@ func TestSchemaHasThePrimitivesRule(t *testing.T) {
 // and a title of only joiners and spaces stop it, and an emoji sequence, U+200C, and a
 // Markdown description with tab, line feed and carriage return pass.
 func TestCheckStopsTheRuleCharactersInTheMembers(t *testing.T) {
-	family := "\U0001F468‍\U0001F469‍\U0001F467"
+	family := "\U0001F468\u200D\U0001F469\u200D\U0001F467"
 	with := func(member, value string) string {
 		quoted, err := json.Marshal(value)
 		if err != nil {
@@ -128,24 +128,24 @@ func TestCheckStopsTheRuleCharactersInTheMembers(t *testing.T) {
 		ok            bool
 	}{
 		{"text.title", "Add " + family, true},
-		{"text.title", "Add‌it", true},
+		{"text.title", "Add\u200Cit", true},
 		{"text.title", "Add\U000E0041it", false},
-		{"text.title", "Add​it", false},
-		{"text.title", "‌‍  　", false},
-		{"text.title", "‌‍a", true},
+		{"text.title", "Add\u200Bit", false},
+		{"text.title", "\u200C\u200D  　", false},
+		{"text.title", "\u200C\u200Da", true},
 		{"text.title", "Add it", false},
 		{"draft.title", "Add " + family, true},
 		{"draft.title", "Add\U000E0041it", false},
-		{"draft.title", "Add​it", false},
-		{"draft.title", "‍ ‌", false},
+		{"draft.title", "Add\u200Bit", false},
+		{"draft.title", "\u200D \u200C", false},
 		{"step", "deliverable:" + family, true},
 		{"step", "deliverable:\U000E0041", false},
-		{"step", "deliverable:​", false},
+		{"step", "deliverable:\u200B", false},
 		{"step", "deliverable:\t", false},
 		{"text.description", "# Page\n\n\tindented\r\n" + family, true},
-		{"text.description", "Adds‌it", true},
+		{"text.description", "Adds\u200Cit", true},
 		{"text.description", "Adds\U000E0041it", false},
-		{"text.description", "Adds​it", false},
+		{"text.description", "Adds\u200Bit", false},
 		{"text.description", "Adds it", false},
 	} {
 		err := submission.Check([]byte(with(c.member, c.value)))
