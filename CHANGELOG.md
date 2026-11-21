@@ -672,6 +672,21 @@ release may change what an existing document does, and states it under Upgrading
   least one character that is not a space. A blocking finding has a `failing check` or a
   `failing input` as its proof. See The review report format in
   `contracts/harness/v1/README.md`.
+- Version 1 of the primitives, `contracts/harness/v1/primitives.schema.json`: the `line`,
+  `title`, `text`, `reference`, `link` and `amount` that the schemas of artifact types have in
+  common. A `json_schema` in a `process.yaml` can refer to a definition by the address of
+  the file, such as
+  `https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/title`. qory resolves
+  that address from a built-in copy and reads no file or URL; a reference to any other
+  address fails as before. See The primitives in `contracts/harness/v1/README.md`.
+- An artifact type of a `process.yaml` can have `deliver: {send: end_of_run}` or
+  `deliver: {send: after_gate}`. Without `deliver`, qory stores the type and never sends
+  it. Only a structured type has `deliver`, and its `json_schema` has a top-level property
+  `target` that is the primitive `reference`, written as a `$ref` to
+  `primitives.schema.json#/$defs/reference`, in an `allOf`, or through a definition under
+  `$defs`. A `deliver` that breaks a rule stops the command with the fix on the first line,
+  such as ``Add a top-level `target` of the primitive `reference` to the schema, or remove
+  `deliver`.``
 
 ### Changed
 
@@ -1657,6 +1672,20 @@ release may change what an existing document does, and states it under Upgrading
   files of codex/<folder> add up to more than 1 GiB, the most a walled Codex run takes.``
   or ``Ship codex/<path> under 64 MiB.`` and the next line ``The file is larger than 64
   MiB, the most a walled Codex run takes for one file.``
+- The character rule of the contract schemas is one for a line and one for a text. A line
+  has no control character, no U+2028 or U+2029, and no format character (Unicode
+  category Cf) except U+200C and U+200D, the joiners that emoji sequences need. A text
+  keeps tab, line feed and carriage return as its only control characters and has the same
+  other stops. Until this change, the schemas of the questions, acceptance criteria,
+  verification, review comments, proposal sources and verdict formats listed the stopped
+  characters themselves, and the lists stopped at U+FFFF: U+0600 and a tag character such
+  as U+E0041 passed. Each `$defs` `line` and `text` now has the pattern of the primitives.
+  The checks of `qory run verdict` and of the review round stop the same characters.
+- A stack, a stage name or a workflow in a `process.yaml` that has U+200B, U+2028, U+2029
+  or another character that a line does not have is stopped, with the fix `Set stack in
+  process.yaml to one line of text.` and the cause `The value has the character U+200B,
+  which a line of text does not have.` Until this change, only the control characters were
+  stopped.
 
 ### Removed
 

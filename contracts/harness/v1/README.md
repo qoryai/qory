@@ -774,7 +774,7 @@ artifact types have in common. It is not the schema of a document. Each definiti
 | Definition | A string that |
 |---|---|
 | `line` | has no control character (U+0000 to U+001F and U+007F to U+009F), no U+2028 or U+2029, and no Cf character except U+200C and U+200D, the joiners that emoji sequences and some scripts need |
-| `text` | is Markdown: of the control characters it has only tab, line feed and carriage return, and it has the same other stops as a `line`; at most 20,000 characters, with no line that is `<!-- qory:start -->` or `<!-- qory:end -->` |
+| `text` | is Markdown: of the control characters it has only tab, line feed and carriage return, and it has the same other stops as a `line`; at most 20,000 characters, with no line that starts with `<!-- qory:start -->` or `<!-- qory:end -->` |
 | `title` | is a `line` of 1 to 256 characters with at least one character that is not a space (U+0020, U+00A0, U+1680, U+2000 to U+200A, U+202F, U+205F, U+3000), U+200C or U+200D |
 | `reference` | is an object with a `collection` (a `line` of 1 to 200 characters) and, optionally, an `address` with a `system` (a host name of at most 253 characters) and a `path` (a `line` of 1 to 200 characters); an `address` has both |
 | `link` | is an `https` URL of at most 2048 characters, with a host, with no user information |
@@ -1001,7 +1001,7 @@ stores it as a version of the artifact type `verdict`. This is version 1 of the 
 |---|---|
 | `verdict` | `passed`: the work meets the bar; `changes-requested`: the work needs another round; `escalate`: a person must act |
 | `points` | what is wrong or missing, 1 to 20 points: required with `escalate`, optional with `changes-requested`, where each point has the action `run_again`, and absent with `passed` |
-| `text` | what is wrong or missing, in one plain sentence for a person on one line, 1 to 500 characters, with no action and no question id, because Qory Apiary adds the action from `action`: it has no control character, so no tab, line feed or carriage return, and the schema's `$defs` `line`, the `line` of the questions format, lists the format characters it cannot have |
+| `text` | what is wrong or missing, in one plain sentence for a person on one line, 1 to 500 characters, with no action and no question id, because Qory Apiary adds the action from `action`: it has no control character, so no tab, line feed or carriage return, and the schema's `$defs` `line`, the `line` of the primitives, stops the other characters a line cannot have |
 | `action` | `answer`: a person answers the question in `question`, only with `escalate`; `run_again`: another round runs, and with `escalate` a person runs it |
 | `question` | the id of an open question in the work item's newest `questions` version, in the id form of the questions format: required with `answer`, and absent with `run_again` |
 | `fix` | what a person does to fix the point, in one plain sentence on one line, with the rules of `text`: optional with `run_again`, and absent with `answer`. Qory Apiary shows it in place of the sentence of the action `run_again` |
