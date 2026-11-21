@@ -4,10 +4,30 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/sourcetext"
 )
+
+// TestHiddenIsTheOldTable is Hidden for every code point against the table that Hidden
+// had before it was built on primitives.StopsLine.
+func TestHiddenIsTheOldTable(t *testing.T) {
+	old := func(r rune) bool {
+		switch r {
+		case '\n', '\t', 0x200C, 0x200D:
+			return false
+		case 0x2028, 0x2029:
+			return true
+		}
+		return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
+	}
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if got := sourcetext.Hidden(r); got != old(r) {
+			t.Fatalf("U+%04X: Hidden is %v, the old table has %v", r, got, old(r))
+		}
+	}
+}
 
 func TestHidden(t *testing.T) {
 	tests := []struct {
