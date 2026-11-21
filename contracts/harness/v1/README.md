@@ -677,7 +677,7 @@ Declare check-the-tone in stack support, or remove it from stage Answer.
 A workflow that is empty, null, not a string, such as `123` or `true`, or is not one line
 of text (see `line` in The primitives), is stopped the same way, with the entry's place
 in the stage, such as `entry 2 in the loop of entry 3`. A stage name and a `stack` that
-are not one line of text are stopped too: the message gives the line break, the control
+are not one line of text are stopped too: the message shows the line break, the control
 character, or the character, such as U+200B or the tag character U+E0041, as a code point. qory reads the file through the module's folder, as
 the compose reads a module's files: a link to a file inside the folder is followed, and
 a link to a place outside it is refused without reading the place it leads to.
@@ -774,12 +774,12 @@ Remove the key "command" from submit.
 artifact types have in common. It is not the schema of a document. Each definition is under
 `$defs`:
 
-| Definition | A string that |
+| Definition | A value that |
 |---|---|
 | `line` | has no control character (U+0000 to U+001F and U+007F to U+009F), no U+2028 or U+2029, and no Cf character except U+200C and U+200D, the joiners that emoji sequences and some scripts need |
 | `text` | is Markdown: of the control characters it has only tab, line feed and carriage return, and it has the same other stops as a `line`; at most 20,000 characters, with no line that starts with `<!-- qory:start -->` or `<!-- qory:end -->` |
 | `title` | is a `line` of 1 to 256 characters with at least one character that is not a space (U+0020, U+00A0, U+1680, U+2000 to U+200A, U+202F, U+205F, U+3000), U+200C or U+200D |
-| `reference` | is an object with a `collection` (a `line` of 1 to 200 characters) and, optionally, an `address` with a `system` (a host name of at most 253 characters) and a `path` (a `line` of 1 to 200 characters); an `address` has both |
+| `reference` | is an object with a `collection` (a `line` of 1 to 200 characters) and, optionally, an `address` with a `system` (1 to 253 lower-case letters, digits, dots and hyphens) and a `path` (a `line` of 1 to 200 characters); an `address` has both |
 | `link` | is an `https` URL of at most 2048 characters, with a host, with no user information |
 | `amount` | is an object with a `value`, a decimal number written as a string (an optional minus sign, 1 to 15 digits, and optionally a point with 1 to 6 digits, such as `12.50` or `-3`), and exactly one of `currency` (an ISO 4217 code, three capital letters) and `unit` (a `title` of at most 32 characters); it has no other member |
 
@@ -831,7 +831,7 @@ writes it, after the push. This is version 1 of the format
 | `commit` | the head of the branch: a full commit id, 40 or 64 lower-case hexadecimal digits. Each commit id of the format has this form |
 | `base` | the commit the run started at (`commit`), and the name of the repository's default branch when the run started (`branch`, optional, at most 255 characters, a name that git accepts after `refs/heads/`): the branch that a pull request of the run is based on |
 | `commits` | each commit from the base to the head, oldest first, with the ledger step that made it, at most 128 characters on one line (a `line` of the primitives): the id of a ledger row, such as `deliverable:d-1`, `fix:f1`, `plan`, `checks`, `small-change` or `script:scenario-2#3`. A commit that a step made gets that step. Any commit with no step gets `unreviewed` |
-| `draft` | the draft pull request (`number`, `url`, `title`, a `title` of the primitives, `state`, `action`), or `{"none": <reason>}` with the reason `not-passed`, `no-text`, `escalated`, `no-program`, `program-failed` (with `exit`, 0, 1 or 2), `program-timeout` or `login-needed` (with `exit` 3). The `state` of a draft is `draft`, `open`, `closed` or `merged` |
+| `draft` | the draft pull request (`number`, `url`, `title`, `state`, `action`; the `title` is a `line` with a character that is not a space, U+200C or U+200D, and the program reader limits it to 256 characters), or `{"none": <reason>}` with the reason `not-passed`, `no-text`, `escalated`, `no-program`, `program-failed` (with `exit`, 0, 1 or 2), `program-timeout` or `login-needed` (with `exit` 3). The `state` of a draft is `draft`, `open`, `closed` or `merged` |
 | `commit_url` | the forge's address of a commit, from the submit program of a run with no run code |
 
 A document has no other member. The schema writes the patterns of the primitives in its

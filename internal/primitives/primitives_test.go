@@ -14,6 +14,9 @@ import (
 	"github.com/qoryai/qory/internal/primitives"
 )
 
+// contractPath is the path of the contract's primitives schema under the repository root.
+const contractPath = "contracts/harness/v1/primitives.schema.json"
+
 // definition compiles $defs/name of the embedded schema, with no loader.
 func definition(t *testing.T, name string) *jsonschema.Schema {
 	t.Helper()
@@ -34,12 +37,12 @@ func definition(t *testing.T, name string) *jsonschema.Schema {
 
 // TestSchemaIsTheContract keeps the embedded copy equal to the contract, byte for byte.
 func TestSchemaIsTheContract(t *testing.T) {
-	want, err := os.ReadFile(filepath.Join("..", "..", primitives.ContractPath))
+	want, err := os.ReadFile(filepath.Join("..", "..", contractPath))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(primitives.Schema, want) {
-		t.Fatalf("internal/primitives/primitives.schema.json differs from %s", primitives.ContractPath)
+		t.Fatalf("internal/primitives/primitives.schema.json differs from %s", contractPath)
 	}
 }
 
@@ -78,7 +81,7 @@ func TestRuleAgreesWithTheDefinitions(t *testing.T) {
 // TestDefinitionsOnExamples checks what the rule is for, on whole strings.
 func TestDefinitionsOnExamples(t *testing.T) {
 	line, text, title := definition(t, "line"), definition(t, "text"), definition(t, "title")
-	family := "\U0001F468‍\U0001F469‍\U0001F467"
+	family := "\U0001F468\u200d\U0001F469\u200d\U0001F467"
 	for _, c := range []struct {
 		name  string
 		def   *jsonschema.Schema
@@ -86,7 +89,7 @@ func TestDefinitionsOnExamples(t *testing.T) {
 		valid bool
 	}{
 		{"line", line, "Add the export " + family, true},
-		{"line", line, "a‌b", true},
+		{"line", line, "a\u200cb", true},
 		{"line", line, "a\U000E0041b", false},
 		{"line", line, "a​b", false},
 		{"line", line, "a\tb", false},
@@ -94,12 +97,12 @@ func TestDefinitionsOnExamples(t *testing.T) {
 		{"text", text, "# Title\n\n\tindented\r\n" + family, true},
 		{"text", text, "a\U000E0041b", false},
 		{"text", text, "a​b", false},
-		{"text", text, "a b", false},
+		{"text", text, "a\u2028b", false},
 		{"title", title, "Add " + family, true},
 		{"title", title, "", false},
 		{"title", title, "  　", false},
-		{"title", title, "‌‍ ‌", false},
-		{"title", title, "‌‍a", true},
+		{"title", title, "\u200c\u200d \u200c", false},
+		{"title", title, "\u200c\u200da", true},
 		{"title", title, "a\U000E0041", false},
 	} {
 		if got := c.def.Validate(c.value) == nil; got != c.valid {
@@ -157,7 +160,7 @@ func TestAmount(t *testing.T) {
 		{`{"value": "` + strings.Repeat("9", 15) + `", "currency": "USD"}`, true},
 		{`{"value": "-` + strings.Repeat("9", 15) + `.999999", "currency": "USD"}`, true},
 		{`{"value": "1", "unit": "` + strings.Repeat("a", 32) + `"}`, true},
-		{`{"value": "1", "unit": "👨‍👩"}`, true},
+		{`{"value": "1", "unit": "👨\u200d👩"}`, true},
 		{`{"value": "1", "currency": "EUR", "unit": "km"}`, false},
 		{`{"value": "1"}`, false},
 		{`{"currency": "EUR"}`, false},
