@@ -684,7 +684,7 @@ release may change what an existing document does, and states it under Upgrading
   it. Only a structured type has `deliver`, and its `json_schema` has a top-level property
   `target` that is the primitive `reference`, written as a `$ref` to
   `primitives.schema.json#/$defs/reference`, in an `allOf`, or through a definition under
-  `$defs`. A `deliver` that breaks a rule stops the command with the fix on the first line,
+  `$defs`, or as a written-out copy of that definition. A `deliver` that breaks a rule stops the command with the fix on the first line,
   such as ``Add a top-level `target` of the primitive `reference` to the schema, or remove
   `deliver`.``
 
@@ -1686,6 +1686,10 @@ release may change what an existing document does, and states it under Upgrading
   process.yaml to one line of text.` and the cause `The value has the character U+200B,
   which a line of text does not have.` Until this change, only the control characters were
   stopped.
+- The patterns of the primitives write the characters above U+FFFF, such as the tag
+  characters, as surrogate pairs. YAML reads no surrogate pair, so in a `process.yaml`
+  write each pair as `\UXXXXXXXX` in a double-quoted string, such as `\U000E0041`, when you
+  paste a schema of `contracts/harness/v1/` into a `json_schema`.
 
 ### Removed
 

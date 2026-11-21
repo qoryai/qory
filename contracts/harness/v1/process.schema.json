@@ -71,7 +71,7 @@
         "json_schema": {"description": "The JSON Schema of a structured type's file.", "type": "object"},
         "withdrawable": {"description": "Whether a run may withdraw a name of the type. Optional, and true when the entry has none. A standard type and a custom type may both set it.", "type": "boolean"},
         "deliver": {
-          "description": "When qory sends the versions of the type to the target that the document names. Optional: without it, qory stores the type and never sends it. Only a custom structured type has it, and its json_schema has a top-level property target that is the primitive reference, $ref https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference, written directly, in an allOf, or through a definition under $defs. qory checks that property, which this schema cannot state.",
+          "description": "When qory sends the versions of the type to the target in the document. Optional: without it, qory stores the type and never sends it. Only a custom structured type has it, and its json_schema has a top-level property target that is the primitive reference, $ref https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference, written directly, in an allOf, or through a definition under $defs, or a written-out copy of that definition in any of these places. qory checks that property, which this schema cannot state.",
           "type": "object",
           "required": ["send"],
           "additionalProperties": false,
@@ -120,7 +120,7 @@
       "allOf": [{"$ref": "#/$defs/line"}]
     },
     "line": {
-      "description": "One line of text: no control character (so no tab, line feed or carriage return), no U+2028 or U+2029, and no format character (Unicode category Cf) but U+200C and U+200D, the joiners of emoji. The pattern is the one of $defs line in primitives.schema.json. It says nothing of a value that is no string.",
+      "description": "One line of text: no control character (so no tab, line feed or carriage return), no U+2028 or U+2029, and no format character (Unicode category Cf) but U+200C and U+200D, the joiners of emoji. The pattern is the one of $defs line in primitives.schema.json. It does not apply to a value that is no string.",
       "pattern": "^[^\u0000-\u001f\u007f-\u009f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\ud804\udcbd\ud804\udccd\ud80d\udc30-\ud80d\udc3f\ud82f\udca0-\ud82f\udca3\ud834\udd73-\ud834\udd7a\udb40\udc01\udb40\udc20-\udb40\udc7f]*$"
     }
   }

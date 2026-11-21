@@ -1,4 +1,4 @@
-// Package primitives holds the character rule of a line, a text and a title, and a copy of
+// Package primitives has the character rule of a line, a text and a title, and a copy of
 // contracts/harness/v1/primitives.schema.json, the schema that defines them. The package
 // imports nothing from qory, so every package that checks a string can use it.
 package primitives

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/primitives.schema.json",
   "title": "The primitives of the harness contracts, version 1",
-  "description": "The definitions that the schemas of artifact types refer to for a line, a title, a text, a reference and a link. Each is under $defs, and each $ref in this file is to $defs of this file. A schema that refers to a primitive names this file's $id, such as https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/title.",
+  "description": "The definitions that the schemas of artifact types refer to for a line, a title, a text, a reference and a link. Each is under $defs, and each $ref in this file is to $defs of this file. A schema that refers to a primitive writes this file's $id, such as https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/title.",
   "$defs": {
     "line": {
       "description": "One line of text: no control character, no U+2028 or U+2029, and no Cf character but U+200C and U+200D (emoji joiners).",

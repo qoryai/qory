@@ -656,7 +656,7 @@ artifact_types:                  # optional; the artifact types the workspaces u
 | `description` | how such a workspace works, at most 1200 characters and at most 80 words |
 | `type` | the workspace type of a workspace made from the template: a workspace type key, such as `qory.software` |
 | `stack` | the stack the workspace's workflows run on, one that `exports.stacks` of the same repository lists |
-| `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`; that each `workflow` of a stage's `sequence`, a loop's `body` included, is a non-empty string of one line that the stack's `qory-stack.yaml` declares under `workflows`; and that each stage `name` has no line break or other control character. qory checks nothing else in it |
+| `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`; that each `workflow` of a stage's `sequence`, a loop's `body` included, is a non-empty string of one line of text that the stack's `qory-stack.yaml` declares under `workflows`; and that each stage `name` is one line of text. qory checks nothing else in it |
 | `artifact_types` | optional; the list of the artifact types the workspaces use, as [Artifact types](#artifact-types) has it. A list with no entries is valid |
 | `submit` | optional; the submit step of a run, as [The submit step](#the-submit-step) has it |
 
@@ -675,10 +675,10 @@ Declare check-the-tone in stack support, or remove it from stage Answer.
 ```
 
 A workflow that is empty, null, not a string, such as `123` or `true`, or is not one line
-of text (see `line` in The primitives), is refused the same way, with the entry's place
+of text (see `line` in The primitives), is stopped the same way, with the entry's place
 in the stage, such as `entry 2 in the loop of entry 3`. A stage name and a `stack` that
-are not one line of text are refused too: the line break, the control character, or the
-character, such as U+200B or the tag character U+E0041, is named by its code point. qory reads the file through the module's folder, as
+are not one line of text are stopped too: the message gives the line break, the control
+character, or the character, such as U+200B or the tag character U+E0041, as a code point. qory reads the file through the module's folder, as
 the compose reads a module's files: a link to a file inside the folder is followed, and
 a link to a place outside it is refused without reading the place it leads to.
 
@@ -699,7 +699,7 @@ is a standard type, `name` alone or with `withdrawable`, or a custom type, with 
 | `max_files` | the most files of one version, a whole number from 1 to 20; exactly 1 for `structured` |
 | `json_schema` | the JSON Schema of the file, exactly when `base_view` is `structured` |
 | `withdrawable` | optional, `true` or `false`, and `true` when the entry has none: whether a run may withdraw a name of the type with `qory artifact push --withdraw`. A standard type and a custom type may both set it. qory refuses any other value, such as `"no"`, with the fix on the first line and the file on the last |
-| `deliver` | optional, an object with one required member `send`, `end_of_run` or `after_gate`: `end_of_run` sends a version at the end of the run, and `after_gate` after the gate of the run's stage passes, and until then qory stores the version and sends nothing. Without `deliver`, qory stores the type and never sends it. Only a custom structured type has `deliver`, and its `json_schema` has a top-level property `target` that is the primitive `reference`: a `$ref` to `https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference`, directly, in an `allOf`, or through a definition under `$defs`. qory checks that property, and nothing reads `deliver` yet |
+| `deliver` | optional, an object with one required member `send`, `end_of_run` or `after_gate`: `end_of_run` sends a version at the end of the run, and `after_gate` after the gate of the run's stage passes, and until then qory stores the version and sends nothing. Without `deliver`, qory stores the type and never sends it. Only a custom structured type has `deliver`, and its `json_schema` has a top-level property `target` that is the primitive `reference`: a `$ref` to `https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference`, or a copy of that definition written out under `$defs`, each directly, in an `allOf`, or through a `$ref` to a definition under `$defs`. qory checks that property, and nothing reads `deliver` yet |
 
 A custom type has `base_view`, `size_limit` and `max_files`. qory has no list of standard
 types: a name alone, or a name with `withdrawable` alone, passes for any name of the right
@@ -723,7 +723,10 @@ schema fails when the schema reaches it, and qory reads no file or URL for one. 
 of reference pass: a reference to a JSON Schema metaschema, which is built in, and a
 reference into `primitives.schema.json`, such as
 `https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/title` (§The
-primitives). A `pattern` is a Go regular expression (RE2). A
+primitives). A `pattern` is a Go regular expression (RE2). YAML reads no surrogate pair, and the patterns of
+the primitives write the characters above U+FFFF as one: where you paste a schema of this
+directory into a `process.yaml`, write each such pair as the escape `\UXXXXXXXX` of the
+character in a double-quoted string, such as `\U000E0041` for `\udb40\udc41`. A
 `json_schema` has at most 65,536 bytes as compact JSON, 4096 values in all,
 1024 entries in a list, 1024 members in an object, 16,384 bytes in a string or a member
 name, and 64 lists and objects nested in one another. The patterns of all custom types in

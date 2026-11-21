@@ -376,7 +376,7 @@ func badWorkflow(n *yaml.Node) string {
 
 // notOneLine is why v is not one line of text, for a message: it has a line break, another
 // control character, or a character that [primitives.StopsLine] stops, such as U+200B or a
-// tag character, which the message names by its code point; "" for one line.
+// tag character, which the message writes as a code point; "" for one line.
 func notOneLine(v string) string {
 	if strings.ContainsAny(v, "\n\r") {
 		return "has a line break"
