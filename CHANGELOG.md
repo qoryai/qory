@@ -485,8 +485,8 @@ release may change what an existing document does, and states it under Upgrading
   lists `workflows` stops with exit 2, `remove workflows or extends: a harness section
   that extends a stack takes the workflows of its base`.
 - A run from a run code composes a harness document with no `extends`, which defines a
-  stack, for the run's runtime, `run_settings.runtime`. qory leaves out a `time_limit`
-  of a workflow there, which the run documents allow and a stack does not have.
+  stack, for the run's runtime, `run_settings.runtime`, with the `access`, `plan` and
+  `tier` of each of its workflows as the run documents set them.
 - `QORY_STATUS_FD=<n>` makes `qory run` also write qory's lines, masked, to the open
   descriptor `<n>`: the `✓`, `✗` and `⚠` lines, every `qory run:` line, Forager's lines
   among them, and the last error line, an error of the flags included, each only when

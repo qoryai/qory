@@ -561,14 +561,13 @@ func TestAHarnessDocumentWithASourceQoryDoesNotFetchStops(t *testing.T) {
 // TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime is a harness document
 // with no extends, whose section defines a stack with workflows: harnessChecked checks
 // its modules and no base, and qory writes it with target.runtime set to the run's
-// runtime, run_settings.runtime, the workflows as the documents have them but for
-// time_limit, which qory leaves out: a run's time limit is the documents'
-// time_limit_minutes alone.
+// runtime, run_settings.runtime, and the workflows as the documents have them, plan and
+// tier included.
 func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing.T) {
 	defined := func(git string) *contracts.HarnessDocument {
 		return &contracts.HarnessDocument{Harness: contracts.HarnessSection{
 			Modules:   []contracts.HarnessModule{{Name: "tools", Source: contracts.HarnessSource{Git: git, Ref: "main"}}},
-			Workflows: map[string]contracts.HarnessWorkflow{"example": {Access: "write", TimeLimit: "45m"}},
+			Workflows: map[string]contracts.HarnessWorkflow{"example": {Access: "write", Plan: "build-plan", Tier: "thinking"}},
 		}}
 	}
 	if err := harnessChecked(defined("https://code.example.com/team/tools.git"), true); err != nil {
@@ -594,11 +593,8 @@ func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing
 			t.Fatal(err)
 		}
 		h := doc.Harness
-		if h.Extends != nil || h.Target.Runtime != settings.Runtime || len(h.Modules) != 1 || h.Workflows["example"] != (contracts.HarnessWorkflow{Access: "write"}) {
+		if h.Extends != nil || h.Target.Runtime != settings.Runtime || len(h.Modules) != 1 || h.Workflows["example"] != (contracts.HarnessWorkflow{Access: "write", Plan: "build-plan", Tier: "thinking"}) {
 			t.Errorf("run settings %+v: harness.yaml has:\n%s", settings, r.harness)
-		}
-		if strings.Contains(string(r.harness), "time_limit") {
-			t.Errorf("harness.yaml has a time_limit:\n%s", r.harness)
 		}
 	}
 	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})

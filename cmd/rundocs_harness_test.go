@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/checkout"
@@ -375,18 +376,23 @@ func TestARunCodeComposesTheWorkspacesHarnessThroughTheStackProxy(t *testing.T) 
 
 // TestARunCodeComposesAHarnessDocumentThatDefinesAStack is a run from a run code whose
 // documents contain a harness document with no extends, which defines a stack of the
-// module hello and its workflow hello, with a time_limit of 4h, which the run contract
-// still allows there, once with run_settings naming claude and once naming codex. qory
-// composes it for that runtime, though the document has no target, and starts that
-// runtime's program. The documents' time_limit_minutes, 45, is the session's time limit,
-// not the workflow's time_limit, and no text shows an address.
+// module hello and its workflow hello, with access write, plan build-plan and tier
+// thinking, once with run_settings naming claude and once naming codex. The module hello
+// declares a scope check for build-plan. qory writes the plan and the tier to
+// harness.yaml, composes it for that runtime, though the document has no target, and
+// starts that runtime's program. The documents' time_limit_minutes, 45, is the session's
+// time limit, and no text shows an address.
 func TestARunCodeComposesAHarnessDocumentThatDefinesAStack(t *testing.T) {
 	for _, runtime := range []string{"claude", "codex"} {
 		t.Run(runtime, func(t *testing.T) {
 			r := codeHarness{
-				defines: map[string]any{"hello": map[string]any{"time_limit": "4h", "access": "write"}},
+				defines: map[string]any{"hello": helloWithPlan},
 				// Codex starts a workflow by its skill, and the module hello ships a command.
-				files: map[string]string{"examples/hello/modules/hello/skills/workflow-hello/SKILL.md": "---\nname: workflow-hello\ndescription: Say hello.\n---\n\nSay hello.\n"},
+				files: map[string]string{
+					"examples/hello/modules/hello/skills/workflow-hello/SKILL.md": "---\nname: workflow-hello\ndescription: Say hello.\n---\n\nSay hello.\n",
+					"examples/hello/modules/hello/qory-module.yaml":               helloScopeCheck,
+					"examples/hello/modules/hello/checks/check.js":                "process.exit(0)\n",
+				},
 				change: func(d map[string]any) {
 					d["time_limit_minutes"] = 45
 					d["run_settings"] = map[string]any{"runtime": runtime}
@@ -408,9 +414,41 @@ func TestARunCodeComposesAHarnessDocumentThatDefinesAStack(t *testing.T) {
 			if r.spec.Timeout != 45*time.Minute {
 				t.Errorf("the time limit is %v, want the whole 45m", r.spec.Timeout)
 			}
+			data, err := os.ReadFile(filepath.Join(r.runDir, "harness.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var doc struct {
+				Harness struct {
+					Workflows map[string]contracts.HarnessWorkflow `json:"workflows"`
+				} `json:"harness"`
+			}
+			if json.Unmarshal(data, &doc) != nil || doc.Harness.Workflows["hello"] != (contracts.HarnessWorkflow{Access: "write", Plan: "build-plan", Tier: "thinking"}) {
+				t.Errorf("harness.yaml has:\n%s", data)
+			}
 			r.noAddress(t)
 		})
 	}
+}
+
+// helloWithPlan is the workflow hello of a harness document that defines a stack, with
+// access write, plan build-plan and tier thinking.
+var helloWithPlan = map[string]any{"access": "write", "plan": "build-plan", "tier": "thinking"}
+
+// helloScopeCheck is the qory-module.yaml of the module hello with a scope check for
+// build-plan.
+const helloScopeCheck = "apiVersion: qory.dev/v1alpha1\nname: hello\nscope_checks:\n  build-plan: [checks/check.js, scope]\n"
+
+// TestARunCodesHarnessDocumentWithAPlanNoModuleChecksStops is a run from a run code whose
+// harness document defines a stack whose workflow hello has plan build-plan, and whose
+// module hello declares no scope check: qory passes the plan to the compose, which fails,
+// exit 2, before the join.
+func TestARunCodesHarnessDocumentWithAPlanNoModuleChecksStops(t *testing.T) {
+	r := codeHarness{defines: map[string]any{"hello": helloWithPlan}}.run(t)
+	if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
+		t.Fatalf("%v (exit %d), want exit 2 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out+r.err.Error(), "No module of the stack declares a scope check for build-plan.")
 }
 
 // TestARunCodesHarnessDocumentWithAWorkflowItsModulesLackStops is a run from a run code

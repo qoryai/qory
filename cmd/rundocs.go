@@ -192,10 +192,9 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 		if err := harnessChecked(doc.Harness, hidden); err != nil {
 			return nil, err
 		}
-		section := withoutTimeLimits(doc.Harness.Harness)
-		var written any = contracts.HarnessDocument{Harness: section}
+		var written any = doc.Harness
 		if defines {
-			written = definedHarness{Harness: definedSection{HarnessSection: section, Target: definedTarget{Runtime: runtime}}}
+			written = definedHarness{Harness: definedSection{HarnessSection: doc.Harness.Harness, Target: definedTarget{Runtime: runtime}}}
 		}
 		var err error
 		if harness, err = json.MarshalIndent(written, "", "  "); err != nil {
@@ -224,22 +223,6 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 // whose documents have no target.
 func (r *codeRun) writes() bool {
 	return r != nil && r.access == stack.AccessWrite
-}
-
-// withoutTimeLimits is s with no time_limit in its workflows. The run contract still
-// allows one there, and a stack has no such key: a run's time limit comes only from the
-// documents' time_limit_minutes.
-func withoutTimeLimits(s contracts.HarnessSection) contracts.HarnessSection {
-	if len(s.Workflows) == 0 {
-		return s
-	}
-	workflows := make(map[string]contracts.HarnessWorkflow, len(s.Workflows))
-	for name, w := range s.Workflows {
-		w.TimeLimit = ""
-		workflows[name] = w
-	}
-	s.Workflows = workflows
-	return s
 }
 
 // definedHarness is a harness document whose section defines a stack, as qory writes it

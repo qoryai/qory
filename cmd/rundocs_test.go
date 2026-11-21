@@ -122,7 +122,7 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 	}{
 		{"none", nil, "use another run code: the enrolment answer has no documents"},
 		{"an unknown member", codeDocuments(t, func(d map[string]any) { d["prompt"] = "x" }), broken},
-		{"a time limit under 15 minutes", codeDocuments(t, func(d map[string]any) { d["time_limit_minutes"] = 14 }), broken},
+		{"a time limit of 0 minutes", codeDocuments(t, func(d map[string]any) { d["time_limit_minutes"] = 0 }), broken},
 		{"a time limit in the run settings", codeDocuments(t, func(d map[string]any) {
 			d["run_settings"] = map[string]any{"runtime": "claude", "time_limit_minutes": 45}
 		}), broken},

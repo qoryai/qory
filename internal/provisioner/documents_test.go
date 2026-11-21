@@ -187,7 +187,7 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 		{"a runtime with a trailing line feed", withSettings(func(d map[string]any) { settings(d)["runtime"] = "claude\n" }), broken},
 		{"a key in the run settings", withSettings(func(d map[string]any) { settings(d)["api_key"] = "example-key" }), broken},
 		{"a time limit in the run settings", withSettings(func(d map[string]any) { settings(d)["time_limit_minutes"] = 45 }), broken},
-		{"a time limit of 14 minutes", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 14 }), broken},
+		{"a time limit of 0 minutes", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 0 }), broken},
 		{"a time limit of 1441 minutes", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 1441 }), broken},
 		{"a time limit with a fraction", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 45.5 }), broken},
 		{"shared_run that is not a boolean", withSettings(func(d map[string]any) { d["shared_run"] = "yes" }), broken},
