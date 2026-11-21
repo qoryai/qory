@@ -25,6 +25,7 @@ var ruleSchemas = []struct {
 	{"review-comments", true},
 	{"proposal-sources", false},
 	{"verdict", false},
+	{"process", false},
 }
 
 // patternOf is the pattern of $defs name in the schema file at path, decoded.

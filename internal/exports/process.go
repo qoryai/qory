@@ -16,6 +16,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 	"gopkg.in/yaml.v3"
 
+	"github.com/qoryai/qory/internal/primitives"
 	"github.com/qoryai/qory/internal/runapi"
 )
 
@@ -373,14 +374,19 @@ func badWorkflow(n *yaml.Node) string {
 	return notOneLine(n.Value)
 }
 
-// notOneLine is why v is not one line of text, for a message: it has a line break or
-// another control character; "" for one line.
+// notOneLine is why v is not one line of text, for a message: it has a line break, another
+// control character, or a character that [primitives.StopsLine] stops, such as U+200B or a
+// tag character, which the message names by its code point; "" for one line.
 func notOneLine(v string) string {
 	if strings.ContainsAny(v, "\n\r") {
 		return "has a line break"
 	}
 	if strings.IndexFunc(v, unicode.IsControl) >= 0 {
 		return "has a control character"
+	}
+	if i := strings.IndexFunc(v, primitives.StopsLine); i >= 0 {
+		r, _ := utf8.DecodeRuneInString(v[i:])
+		return fmt.Sprintf("has the character %U, which a line of text does not have", r)
 	}
 	return ""
 }

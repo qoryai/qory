@@ -12,9 +12,9 @@
     "summary": {"description": "One or two sentences on what a workspace made from the template does, at most 200 characters.", "type": "string", "maxLength": 200, "pattern": "\\S"},
     "description": {"description": "How a workspace made from the template works, at most 1200 characters and 80 words.", "type": "string", "maxLength": 1200, "pattern": "^\\s*\\S+(\\s+\\S+){0,79}\\s*$"},
     "type": {"description": "The workspace type a workspace made from the template has: a workspace type key, such as qory.software.", "type": "string", "pattern": "\\S"},
-    "stack": {"description": "The stack the template's workflows run on: a name that exports.stacks of the same repository lists. Each workflow of a stage is declared under workflows in that stack's qory-stack.yaml.", "type": "string", "pattern": "^[^./\\\\@\\p{Cc}][^/\\\\@\\p{Cc}]*$"},
+    "stack": {"description": "The stack the template's workflows run on: a name that exports.stacks of the same repository lists. Each workflow of a stage is declared under workflows in that stack's qory-stack.yaml.", "type": "string", "pattern": "^[^./\\\\@\\p{Cc}][^/\\\\@\\p{Cc}]*$", "allOf": [{"$ref": "#/$defs/line"}]},
     "process": {
-      "description": "The process document of a workspace made from the template, a qory.process/v1 document. qory checks its schema, that its stages are a list, that each workflow of a stage is a non-empty string of one line that the stack declares, and that each stage name has no line break or other control character, and checks nothing else in it. This schema checks the same, except whether the stack declares a workflow.",
+      "description": "The process document of a workspace made from the template, a qory.process/v1 document. qory checks its schema, that its stages are a list, that each workflow of a stage is a non-empty string of one line of text that the stack declares, and that each stage name is one line of text (no control character, no U+2028 or U+2029, and no format character but U+200C and U+200D), and checks nothing else in it. This schema checks the same, except whether the stack declares a workflow.",
       "type": "object",
       "required": ["schema", "stages"],
       "properties": {
@@ -23,7 +23,7 @@
           "type": "array",
           "items": {
             "properties": {
-              "name": {"description": "A stage name has no line break or other control character.", "pattern": "^\\P{Cc}*$"},
+              "name": {"description": "A stage name is one line of text, as $defs line defines it.", "$ref": "#/$defs/line"},
               "sequence": {
                 "items": {
                   "properties": {
@@ -107,7 +107,12 @@
     "workflow": {
       "description": "A workflow of a stage: a string of one line, not empty or white space alone, that the stack declares under workflows.",
       "type": "string",
-      "pattern": "^\\P{Cc}*[^\\p{Cc}\\p{Z}]\\P{Cc}*$"
+      "pattern": "^\\P{Cc}*[^\\p{Cc}\\p{Z}]\\P{Cc}*$",
+      "allOf": [{"$ref": "#/$defs/line"}]
+    },
+    "line": {
+      "description": "One line of text: no control character (so no tab, line feed or carriage return), no U+2028 or U+2029, and no format character (Unicode category Cf) but U+200C and U+200D, the joiners of emoji. The pattern is the one of $defs line in primitives.schema.json. It says nothing of a value that is no string.",
+      "pattern": "^[^\u0000-\u001f\u007f-\u009f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\ud804\udcbd\ud804\udccd\ud80d\udc30-\ud80d\udc3f\ud82f\udca0-\ud82f\udca3\ud834\udd73-\ud834\udd7a\udb40\udc01\udb40\udc20-\udb40\udc7f]*$"
     }
   }
 }

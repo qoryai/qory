@@ -674,10 +674,11 @@ Declare check-the-tone in stack support, or remove it from stage Answer.
   The stack is in harness/stacks/support/qory-stack.yaml.
 ```
 
-A workflow that is empty, null, not a string, such as `123` or `true`, or has a line
-break or another control character, is refused the same way, with the entry's place in the stage, such as `entry
-2 in the loop of entry 3`. A stage name and a `stack` with a line break or another
-control character are refused too. qory reads the file through the module's folder, as
+A workflow that is empty, null, not a string, such as `123` or `true`, or is not one line
+of text (see `line` in The primitives), is refused the same way, with the entry's place
+in the stage, such as `entry 2 in the loop of entry 3`. A stage name and a `stack` that
+are not one line of text are refused too: the line break, the control character, or the
+character, such as U+200B or the tag character U+E0041, is named by its code point. qory reads the file through the module's folder, as
 the compose reads a module's files: a link to a file inside the folder is followed, and
 a link to a place outside it is refused without reading the place it leads to.
 
