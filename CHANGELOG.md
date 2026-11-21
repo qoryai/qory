@@ -675,6 +675,13 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- `qory work-item show`, `qory artifact pull` (`index.json`, the files of a version and
+  their names) and the message of `qory artifact push --withdraw` for a version that a
+  person uploaded write each hidden character as `<U+XXXX>`. A hidden character is a
+  control or format character except newline, tab and the zero width joiners, or a line or
+  paragraph separator. Qory Apiary keeps the stored text unchanged. `.json` files stay
+  valid JSON, binary files stay as they are, and an escaped file is downloaded again on
+  each pull.
 - The `config.toml` of a Codex home, and of a walled Codex run, sets
   `features.unified_exec_tty = false`. A shell started with a terminal takes commands
   through `write_stdin`, for which Codex runs no `PreToolUse` hook. A Codex agent can no

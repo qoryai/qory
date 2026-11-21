@@ -15,6 +15,7 @@ import (
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/sourcetext"
 )
 
 // The texts of qory artifact push --withdraw for a push that qory refuses, from the
@@ -113,7 +114,7 @@ func withdrawRefusal(index *runapi.Index, artifactType, name string) error {
 	case newest.Withdrawn:
 		return refused(fmt.Sprintf(textWithdrawAlready, artifactType, name, newest.Number))
 	case newest.Writer.Kind == "person":
-		who := newest.Writer.Name
+		who := sourcetext.Escape(newest.Writer.Name)
 		if who == "" {
 			who = "a member"
 		}
