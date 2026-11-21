@@ -691,10 +691,11 @@ release may change what an existing document does, and states it under Upgrading
   in it, also as the name of a property or a definition, because `$id` changes where a
   `$ref` points. It fails when `$schema` is anything other than
   `https://json-schema.org/draft/2020-12/schema`, with or without a final `#`, because
-  draft-07 ignores the keys next to a `$ref`. It fails when a `$ref` into `$defs` has a
-  name with a character other than a letter, a digit, `_` or `-`, because the compiler
-  decodes `%`, `~` and `/` in a JSON Pointer. A `deliver` that breaks a rule stops the command with the fix on
-  the first line, at most 100 characters, and the type name on the second line, such as
+  draft-07 ignores the keys next to a `$ref`. It fails when the `$ref` that leads to the
+  `target` goes through a `$defs` name with a character other than a letter, a digit, `_`
+  or `-`, because the compiler decodes `%`, `~0` and `~1` and splits a name at `/`. A
+  `deliver` that breaks a rule stops the command with the fix on the first line, at most
+  100 characters, and the type name on the second line, such as
   ``Add a top-level `target` of the primitive `reference` to the schema, or remove
   `deliver`.``
 
