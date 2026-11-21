@@ -8,21 +8,23 @@ import (
 )
 
 // maxReviewPath is the most characters of a path that the harness's tool guard accepts as
-// qory.review.report.
+// a path to write, such as qory.review_session.reports.
 const maxReviewPath = 4096
 
 // The members of the member qory of inputs.json for the review-changes session. They are
 // named as the members of qoryInputs are: lower-case words joined by underscores. Q-36
 // adds qory.start_commits and qory.start_artifacts for a Build session, and Q-71 adds
-// qory.review.outputs; this file defines neither.
+// qory.review.outputs; this file defines neither. The review-changes session has
+// qory.review_session and no qory.review, because the harness's tool guard treats a
+// session with qory.review as one reviewer, and this session starts several.
 
-// reviewInputs is qory.review, written into the inputs.json of the review-changes
-// session. Each value is the absolute path of a file that the session reads, except
-// Report, the path where the session writes its report.
-type reviewInputs struct {
-	// Report is the path of the report file that the session writes.
-	Report string `json:"report"`
-	// SuiteResult is the path of the suite result file, see suite.WriteResult.
+// reviewSession is qory.review_session, written into the inputs.json of the
+// review-changes session.
+type reviewSession struct {
+	// Reports is the absolute path of the folder where each reviewer agent of the session
+	// writes its report, as <agent>.json.
+	Reports string `json:"reports"`
+	// SuiteResult is the absolute path of the suite result file, see suite.WriteResult.
 	SuiteResult string `json:"suite_result"`
 }
 
@@ -34,29 +36,29 @@ var reviewStartArtifactTypes = []string{"acceptance-criteria", "spec", "build-pl
 // reviewSessionInputs is the members of qory that the inputs.json of the review-changes
 // session has beside the ones every session has.
 type reviewSessionInputs struct {
-	Review         reviewInputs `json:"review"`
-	StartArtifacts string       `json:"start_artifacts"`
+	ReviewSession  reviewSession `json:"review_session"`
+	StartArtifacts string        `json:"start_artifacts"`
 }
 
 // newReviewSessionInputs are the members of qory for the review-changes session, with
-// report, the path where the session writes its report, suiteResult, the path of the
-// suite result file, and startArtifacts, the path of the folder of
-// [reviewStartArtifactTypes]. It returns an error that starts with the fix for a report
-// path that the harness's tool guard does not accept, and for a path of a file or folder
-// to read that is not absolute and clean.
+// reports, the folder where the reviewer agents write their reports, suiteResult, the
+// path of the suite result file, and startArtifacts, the path of the folder of
+// [reviewStartArtifactTypes]. It returns an error that starts with the fix for a reports
+// folder that the harness's tool guard does not accept as a place to write, and for a
+// path of a file or folder to read that is not absolute and clean.
 //
 // shortcut: not called yet; wired in when cmd/run.go, cmd/rundocs.go and
 // cmd/pushstep.go can change (after Q-01, Q-36 and Q-73).
-func newReviewSessionInputs(report, suiteResult, startArtifacts string) (reviewSessionInputs, error) {
-	if why := reviewPathProblem(report); why != "" {
-		return reviewSessionInputs{}, fmt.Errorf("Give the session an absolute path in qory.review.report that the harness accepts.\nThe path %s %s.", strconv.Quote(report), why)
+func newReviewSessionInputs(reports, suiteResult, startArtifacts string) (reviewSessionInputs, error) {
+	if why := reviewPathProblem(reports); why != "" {
+		return reviewSessionInputs{}, fmt.Errorf("Give the session an absolute path in qory.review_session.reports that the harness accepts.\nThe path %s %s.", strconv.Quote(reports), why)
 	}
-	for _, p := range []struct{ what, path string }{{"review.suite_result", suiteResult}, {"start_artifacts", startArtifacts}} {
+	for _, p := range []struct{ what, path string }{{"review_session.suite_result", suiteResult}, {"start_artifacts", startArtifacts}} {
 		if !cleanAbs(p.path) {
 			return reviewSessionInputs{}, fmt.Errorf("Give the session an absolute, clean path in qory.%s.\nThe path is %s.", p.what, strconv.Quote(p.path))
 		}
 	}
-	return reviewSessionInputs{Review: reviewInputs{Report: report, SuiteResult: suiteResult}, StartArtifacts: startArtifacts}, nil
+	return reviewSessionInputs{ReviewSession: reviewSession{Reports: reports, SuiteResult: suiteResult}, StartArtifacts: startArtifacts}, nil
 }
 
 // cleanAbs reports whether path is absolute and clean, and has no line break or NUL.
@@ -64,9 +66,9 @@ func cleanAbs(path string) bool {
 	return filepath.IsAbs(path) && filepath.Clean(path) == path && !strings.ContainsAny(path, "\n\r\x00")
 }
 
-// reviewPathProblem is why the harness's tool guard does not accept path as
-// qory.review.report or as another path of qory.review, as the end of a sentence about the
-// path ("is not absolute"), and "" for a path it accepts: an absolute path with no . or ..
+// reviewPathProblem is why the harness's tool guard does not accept path as a place to
+// write, such as qory.review_session.reports, as the end of a sentence about the path
+// ("is not absolute"), and "" for a path it accepts: an absolute path with no . or ..
 // part, no double or trailing slash, no NUL, of at most 4096 characters, and no .git or
 // .claude part. Whether links lie on the path is for the folder's maker.
 func reviewPathProblem(path string) string {

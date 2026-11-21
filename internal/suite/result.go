@@ -14,7 +14,7 @@ import (
 const MaxTailLines = 200
 
 // Result is the suite result file that the reviewers of a round read as
-// qory.review.suite_result: the counts of the full suite and the last lines of its
+// qory.review_session.suite_result: the counts of the full suite and the last lines of its
 // output. A reviewer cites OutputTail as the proof of a failing check.
 type Result struct {
 	Counts

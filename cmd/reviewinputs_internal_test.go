@@ -10,7 +10,7 @@ import (
 )
 
 func TestNewReviewSessionInputsJSON(t *testing.T) {
-	in, err := newReviewSessionInputs("/r/a/report.json", "/r/suite_result.json", "/r/start")
+	in, err := newReviewSessionInputs("/r/reports", "/r/suite_result.json", "/r/start")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -18,7 +18,7 @@ func TestNewReviewSessionInputsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"review":{"report":"/r/a/report.json","suite_result":"/r/suite_result.json"},"start_artifacts":"/r/start"}`
+	const want = `{"review_session":{"reports":"/r/reports","suite_result":"/r/suite_result.json"},"start_artifacts":"/r/start"}`
 	if string(data) != want {
 		t.Errorf("json = %s, want %s", data, want)
 	}
@@ -51,7 +51,7 @@ func TestReviewSessionInputsNamingMatchesQoryInputs(t *testing.T) {
 }
 
 func TestNewReviewSessionInputsRefuses(t *testing.T) {
-	const ok = "/r/a/report.json"
+	const ok = "/r/reports"
 	for _, c := range []struct {
 		name   string
 		report string
@@ -59,11 +59,11 @@ func TestNewReviewSessionInputsRefuses(t *testing.T) {
 		start  string
 		want   string
 	}{
-		{"relative report", "report.json", "/s", "/t", "qory.review.report"},
-		{"suite result with ..", ok, "/s/../x", "/t", "qory.review.suite_result"},
+		{"relative reports", "reports", "/s", "/t", "qory.review_session.reports"},
+		{"suite result with ..", ok, "/s/../x", "/t", "qory.review_session.suite_result"},
 		{"suite result below .git is fine to read", ok, "/w/.git/s", "/t", ""},
 		{"relative start", ok, "/s", "start", "qory.start_artifacts"},
-		{"report in .claude", "/w/.claude/r.json", "/s", "/t", "qory.review.report"},
+		{"reports in .claude", "/w/.claude/reports", "/s", "/t", "qory.review_session.reports"},
 	} {
 		_, err := newReviewSessionInputs(c.report, c.suite, c.start)
 		if c.want == "" {
