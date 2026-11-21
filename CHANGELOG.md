@@ -685,9 +685,12 @@ release may change what an existing document does, and states it under Upgrading
   it. Only a structured type has `deliver`, and its `json_schema` has a top-level property
   `target` that is the primitive `reference`, written as a `$ref` to
   `primitives.schema.json#/$defs/reference`, in an `allOf`, or through a definition under
-  `$defs`, or as a written-out copy of that definition. A written-out copy uses the `line`
-  of the primitives as its `$defs` `line`, and a schema whose `$id` is the address of the
-  primitives schema fails. A `deliver` that breaks a rule stops the command with the fix on
+  `$defs`, or as a written-out copy of that definition. In a written-out copy, each
+  definition that it refers to under `$defs` is the definition of that name in the
+  primitives. A schema with an `$id`, an `$anchor` or a `$dynamicAnchor` anywhere fails,
+  because it changes where a `$ref` points. A `$schema` other than
+  `https://json-schema.org/draft/2020-12/schema` fails too, because draft-07 ignores the
+  keys next to a `$ref`. A `deliver` that breaks a rule stops the command with the fix on
   the first line, at most 100 characters, and the type name on the second line, such as
   ``Add a top-level `target` of the primitive `reference` to the schema, or remove
   `deliver`.``
@@ -1780,8 +1783,9 @@ release may change what an existing document does, and states it under Upgrading
   not a space, U+200C or U+200D. It lists the line as a line that qory cannot use, with the
   cause and the character as a code point, and the draft is `program-failed` as for any draft
   line that qory leaves out. After a timeout, a program that did not start or an exit status
-  above 3, the step lists no line, because qory reads none. Until this change, the step stored
-  such a title and the submission then failed the check of the format.
+  other than 0, 1 or 2, the step lists no line, because qory reads none. Until this
+  change, the step stored such a title and the submission then failed the check of the
+  format.
 - The submission format stops the same characters. The title of the text and the title of a
   draft are a line with a character that is not a space, U+200C or U+200D; a step is a line;
   the description is a text. Until this change, the title stopped only the control
@@ -1799,7 +1803,7 @@ release may change what an existing document does, and states it under Upgrading
 - The patterns of the contract schemas and of the primitives write the control characters
   as the regex escapes `\x00-\x1f` and `\x7f-\x9f`, and the branch name pattern of
   `submission.schema.json` writes `\x00-\x20\x7f` the same way. A pattern written with
-  the JSON escape `\u0000` decodes to a raw control character, and a reader refuses a
+  the JSON escape `\u0000` decodes to a raw control character, and a reader fails on a
   file that has one. The patterns accept and stop the same characters as before. A test
   fails when a pattern of a contract schema has a raw control character.
 

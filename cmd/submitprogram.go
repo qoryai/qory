@@ -293,23 +293,27 @@ func shownText(line string) string {
 // shownErrorText is s as [shownError] shows an error.
 func shownErrorText(s string) string { return shownError(errors.New(s)) }
 
-// The reasons for a draft_title line that qory leaves out, as [textProgramLeftOut] lists them.
+// The reasons for a draft_title line that qory leaves out, as [textProgramLeftOut]
+// lists them.
 const (
 	reasonTitleChar  = "the title has the character %U, which a title does not have, at character %d"
 	reasonTitleBlank = "the title has no character that is not a space, U+200C or U+200D"
 )
 
-// withoutUnusableTitle is stdout, the lines of a submit program, with each draft_title line
-// blanked out whose title is not one that the submission format stores: the title of the
-// contract is a line with a character that shows. It also returns each such line as a line
-// that qory cannot use, with its number. A blank line keeps the numbers of the others, and the
-// contract's reader then finds the draft incomplete and records program-failed, as for any
-// draft line it leaves out. A draft of none has no draft lines to read, so nothing is left
-// out. The checks that the reader makes of the title, such as its length, stay with the
-// reader. Every line is tested, because the reader uses the first title that passes its
-// checks, and that may come after a line that passes qory's test and fails the reader's.
-// shortcut: qory tests the title beside the reader, until the repin to T-28 gives the reader
-// the rule of the primitives; then delete this function.
+// withoutUnusableTitle is stdout, the lines of a submit program, with each draft_title
+// line blanked out whose title is not one that the submission format stores: the title
+// of the contract is a line with a character that shows. It also returns each such
+// line as a line that qory cannot use, with its number. A blank line keeps the numbers
+// of the others, and the contract's reader then finds the draft incomplete and records
+// program-failed, as for any draft line it leaves out. A draft of none has no draft
+// lines to read, so nothing is left out. The checks that the reader makes of the
+// title, such as its length, stay with the reader. Every line is tested, because the
+// reader uses the first title that passes its checks, and that may come after a line
+// that passes qory's test and fails the reader's.
+// shortcut: qory tests the title beside the reader, until the integrations module has the
+// change that moves the title rule into its shared reader and qory pins that version;
+// then delete this function. withoutUnusableTitle and visibleTitle repeat
+// primitives.ShowsInTitle until then.
 func withoutUnusableTitle(stdout, draft string) (string, []contracts.SubmitLineError) {
 	if draft == contracts.SubmitDraftNone {
 		return stdout, nil

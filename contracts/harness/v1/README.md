@@ -699,7 +699,7 @@ is a standard type, `name` alone or with `withdrawable`, or a custom type, with 
 | `max_files` | the most files of one version, a whole number from 1 to 20; exactly 1 for `structured` |
 | `json_schema` | the JSON Schema of the file, exactly when `base_view` is `structured` |
 | `withdrawable` | optional, `true` or `false`, and `true` when the entry has none: whether a run may withdraw a name of the type with `qory artifact push --withdraw`. A standard type and a custom type may both set it. qory refuses any other value, such as `"no"`, with the fix on the first line and the file on the last |
-| `deliver` | optional, an object with one required member `send`, `end_of_run` or `after_gate`: `end_of_run` sends a version at the end of the run, and `after_gate` after the gate of the run's stage passes, and until then qory stores the version and sends nothing. Without `deliver`, qory stores the type and never sends it. Only a custom structured type has `deliver`, and its `json_schema` has a top-level property `target` that is the primitive `reference`: a `$ref` to `https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference`, or a copy of that definition written out under `$defs`, with the `line` of the primitives as its `$defs` `line`, each directly, in an `allOf`, or through a `$ref` to a definition under `$defs`. A schema whose `$id` is the address of the primitives schema fails. qory checks that property, and nothing reads `deliver` yet |
+| `deliver` | optional, an object with one required member `send`, `end_of_run` or `after_gate`: `end_of_run` sends a version at the end of the run, and `after_gate` after the gate of the run's stage passes, and until then qory stores the version and sends nothing. Without `deliver`, qory stores the type and never sends it. Only a custom structured type has `deliver`, and its `json_schema` has a top-level property `target` that is the primitive `reference`: a `$ref` to `https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference`, or a copy of that definition written out under `$defs`, where each definition that it refers to under `$defs` is the definition of that name in the primitives, each directly, in an `allOf`, or through a `$ref` to a definition under `$defs`. A schema with an `$id`, an `$anchor` or a `$dynamicAnchor` anywhere fails, because it changes where a `$ref` points, and so does a `$schema` other than `https://json-schema.org/draft/2020-12/schema`, because draft-07 ignores the keys next to a `$ref`. qory checks that property, and nothing reads `deliver` yet |
 
 A custom type has `base_view`, `size_limit` and `max_files`. qory has no list of standard
 types: a name alone, or a name with `withdrawable` alone, passes for any name of the right
@@ -790,7 +790,7 @@ above U+FFFF are written as surrogate pairs, because the checks of the harness r
 pattern as JavaScript with the `u` flag. The control characters are written as the regex
 escapes `\x00-\x1f` and `\x7f-\x9f` (for a `text`, `\x00-\x08\x0b\x0c\x0e-\x1f` and
 `\x7f-\x9f`), never as the JSON escape `\u0000`: that escape decodes to a raw control
-character in the pattern, and a reader refuses a file that has one.
+character in the pattern, and a reader fails on a file that has one.
 
 A schema of an artifact type in a `process.yaml` refers to a definition by the address of
 the file, such as

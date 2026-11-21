@@ -144,7 +144,7 @@ func patternStrings(doc any) []string {
 	return out
 }
 
-// TestNoPatternHasARawControlCharacter: a reader refuses a schema file whose pattern
+// TestNoPatternHasARawControlCharacter: a reader fails on a schema file whose pattern
 // decodes to a control character, so every pattern of the contract schemas, of the
 // primitives and of the copies that Go embeds writes U+0000 to U+001F and U+007F to
 // U+009F as regex escapes such as `\x00`, never as a JSON escape such as `\u0000`.

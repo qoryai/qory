@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 	"unicode"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -141,10 +142,10 @@ printf 'draft_action opened\n'
 	}
 }
 
-// TestEveryUnusableDraftTitleLineIsLeftOut is a submit program that prints several draft_title
-// lines. The contract's reader uses the first title that passes its checks, so qory leaves out
-// each line that its rule stops, also after a line that the reader rejects for its length, and
-// a good title after a bad one is stored.
+// TestEveryUnusableDraftTitleLineIsLeftOut is a submit program that prints several
+// draft_title lines. The contract's reader uses the first title that passes its checks,
+// so qory leaves out each line that its rule stops, also after a line that the reader
+// rejects for its length, and a good title after a bad one is stored.
 func TestEveryUnusableDraftTitleLineIsLeftOut(t *testing.T) {
 	const (
 		zeroWidth = `a\342\200\213b`
@@ -194,17 +195,29 @@ func TestEveryUnusableDraftTitleLineIsLeftOut(t *testing.T) {
 }
 
 // TestAnUnusableTitleIsNotListedWhenTheReaderIgnoresTheOutput is a program that prints a
-// title with a tag character and then exits with status 9: the reader ignores the output, so
-// the step lists no line as one that qory cannot use.
+// title with a tag character and then ends in a way that the reader ignores the output:
+// an exit status above 2, a signal (-1) or a timeout. The step lists no line as one that
+// qory cannot use.
 func TestAnUnusableTitleIsNotListedWhenTheReaderIgnoresTheOutput(t *testing.T) {
-	p := &submitProgram{command: []string{programScript(t, `printf 'draft_title c\363\240\201\201d\n'
-exit 9
-`)}}
-	got, printed := runProgram(t, p, passedDocument())
-	if d := string(got.Repositories[0].Draft); d != `{"none":"program-failed","exit":1}` {
-		t.Errorf("the draft is %s", d)
-	}
-	if strings.Contains(printed, "cannot use") {
-		t.Errorf("the step lists a line that the reader never read:\n%s", printed)
+	const title = `printf 'draft_title c\363\240\201\201d\n'` + "\n"
+	for _, c := range []struct {
+		name, end, draft string
+		limit            time.Duration
+	}{
+		{"exit 9", "exit 9\n", `{"none":"program-failed","exit":1}`, 0},
+		{"exit 3", "exit 3\n", `{"none":"login-needed","exit":3}`, 0},
+		{"a signal", "kill -9 $$\n", `{"none":"program-failed","exit":1}`, 0},
+		{"a timeout", "exec sleep 30\n", `{"none":"program-timeout"}`, 300 * time.Millisecond},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p := &submitProgram{command: []string{programScript(t, title+c.end)}, limit: c.limit}
+			got, printed := runProgram(t, p, passedDocument())
+			if d := string(got.Repositories[0].Draft); d != c.draft {
+				t.Errorf("the draft is %s, want %s", d, c.draft)
+			}
+			if strings.Contains(printed, "cannot use") {
+				t.Errorf("the step lists a line that the reader never read:\n%s", printed)
+			}
+		})
 	}
 }
