@@ -278,8 +278,9 @@ const primitiveReference = primitives.URL + "#/$defs/reference"
 // of the primitives, or an allOf that has one. The check reads a $ref as a path into
 // $defs of the root and as the address of the primitives, so it fails a schema that
 // changes where a $ref resolves, or how a draft reads it: a $schema other than draft
-// 2020-12, and an $id, $anchor or $dynamicAnchor anywhere in the schema. It returns the
-// fix for a message with [FilePlace] for the file, "" for a type that passes.
+// 2020-12, and an $id, $anchor or $dynamicAnchor anywhere in the schema. A $ref into
+// $defs counts only with a plain name ([localName]). It returns the fix for a message
+// with [FilePlace] for the file, "" for a type that passes.
 func checkDeliverTarget(label string, schema *yaml.Node) string {
 	doc, why := jsonValue(schema, "json_schema of "+label)
 	if why != "" {
@@ -290,7 +291,7 @@ func checkDeliverTarget(label string, schema *yaml.Node) string {
 		return typeRefusal("Remove $schema from the json_schema, or set it to the 2020-12 draft, or remove `deliver`.", "json_schema of "+label+" has another draft, and draft-07 ignores the keys next to a $ref.")
 	}
 	if hasResolutionKey(root) {
-		return typeRefusal("Remove $id, $anchor and $dynamicAnchor from the json_schema, or remove `deliver`.", "json_schema of "+label+" has one, and the check of deliver cannot tell where a $ref under it points.")
+		return typeRefusal("Remove $id, $anchor and $dynamicAnchor from the json_schema, or remove `deliver`.", "json_schema of "+label+" has one. A $ref under such a key can resolve to a different schema.")
 	}
 	props, _ := root["properties"].(map[string]any)
 	target, has := props["target"]
@@ -333,14 +334,38 @@ var primitiveDefinitions = sync.OnceValue(func() map[string]any {
 	return doc.Defs
 })
 
+// defsPrefix starts a $ref to a definition of the root schema.
+const defsPrefix = "#/$defs/"
+
+// localName is the name of the definition that ref, a $ref, refers to under [defsPrefix],
+// and whether ref has one. A name has letters, digits, "_" and "-" only: the compiler
+// decodes "%", "~" and "/" in a JSON Pointer, so a name with one could reach another
+// definition than the name spells.
+func localName(ref string) (string, bool) {
+	name, local := strings.CutPrefix(ref, defsPrefix)
+	if !local || name == "" {
+		return "", false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+			return "", false
+		}
+	}
+	return name, true
+}
+
 // localDefinitionsAreThePrimitives reports whether each definition of root under "#/$defs/"
 // that node refers to, directly or through another such definition, is the definition of
-// the same name in the primitives schema.
+// the same name in the primitives schema. A $ref whose name is not plain ([localName])
+// fails.
 func localDefinitionsAreThePrimitives(root map[string]any, node any, checked map[string]bool) bool {
 	switch v := node.(type) {
 	case map[string]any:
-		if ref, _ := v["$ref"].(string); strings.HasPrefix(ref, "#/$defs/") {
-			name := strings.TrimPrefix(ref, "#/$defs/")
+		if ref, _ := v["$ref"].(string); strings.HasPrefix(ref, defsPrefix) {
+			name, plain := localName(ref)
+			if !plain {
+				return false
+			}
 			if !checked[name] {
 				checked[name] = true
 				defs, _ := root["$defs"].(map[string]any)
@@ -395,7 +420,7 @@ func isPrimitiveReference(root map[string]any, node any, visited map[string]bool
 	}
 	if ref, _ := m["$ref"].(string); ref == primitiveReference {
 		return true
-	} else if name, local := strings.CutPrefix(ref, "#/$defs/"); local && !visited[name] {
+	} else if name, plain := localName(ref); plain && !visited[name] {
 		visited[name] = true
 		defs, _ := root["$defs"].(map[string]any)
 		if isPrimitiveReference(root, defs[name], visited) {

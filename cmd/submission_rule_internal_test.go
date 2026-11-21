@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -197,7 +198,9 @@ func TestEveryUnusableDraftTitleLineIsLeftOut(t *testing.T) {
 // TestAnUnusableTitleIsNotListedWhenTheReaderIgnoresTheOutput is a program that prints a
 // title with a tag character and then ends in a way that the reader ignores the output:
 // an exit status above 2, a signal (-1) or a timeout. The step lists no line as one that
-// qory cannot use.
+// qory cannot use. The program creates a marker file after it prints the title, and the
+// test fails without the marker, so a program that the limit stopped before it printed
+// cannot pass for one whose output the reader ignores.
 func TestAnUnusableTitleIsNotListedWhenTheReaderIgnoresTheOutput(t *testing.T) {
 	const title = `printf 'draft_title c\363\240\201\201d\n'` + "\n"
 	for _, c := range []struct {
@@ -207,11 +210,15 @@ func TestAnUnusableTitleIsNotListedWhenTheReaderIgnoresTheOutput(t *testing.T) {
 		{"exit 9", "exit 9\n", `{"none":"program-failed","exit":1}`, 0},
 		{"exit 3", "exit 3\n", `{"none":"login-needed","exit":3}`, 0},
 		{"a signal", "kill -9 $$\n", `{"none":"program-failed","exit":1}`, 0},
-		{"a timeout", "exec sleep 30\n", `{"none":"program-timeout"}`, 300 * time.Millisecond},
+		{"a timeout", "exec sleep 30\n", `{"none":"program-timeout"}`, 5 * time.Second},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			p := &submitProgram{command: []string{programScript(t, title+c.end)}, limit: c.limit}
+			marker := filepath.Join(t.TempDir(), "printed")
+			p := &submitProgram{command: []string{programScript(t, title+"touch '"+marker+"'\n"+c.end)}, limit: c.limit}
 			got, printed := runProgram(t, p, passedDocument())
+			if _, err := os.Stat(marker); err != nil {
+				t.Fatalf("the program did not print the title before it ended: %v", err)
+			}
 			if d := string(got.Repositories[0].Draft); d != c.draft {
 				t.Errorf("the draft is %s, want %s", d, c.draft)
 			}

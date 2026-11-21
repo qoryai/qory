@@ -1323,7 +1323,7 @@ func TestVerifyChecksDeliver(t *testing.T) {
 	withTarget := "{type: object, properties: {target: {$ref: '" + reference + "'}}}"
 	const primitivesID = "https://qory.dev/contracts/harness/v1/primitives.schema.json"
 	const (
-		idFix    = "Remove $id, $anchor and $dynamicAnchor from the json_schema, or remove `deliver`.\n  json_schema of artifact type a-type has one, and the check of deliver cannot tell where a $ref under it points."
+		idFix    = "Remove $id, $anchor and $dynamicAnchor from the json_schema, or remove `deliver`.\n  json_schema of artifact type a-type has one. A $ref under such a key can resolve to a different schema."
 		draftFix = "Remove $schema from the json_schema, or set it to the 2020-12 draft, or remove `deliver`.\n  json_schema of artifact type a-type has another draft, and draft-07 ignores the keys next to a $ref."
 		place    = "\n  The type is in {file}."
 		fix      = "Add a top-level `target` of the primitive `reference` to the schema, or remove `deliver`.\n  "
@@ -1368,7 +1368,7 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		{structured(send, "{$id: '"+primitivesID+"', $defs: {reference: {type: string}}, properties: {target: {$ref: '"+reference+"'}}}"), idFix + place, true},
 		{structured(send, "{$id: '"+primitivesID+"#', $defs: {reference: {type: string}}, properties: {target: {$ref: '"+reference+"'}}}"), idFix + place, true},
 		// A relative or spelled-out $id resolves to the address of the primitives, and a
-		// nested $id starts a resource of its own: each fails, as an $anchor does.
+		// nested $id starts a new resource: each fails, as an $anchor does.
 		{structured(send, "{$id: primitives.schema.json, $defs: {reference: {type: number}}, properties: {target: {$ref: '"+reference+"'}}}"), idFix + place, true},
 		{structured(send, "{$id: ./primitives.schema.json, $defs: {reference: {type: number}}, properties: {target: {$ref: '"+reference+"'}}}"), idFix + place, true},
 		{structured(send, "{$id: /contracts/harness/v1/primitives.schema.json, $defs: {reference: {type: number}}, properties: {target: {$ref: '"+reference+"'}}}"), idFix + place, true},
@@ -1377,11 +1377,21 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		{structured(send, "{$defs: {line: "+string(line)+"}, properties: {target: {$id: 'https://example.test/t', $defs: {line: {type: string}}, allOf: ["+string(written)+"]}}}"), idFix + place, true},
 		{structured(send, "{$defs: {reference: {$anchor: a}}, properties: {target: {$ref: '"+reference+"'}}}"), idFix + place, true},
 		{structured(send, "{$defs: {reference: {$dynamicAnchor: a}}, properties: {target: {$ref: '"+reference+"'}}}"), idFix + place, true},
-		// Draft-07 ignores the keys next to a $ref, so a written-out copy loses its limits.
+		// Draft-07 ignores the keys next to a $ref: a written-out copy loses its limits.
 		{structured(send, "{$schema: 'http://json-schema.org/draft-07/schema#', $defs: {line: "+string(line)+", reference: "+string(written)+"}, properties: {target: {$ref: '#/$defs/reference'}}}"), draftFix + place, true},
 		{structured(send, "{$schema: 'http://json-schema.org/draft-07/schema#', properties: {target: {$ref: '"+reference+"'}}}"), draftFix + place, true},
 		{structured(send, "{$schema: 'https://json-schema.org/draft/2020-12/schema', properties: {target: {$ref: '"+reference+"'}}}"), "", true},
 		{structured(send, "{$schema: 'https://json-schema.org/draft/2020-12/schema#', properties: {target: {$ref: '"+reference+"'}}}"), "", true},
+		// A key in a list of subschemas counts as well.
+		{structured(send, "{allOf: [{$id: 'https://example.test/x'}], properties: {target: {$ref: '"+reference+"'}}}"), idFix + place, true},
+		{structured(send, "{anyOf: [{$anchor: a}], properties: {target: {$ref: '"+reference+"'}}}"), idFix + place, true},
+		// The compiler decodes %, ~ and / in the name of a $ref into $defs, so the name that
+		// the check reads must have letters, digits, _ and - only.
+		{structured(send, "{$defs: {'r%65': {$ref: '"+reference+"'}, re: {type: number}}, properties: {target: {$ref: '#/$defs/r%65'}}}"), fix + other + place, true},
+		{structured(send, "{$defs: {'a~1b': {$ref: '"+reference+"'}, 'a/b': {type: number}}, properties: {target: {$ref: '#/$defs/a~1b'}}}"), fix + other + place, true},
+		{structured(send, "{$defs: {'a~0b': {$ref: '"+reference+"'}, 'a~b': {type: number}}, properties: {target: {$ref: '#/$defs/a~0b'}}}"), fix + other + place, true},
+		{structured(send, "{$defs: {'a/b': {$ref: '"+reference+"'}, a: {b: {type: number}}}, properties: {target: {$ref: '#/$defs/a/b'}}}"), fix + other + place, true},
+		{structured(send, "{$defs: {line: "+string(line)+", 're%66erence': "+string(written)+", reference: {type: number}}, properties: {target: {$ref: '#/$defs/re%66erence'}}}"), fix + other + place, true},
 		{structured("", withTarget), "", true},
 		{structured(send, withTarget), "", true},
 		{structured(", deliver: {send: after_gate}", withTarget), "", true},
@@ -1451,13 +1461,15 @@ func TestVerifyDeliverEndsOnALoopOfDefinitions(t *testing.T) {
 	loop := "{$ref: '#/$defs/a'}" + strings.Repeat(", {$ref: '#/$defs/a'}", n-1)
 	schema := "{$defs: {a: {allOf: [" + loop + "]}}, properties: {target: {$ref: '#/$defs/a'}}}"
 	e := factory(t, withTypes(custom("structured", "size_limit: 1, max_files: 1, json_schema: "+schema+", deliver: {send: end_of_run}")))
-	start := time.Now()
-	err := e.Verify()
-	if err == nil || !strings.Contains(err.Error(), "is not the primitive reference") {
-		t.Errorf("%v", err)
-	}
-	if took := time.Since(start); took > 10*time.Second {
-		t.Errorf("Verify took %v for %d references", took, n)
+	done := make(chan error, 1)
+	go func() { done <- e.Verify() }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "is not the primitive reference") {
+			t.Errorf("%v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("Verify did not return in 10 s for %d references", n)
 	}
 }
 
