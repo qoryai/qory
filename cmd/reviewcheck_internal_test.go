@@ -136,3 +136,31 @@ func TestReviewCheckLetsPassedStand(t *testing.T) {
 		t.Errorf("no reviewer: %v", err)
 	}
 }
+
+// While rounds are left, the refusal names changes-requested; in the last round of the
+// loop, and when the suite has a cause that the agent cannot fix, it names escalate.
+func TestReviewCheckRefusalNamesTheVerdictToRecord(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		last  bool
+		suite reviewround.Suite
+		want  string
+	}{
+		{"rounds left", false, reviewround.Suite{State: reviewround.SuitePassed}, "Record changes-requested, not passed"},
+		{"last round", true, reviewround.Suite{State: reviewround.SuitePassed}, "Record escalate, not passed"},
+		{"suite the agent cannot fix", false, reviewround.Suite{State: reviewround.SuiteNotRun, AgentCannotFix: true}, "Record escalate, not passed"},
+	} {
+		in := checkFor(t, []string{"code-reviewer"}, map[string]string{
+			"code-reviewer": reportOf("code-reviewer", "blocking"),
+		}, runapi.VerdictPassed)
+		in.LastRound = c.last
+		in.Suite = &c.suite
+		res, err := checkReviewRound(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Stands || !strings.HasPrefix(res.Refusal, c.want) {
+			t.Errorf("%s: stands %v, refusal %q", c.name, res.Stands, res.Refusal)
+		}
+	}
+}

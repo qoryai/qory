@@ -25,6 +25,10 @@ type reviewCheck struct {
 	Previous *reviewround.OpenFindings
 	// Recorded is the verdict that the session recorded.
 	Recorded string
+	// LastRound is whether this round is the last of the Build loop, so that no
+	// implement-changes session follows it: then the verdict to record over a round that
+	// is not clean is escalate, not changes-requested.
+	LastRound bool
 	// OpenFindings is the path of open-findings.json for the next implement-changes
 	// session.
 	OpenFindings string
@@ -76,14 +80,19 @@ func checkReviewRound(c reviewCheck) (reviewCheckResult, error) {
 	case d.Verdict == reviewround.Passed:
 		res.Stands = true
 	default:
-		res.Refusal = reviewRefusal(d)
+		res.Refusal = reviewRefusal(d, c.LastRound)
 	}
 	return res, nil
 }
 
 // reviewRefusal is the text for a recorded passed on a round whose decision is d, which
-// has a verdict other than passed.
-func reviewRefusal(d reviewround.Decision) string {
+// has a verdict other than passed. It names the verdict to record: escalate when d
+// escalates or last is true, changes-requested otherwise.
+func reviewRefusal(d reviewround.Decision, last bool) string {
+	verdict := d.Verdict
+	if last {
+		verdict = reviewround.Escalate
+	}
 	var counts []string
 	total := 0
 	for _, entry := range d.Open.Reviewers {
@@ -102,5 +111,5 @@ func reviewRefusal(d reviewround.Decision) string {
 	return fmt.Sprintf("Record %s, not passed: the review round is not clean.\n"+
 		"  Round %d has %d blocking findings, from %s.\n"+
 		"  A missing report is a blocking finding. open-findings.json has each finding.",
-		d.Verdict, d.Open.Round, total, strings.Join(counts, ", "))
+		verdict, d.Open.Round, total, strings.Join(counts, ", "))
 }
