@@ -238,7 +238,7 @@ func TestARunCodeAtATargetVersionWithNoRepositoryRunsOn(t *testing.T) {
 	}
 }
 
-// TestARunCodeWhoseTargetHasNoAddressFetchesNothing is a run from a run code whose
+// TestARunCodeWhoseTargetHasNoAddressUsesNoVersion is a run from a run code whose
 // documents set a target with a collection and no address, and a target_version, the
 // first commit of acme/site:
 //   - with no QORY_RUN_SYSTEM and no repository, as for a place that is not on a host,
@@ -247,7 +247,7 @@ func TestARunCodeAtATargetVersionWithNoRepositoryRunsOn(t *testing.T) {
 //     collection's ref, qory run fetches acme/site at the head of its default branch and
 //     does not use the version. The head has no workflow hello, so the run stops with
 //     workflow_not_in_harness, and the line shows the checkout's harness with no path.
-func TestARunCodeWhoseTargetHasNoAddressFetchesNothing(t *testing.T) {
+func TestARunCodeWhoseTargetHasNoAddressUsesNoVersion(t *testing.T) {
 	t.Run("no repositories", func(t *testing.T) {
 		h, first, _, files := versionRepository(t)
 		for name, content := range files {
