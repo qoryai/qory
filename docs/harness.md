@@ -143,7 +143,8 @@ exports:
 A listed module with a `process.yaml` at its folder root is a factory. The file is a
 process template: a name, a summary, a description, a workspace type, a stack that
 `exports.stacks` lists, a `qory.process/v1` process, and optionally `artifact_types`, the
-artifact types the workspaces use, and `submit`, the submit step of a run. Every command
+artifact types the workspaces use, `type_settings`, the JSON Schema of a run's type
+settings, and `submit`, the submit step of a run. Every command
 that reads the configuration, `qory config` among them, checks the file, and checks that
 the stack declares under `workflows` each workflow that the process runs. The fields
 and their limits are in [the contract's section on a factory's

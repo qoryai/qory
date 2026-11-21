@@ -110,7 +110,8 @@ type codeRun struct {
 	named    *source.Named
 	workflow string
 	inputs   []byte
-	// fullSuite is the documents' full_suite: whether session 1 runs the full suite.
+	// fullSuite is full_suite of the documents' type_settings, see [fullSuiteIn]: whether
+	// session 1 runs the full suite.
 	fullSuite bool
 	minutes   int
 	hidden    bool
@@ -211,9 +212,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Target != nil && doc.Target.Address != nil {
 		target.System, target.Path, target.Version = doc.Target.Address.System, doc.Target.Address.Path, doc.TargetVersion
 	}
-	// shortcut: full_suite moved into type_settings, so fullSuite stays false; Q-68
-	// replaces this with the read of doc.TypeSettings.
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, hidden: hidden, target: target, access: doc.Access}
+	r := &codeRun{runtime: runtime, settings: settings, harness: harness, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: fullSuiteIn(doc.TypeSettings), hidden: hidden, target: target, access: doc.Access}
 	if doc.Subject != nil && doc.Subject.Kind == provisioner.SubjectWorkItem {
 		r.workItem = doc.Subject.ID
 	}
@@ -222,6 +221,20 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	}
 	r.submit = doc.Submit
 	return r, nil
+}
+
+// fullSuiteIn is full_suite of settings, the type_settings of the documents: false when
+// settings is empty, has no full_suite, or has one that is not a boolean. qory checks
+// type_settings against no schema: Qory Apiary checks it against the schema of the
+// workspace type's process when it writes it, and the harness checks that schema at
+// compose.
+func fullSuiteIn(settings json.RawMessage) bool {
+	var members map[string]any
+	if json.Unmarshal(settings, &members) != nil {
+		return false
+	}
+	full, _ := members["full_suite"].(bool)
+	return full
 }
 
 // writes reports whether the documents of the run r give it the access to write and push
