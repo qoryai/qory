@@ -23,9 +23,9 @@ func TestReadSessionSpec(t *testing.T) {
 		t.Fatalf("args %q have no --tools list", got.Args)
 	}
 	tools := strings.Split(got.Args[i+1], ",")
-	want := []string{"Read", "Grep", "Glob", "Skill", "Write", "Agent"}
+	want := []string{"Read", "Grep", "Glob", "Skill", "Write", "Agent", "Bash"}
 	if !slices.Equal(tools, want) {
-		t.Errorf("tools %q, want %q: no Bash and no edit tool", tools, want)
+		t.Errorf("tools %q, want %q: Bash and no edit tool", tools, want)
 	}
 	if !slices.Equal(got.Args[:3], base.Args) {
 		t.Errorf("args %q do not start with the given ones", got.Args)
