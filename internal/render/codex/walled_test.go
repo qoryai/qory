@@ -43,9 +43,9 @@ const composed = `model = "gpt-6.1-sol"
 // TestWalledConfigIsGolden is the config.toml a walled run binds, for a copy of the
 // checkout: the compose's keys as they were, without the hooks, which the run binds in
 // /etc/codex, the login kept in memory only, the login shell, the shell snapshot, goals,
-// memories and a shell with a terminal off, each project path untrusted, the skills Codex
-// ships and a cloud's skills off, and a disabling entry for each skill name, then for
-// each skill path, after the compose's entry.
+// memories, a shell with a terminal and web search off, each project path untrusted, the
+// skills Codex ships and a cloud's skills off, and a disabling entry for each skill name,
+// then for each skill path, after the compose's entry.
 func TestWalledConfigIsGolden(t *testing.T) {
 	got, err := codex.WalledConfig([]byte(composed), []string{"/cache/qory/runs/r1/work", "/workspace"}, []string{"deploying", "plugin:review", "review"}, []string{"/workspace/.agents/skills/review/SKILL.md"})
 	if err != nil {
@@ -54,6 +54,7 @@ func TestWalledConfigIsGolden(t *testing.T) {
 	want := `allow_login_shell = false
 cli_auth_credentials_store = "ephemeral"
 model = "gpt-6.1-sol"
+web_search = "disabled"
 
 [cloud]
   [cloud.skills]
@@ -113,8 +114,27 @@ func TestWalledConfigTrustsNoProjectAndAddsNoState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "allow_login_shell = false\ncli_auth_credentials_store = \"ephemeral\"\nmodel = \"m\"\n\n[cloud]\n  [cloud.skills]\n    enabled = false\n\n[features]\n  goals = false\n  memories = false\n  shell_snapshot = false\n  unified_exec_tty = false\n\n[skills]\n  [skills.bundled]\n    enabled = false\n"; string(got) != want {
+	if want := "allow_login_shell = false\ncli_auth_credentials_store = \"ephemeral\"\nmodel = \"m\"\nweb_search = \"disabled\"\n\n[cloud]\n  [cloud.skills]\n    enabled = false\n\n[features]\n  goals = false\n  memories = false\n  shell_snapshot = false\n  unified_exec_tty = false\n\n[skills]\n  [skills.bundled]\n    enabled = false\n"; string(got) != want {
 		t.Errorf("config.toml %q", got)
+	}
+}
+
+// TestWalledConfigTurnsOffWebSearch is a composed config.toml that sets web_search =
+// "live", such as one from a compose before qory wrote the key: the walled config.toml
+// sets web_search = "disabled" at the top level.
+func TestWalledConfigTurnsOffWebSearch(t *testing.T) {
+	got, err := codex.WalledConfig([]byte("web_search = \"live\"\n"), nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		WebSearch string `toml:"web_search"`
+	}
+	if _, err := toml.Decode(string(got), &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.WebSearch != "disabled" {
+		t.Errorf("web_search is %q, want \"disabled\":\n%s", m.WebSearch, got)
 	}
 }
 
