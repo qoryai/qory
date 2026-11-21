@@ -2886,8 +2886,10 @@ doubles. Then:
   <n>: <error>`.
 
 Each session's push step stores a version of the artifact `submission`, from the
-hand-off file as the session left it (see [The submit step](#the-submit-step)). The commits
-that earlier sessions pushed stay on the branch.
+hand-off file as it is after that session (see [The submit step](#the-submit-step)). qory
+does not empty the file between sessions, so a session that does not write it hands over
+the text and steps of the session before. The commits that earlier sessions pushed stay on
+the branch.
 
 ### The push step of a write run
 
