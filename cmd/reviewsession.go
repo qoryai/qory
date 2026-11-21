@@ -46,7 +46,7 @@ type reviewSessionInput struct {
 	Provider string
 	// Tiers maps a tier to its model, as the compose result has it.
 	Tiers map[string]stack.Tier
-	// TimeLimit is the time limit of the workflow entry that has the reviewers, 0 for none.
+	// TimeLimit is the time limit of the workflow entry with the reviewers, 0 for none.
 	TimeLimit time.Duration
 }
 
