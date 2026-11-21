@@ -269,7 +269,7 @@ func TestARunCodeWhoseTargetHasNoAddressUsesNoVersion(t *testing.T) {
 			}
 		}
 	})
-	t.Run("the target's collection is a listed repository", func(t *testing.T) {
+	t.Run("the listed repository is fetched at its head, not at the version", func(t *testing.T) {
 		h, first, head, _ := versionRepository(t)
 		out, err, n, _ := runAtTarget(t, h, proxygittest.Host, "acme/site", first, map[string]any{"collection": "acme/site"})
 		if cmd.ExitCode(err) != 1 || n.joined {

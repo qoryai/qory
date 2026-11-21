@@ -686,7 +686,11 @@ release may change what an existing document does, and states it under Upgrading
   `inputs.domain` and `inputs.work_item.id` only for a subject of the kind `work_item`,
   and only such a run works on the branch `qory/<work item id>`. Documents with the step
   `explore` or the member `work_item` stop the run after the redemption, exit 1, with `it
-  breaks documents.schema.json`.
+  breaks documents.schema.json`. Documents of a step other than `workflow` and
+  `prebuild`, which stopped with `update qory: … for the steps explore and prebuild
+  only`, and documents with no `workflow`, which stopped with `set a workflow for the
+  workspace in Qory Apiary, then take the work item in again: …`, stop with `it breaks
+  documents.schema.json` too.
 - The `config.toml` of a Codex home, and of a walled Codex run, sets
   `web_search = "disabled"`. Without the key, Codex 0.169.0 turns web search on: cached,
   or live in a run with `--sandbox danger-full-access`, such as a walled run.
