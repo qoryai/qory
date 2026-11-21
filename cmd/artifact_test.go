@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -186,18 +187,32 @@ func wantExit(t *testing.T, err error, status int, text string) {
 	}
 }
 
+// Hidden characters of source text: U+202E, which reorders the text after it, and the tag
+// character U+E0041, which spells a letter that no person sees.
+const (
+	rlo  = "\u202e"
+	tagA = "\U000E0041"
+)
+
+// sourceDocument is a work item with rlo in a title and tagA in a comment, and
+// sourceDocumentShown is what the agent reads: each is written as <U+XXXX>.
+const (
+	sourceDocument      = `{"version":1,"ticket":{"title":"A title` + rlo + `"},"notes":[{"comment":"see` + tagA + `"}]}`
+	sourceDocumentShown = `{"version":1,"ticket":{"title":"A title<U+202E>"},"notes":[{"comment":"see<U+E0041>"}]}`
+)
+
 func TestWorkItemShowPrintsTheSnapshotInARun(t *testing.T) {
 	inCheckout(t)
 	server := startRunAPI(t)
-	server.snapshot = `{"version":1,"ticket":{"title":"A title"},"notes":[]}`
+	server.snapshot = sourceDocument
 
 	out, err := run(t, "work-item", "show")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if out != server.snapshot+"\n" {
-		t.Errorf("out = %q", out)
+	if out != sourceDocumentShown+"\n" {
+		t.Errorf("out = %q, want %q", out, sourceDocumentShown+"\n")
 	}
 
 	for name := range server.headers {
@@ -219,7 +234,7 @@ func TestWorkItemShowReadsTheLocalFileOutsideARun(t *testing.T) {
 	}
 
 	path := filepath.Join(root, ".qory", "work-item.json")
-	if err := os.WriteFile(path, []byte("{\"title\":\"Local\"}\n\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(sourceDocument+"\n\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -228,9 +243,25 @@ func TestWorkItemShowReadsTheLocalFileOutsideARun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if out != "{\"title\":\"Local\"}\n" {
-		t.Errorf("out = %q", out)
+	if out != sourceDocumentShown+"\n" {
+		t.Errorf("out = %q, want %q", out, sourceDocumentShown+"\n")
 	}
+
+	if err := os.WriteFile(path, []byte("{\"title\":\"Local\"}\n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if out, err = run(t, "work-item", "show"); err != nil || out != "{\"title\":\"Local\"}\n" {
+		t.Errorf("out = %q, err = %v", out, err)
+	}
+
+	// Invalid UTF-8 is JSON to json.Valid, and not text that EscapeJSON can read.
+	if err := os.WriteFile(path, []byte("{\"title\":\"\xff\"}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = run(t, "work-item", "show")
+	wantExit(t, err, cmd.ExitInput, "Fix ")
 
 	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
 		t.Fatal(err)
@@ -238,6 +269,21 @@ func TestWorkItemShowReadsTheLocalFileOutsideARun(t *testing.T) {
 
 	_, err = run(t, "work-item", "show")
 	wantExit(t, err, cmd.ExitInput, "Fix ")
+}
+
+func TestWorkItemShowStopsOnTextThatIsNotUTF8InARun(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	server.snapshot = "{\"version\":1,\"ticket\":{\"title\":\"\xff\"}}"
+
+	out, err := run(t, "work-item", "show")
+	if err == nil || !strings.HasPrefix(err.Error(), "Contact support: the run API sent a work item that is not valid JSON text. ") {
+		t.Errorf("err = %v", err)
+	}
+
+	if out != "" {
+		t.Errorf("out = %q", out)
+	}
 }
 
 func TestABadRunAPIAddressIsReported(t *testing.T) {
@@ -1720,5 +1766,248 @@ func TestRunVerdictChecksItsArguments(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(root, ".qory", "artifacts", "verdict")); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("the store has a verdict: %v", err)
+	}
+}
+
+// hiddenFixture sets the server to the artifact brief/main with one version, av_h1, that
+// has the files of files: each key is a filename, and its value is what the server sends.
+func hiddenFixture(server *runAPIServer, files map[string]string) {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+
+	slices.Sort(names)
+
+	entries := make([]string, 0, len(names))
+	server.files = map[string]string{}
+
+	for _, name := range names {
+		entries = append(entries, fileEntry(name, files[name]))
+		server.files["/artifacts/av_h1/files/"+name] = files[name]
+	}
+
+	server.snapshot = `{"version":1,"inputs":[],"outputs":[]}`
+	server.index = indexOf(artifactEntry("brief", "main", "av_h1", 1,
+		versionEntry("av_h1", 1, entries...)))
+}
+
+func TestArtifactPullEscapesTheIndex(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	server.index = indexOf(artifactEntry("brief", "main", "", 1, strings.NewReplacer(
+		`"note":null`, `"note":"n`+rlo+`"`,
+		`{"kind":"run","run_id":"r"}`, `{"kind":"person","name":"Ana`+tagA+`"}`,
+		`"approvals":[]`, `"approvals":[{"by":{"name":"Bo`+rlo+`"},"automatic":false,"stage_id":null,"at":"t"}]`,
+	).Replace(versionEntry("av_h1", 1, fileEntry("a"+rlo+".md", "x")))))
+	server.files = map[string]string{"/artifacts/av_h1/files/a" + rlo + ".md": "x"}
+
+	if _, err := run(t, "artifact", "pull"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(root, ".qory", "artifacts", "index.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var index struct {
+		Artifacts []struct {
+			Versions []struct {
+				Writer    struct{ Name string }
+				Note      string
+				Approvals []struct{ By struct{ Name string } }
+				Files     []struct{ Filename string }
+			}
+		}
+	}
+	if err := json.Unmarshal(got, &index); err != nil {
+		t.Fatalf("index.json is not JSON: %v\n%s", err, got)
+	}
+
+	version := index.Artifacts[0].Versions[0]
+	if version.Writer.Name != "Ana<U+E0041>" || version.Note != "n<U+202E>" ||
+		version.Approvals[0].By.Name != "Bo<U+202E>" || version.Files[0].Filename != "a<U+202E>.md" {
+		t.Errorf("index.json = %s", got)
+	}
+
+	if strings.ContainsAny(string(got), rlo+tagA) {
+		t.Errorf("index.json has a hidden character: %q", got)
+	}
+}
+
+func TestArtifactPullStopsOnAnIndexThatIsNotUTF8(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	server.index = "{\"version\":1,\"artifacts\":[],\"x\":\"\xff\"}"
+
+	_, err := run(t, "artifact", "pull")
+	if err == nil || !strings.HasPrefix(err.Error(), "Contact support: the run API sent an artifact index that is not valid JSON text. ") {
+		t.Errorf("err = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, ".qory", "artifacts", "index.json")); !os.IsNotExist(err) {
+		t.Errorf("index.json: %v", err)
+	}
+}
+
+func TestArtifactPullEscapesTheFilesOfAVersion(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	hiddenFixture(server, map[string]string{
+		"data.json":   "{\r\n\"a\": \"x" + rlo + "y\",\r\n\"n\": 1.50\r\n}\r\n",
+		"upper.JSON":  "[\"" + tagA + "\"]",
+		"broken.json": "{ x" + rlo,
+		"notes.md":    "line" + rlo + "\n\ttab \u200d",
+		"clean.md":    "nothing hidden\n",
+		"blob.bin":    "bin" + rlo + "\x00end",
+		"latin.txt":   "caf\xe9" + rlo,
+		"a" + rlo:     "named",
+	})
+
+	if _, err := run(t, "artifact", "pull"); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(root, ".qory", "artifacts", "brief", "main", "v1")
+	wantFile(t, filepath.Join(dir, "data.json"), "{\r\n\"a\": \"x<U+202E>y\",\r\n\"n\": 1.50\r\n}\r\n")
+	wantFile(t, filepath.Join(dir, "upper.JSON"), "[\"<U+E0041>\"]")
+	wantFile(t, filepath.Join(dir, "broken.json"), "{ x<U+202E>")
+	wantFile(t, filepath.Join(dir, "notes.md"), "line<U+202E>\n\ttab \u200d")
+	wantFile(t, filepath.Join(dir, "clean.md"), "nothing hidden\n")
+	wantFile(t, filepath.Join(dir, "blob.bin"), "bin"+rlo+"\x00end")
+	wantFile(t, filepath.Join(dir, "latin.txt"), "caf\xe9"+rlo)
+	wantFile(t, filepath.Join(dir, "a<U+202E>"), "named")
+
+	got, err := os.ReadFile(filepath.Join(dir, "data.json"))
+	if err != nil || !json.Valid(got) {
+		t.Errorf("data.json is not valid JSON: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "a"+rlo)); !os.IsNotExist(err) {
+		t.Errorf("the file under the raw name: %v", err)
+	}
+}
+
+// TestArtifactPullChecksTheDigestBeforeEscaping is a file whose bytes differ from the
+// index's digest: the pull stops, and writes no file.
+func TestArtifactPullChecksTheDigestBeforeEscaping(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	hiddenFixture(server, map[string]string{"notes.md": "a" + rlo})
+	server.files["/artifacts/av_h1/files/notes.md"] = "b" + rlo
+
+	_, err := run(t, "artifact", "pull")
+	if err == nil || !strings.Contains(err.Error(), "SHA-256") {
+		t.Errorf("err = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, ".qory", "artifacts", "brief", "main", "v1", "notes.md")); !os.IsNotExist(err) {
+		t.Errorf("notes.md: %v", err)
+	}
+}
+
+// TestArtifactPullDownloadsAnEscapedFileAgain is the cost of escaping: the file on disk
+// has another digest than the index, so each pull fetches it, and a file with no hidden
+// character is fetched once.
+func TestArtifactPullDownloadsAnEscapedFileAgain(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	hiddenFixture(server, map[string]string{"a.md": "x" + rlo, "b.md": "plain\n", "c" + rlo: "named\n"})
+
+	for range 2 {
+		if _, err := run(t, "artifact", "pull"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if server.downloads != 4 {
+		t.Errorf("downloads = %d, want 4: a.md twice, and b.md and the file of a hidden name once", server.downloads)
+	}
+}
+
+func TestArtifactPullStopsOnTwoFilesOfOneEscapedName(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	hiddenFixture(server, map[string]string{"a" + rlo: "one", "a<U+202E>": "two"})
+
+	_, err := run(t, "artifact", "pull")
+	want := fmt.Sprintf("Rename one of the files %q and %q in its artifact, then pull again. With their hidden characters written as <U+XXXX>, both have the name %q in the version av_h1.",
+		"a<U+202E>", "a"+rlo, "a<U+202E>")
+
+	if err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %s", err, want)
+	}
+}
+
+// TestArtifactPullTakesTheSameFilenameTwice is an index that lists one filename twice in
+// a version, which is not a collision of escaped names: the pull writes the file.
+func TestArtifactPullTakesTheSameFilenameTwice(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	server.index = indexOf(artifactEntry("brief", "main", "av_h1", 1,
+		versionEntry("av_h1", 1, fileEntry("a"+rlo, "x"), fileEntry("a"+rlo, "x"))))
+	server.files = map[string]string{"/artifacts/av_h1/files/a" + rlo: "x"}
+
+	if _, err := run(t, "artifact", "pull"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantFile(t, filepath.Join(root, ".qory", "artifacts", "brief", "main", "v1", "a<U+202E>"), "x")
+}
+
+func TestArtifactPullStopsOnAnEscapedNameThatIsTooLong(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	name := strings.Repeat("a", 250) + rlo // 253 bytes; 258 once escaped as <U+202E>
+	hiddenFixture(server, map[string]string{name: "x"})
+
+	_, err := run(t, "artifact", "pull")
+	if err == nil || !strings.HasPrefix(err.Error(), "Rename the file ") ||
+		!strings.Contains(err.Error(), "in its artifact, then pull again. With its hidden characters written as <U+XXXX>, its name is longer than 255 bytes.") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// TestAPushCheckKeepsTheRawBytesAndNames is the push check's working folder for a version
+// whose file name, file and index have hidden characters: the check is a program, and
+// reads the bytes of the run API.
+func TestAPushCheckKeepsTheRawBytesAndNames(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	content := "{\r\n\"a\": \"x" + rlo + "\"}\r\n"
+	server.index = indexOf(artifactEntry("spec", "main", "", 1,
+		versionEntry("av_1", 1, fileEntry("s"+rlo+".json", content), fileEntry("t.md", "y"+rlo))))
+	server.files = map[string]string{
+		"/artifacts/av_1/files/s" + rlo + ".json": content,
+		"/artifacts/av_1/files/t.md":              "y" + rlo,
+	}
+
+	fetch, err := cmd.ArtifactsForCheck(server.URL + "/v1/runs/run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	if err := fetch(context.Background(), dir, []string{"spec"}); err != nil {
+		t.Fatal(err)
+	}
+
+	wantFile(t, filepath.Join(dir, "spec", "main", "v1", "s"+rlo+".json"), content)
+	wantFile(t, filepath.Join(dir, "spec", "main", "v1", "t.md"), "y"+rlo)
+	wantFile(t, filepath.Join(dir, "index.json"), server.index)
+}
+
+func TestArtifactPushWithdrawEscapesTheNameOfAMember(t *testing.T) {
+	inCheckout(t)
+	server := startRunAPI(t)
+	server.index = strings.Replace(withdrawIndex(), `"name":"Ana"`, `"name":"Ana`+rlo+`"`, 1)
+
+	_, err := run(t, "artifact", "push", "--withdraw", "demo-script", "--name", "scenario-3")
+	want := "Leave demo-script/scenario-3 to a member.\n  Its newest version, v1, is an upload by Ana<U+202E>, and a run withdraws only a name whose newest version a run wrote."
+	wantExit(t, err, cmd.ExitArtifactRefused, want)
+
+	if err.Error() != want {
+		t.Errorf("err = %q, want %q", err, want)
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/sourcetext"
 	"github.com/qoryai/qory/internal/verdictformat"
 )
 
@@ -175,7 +176,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 					return err
 				}
 
-				_, err = fmt.Fprintln(c.OutOrStdout(), string(snapshot.Raw))
+				shown, err := sourcetext.EscapeJSON(snapshot.Raw)
+				if err != nil {
+					return fmt.Errorf("Contact support: the run API sent a work item that is not valid JSON text. %w", err)
+				}
+
+				_, err = fmt.Fprintln(c.OutOrStdout(), string(shown))
 
 				return err
 			}
@@ -185,7 +191,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 	}
 }
 
-// showLocalWorkItem prints the checkout's .qory/work-item.json.
+// showLocalWorkItem prints the checkout's .qory/work-item.json, with each hidden character
+// written as `<U+XXXX>` as [sourcetext.EscapeJSON] does, so it prints what a run prints.
 func showLocalWorkItem(c *cobra.Command) error {
 	root, err := checkoutRoot()
 	if err != nil {
@@ -207,7 +214,12 @@ func showLocalWorkItem(c *cobra.Command) error {
 		return input(fmt.Errorf("Fix %s. The file is not JSON.", path))
 	}
 
-	_, err = fmt.Fprintln(c.OutOrStdout(), string(bytes.TrimSpace(raw)))
+	shown, err := sourcetext.EscapeJSON(bytes.TrimSpace(raw))
+	if err != nil {
+		return input(fmt.Errorf("Fix %s. It has a string that is not valid UTF-8 or JSON text: %w", path, err))
+	}
+
+	_, err = fmt.Fprintln(c.OutOrStdout(), string(shown))
 
 	return err
 }
@@ -292,7 +304,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 }
 
 // pullArtifacts fetches what [chosenVersion] chooses into the store, then writes the
-// index and prints the directory.
+// index and prints the directory. The agent reads the store, so the index and the files
+// have each hidden character written as `<U+XXXX>`; the push check's store keeps the
+// run API's bytes.
 func pullArtifacts(c *cobra.Command, client *runapi.Client, artifactType string, version int) error {
 	var snapshot *runapi.Snapshot
 
@@ -333,7 +347,12 @@ func pullArtifacts(c *cobra.Command, client *runapi.Client, artifactType string,
 		}
 	}
 
-	if err := store.writeIndex(index.Raw); err != nil {
+	shown, err := sourcetext.EscapeJSON(index.Raw)
+	if err != nil {
+		return fmt.Errorf("Contact support: the run API sent an artifact index that is not valid JSON text. %w", err)
+	}
+
+	if err := store.writeIndex(shown); err != nil {
 		return err
 	}
 
@@ -1319,10 +1338,18 @@ func (s *artifactStore) keep(artifactType, name string, number int, sources []pu
 	return dir, nil
 }
 
-// fetch downloads the files of version into its directory. A file that is there with the
-// index's digest stays. In a fresh store, a file that is there is an error: on a file
-// system that ignores case or the form of an accent, two files of the version whose
-// names differ in those alone are one file.
+// fetch downloads the files of version into its directory.
+//
+// In a fresh store, the store of a push check, each file keeps the run API's bytes and
+// name, and a file that is there is an error: on a file system that ignores case or the
+// form of an accent, two files of the version whose names differ in those alone are one
+// file.
+//
+// In any other store, the agent reads the files, so each name and each text file has every
+// hidden character written as `<U+XXXX>` ([escapedFile], [sourcetext.Escape]). A file
+// that is there with the index's digest stays; an escaped file has another digest, so qory
+// downloads it again on each pull. Two files of the version whose names are the same once
+// escaped are an error.
 func (s *artifactStore) fetch(ctx context.Context, client *runapi.Client, artifact runapi.Artifact, version runapi.Version) error {
 	for what, value := range map[string]string{"type": artifact.Type, "name": artifact.Name} {
 		if err := artifactNameError(what, value); err != nil {
@@ -1334,6 +1361,8 @@ func (s *artifactStore) fetch(ctx context.Context, client *runapi.Client, artifa
 	if err != nil {
 		return err
 	}
+
+	named := map[string]string{} // escaped name to the filename in the index
 
 	for i, file := range version.Files {
 		if !runapi.LocalFilename(file.Filename) {
@@ -1356,18 +1385,62 @@ func (s *artifactStore) fetch(ctx context.Context, client *runapi.Client, artifa
 			continue
 		}
 
-		if sameFile(path, file) {
+		name := sourcetext.Escape(file.Filename)
+		if !runapi.LocalFilename(name) {
+			return fmt.Errorf("Rename the file %q in its artifact, then pull again. With its hidden characters written as <U+XXXX>, its name is longer than %d bytes.", file.Filename, runapi.MaxFilename)
+		}
+
+		if other, ok := named[name]; ok && other != file.Filename {
+			return fmt.Errorf("Rename one of the files %q and %q in its artifact, then pull again. With their hidden characters written as <U+XXXX>, both have the name %q in the version %s.", other, file.Filename, name, version.ID)
+		}
+
+		named[name] = file.Filename
+
+		if sameFile(filepath.Join(dir, name), file) {
 			continue
 		}
 
-		if err := s.write(dir, file.Filename, func(w io.Writer) error {
-			return client.Download(ctx, version.ID, file, w)
+		// shortcut: the file is held in memory, and qory sets no limit on a download but
+		// the size in the index; replace it with a stream if files of more than 24 MiB
+		// (the most of a push) are pulled.
+		var raw bytes.Buffer
+		if err := client.Download(ctx, version.ID, file, &raw); err != nil {
+			return err
+		}
+
+		content := escapedFile(file.Filename, raw.Bytes())
+		if err := s.write(dir, name, func(w io.Writer) error {
+			_, err := w.Write(content)
+
+			return err
 		}); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// escapedFile returns content, the checked bytes of the file filename, as the agent
+// reads it. A filename that ends in .json, in any case, gets [sourcetext.EscapeJSON],
+// which keeps the whitespace between tokens. Other content that is valid UTF-8 with no
+// NUL byte gets [sourcetext.Escape], and so does a .json file that is not JSON text. Any
+// other content is binary, and stays as it is.
+func escapedFile(filename string, content []byte) []byte {
+	if strings.EqualFold(filepath.Ext(filename), ".json") {
+		if escaped, err := sourcetext.EscapeJSON(content); err == nil {
+			return escaped
+		}
+	}
+
+	if utf8.Valid(content) && !bytes.Contains(content, []byte{0}) {
+		text := string(content)
+		if escaped := sourcetext.Escape(text); escaped != text {
+			return []byte(escaped)
+		}
+	}
+
+	return content
 }
 
 // writeFresh writes the new file at path with fill. A file that is there is an error
@@ -1420,7 +1493,7 @@ func sameFile(path string, file runapi.File) bool {
 	return err == nil && size == file.Size && strings.EqualFold(hex.EncodeToString(digest.Sum(nil)), file.SHA256)
 }
 
-// writeIndex writes the run API's index, as it returned it.
+// writeIndex writes raw, the index's bytes, as the caller made them.
 func (s *artifactStore) writeIndex(raw []byte) error {
 	return s.write(s.dir, indexFile, func(w io.Writer) error {
 		_, err := w.Write(raw)
