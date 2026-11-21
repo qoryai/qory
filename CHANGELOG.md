@@ -1801,11 +1801,14 @@ release may change what an existing document does, and states it under Upgrading
   characters themselves, and the lists stopped at U+FFFF: U+0600 and a tag character such
   as U+E0041 passed. Each `$defs` `line` and `text` now has the pattern of the primitives.
   The checks of `qory run verdict` and of the review round stop the same characters.
+  The `point` of a finding in `review-report.schema.json` is a `line` too: before, it
+  stopped only line breaks, so a tab, U+200B and U+E0041 passed, and a report with such a
+  point now does not match the format.
 - The hand-off drops a `description` that has a character that a text does not have: a control
   character other than tab, line feed and carriage return, U+2028, U+2029, or a Cf character
   other than U+200C and U+200D, such as U+200B or the tag character U+E0041. It prints
-  `Description: has the character U+200B, which a text does not have, at character 4. qory
-  dropped the text.`, and the commit is `unreviewed`. Until this change, the run stored the
+  `Remove the character U+200B at character 4 of the description. qory dropped the
+  text.`, and the commit is `unreviewed`. Until this change, the run stored the
   description and the submission then failed the check of the format.
 - The step leaves out each `draft_title` line of a submit program whose title has a character
   that a title does not have, such as U+200B or a tag character, or has no character that is

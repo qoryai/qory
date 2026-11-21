@@ -770,14 +770,14 @@ Remove the key "command" from submit.
 
 ## The primitives
 
-[primitives.schema.json](primitives.schema.json) defines the strings that the schemas of
-artifact types have in common. It is not the schema of a document. Each definition is under
+[primitives.schema.json](primitives.schema.json) defines the strings and objects that the
+schemas of artifact types have in common. It is not the schema of a document. Each definition is under
 `$defs`:
 
 | Definition | A value that |
 |---|---|
 | `line` | has no control character (U+0000 to U+001F and U+007F to U+009F), no U+2028 or U+2029, and no Cf character except U+200C and U+200D, the joiners that emoji sequences and some scripts need |
-| `text` | is Markdown: of the control characters it has only tab, line feed and carriage return, and it has the same other stops as a `line`; at most 20,000 characters, with no line that starts with `<!-- qory:start -->` or `<!-- qory:end -->` |
+| `text` | is Markdown: of the control characters it has only tab, line feed and carriage return, and it has the same other stops as a `line`; at most 20,000 characters |
 | `title` | is a `line` of 1 to 256 characters with at least one character that is not a space (U+0020, U+00A0, U+1680, U+2000 to U+200A, U+202F, U+205F, U+3000), U+200C or U+200D |
 | `reference` | is an object with a `collection` (a `line` of 1 to 200 characters) and, optionally, an `address` with a `system` (1 to 253 lower-case letters, digits, dots and hyphens) and a `path` (a `line` of 1 to 200 characters); an `address` has both |
 | `link` | is an `https` URL of at most 2048 characters, with a host, with no user information |
@@ -1103,7 +1103,7 @@ format ([review-report.schema.json](review-report.schema.json)):
 | `problem` | what is wrong, 1 to 2000 characters. Required |
 | `fix` | what the next session changes, 1 to 2000 characters. Required |
 | `proof` | `failing check: `, `failing input: ` or `broken rule: `, then the evidence, at most 1000 characters. A blocking finding has a failing check or a failing input. Required |
-| `point` | the finding in one line, 1 to 500 characters, with at least one character that is not a space. qory trims the spaces at its ends, and reads a point of spaces and characters that show nothing, such as U+200B, as a report that does not match the format. Required |
+| `point` | the finding in one line, 1 to 500 characters, a `line` of the primitives (no control character, so no tab, line feed or carriage return, no U+2028 or U+2029, and no Cf character such as U+200B or U+E0041, except U+200C and U+200D), with at least one character that is not a space. qory trims the spaces at its ends, and reads a point of spaces and characters that show nothing, such as U+00A0 or U+3164, as a report that does not match the format. Required |
 | `file` | the path of the file that the finding is about, 1 to 500 characters. Optional |
 | `line` | the line of `file`, a whole number from 1. Optional |
 

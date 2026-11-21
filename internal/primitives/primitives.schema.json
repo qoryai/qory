@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/primitives.schema.json",
   "title": "The primitives of the harness contracts, version 1",
-  "description": "The definitions that the schemas of artifact types refer to for a line, a title, a text, a reference and a link. Each is under $defs, and each $ref in this file is to $defs of this file. A schema that refers to a primitive writes this file's $id, such as https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/title.",
+  "description": "The definitions that the schemas of artifact types refer to for a line, a title, a text, a reference, a link and an amount. Each is under $defs, and each $ref in this file is to $defs of this file. A schema that refers to a primitive writes this file's $id, such as https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/title.",
   "$defs": {
     "line": {
       "description": "One line of text: no control character, no U+2028 or U+2029, and no Cf character but U+200C and U+200D (emoji joiners).",
@@ -28,10 +28,7 @@
       "description": "Markdown. Of the control characters it has only tab, line feed and carriage return, and it has no U+2028, U+2029 or Cf character but U+200C and U+200D.",
       "type": "string",
       "maxLength": 20000,
-      "pattern": "^[^\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f-\\x9f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\ud804\udcbd\ud804\udccd\ud80d\udc30-\ud80d\udc3f\ud82f\udca0-\ud82f\udca3\ud834\udd73-\ud834\udd7a\udb40\udc01\udb40\udc20-\udb40\udc7f]*$",
-      "not": {
-        "pattern": "(^|\\n)<!-- qory:(start|end) -->"
-      }
+      "pattern": "^[^\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f-\\x9f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\ud804\udcbd\ud804\udccd\ud80d\udc30-\ud80d\udc3f\ud82f\udca0-\ud82f\udca3\ud834\udd73-\ud834\udd7a\udb40\udc01\udb40\udc20-\udb40\udc7f]*$"
     },
     "reference": {
       "description": "An object in a system: a collection, and its address when it has one.",

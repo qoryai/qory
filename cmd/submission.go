@@ -128,7 +128,7 @@ const (
 	textDroppedControl     = "Title: has a control character at character %d. qory dropped the text."
 	textDroppedNUL         = "Description: has a NUL character at character %d. qory dropped the text."
 	textDroppedMarker      = "Description: line %d is a marker line of the draft's block. qory dropped the text."
-	textDroppedChar        = "Description: has the character %U, which a text does not have, at character %d. qory dropped the text."
+	textDroppedChar        = "Remove the character %U at character %d of the description. qory dropped the text."
 	textDroppedStepControl = "Step of commit %s: has a control, invisible, direction or separator character. qory dropped the step."
 	textDroppedFurtherCtl  = "%d further steps have a control, invisible, direction or separator character. qory dropped them."
 	textDroppedKeys        = "%d step keys are not a full commit id of 40 or 64 lower-case hexadecimal digits. qory dropped them."
