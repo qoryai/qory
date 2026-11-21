@@ -18,25 +18,26 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
-- `qory run` from a run code whose documents set `shared_run` runs one session after another,
-  until Qory Apiary ends the run. After each session, once the suite's result is posted and
-  the push step passed, qory sends the next-session request, and joins the next session with
-  its workflow, runtime, model settings, model key and time limit. Each session's harness is
-  composed from the run's sources at session 1's commits; a runtime is installed once per
-  run, at the version the stack pins, with npm's signature checked as for session 1; a
-  Codex session gets a new Codex home; each push step that pushes commits stores a
-  version of `submission`. In a home that the run made, a later session's compose keeps
-  that session's runtime alone. A home from `--home` or `harness.home` keeps every
-  runtime, so a later Codex session there gets no tier models. The route to qory serves
-  the session that runs, and the harness report lists each session's runtime and tiers in
-  `sessions`. qory sends the request again for 10 minutes after no response, a refusal of
-  the gateway's, Qory Apiary's refusals with a status of 500 or above, and `rate_limited`;
-  any other refusal of Qory Apiary's closes the run `failed`. The steps before a later
-  session need a wall and no container of the run kept, and past the setup's limit they
-  close the run `cancelled` with `timeout`, exit 124.
+- `qory run` from a run code whose documents set `shared_run` runs one session after
+  another, until Qory Apiary ends the run. After each session, once the suite's result is
+  posted and the push step passed, qory sends the next-session request, and joins the next
+  session with its workflow, runtime, model settings, model key and time limit. Each
+  session's harness is composed from the run's sources at session 1's commits; a runtime is
+  installed once per run, at the version the stack pins, with npm's signature checked as
+  for session 1; a Codex session gets a new Codex home; each push step that pushes commits
+  stores a version of `submission`. In a home that the run made, a later session's compose
+  keeps that session's runtime alone. A home from `--home` or `harness.home` keeps every
+  runtime composed in it, so a later Codex session there gets no tier models when the home
+  also has another runtime's tree. The route to qory serves the session that runs, and the
+  harness report lists each session's runtime and tiers in `sessions`. qory sends the
+  request again for 10 minutes after no response, a refusal of the gateway's, Qory Apiary's
+  refusals with a status of 500 or above, and `rate_limited`. Qory Apiary's `run_ended`
+  closes the run as the session ended, and any other refusal of Qory Apiary's closes it
+  `failed`, exit 1. The steps before a later session need a wall and no container of the
+  run kept, and past the setup's limit they close the run `cancelled` with `timeout`, exit
+  124.
 - The agent of a walled run gets `QORY_SESSION`, the session's number from 1, which Forager
-  sets at each join: `qory run agent-env` keeps the name, as it keeps `QORY_RUN_ID`. Before,
-  the verb removed it, and the agent of a walled run had no session number.
+  sets at each join: `qory run agent-env` keeps the name, as it keeps `QORY_RUN_ID`.
 - In a home composed for codex alone, a Codex agent with a tier gets the tier's model as
   `model` and its effort as `model_reasoning_effort` in `agents/<name>.toml`. An effort
   outside `none`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra` stops the compose
