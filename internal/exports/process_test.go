@@ -1320,7 +1320,9 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		return custom("structured", limits+", json_schema: "+schema+extra)
 	}
 	withTarget := "{type: object, properties: {target: {$ref: '" + reference + "'}}}"
+	const primitivesID = "https://qory.dev/contracts/harness/v1/primitives.schema.json"
 	const (
+		idFix = "Remove the $id of the primitives schema from the json_schema, or remove `deliver`.\n  json_schema of artifact type a-type has that address as an $id."
 		place = "\n  The type is in {file}."
 		fix   = "Add a top-level `target` of the primitive `reference` to the schema, or remove `deliver`.\n  "
 		gone  = "artifact type a-type has no top-level target in json_schema."
@@ -1343,15 +1345,26 @@ func TestVerifyChecksDeliver(t *testing.T) {
 	if broken == string(written) {
 		t.Fatal("the reference of the primitives has no required system to remove")
 	}
-	copyOf := func(def string) string {
-		return "{$defs: {line: {type: string}, reference: " + def + "}, properties: {target: {$ref: '#/$defs/reference'}}}"
+	line, err := json.Marshal(primitive.Defs["line"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// copyOf is a schema with def as its $defs reference and the given $defs line.
+	copyOf := func(def, line string) string {
+		return "{$defs: {line: " + line + ", reference: " + def + "}, properties: {target: {$ref: '#/$defs/reference'}}}"
 	}
 	for _, c := range []struct {
 		body, want string
 		schemaOK   bool // process.schema.json passes the entry
 	}{
-		{structured(send, copyOf(string(written))), "", true},
-		{structured(send, copyOf(broken)), fix + other + place, true},
+		{structured(send, copyOf(string(written), string(line))), "", true},
+		{structured(send, copyOf(broken, string(line))), fix + other + place, true},
+		// A written-out copy takes the line of the primitives, not another definition.
+		{structured(send, copyOf(string(written), "{type: string}")), fix + other + place, true},
+		{structured(send, copyOf(string(written), strings.Replace(string(line), `"type":"string"`, `"type":"string","maxLength":9`, 1))), fix + other + place, true},
+		// A schema whose $id is the address of the primitives fails.
+		{structured(send, "{$id: '"+primitivesID+"', $defs: {reference: {type: string}}, properties: {target: {$ref: '"+reference+"'}}}"), idFix + place, true},
+		{structured(send, "{$id: '"+primitivesID+"#', $defs: {reference: {type: string}}, properties: {target: {$ref: '"+reference+"'}}}"), idFix + place, true},
 		{structured("", withTarget), "", true},
 		{structured(send, withTarget), "", true},
 		{structured(", deliver: {send: after_gate}", withTarget), "", true},
@@ -1359,17 +1372,17 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		{structured(send, "{$defs: {r: {$ref: '"+reference+"'}}, properties: {target: {$ref: '#/$defs/r'}}}"), "", true},
 		{structured(send, "{$defs: {r: {allOf: [{$ref: '"+reference+"'}]}}, properties: {target: {$ref: '#/$defs/r'}}}"), "", true},
 		// The shape of deliver.
-		{structured(", deliver: {}", withTarget), "Add send to deliver of artifact type a-type, end_of_run or after_gate.\n  deliver has no send." + place, false},
-		{structured(", deliver: {send: never}", withTarget), "Set send in deliver of artifact type a-type to end_of_run or after_gate.\n  send is \"never\"." + place, false},
-		{structured(", deliver: {send: 1}", withTarget), "Set send in deliver of artifact type a-type to end_of_run or after_gate.\n  send is a number." + place, false},
-		{structured(", deliver: {send: end_of_run, to: x}", withTarget), "Remove the key \"to\" from deliver of artifact type a-type.\n  deliver has only send." + place, false},
-		{structured(", deliver: end_of_run", withTarget), "Set deliver of artifact type a-type to an object with send, or remove it.\n  deliver is a string." + place, false},
-		{structured(", deliver: ~", withTarget), "Set deliver of artifact type a-type to an object with send, or remove it.\n  deliver is null." + place, false},
+		{structured(", deliver: {}", withTarget), "Add send to deliver, end_of_run or after_gate.\n  deliver of artifact type a-type has no send." + place, false},
+		{structured(", deliver: {send: never}", withTarget), "Set send in deliver to end_of_run or after_gate.\n  send of artifact type a-type is \"never\"." + place, false},
+		{structured(", deliver: {send: 1}", withTarget), "Set send in deliver to end_of_run or after_gate.\n  send of artifact type a-type is a number." + place, false},
+		{structured(", deliver: {send: end_of_run, to: x}", withTarget), "Remove the extra key from deliver.\n  deliver of artifact type a-type has the key \"to\", and has only send." + place, false},
+		{structured(", deliver: end_of_run", withTarget), "Set deliver to an object with send, or remove it.\n  deliver of artifact type a-type is a string." + place, false},
+		{structured(", deliver: ~", withTarget), "Set deliver to an object with send, or remove it.\n  deliver of artifact type a-type is null." + place, false},
 		// The types that may have it.
-		{"\n  - {name: a-type" + send + "}", "Remove deliver from artifact type a-type, or make it a structured type with a json_schema.\n  Only a structured type is sent, and the type is a standard type." + place, false},
-		{custom("document", limits+send), "Remove deliver from artifact type a-type, or make it a structured type with a json_schema.\n  Only a structured type is sent, and base_view is document." + place, false},
-		{custom("image", limits+send), "Remove deliver from artifact type a-type, or make it a structured type with a json_schema.\n  Only a structured type is sent, and base_view is image." + place, false},
-		{custom("file", limits+send), "Remove deliver from artifact type a-type, or make it a structured type with a json_schema.\n  Only a structured type is sent, and base_view is file." + place, false},
+		{"\n  - {name: a-type" + send + "}", "Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is sent, and artifact type a-type is a standard type." + place, false},
+		{custom("document", limits+send), "Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is sent, and artifact type a-type has base_view document." + place, false},
+		{custom("image", limits+send), "Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is sent, and artifact type a-type has base_view image." + place, false},
+		{custom("file", limits+send), "Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is sent, and artifact type a-type has base_view file." + place, false},
 		// The target.
 		{structured(send, "{type: object}"), fix + gone + place, true},
 		{structured(send, "{type: object, properties: {name: {type: string}}}"), fix + gone + place, true},

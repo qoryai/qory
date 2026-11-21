@@ -685,8 +685,11 @@ release may change what an existing document does, and states it under Upgrading
   it. Only a structured type has `deliver`, and its `json_schema` has a top-level property
   `target` that is the primitive `reference`, written as a `$ref` to
   `primitives.schema.json#/$defs/reference`, in an `allOf`, or through a definition under
-  `$defs`, or as a written-out copy of that definition. A `deliver` that breaks a rule stops the command with the fix on the first line,
-  such as ``Add a top-level `target` of the primitive `reference` to the schema, or remove
+  `$defs`, or as a written-out copy of that definition. A written-out copy uses the `line`
+  of the primitives as its `$defs` `line`, and a schema whose `$id` is the address of the
+  primitives schema fails. A `deliver` that breaks a rule stops the command with the fix on
+  the first line, at most 100 characters, and the type name on the second line, such as
+  ``Add a top-level `target` of the primitive `reference` to the schema, or remove
   `deliver`.``
 
 ### Changed

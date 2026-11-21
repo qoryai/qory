@@ -123,11 +123,11 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 // checkArtifactType checks entry i of artifact_types, counted from 0. An entry is a name
 // alone, or a name with base_view, size_limit and max_files, and with json_schema
 // exactly when base_view is structured. Either also may have withdrawable, true or
-// false, and a structured type may have deliver ([checkDeliver]). It returns the entry's name, "" for none of the right form, and the first thing
-// to fix in the entry, for a message, with [FilePlace] for the file in one written fix
-// first; "" for an entry
-// that passes. qory has no list of standard types, so a name alone passes in any name
-// of the right form. patterns is the budget of the file's patterns.
+// false, and a structured type may have deliver ([checkDeliver]). It returns the entry's
+// name, "" for none of the right form, and the first thing to fix in the entry, for a
+// message, with [FilePlace] for the file, fix first; "" for an entry that passes. qory has
+// no list of standard types, so a name alone passes in any name of the right form.
+// patterns is the budget of the file's patterns.
 func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, why string) {
 	label := fmt.Sprintf("entry %d of artifact_types", i+1)
 	if entry.Kind != yaml.MappingNode {
@@ -175,7 +175,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 	}
 	if !seen["base_view"] && !seen["size_limit"] && !seen["max_files"] && !seen["json_schema"] {
 		if deliver != nil {
-			return name, notDelivered(label, "the type is a standard type")
+			return name, notDelivered(label, "is a standard type")
 		}
 		return name, ""
 	}
@@ -206,7 +206,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 	}
 	schema := value(entry, "json_schema")
 	if deliver != nil && !structured {
-		return name, notDelivered(label, "base_view is "+view.Value)
+		return name, notDelivered(label, "has base_view "+view.Value)
 	}
 	switch {
 	case !structured && schema != nil:
@@ -233,38 +233,38 @@ var deliverSends = []string{"end_of_run", "after_gate"}
 func checkDeliver(label string, n *yaml.Node) string {
 	sends := strings.Join(deliverSends, " or ")
 	if n.Kind != yaml.MappingNode {
-		return fmt.Sprintf("Set deliver of %s to an object with send, or remove it.\n  deliver is %s.\n  The type is in %s.", label, nodeKind(n), FilePlace)
+		return fmt.Sprintf("Set deliver to an object with send, or remove it.\n  deliver of %s is %s.\n  The type is in %s.", label, nodeKind(n), FilePlace)
 	}
 	seen := map[string]bool{}
 	for j := 0; j+1 < len(n.Content); j += 2 {
 		key := n.Content[j]
 		if key.Kind != yaml.ScalarNode || key.Value != "send" {
-			return fmt.Sprintf("Remove the key %s from deliver of %s.\n  deliver has only send.\n  The type is in %s.", scalarText(key), label, FilePlace)
+			return fmt.Sprintf("Remove the extra key from deliver.\n  deliver of %s has the key %s, and has only send.\n  The type is in %s.", label, scalarText(key), FilePlace)
 		}
 		if seen[key.Value] {
-			return fmt.Sprintf("Remove the second send from deliver of %s.\n  deliver has the key twice.\n  The type is in %s.", label, FilePlace)
+			return fmt.Sprintf("Remove the second send from deliver.\n  deliver of %s has the key twice.\n  The type is in %s.", label, FilePlace)
 		}
 		seen[key.Value] = true
 	}
 	send := value(n, "send")
 	switch {
 	case send == nil:
-		return fmt.Sprintf("Add send to deliver of %s, %s.\n  deliver has no send.\n  The type is in %s.", label, sends, FilePlace)
+		return fmt.Sprintf("Add send to deliver, %s.\n  deliver of %s has no send.\n  The type is in %s.", sends, label, FilePlace)
 	case send.Kind == yaml.ScalarNode && send.Tag != "!!str" && nodeKind(send) == "a string":
 		// A value with an explicit tag: YAML reads it as no string.
-		return fmt.Sprintf("Set send in deliver of %s to a quoted string.\n  YAML reads %s as a value that is not a string.\n  The type is in %s.", label, scalarText(send), FilePlace)
+		return fmt.Sprintf("Set send in deliver to a quoted string.\n  YAML reads send of %s, %s, as a value that is not a string.\n  The type is in %s.", label, scalarText(send), FilePlace)
 	case send.Kind != yaml.ScalarNode || send.Tag != "!!str":
-		return fmt.Sprintf("Set send in deliver of %s to %s.\n  send is %s.\n  The type is in %s.", label, sends, nodeKind(send), FilePlace)
+		return fmt.Sprintf("Set send in deliver to %s.\n  send of %s is %s.\n  The type is in %s.", sends, label, nodeKind(send), FilePlace)
 	case !slices.Contains(deliverSends, send.Value):
-		return fmt.Sprintf("Set send in deliver of %s to %s.\n  send is %s.\n  The type is in %s.", label, sends, scalarText(send), FilePlace)
+		return fmt.Sprintf("Set send in deliver to %s.\n  send of %s is %s.\n  The type is in %s.", sends, label, scalarText(send), FilePlace)
 	}
 	return ""
 }
 
 // notDelivered is the refusal of a deliver on the artifact type label that is not a
-// structured type with a json_schema; cause says what the type is.
-func notDelivered(label, cause string) string {
-	return fmt.Sprintf("Remove deliver from %s, or make it a structured type with a json_schema.\n  Only a structured type is sent, and %s.\n  The type is in %s.", label, cause, FilePlace)
+// structured type with a json_schema; what says what the type is or has.
+func notDelivered(label, what string) string {
+	return fmt.Sprintf("Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is sent, and %s %s.\n  The type is in %s.", label, what, FilePlace)
 }
 
 // primitiveReference is the $ref that a schema writes for the definition reference of the
@@ -274,14 +274,20 @@ const primitiveReference = primitives.URL + "#/$defs/reference"
 // checkDeliverTarget checks that schema, the json_schema of the artifact type label, a
 // compiled JSON Schema, has a top-level property target that is the primitive reference:
 // the property is a $ref to [primitiveReference], or to a definition of the schema's
-// $defs that is, a written-out copy of the definition, or an allOf that has one. It
-// returns the fix for a message with [FilePlace] for the file, "" for a type that passes.
+// $defs that is, a written-out copy of the definition whose local definitions are those of
+// the primitives, or an allOf that has one. A schema whose $id is the address of the
+// primitives schema fails: the compiler does not report the same address twice, so
+// definitions in the schema would stand for the primitives'. It returns the fix for a message with
+// [FilePlace] for the file, "" for a type that passes.
 func checkDeliverTarget(label string, schema *yaml.Node) string {
 	doc, why := jsonValue(schema, "json_schema of "+label)
 	if why != "" {
 		return why
 	}
 	root, _ := doc.(map[string]any)
+	if id, _ := root["$id"].(string); strings.TrimSuffix(id, "#") == primitives.URL {
+		return fmt.Sprintf("Remove the $id of the primitives schema from the json_schema, or remove `deliver`.\n  json_schema of %s has that address as an $id.\n  The type is in %s.", label, FilePlace)
+	}
 	props, _ := root["properties"].(map[string]any)
 	target, has := props["target"]
 	cause := label + " has no top-level target in json_schema."
@@ -294,21 +300,69 @@ func checkDeliverTarget(label string, schema *yaml.Node) string {
 	return fmt.Sprintf("Add a top-level `target` of the primitive `reference` to the schema, or remove `deliver`.\n  %s\n  The type is in %s.", cause, FilePlace)
 }
 
-// primitiveReferenceDefinition is $defs reference of the primitives schema, as JSON
-// decoded into Go values.
-var primitiveReferenceDefinition = sync.OnceValue(func() any {
+// primitiveDefinitions is $defs of the primitives schema, as JSON decoded into Go values.
+var primitiveDefinitions = sync.OnceValue(func() map[string]any {
 	var doc struct {
 		Defs map[string]any `json:"$defs"`
 	}
 	if err := json.Unmarshal(primitives.Schema, &doc); err != nil {
 		panic("exports: the embedded primitives schema is no JSON: " + err.Error())
 	}
-	return doc.Defs["reference"]
+	return doc.Defs
 })
+
+// localDefinitionsAreThePrimitives reports whether each definition of root under "#/$defs/"
+// that node refers to, directly or through another such definition, is the definition of
+// the same name in the primitives schema.
+func localDefinitionsAreThePrimitives(root map[string]any, node any, checked map[string]bool) bool {
+	switch v := node.(type) {
+	case map[string]any:
+		if ref, _ := v["$ref"].(string); strings.HasPrefix(ref, "#/$defs/") {
+			name := strings.TrimPrefix(ref, "#/$defs/")
+			if !checked[name] {
+				checked[name] = true
+				defs, _ := root["$defs"].(map[string]any)
+				if !reflect.DeepEqual(roundTrip(defs[name]), primitiveDefinitions()[name]) {
+					return false
+				}
+				if !localDefinitionsAreThePrimitives(root, primitiveDefinitions()[name], checked) {
+					return false
+				}
+			}
+		}
+		for _, member := range v {
+			if !localDefinitionsAreThePrimitives(root, member, checked) {
+				return false
+			}
+		}
+	case []any:
+		for _, member := range v {
+			if !localDefinitionsAreThePrimitives(root, member, checked) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// roundTrip is node as JSON decodes it, so that numbers and lists compare with the
+// primitives'; nil when node has no JSON form.
+func roundTrip(node any) any {
+	data, err := json.Marshal(node)
+	if err != nil {
+		return nil
+	}
+	var same any
+	if json.Unmarshal(data, &same) != nil {
+		return nil
+	}
+	return same
+}
 
 // isPrimitiveReference reports whether node, a member of root, a JSON Schema, is the
 // primitive reference: a $ref to [primitiveReference]; a copy of its definition, written
-// out as a member does under $defs reference of the schemas of the harness; a $ref to a
+// out as a member does under $defs reference of the schemas of the harness, with the
+// definitions that it refers to in $defs of root as the primitives have them; a $ref to a
 // definition under "#/$defs/" of root that is one of these; or an allOf with an entry
 // that is. depth stops a loop of definitions.
 func isPrimitiveReference(root map[string]any, node any, depth int) bool {
@@ -324,11 +378,9 @@ func isPrimitiveReference(root map[string]any, node any, depth int) bool {
 			return true
 		}
 	}
-	if data, err := json.Marshal(m); err == nil {
-		var same any
-		if json.Unmarshal(data, &same) == nil && reflect.DeepEqual(same, primitiveReferenceDefinition()) {
-			return true
-		}
+	if reflect.DeepEqual(roundTrip(m), primitiveDefinitions()["reference"]) &&
+		localDefinitionsAreThePrimitives(root, m, map[string]bool{}) {
+		return true
 	}
 	all, _ := m["allOf"].([]any)
 	return slices.ContainsFunc(all, func(entry any) bool { return isPrimitiveReference(root, entry, depth+1) })
