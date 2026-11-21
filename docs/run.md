@@ -4242,6 +4242,7 @@ A red suite, whose command ran (`failed` or `timeout`):
 | `changes-requested` | nothing: the verdict stands |
 | `escalate` with up to 19 points | the same `escalate` and `track`, with that point added |
 | `escalate` with 20 points | nothing: the verdict stands |
+| another kind, which this qory does not know | `escalate` with the agent's points and `track`, and that point added |
 
 A suite that did not start or did not run, with a cause the agent cannot fix: the after step
 could not run or the script ended before the command (exit 70, 71, 72 or another status, or -1), or the step
@@ -4254,6 +4255,7 @@ qory cannot reach the run API, or the session succeeded and its after step did n
 | none, or `passed` | `escalate` with one point, and the agent's `track` |
 | `escalate` | the same `escalate` and `track`, with that point added |
 | `changes-requested` | `escalate` with the agent's points and `track`, and that point added |
+| another kind, which this qory does not know | `escalate` with the agent's points and `track`, and that point added |
 | 20 points already | nothing: the verdict stands, and qory prints `the verdict of the agent has 20 points already, so qory adds none for the full suite` |
 
 A suite that did not start for a cause in the build plan that the agent wrote (no usable build plan, one over 1 MiB, no
@@ -4267,6 +4269,7 @@ judges it once the session succeeded. The point has the cause in `text` and what
 | none, or `passed` | `changes-requested` with one point, and the agent's `track` |
 | `escalate` | the same `escalate` and `track`, with that point added |
 | `changes-requested` | the same verdict and `track`, with that point added: one fix round covers both |
+| another kind, which this qory does not know | `escalate` with the agent's points and `track`, and that point added |
 | 20 points already | nothing: the verdict stands, and qory prints `the verdict of the agent has 20 points already, so qory adds none for the full suite` |
 
 A session that did not succeed posts nothing for a cause found at the launch.

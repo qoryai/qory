@@ -372,7 +372,8 @@ func (r *suiteRun) post(ctx context.Context, point runapi.Point, kind suiteKind,
 		if kind == kindUnfixable {
 			verdict = runapi.VerdictEscalate
 		}
-	case agent.verdict == runapi.VerdictEscalate:
+	case agent.verdict == runapi.VerdictEscalate || !verdictformat.Known(agent.verdict):
+		// A kind that this qory does not know stops at a person, as escalate does.
 		verdict, points = runapi.VerdictEscalate, append(agent.points, point)
 	case kind == kindRed:
 		return fmt.Sprintf(textSuiteStands, agent.verdict), nil

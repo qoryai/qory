@@ -276,7 +276,8 @@ func TestARedSuitePostsChangesRequestedAfterTheSessionAndTheRunSucceeds(t *testi
 }
 
 // TestAGreenSuiteAndASkippedSuitePostNothing: neither reads the artifact index, and a suite
-// that did not run and a session that did not succeed post nothing either.
+// that did not run and a session that did not succeed post nothing either. The agent's verdict,
+// of a kind that this qory does not know, stands unchanged.
 func TestAGreenSuiteAndASkippedSuitePostNothing(t *testing.T) {
 	for _, c := range []struct {
 		name    string
@@ -292,7 +293,7 @@ func TestAGreenSuiteAndASkippedSuitePostNothing(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHelper(t)
-			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: `{"verdict":"escalate","points":[{"text":"Pick one.","action":"answer","question":"q1"}]}`})
+			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: `{"verdict":"approve-spend","points":[{"text":"Approve the spend.","action":"approve_spend"}]}`})
 			if c.status != "" {
 				h.state(t, c.status, c.result)
 			}
@@ -489,6 +490,8 @@ func TestASuiteThatCannotStartPostsAnEscalate(t *testing.T) {
 		{"over a changes-requested", `{"verdict":"changes-requested","points":[` + point(1) + `],"track":{"id":"small","reason":"One file."}}`, session.AfterResult{State: event.StateFailed, ExitCode: 71},
 			`{"verdict":"escalate","points":[` + point(1) + `,{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}],"track":{"id":"small","reason":"One file."}}`},
 		{"over a changes-requested with 20 points", `{"verdict":"changes-requested","points":[` + strings.Join(twenty, ",") + `]}`, session.AfterResult{State: event.StateFailed, ExitCode: 71}, ""},
+		{"over an unknown kind", `{"verdict":"approve-spend","points":[` + point(1) + `]}`, session.AfterResult{State: event.StateFailed, ExitCode: 71},
+			`{"verdict":"escalate","points":[` + point(1) + `,{"text":"The full suite did not start: git could not clone HEAD of the workspace.","action":"run_again"}]}`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHelper(t)
@@ -574,7 +577,8 @@ func TestAHostTextThatTheVerdictFormatRefusesIsLeftOut(t *testing.T) {
 
 // TestAnAgentsVerdictStandsOverARedSuite: a changes-requested stands as it is; an escalate stands
 // with the red suite as one more point, with its points and its track kept in order; an escalate
-// with 20 points stands unchanged.
+// with 20 points stands unchanged. A kind that this qory does not know becomes escalate, as an
+// escalate does.
 func TestAnAgentsVerdictStandsOverARedSuite(t *testing.T) {
 	point := func(i int) string { return fmt.Sprintf(`{"text":"Point %d.","action":"run_again"}`, i) }
 	points := func(n int) string {
@@ -595,6 +599,9 @@ func TestAnAgentsVerdictStandsOverARedSuite(t *testing.T) {
 			`{"verdict":"escalate","points":[` + point(1) + `,` + suitePointText + `],"track":{"id":"small","reason":"One file."}}`},
 		{"escalate with 19 points", `{"verdict":"escalate","points":[` + points(19) + `]}`, `{"verdict":"escalate","points":[` + points(19) + `,` + suitePointText + `]}`},
 		{"escalate with 20 points", `{"verdict":"escalate","points":[` + points(20) + `]}`, ""},
+		{"an unknown kind", `{"verdict":"approve-spend","points":[{"text":"Approve the spend.","action":"approve_spend"}],"track":{"id":"small","reason":"One file."}}`,
+			`{"verdict":"escalate","points":[{"text":"Approve the spend.","action":"approve_spend"},` + suitePointText + `],"track":{"id":"small","reason":"One file."}}`},
+		{"an unknown kind with 20 points", `{"verdict":"approve-spend","points":[` + points(20) + `]}`, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHelper(t)

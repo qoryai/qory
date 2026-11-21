@@ -683,6 +683,14 @@ release may change what an existing document does, and states it under Upgrading
   such as `run_id`, start the run; until this release they stop it with `it breaks
   documents.schema.json`. A document whose `must_understand` lists a member that qory does
   not read stops as one that breaks its schema.
+- The verdict format takes a verdict kind and a point action that a later version adds:
+  a kind of lower-case letters, digits and hyphens, and an action of lower-case letters,
+  digits and underscores, each starting with a letter and at most 64 characters. The
+  submission's `verdict` takes such a kind too. qory passes a kind it does not know on
+  unchanged, and takes it as not passed, so no draft follows. Over a red full suite, or a
+  suite that did not start, such a kind becomes `escalate` with the agent's points and the
+  suite's point. `qory run verdict` takes only `passed`, `changes-requested` and
+  `escalate`, and only the actions `answer` and `run_again`.
 - `qory run pool` acts on a signed 403 or 409 from Qory Apiary whose body it cannot read
   by its status alone: it keeps the dispatch and sends the release or `dispatched` again.
   Until this release, such an answer to `dispatched` releases the dispatch, and such a 403

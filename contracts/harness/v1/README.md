@@ -783,7 +783,7 @@ writes it, after the push. This is version 1 of the format
 | Member | Meaning |
 |---|---|
 | `ref` | the branch's name, the same in each repository: `qory/` followed by the work item's id |
-| `verdict` | the work item's newest verdict, when this run wrote it: `passed`, `changes-requested`, `escalate`, or `none` |
+| `verdict` | the work item's newest verdict, when this run wrote it: `passed`, `changes-requested`, `escalate`, another kind in the form of the verdict format, or `none` |
 | `text` | the title and the description of the draft pull request, from the session's hand-off file. The title has 1 to 256 characters and no control character: no tab, no line end. Absent when the session wrote none |
 | `repositories` | each repository with the commit of the branch in it, at least one |
 | `system` | the host the repository is on, a lower-case host name of at most 253 characters |
@@ -980,10 +980,10 @@ stores it as a version of the artifact type `verdict`. This is version 1 of the 
 
 | Member | Meaning |
 |---|---|
-| `verdict` | `passed`: the work meets the bar; `changes-requested`: the work needs another round; `escalate`: a person must act |
-| `points` | what is wrong or missing, 1 to 20 points: required with `escalate`, optional with `changes-requested`, where each point has the action `run_again`, and absent with `passed` |
+| `verdict` | `passed`: the work meets the bar; `changes-requested`: the work needs another round; `escalate`: a person must act. A later version of the format may add a kind in the same form: a lower-case letter, then lower-case letters, digits and hyphens, at most 64 characters. A reader passes a kind it does not know on unchanged |
+| `points` | what is wrong or missing, 1 to 20 points: required with `escalate`, optional with `changes-requested`, where each point has the action `run_again`, absent with `passed`, and optional with another kind |
 | `text` | what is wrong or missing, in one plain sentence for a person on one line, 1 to 500 characters, with no action and no question id, because Qory Apiary adds the action from `action`: it has no control character, so no tab, line feed or carriage return, and the schema's `$defs` `line`, the `line` of the questions format, lists the format characters it cannot have |
-| `action` | `answer`: a person answers the question in `question`, only with `escalate`; `run_again`: another round runs, and with `escalate` a person runs it |
+| `action` | `answer`: a person answers the question in `question`, only with `escalate`; `run_again`: another round runs, and with `escalate` a person runs it. A later version of the format may add an action in the same form: a lower-case letter, then lower-case letters, digits and underscores, at most 64 characters. A reader passes an action it does not know on unchanged, and the format sets no rule for `question` and `fix` with it |
 | `question` | the id of an open question in the work item's newest `questions` version, in the id form of the questions format: required with `answer`, and absent with `run_again` |
 | `fix` | what a person does to fix the point, in one plain sentence on one line, with the rules of `text`: optional with `run_again`, and absent with `answer`. Qory Apiary shows it in place of the sentence of the action `run_again` |
 | `track` | the track the run proposes for the work item: optional with a verdict of any kind, an object with the members `id` and `reason` and no other. A verdict with no track proposes none. Qory Apiary returns 422 for a track that the gate of the run's stage does not offer |
@@ -997,7 +997,8 @@ A `changes-requested` verdict may list what the next round fixes:
  "points": [{"text": "The checks script failed on the spec's links.", "action": "run_again"}]}
 ```
 
-`qory run verdict` sends points only with `escalate`.
+`qory run verdict` sends points only with `escalate`. It takes only the kinds `passed`,
+`changes-requested` and `escalate`, and only the actions `answer` and `run_again`.
 
 A verdict of any kind may propose a track:
 
