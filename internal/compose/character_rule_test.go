@@ -3,6 +3,7 @@ package compose_test
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode"
@@ -74,7 +75,7 @@ func TestContractSchemasHaveThePrimitivesPatterns(t *testing.T) {
 		// The pattern is written once for a line and once for a text, in $defs.
 		var lists int
 		for _, l := range strings.Split(string(raw), "\n") {
-			if strings.Contains(l, `"pattern"`) && strings.Contains(l, `\u007f`) {
+			if strings.Contains(l, `"pattern"`) && strings.Contains(l, `\\x7f`) {
 				lists++
 			}
 		}
@@ -117,6 +118,62 @@ func TestContractSchemasStopTheRuleCharacters(t *testing.T) {
 			if text != nil {
 				if got := text.Validate(string(r)) == nil; got == primitives.StopsText(r) {
 					t.Fatalf("%s: U+%04X: $defs text is valid: %v, StopsText: %v", c.name, r, got, primitives.StopsText(r))
+				}
+			}
+		}
+	}
+}
+
+// patternStrings are the decoded strings of every "pattern" in a decoded JSON document.
+func patternStrings(doc any) []string {
+	var out []string
+	switch v := doc.(type) {
+	case map[string]any:
+		for k, m := range v {
+			if p, ok := m.(string); ok && k == "pattern" {
+				out = append(out, p)
+				continue
+			}
+			out = append(out, patternStrings(m)...)
+		}
+	case []any:
+		for _, m := range v {
+			out = append(out, patternStrings(m)...)
+		}
+	}
+	return out
+}
+
+// TestNoPatternHasARawControlCharacter: a reader refuses a schema file whose pattern
+// decodes to a control character, so every pattern of the contract schemas, of the
+// primitives and of the copies that Go embeds writes U+0000 to U+001F and U+007F to
+// U+009F as regex escapes such as `\x00`, never as a JSON escape such as `\u0000`.
+func TestNoPatternHasARawControlCharacter(t *testing.T) {
+	var files []string
+	for _, glob := range []string{"../../contracts/harness/v1/*.schema.json", "../../internal/*/*.schema.json"} {
+		m, err := filepath.Glob(glob)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, m...)
+	}
+	if len(files) < 14 {
+		t.Fatalf("found %d schema files: %v", len(files), files)
+	}
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc any
+		if err := json.Unmarshal(data, &doc); err != nil {
+			t.Fatalf("%s: %v", file, err)
+		}
+		for _, p := range patternStrings(doc) {
+			for i, r := range p {
+				if r < 0x20 || 0x7f <= r && r <= 0x9f {
+					t.Errorf("%s: the pattern %.30q has the control character %U at byte %d", file, p, r, i)
+					break
 				}
 			}
 		}

@@ -787,7 +787,10 @@ The Cf characters include the bidirectional controls, the soft hyphen, the zero 
 space and the tag characters such as U+E0041. The patterns of `line` and `text` list the
 characters of Unicode 17.0.0 that Go's and Node's tables have as Cc and Cf. The characters
 above U+FFFF are written as surrogate pairs, because the checks of the harness read a
-pattern as JavaScript with the `u` flag.
+pattern as JavaScript with the `u` flag. The control characters are written as the regex
+escapes `\x00-\x1f` and `\x7f-\x9f` (for a `text`, `\x00-\x08\x0b\x0c\x0e-\x1f` and
+`\x7f-\x9f`), never as the JSON escape `\u0000`: that escape decodes to a raw control
+character in the pattern, and a reader refuses a file that has one.
 
 A schema of an artifact type in a `process.yaml` refers to a definition by the address of
 the file, such as

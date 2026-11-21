@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1257,6 +1258,18 @@ func TestContractSchemasPassAsCustomTypes(t *testing.T) {
 		if err := processSchema.Validate(doc); err != nil {
 			t.Errorf("%s in process.schema.json: %v", file, err)
 		}
+		// A regex escape such as \x00 in a pattern stays text through YAML: the patterns
+		// of the entry are those of the file, with no control character.
+		var fromFile any
+		if err := json.Unmarshal(raw, &fromFile); err != nil {
+			t.Fatal(err)
+		}
+		want, got := patternStrings(fromFile), patternStrings(doc)
+		slices.Sort(want)
+		slices.Sort(got)
+		if !slices.Equal(want, got) {
+			t.Errorf("%s: the patterns of the entry differ from the patterns of the file after YAML", file)
+		}
 		broken := entry(strings.Replace(inYAML, `"type":"object"`, `"type":"objekt"`, 1))
 		if err := factory(t, broken).Verify(); err == nil || !strings.Contains(err.Error(), "so that it compiles as a JSON Schema.\n  The schema does not compile: ") {
 			t.Errorf("%s, a schema that does not compile: %v", file, err)
@@ -1398,4 +1411,24 @@ func TestVerifyChecksDeliver(t *testing.T) {
 			t.Errorf("%q: process.schema.json passes it: %v", c.body, got)
 		}
 	}
+}
+
+// patternStrings are the decoded strings of every "pattern" in a decoded document.
+func patternStrings(doc any) []string {
+	var out []string
+	switch v := doc.(type) {
+	case map[string]any:
+		for k, m := range v {
+			if p, ok := m.(string); ok && k == "pattern" {
+				out = append(out, p)
+				continue
+			}
+			out = append(out, patternStrings(m)...)
+		}
+	case []any:
+		for _, m := range v {
+			out = append(out, patternStrings(m)...)
+		}
+	}
+	return out
 }

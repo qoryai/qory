@@ -1792,6 +1792,12 @@ release may change what an existing document does, and states it under Upgrading
   characters, as surrogate pairs. YAML reads no surrogate pair, so in a `process.yaml`
   write each pair as `\UXXXXXXXX` in a double-quoted string, such as `\U000E0041`, when you
   paste a schema of `contracts/harness/v1/` into a `json_schema`.
+- The patterns of the contract schemas and of the primitives write the control characters
+  as the regex escapes `\x00-\x1f` and `\x7f-\x9f`, and the branch name pattern of
+  `submission.schema.json` writes `\x00-\x20\x7f` the same way. A pattern written with
+  the JSON escape `\u0000` decodes to a raw control character, and a reader refuses a
+  file that has one. The patterns accept and stop the same characters as before. A test
+  fails when a pattern of a contract schema has a raw control character.
 
 ### Removed
 
