@@ -27,9 +27,9 @@ release may change what an existing document does, and states it under Upgrading
   Codex session gets a new Codex home; each push step that pushes commits stores a
   version of `submission`. In a home that the run made, a later session's compose keeps
   that session's runtime alone. A home from `--home` or `harness.home` keeps every
-  runtime, so a later Codex session there gets no tier models. The route to qory serves the session that runs,
-  and the harness report lists each session's runtime and tiers in `sessions`. qory sends
-  the request again for 10 minutes after no response, a refusal of the gateway's, Qory
+  runtime, so a later Codex session there gets no tier models. The route to qory serves
+  the session that runs, and the harness report lists each session's runtime and tiers in
+  `sessions`. qory sends the request again for 10 minutes after no response, a refusal of the gateway's, Qory
   Apiary's refusals with a status of 500 or above, and `rate_limited`; any other refusal of
   Qory Apiary's closes the run `failed`. The steps before a later session need a wall and no
   container of the run kept, and past the setup's limit they close the run `cancelled` with
