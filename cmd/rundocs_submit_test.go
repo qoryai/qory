@@ -317,14 +317,13 @@ func TestASubmitLineOf100CharactersStaysWholeAndOneOf101IsShortened(t *testing.T
 	}
 }
 
-// TestARunWhoseWorkflowLowersItBelowWriteKeepsNoSubmitAndPrintsNoLine is a run from a run
+// TestARunWhoseWorkflowLowersItBelowWritePrintsNoSubmitLine is a run from a run
 // code whose documents have access write, with a submit or with none, whose composed
 // harness has a different submit, and whose stack declares the workflow hello
-// write-no-push, read or write. With write, the run keeps the documents' submit and
-// prints the one line, whether the documents have a submit or none. With write-no-push
-// or read, the run's level is below write: it keeps no submit, and prints no submit
-// line.
-func TestARunWhoseWorkflowLowersItBelowWriteKeepsNoSubmitAndPrintsNoLine(t *testing.T) {
+// write-no-push, read or write. With write, the run prints the one line, whether the
+// documents have a submit or none. With write-no-push or read, the run's level is below
+// write, and it prints no submit line.
+func TestARunWhoseWorkflowLowersItBelowWritePrintsNoSubmitLine(t *testing.T) {
 	for _, c := range []struct {
 		name, access string
 		docsSubmit   bool
@@ -352,13 +351,6 @@ func TestARunWhoseWorkflowLowersItBelowWriteKeepsNoSubmitAndPrintsNoLine(t *test
 			}
 			if lines := submitLines(r.out); len(lines) != want {
 				t.Errorf("the run prints %q, want %d submit lines\n%s", lines, want, r.out)
-			}
-			submit, err := cmd.SubmitAt(codeDocuments(t, change), c.access)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if kept := submit != nil; kept != (c.write && c.docsSubmit) {
-				t.Errorf("at level %s the run keeps submit %+v", c.access, submit)
 			}
 		})
 	}

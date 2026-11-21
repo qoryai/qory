@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/qoryai/qory/internal/branchformat"
+	"github.com/qoryai/qory/internal/submission"
 )
 
 // TestAStopHasALineForEachKindOfRun is each stop of the fetch whose line contains "run
@@ -163,7 +163,7 @@ func TestASwitchThatFailsHasTheLineOfAUsedCode(t *testing.T) {
 	dir, b := onBranch(t, "acme/shop")
 	head := run(t, dir, "rev-parse", "HEAD")
 	b.Ref = "qory/other"
-	b.Version = []branchformat.Repository{{System: "git.example.com", Path: "acme/shop", Commit: head}}
+	b.Version = []submission.Repository{{System: "git.example.com", Path: "acme/shop", Commit: head}}
 	b.Repositories[0].Commit = strings.Repeat("1", 40)
 	_, err := switchTo(dir, b)
 	if err == nil || !strings.HasPrefix(err.Error(), "qory run: check that git on this machine can read the working folder, then take the work item in again in Qory Apiary: git failed: ") || !strings.HasSuffix(err.Error(), "; the code is used") {

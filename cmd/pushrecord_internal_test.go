@@ -206,12 +206,12 @@ func TestAReportCutDuringTheCallStillGivesTheContactSupportLine(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			if c.wait {
-				before := branchWait
-				branchWait = func(ctx context.Context, _ time.Duration) error {
+				before := submissionWait
+				submissionWait = func(ctx context.Context, _ time.Duration) error {
 					cancel()
 					return ctx.Err()
 				}
-				defer func() { branchWait = before }()
+				defer func() { submissionWait = before }()
 			}
 			send := func(ctx context.Context, _ []byte) ([]byte, error) { return c.send(ctx, cancel) }
 			ended, err := recordLanded(ctx, send, "qory/w-1", landedRepositories(1))
@@ -304,9 +304,9 @@ func TestASendThatGetsNoResponseIsCutAtTheLimit(t *testing.T) {
 	before := recordAttemptLimit
 	recordAttemptLimit = 20 * time.Millisecond
 	defer func() { recordAttemptLimit = before }()
-	waits := branchWait
-	branchWait = func(context.Context, time.Duration) error { return nil }
-	defer func() { branchWait = waits }()
+	waits := submissionWait
+	submissionWait = func(context.Context, time.Duration) error { return nil }
+	defer func() { submissionWait = waits }()
 	var sends int
 	send := func(ctx context.Context, _ []byte) ([]byte, error) {
 		sends++
@@ -328,9 +328,9 @@ func TestASendThatGetsNoResponseIsCutAtTheLimit(t *testing.T) {
 // report returns the line of the code run_closed and no error.
 func TestAClosedRunInTheSecondCallOfThreeEndsTheReport(t *testing.T) {
 	var waits []time.Duration
-	before := branchWait
-	branchWait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
-	defer func() { branchWait = before }()
+	before := submissionWait
+	submissionWait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	defer func() { submissionWait = before }()
 	first, sizes := recordServer(t, nil)
 	sent := 0
 	send := func(ctx context.Context, body []byte) ([]byte, error) {
@@ -355,9 +355,9 @@ func TestAClosedRunInTheSecondCallOfThreeEndsTheReport(t *testing.T) {
 // 4 times, after 1 s, 2 s and 4 s, and the report fails with the contact support line.
 func TestAnErrorOfARunWithNoControlPlaneIsSentAgainAndFails(t *testing.T) {
 	var waits []time.Duration
-	before := branchWait
-	branchWait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
-	defer func() { branchWait = before }()
+	before := submissionWait
+	submissionWait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	defer func() { submissionWait = before }()
 	sent := 0
 	send := func(context.Context, []byte) ([]byte, error) {
 		sent++
