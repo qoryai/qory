@@ -226,8 +226,8 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 // fullSuiteIn is full_suite of settings, the type_settings of the documents: false when
 // settings is empty, has no full_suite, or has one that is not a boolean. qory checks
 // type_settings against no schema: Qory Apiary checks it against the schema of the
-// workspace type's process when it writes it, and the harness checks that schema at
-// compose.
+// workspace type's process when it writes it, and qory checks that the schema compiles
+// when a command reads the configuration.
 func fullSuiteIn(settings json.RawMessage) bool {
 	var members map[string]any
 	if json.Unmarshal(settings, &members) != nil {

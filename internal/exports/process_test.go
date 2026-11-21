@@ -672,7 +672,7 @@ func TestVerifyPassesTypeSettings(t *testing.T) {
 	}
 }
 
-// TestVerifyChecksTypeSettings is each mistake in type_settings, each refused fix first
+// TestVerifyChecksTypeSettings is each mistake in type_settings, each refusal fix first
 // with the file on the last line. Its json_schema is checked as an artifact type's is.
 func TestVerifyChecksTypeSettings(t *testing.T) {
 	const last = "\n  type_settings is in {file}."
@@ -697,6 +697,32 @@ func TestVerifyChecksTypeSettings(t *testing.T) {
 		want := refusalIn(file, c.want)
 		if err := e.Verify(); err == nil || err.Error() != want {
 			t.Errorf("%q: %v\nwant %s", c.body, err, want)
+		}
+	}
+}
+
+// TestVerifyShortensALongKey is a key of 200 characters in a refusal of artifact_types and of
+// type_settings, outside a JSON Schema and inside one: the fix line has at most
+// [exports.LineMax] characters, with the key shortened, and the last line has the full key.
+func TestVerifyShortensALongKey(t *testing.T) {
+	key := strings.Repeat("k", 200)
+	full := "The full name of \"kkkkkkkk…kkkkkkkkk\" is \"" + key + "\"."
+	for _, c := range []struct{ body, fix string }{
+		{withTypes("\n  - {name: mockup, " + key + ": acme}"), `Remove the key "kkkkkkkk…kkkkkkkkk" from entry 1 of artifact_types.`},
+		{withTypes(structuredWith("a-type", "{"+key+": 1, "+key+": 2}")), `Remove the second "kkkkkkkk…kkkkkkkkk" from its object in json_schema of artifact type a-type.`},
+		{withSettings(" {json_schema: {}, " + key + ": acme}"), `Remove the key "kkkkkkkk…kkkkkkkkk" from type_settings.`},
+		{withSettings(" {json_schema: {" + key + ": 1, " + key + ": 2}}"), `Remove the second "kkkkkkkk…kkkkkkkkk" from its object in json_schema of type_settings.`},
+	} {
+		err := factory(t, c.body).Verify()
+		if err == nil {
+			t.Fatalf("%.80s: no error", c.body)
+		}
+		lines := strings.Split(err.Error(), "\n")
+		if lines[0] != c.fix || utf8.RuneCountInString(lines[0]) > exports.LineMax {
+			t.Errorf("%.80s: the fix line is %q, want %q", c.body, lines[0], c.fix)
+		}
+		if last := strings.TrimSpace(lines[len(lines)-1]); last != full {
+			t.Errorf("%.80s: the last line is %q, want %q", c.body, last, full)
 		}
 	}
 }

@@ -643,8 +643,9 @@ release may change what an existing document does, and states it under Upgrading
   setup container of `wall.setup: outside` gets neither the variable nor the route. See The
   route to qory in `docs/run.md`.
 - A session runs the repository's full test suite when the run documents have `full_suite`
-  true in `type_settings`. `full_suite` false, a `type_settings` without it, documents
-  without `type_settings`, and a `full_suite` outside `type_settings` run no suite.
+  true in `type_settings`. A session runs no suite when `full_suite` is false, when
+  `type_settings` has no `full_suite`, when the documents have no `type_settings`, and when
+  `full_suite` is outside `type_settings`.
   Forager's after step runs it after the agent's container is removed: when HEAD moved,
   the `full` command of the build plan that the work item had at the launch runs in a fresh
   clone of HEAD, in a container of the run's image on the run's network, so the run's egress

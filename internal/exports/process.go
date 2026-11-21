@@ -233,7 +233,8 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 // an object with json_schema and no other key. json_schema is the JSON Schema of the
 // type_settings of a run's documents, and [checkTypeSchema] checks it as it checks the
 // json_schema of an artifact type, within patterns, the budget of the file's patterns.
-// qory checks no run's type_settings against it. The error is a [settingsRefusal].
+// qory checks no run's type_settings against it. The error is fix first, with the file on
+// the last line, see [settingsRefusal].
 func checkTypeSettings(shown string, settings *yaml.Node, patterns *patternBudget) error {
 	if settings.Kind == 0 {
 		return nil
@@ -255,7 +256,8 @@ func checkTypeSettings(shown string, settings *yaml.Node, patterns *patternBudge
 		return settingsRefusal(shown, "Add json_schema to type_settings, the JSON Schema of a run's type settings.", "type_settings has no json_schema.")
 	}
 	if why := checkTypeSchema("type_settings", schema, patterns); why != "" {
-		return errors.New(why + "\n  type_settings is in " + shown + ".")
+		fix, cause, _ := strings.Cut(why, "\n  ")
+		return settingsRefusal(shown, fix, cause)
 	}
 	return nil
 }
@@ -343,9 +345,9 @@ func processRefusal(shown, fix, cause string) error {
 
 // settingsRefusal is a refusal of type_settings in the process.yaml shown, fix first: the
 // fix, the cause, and the file on the last line, so the first line stays within 100
-// characters whatever the path.
+// characters whatever the path. [Errorf] fits it, so a long key in the fix is shortened.
 func settingsRefusal(shown, fix, cause string) error {
-	return fmt.Errorf("%s\n  %s\n  type_settings is in %s.", fix, cause, shown)
+	return Errorf("%s\n  %s\n  type_settings is in %s.", fix, cause, shown)
 }
 
 // submitRefusal is a refusal of submit in the process.yaml shown, fix first: the fix,

@@ -88,7 +88,8 @@ var typeSchemaDrafts = []string{
 // out, as [checkArtifactType] checks each entry, and that no two entries have one name.
 // The entries share patterns, the budget of the file's patterns. A list with no entries
 // passes. The error has one refusal for each entry it stops on, each written fix first
-// with shown on its last line.
+// with shown on its last line, as [Fit] fits it, so a long name or key in a fix line is
+// shortened.
 func checkArtifactTypes(shown string, list *yaml.Node, patterns *patternBudget) error {
 	if list.Kind == 0 {
 		return nil
@@ -112,7 +113,7 @@ func checkArtifactTypes(shown string, list *yaml.Node, patterns *patternBudget) 
 		}
 	}
 	if len(lines) > 0 {
-		return errors.New(strings.Join(lines, "\n"))
+		return errors.New(Fit(strings.Join(lines, "\n")))
 	}
 	return nil
 }
