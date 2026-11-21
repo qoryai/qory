@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-func TestNewReviewerInputsJSON(t *testing.T) {
-	in, err := newReviewerInputs("reviewers", "/r/a/report.json", "/r/suite_result.json", "/r/start")
+func TestNewReviewSessionInputsJSON(t *testing.T) {
+	in, err := newReviewSessionInputs("/r/a/report.json", "/r/suite_result.json", "/r/start")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -18,7 +18,7 @@ func TestNewReviewerInputsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"stage":{"reviewers":"reviewers"},"review":{"report":"/r/a/report.json","suite_result":"/r/suite_result.json"},"start_artifacts":"/r/start"}`
+	const want = `{"review":{"report":"/r/a/report.json","suite_result":"/r/suite_result.json"},"start_artifacts":"/r/start"}`
 	if string(data) != want {
 		t.Errorf("json = %s, want %s", data, want)
 	}
@@ -29,7 +29,7 @@ func TestNewReviewerInputsJSON(t *testing.T) {
 
 // The members follow the naming of qoryInputs, which withQoryMember writes, and none
 // repeats one of its members.
-func TestReviewerInputsNamingMatchesQoryInputs(t *testing.T) {
+func TestReviewSessionInputsNamingMatchesQoryInputs(t *testing.T) {
 	keys := func(v any) []string {
 		data, err := json.Marshal(v)
 		if err != nil {
@@ -43,34 +43,29 @@ func TestReviewerInputsNamingMatchesQoryInputs(t *testing.T) {
 	}
 	form := regexp.MustCompile(`^[a-z]+(_[a-z]+)*$`)
 	have := keys(qoryInputs{})
-	for _, k := range keys(reviewerInputs{}) {
+	for _, k := range keys(reviewSessionInputs{}) {
 		if !form.MatchString(k) || slices.Contains(have, k) {
 			t.Errorf("member %q is not a new snake_case name beside %q", k, have)
 		}
 	}
 }
 
-func TestNewReviewerInputsRefuses(t *testing.T) {
+func TestNewReviewSessionInputsRefuses(t *testing.T) {
 	const ok = "/r/a/report.json"
 	for _, c := range []struct {
-		name  string
-		role  string
-		spec  string
-		suite string
-		start string
-		want  string
+		name   string
+		report string
+		suite  string
+		start  string
+		want   string
 	}{
-		{"empty role", "", ok, "/s", "/t", "group role"},
-		{"upper-case role", "Reviewers", ok, "/s", "/t", "group role"},
-		{"role the harness reads as no", "none", ok, "/s", "/t", "reads false, no, null, off, none and 0 as no role"},
-		{"role 0", "0", ok, "/s", "/t", "group role"},
-		{"relative report", "reviewers", "report.json", "/s", "/t", "qory.review.report"},
-		{"suite result with ..", "reviewers", ok, "/s/../x", "/t", "qory.review.suite_result"},
-		{"suite result below .git is fine to read", "reviewers", ok, "/w/.git/s", "/t", ""},
-		{"relative start", "reviewers", ok, "/s", "start", "qory.start_artifacts"},
-		{"report in .claude", "reviewers", "/w/.claude/r.json", "/s", "/t", "qory.review.report"},
+		{"relative report", "report.json", "/s", "/t", "qory.review.report"},
+		{"suite result with ..", ok, "/s/../x", "/t", "qory.review.suite_result"},
+		{"suite result below .git is fine to read", ok, "/w/.git/s", "/t", ""},
+		{"relative start", ok, "/s", "start", "qory.start_artifacts"},
+		{"report in .claude", "/w/.claude/r.json", "/s", "/t", "qory.review.report"},
 	} {
-		_, err := newReviewerInputs(c.role, c.spec, c.suite, c.start)
+		_, err := newReviewSessionInputs(c.report, c.suite, c.start)
 		if c.want == "" {
 			if err != nil {
 				t.Errorf("%s: error %v", c.name, err)
