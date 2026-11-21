@@ -84,12 +84,12 @@
         "json_schema": {"description": "The JSON Schema of a structured type's file.", "type": "object"},
         "withdrawable": {"description": "Whether a run may withdraw a name of the type. Optional, and true when the entry has none. A standard type and a custom type may both set it.", "type": "boolean"},
         "deliver": {
-          "description": "When qory sends the versions of the type to the target in the document. Optional: without it, qory stores the type and never sends it. Only a custom structured type has it, and its json_schema has a top-level property target that is the primitive reference, $ref https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference, written directly, in an allOf, or through a definition under $defs, or a written-out copy of that definition in any of these places. qory checks that property, which this schema cannot state.",
+          "description": "Marks a type that Apiary delivers to the target in the run documents. Optional: a type without it is stored and never delivered. Only a custom structured type has it, and its json_schema is an object schema with a top-level property target that is the primitive reference, $ref https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference, written directly, in an allOf, or through a definition under $defs, or a written-out copy of that definition in any of these places. A top-level property may have x-qory-fill with one of pushed-commits, pushed-head, pushed-base, pushed-branch, pushed-base-branch or pushed-commits-left-out, which qory fills from its push. qory checks the property and the marks, which this schema cannot state.",
           "type": "object",
           "required": ["send"],
           "additionalProperties": false,
           "properties": {
-            "send": {"description": "When qory sends a version: end_of_run at the end of the run; after_gate after the gate of the run's stage passes, and until then qory stores the version and sends nothing.", "enum": ["end_of_run", "after_gate"]}
+            "send": {"description": "When Apiary delivers a version: end_of_run at the end of the run; after_gate after the gate of the run's stage passes, and until then qory stores the version.", "enum": ["end_of_run", "after_gate"]}
           }
         }
       },

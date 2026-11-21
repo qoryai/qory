@@ -214,8 +214,11 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 	case structured && schema == nil:
 		return name, fmt.Sprintf("Add json_schema to %s.\n  A structured type has a JSON Schema.\n  The type is in %s.", label, FilePlace)
 	case structured:
-		if why := checkTypeSchema(label, schema, patterns); why != "" || deliver == nil {
+		if why := checkTypeSchema(label, schema, patterns); why != "" {
 			return name, why
+		}
+		if deliver == nil {
+			return name, checkNoFillMarks(label, schema)
 		}
 		var limit int64
 		if size.Decode(&limit) == nil && limit > maxDeliveredBytes {
@@ -269,7 +272,7 @@ func checkDeliver(label string, n *yaml.Node) string {
 	return ""
 }
 
-// notDelivered is the refusal of a deliver on the artifact type label that is not a
+// notDelivered is the message for a deliver on the artifact type label that is not a
 // structured type with a json_schema; what says what the type is or has.
 func notDelivered(label, what string) string {
 	return fmt.Sprintf("Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is sent, and %s %s.\n  The type is in %s.", label, what, FilePlace)
@@ -296,7 +299,10 @@ func checkDeliverTarget(label string, schema *yaml.Node) string {
 	}
 	root, _ := doc.(map[string]any)
 	if draft, has := root["$schema"]; has && !slices.Contains(typeSchemaDrafts[:2], fmt.Sprint(draft)) {
-		return typeRefusal("Remove $schema from the json_schema, or set it to the 2020-12 draft, or remove `deliver`.", "json_schema of "+label+" has another draft, and draft-07 ignores the keys next to a $ref.")
+		return typeRefusal("Set the root $schema of the json_schema to the 2020-12 draft, or remove it.", "json_schema of "+label+" has another draft, and draft-07 ignores the keys next to a $ref.")
+	}
+	if kind, has := root["type"]; has && kind != "object" {
+		return typeRefusal("Set type of the json_schema to object, or remove `deliver`.", "json_schema of "+label+" has another root type, and a target is a member of an object.")
 	}
 	if hasResolutionKey(root) {
 		return typeRefusal("Remove $id, $anchor and $dynamicAnchor from the json_schema, or remove `deliver`.", "json_schema of "+label+" has one. A $ref under such a key can resolve to a different schema.")
@@ -308,7 +314,7 @@ func checkDeliverTarget(label string, schema *yaml.Node) string {
 		cause = "The top-level target in json_schema of " + label + " is not the primitive reference."
 	}
 	if has && isPrimitiveReference(root, target, map[string]bool{}) {
-		return ""
+		return checkFillMarks(label, root)
 	}
 	return fmt.Sprintf("Add a top-level `target` of the primitive `reference` to the schema, or remove `deliver`.\n  %s\n  The type is in %s.", cause, FilePlace)
 }
@@ -318,15 +324,21 @@ func checkDeliverTarget(label string, schema *yaml.Node) string {
 // shortcut: a property or a definition with one of these names fails too, and a value
 // of enum or const is read as a schema; replace it when a type needs such a name.
 func hasResolutionKey(node any) bool {
+	return hasKey(node, false, "$id", "$anchor", "$dynamicAnchor")
+}
+
+// hasKey reports whether node, a decoded JSON Schema, has one of keys in any object. With
+// skipOwn, the keys of node itself do not count, and those of the objects in it do.
+func hasKey(node any, skipOwn bool, keys ...string) bool {
 	switch v := node.(type) {
 	case map[string]any:
 		for key, member := range v {
-			if key == "$id" || key == "$anchor" || key == "$dynamicAnchor" || hasResolutionKey(member) {
+			if !skipOwn && slices.Contains(keys, key) || hasKey(member, false, keys...) {
 				return true
 			}
 		}
 	case []any:
-		return slices.ContainsFunc(v, hasResolutionKey)
+		return slices.ContainsFunc(v, func(member any) bool { return hasKey(member, false, keys...) })
 	}
 	return false
 }

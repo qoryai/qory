@@ -681,24 +681,33 @@ release may change what an existing document does, and states it under Upgrading
   that address from a built-in copy and reads no file or URL; a reference to any other
   address fails as before. See The primitives in `contracts/harness/v1/README.md`.
 - An artifact type of a `process.yaml` can have `deliver: {send: end_of_run}` or
-  `deliver: {send: after_gate}`. Without `deliver`, qory stores the type and never sends
-  it. Only a structured type has `deliver`, and its `json_schema` has a top-level property
-  `target` that is the primitive `reference`, written as a `$ref` to
-  `primitives.schema.json#/$defs/reference`, in an `allOf`, or through a definition under
-  `$defs`, or as a written-out copy of that definition. In a written-out copy, each
-  definition that it refers to under `$defs` is the definition of that name in the
+  `deliver: {send: after_gate}`. `deliver` marks a type that Apiary delivers to the
+  target in the run documents, at the end of the run or after the gate of the run's
+  stage passes; a type without `deliver` is stored and never delivered. Only a
+  structured type has `deliver`, with a `size_limit` of at most 786432 bytes, and its
+  `json_schema` has a root `type` of `object` or none and a top-level property `target`
+  that is the primitive `reference`, written as a `$ref` to
+  `primitives.schema.json#/$defs/reference`, in an `allOf`, or through a definition
+  under `$defs`, or as a written-out copy of that definition. In a written-out copy,
+  each definition that it refers to under `$defs` is the definition of that name in the
   primitives. A schema fails when `$id`, `$anchor` or `$dynamicAnchor` is a key anywhere
   in it, also as the name of a property or a definition, because `$id` changes where a
-  `$ref` points. It fails when `$schema` is anything other than
+  `$ref` points. It fails when the root `$schema` is anything other than
   `https://json-schema.org/draft/2020-12/schema`, with or without a final `#`, because
   draft-07 ignores the keys next to a `$ref`. It fails when the `$ref` that leads to the
-  `target` goes through a `$defs` name with a character other than a letter, a digit, `_`
-  or `-`, because the compiler decodes `%`, `~0` and `~1` and splits a name at `/`. A
-  type with `deliver` has a `size_limit` of at most 786432 bytes. A `deliver` that breaks
-  a rule stops the command with the fix on the first line, at most 100 characters, and
-  the type name on the second line, such as
-  ``Add a top-level `target` of the primitive `reference` to the schema, or remove
-  `deliver`.``
+  `target` goes through a `$defs` name with a character other than a letter, a digit,
+  `_` or `-`, because the compiler decodes `%`, `~0` and `~1` and splits a name at `/`.
+  A `deliver` that breaks a rule stops the command with the fix on the first line, at
+  most 100 characters, and the type name on the second line, such as ``Add a top-level
+  `target` of the primitive `reference` to the schema, or remove `deliver`.``
+- A top-level property of a type with `deliver` can have the keyword `x-qory-fill` with
+  one of these values, each on one property at most: `pushed-commits` on a list whose
+  `items` are the primitive `reference` (the commits qory pushed to the target, oldest
+  first), `pushed-head` and `pushed-base` on a `reference`, `pushed-branch` and
+  `pushed-base-branch` on a string, and `pushed-commits-left-out` on an integer. qory
+  stops the command with the fix on the first line when `x-qory-fill` is below the top
+  level, on a property of another shape, a value that qory does not fill, or in a type
+  without `deliver`.
 - A stage of the `process` of a `process.yaml` can have `outputs`, a list of objects with
   `type`, the name of an entry of `artifact_types`, and `required`, `true` or `false`,
   `false` when left out. An output has no other key. qory stops the command with the fix
