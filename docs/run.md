@@ -2512,17 +2512,15 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
 - `update qory, or ask Qory Apiary's instance admin: the response to the run code does not
   pass qory's checks: <reason>; the code is used`, where `<reason>` is a check that failed,
   such as `it breaks documents.schema.json`, and contains no value of the response
-  but a member's name, an id, a revision or a byte count
-- `update qory: the response to the run code is for the step <step>, and qory runs a run
-  code's run for the steps workflow and prebuild only; the code is used`
+  but a member's name, an id, a revision or a byte count. Documents with a step other
+  than `workflow` and `prebuild`, and documents of the step `workflow` with no
+  `workflow`, stop with `it breaks documents.schema.json`
 - `set wall.image, pinned by its digest, wall.user and wall.prebuild_image in
   forager.yaml: a prebuild from a run code builds with them; the code is used`
 - `run the prebuild on a machine without an access key: this machine has an access key in
   <path>, and a prebuild fetches the target's code with git on this machine, outside the
   wall; the code is used`, when a file with an access key's secret appeared beside `forager.yaml` while
   the code was redeemed
-- `set a workflow for the workspace in Qory Apiary, then take the work item in again: the
-  response to the run code has no workflow; the code is used`
 - `The run settings set no runtime, so the run did not start; the code is used.` and the
   next line `qory runs one of claude and codex.`, when the documents
   contain no `run_settings`, a null one, or `run_settings` whose `runtime` is missing,
