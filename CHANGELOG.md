@@ -686,13 +686,13 @@ release may change what an existing document does, and states it under Upgrading
   stage passes; a type without `deliver` is stored and never delivered. Only a
   structured type has `deliver`, with a `size_limit` of at most 786432 bytes, and its
   `json_schema` has a root `type` of `object` or none and a top-level property `target`
-  that is the primitive `reference` and is in the `required` list of the root, which is
-  the only place that counts, written as a `$ref` to
+  that is the primitive `reference`, written as a `$ref` to
   `primitives.schema.json#/$defs/reference`, in an `allOf`, or through a definition
   under `$defs`, or as a written-out copy of that definition. In a written-out copy,
   each definition that it refers to under `$defs` is the definition of that name in the
-  primitives. A schema fails when `$id`, `$anchor` or `$dynamicAnchor` is a key anywhere
-  in it, also as the name of a property or a definition, because `$id` changes where a
+  primitives. Its name is in the `required` list of the root, and only the root list
+  counts. A schema fails when `$id`, `$anchor` or `$dynamicAnchor` is a key anywhere in
+  it, also as the name of a property or a definition, because `$id` changes where a
   `$ref` points. It fails when the root `$schema` is anything other than
   `https://json-schema.org/draft/2020-12/schema`, with or without a final `#`, because
   draft-07 ignores the keys next to a `$ref`. It fails when the `$ref` that leads to the
