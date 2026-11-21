@@ -125,9 +125,10 @@ func (codex) Reserved() []render.Reserved {
 //
 // config.toml also gets features.unified_exec_tty = false, so the agent cannot start a
 // shell with a terminal and send it commands with write_stdin, for which Codex 0.170.0
-// runs no PreToolUse hook; web_search = "disabled", in place of the cached web search
-// that Codex 0.169.0 uses for a config.toml without the key
-// (codex-rs/core/src/config/mod.rs, resolve_web_search_mode); and a
+// runs no PreToolUse hook; web_search = "disabled", since without the key Codex 0.169.0
+// turns web search on: cached, or live in a run with --sandbox danger-full-access, such
+// as a walled run (codex-rs/core/src/config/mod.rs, resolve_web_search_mode and
+// resolve_web_search_mode_for_turn); and a
 // hooks.state table with a trusted_hash for each command hook of hooks.json and
 // config.toml, see [trustedHooks]. The instructions written as AGENTS.md end with the
 // names the session registers, see [render.Addressing]: a Codex home registers them as

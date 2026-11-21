@@ -4770,8 +4770,9 @@ so the harness's guard would not run for them. A call with `tty: true` fails wit
 cannot start an interactive shell.
 
 `config.toml` also sets `web_search = "disabled"`, as the composed home's `config.toml` does
-for a run without a wall, so the model gets no web search tool. Without the key, Codex 0.169.0
-uses cached web search.
+for a run without a wall. Without the key, Codex 0.169.0 turns web search on: cached, or live
+in a run with `--sandbox danger-full-access`, which qory adds to a walled `codex exec` run. In
+a walled run, qory stops `--search` and `-c web_search`, so the agent has no web search tool.
 
 A walled Codex run copies the composed home's `skills/`, `rules/` and `agents/` with every
 link replaced by the file or folder it leads to, since Codex 0.167.2 passes over a

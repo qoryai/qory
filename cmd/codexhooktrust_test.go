@@ -3,16 +3,25 @@ package cmd_test
 import (
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 
 	"github.com/qoryai/qory/cmd"
 )
 
-// topWebSearchOff matches web_search = "disabled" on a line of its own with no indent,
-// where the TOML encoder puts a key of the top level, before the first table.
-var topWebSearchOff = regexp.MustCompile(`(?m)\A[^\[]*^web_search = "disabled"$`)
+// webSearch is the value of the top-level key web_search in config, a Codex config.toml.
+func webSearch(t *testing.T, config string) string {
+	t.Helper()
+	var m struct {
+		WebSearch string `toml:"web_search"`
+	}
+	if _, err := toml.Decode(config, &m); err != nil {
+		t.Fatalf("config.toml: %v\n%s", err, config)
+	}
+	return m.WebSearch
+}
 
 // TestComposeTrustsTheCodexCommandHooks composes for codex a module with a PreToolUse
 // command hook in config.toml, and an mcp_tool hook and a Stop command hook with U+2028
@@ -49,8 +58,8 @@ func TestComposeTrustsTheCodexCommandHooks(t *testing.T) {
 			t.Errorf("config.toml lacks %q:\n%s", want, config)
 		}
 	}
-	if !topWebSearchOff.MatchString(config) {
-		t.Errorf("config.toml lacks web_search = \"disabled\" at the top level:\n%s", config)
+	if got := webSearch(t, config); got != "disabled" {
+		t.Errorf("config.toml has web_search %q, want \"disabled\":\n%s", got, config)
 	}
 	if strings.Count(config, "trusted_hash") != 1 {
 		t.Errorf("config.toml has %d trusted hashes, want 1:\n%s", strings.Count(config, "trusted_hash"), config)

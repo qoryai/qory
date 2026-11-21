@@ -138,8 +138,8 @@ func TestAWalledCodexRunMountsAFreshCodexHome(t *testing.T) {
 		homes = append(homes, home)
 		work := filepath.Join(filepath.Dir(home), "work")
 		wants(t, s.config, "[projects.\""+work+"\"]\n    trust_level = \"untrusted\"\n", "[projects.\"/workspace\"]\n    trust_level = \"untrusted\"\n")
-		if !topWebSearchOff.MatchString(s.config) {
-			t.Errorf("the bound config.toml lacks web_search = \"disabled\" at the top level:\n%s", s.config)
+		if got := webSearch(t, s.config); got != "disabled" {
+			t.Errorf("the bound config.toml has web_search %q, want \"disabled\":\n%s", got, s.config)
 		}
 		if slices.Contains(s.rules, codex.ReadRulesName) {
 			t.Errorf("a write run's rules: %q", s.rules)
