@@ -517,11 +517,11 @@ func TestARunCodeWithSharedRunAndFullSuiteRunsOneSession(t *testing.T) {
 	}
 }
 
-// TestARunCodeWithFullSuiteSetsTheAfterStep: a run from a run code behind a wall, whose documents
-// have full_suite true in type_settings and whose work item has a build plan with a full row,
-// gives its session the after step with the suite's cap as its time limit. Documents with
-// full_suite false, with type_settings and no full_suite in it, with no type_settings, or with
-// full_suite outside type_settings, give none. No test seam sets the input.
+// TestARunCodeWithFullSuiteSetsTheAfterStep: the session of a run from a run code behind a wall,
+// whose documents have full_suite true in type_settings and whose work item has a build plan
+// with a full row, has the after step with the suite's cap as its time limit. With full_suite
+// false, with type_settings and no full_suite in it, with no type_settings, or with full_suite
+// outside type_settings, the session has none. No test seam sets the input.
 func TestARunCodeWithFullSuiteSetsTheAfterStep(t *testing.T) {
 	for _, c := range []struct {
 		name   string

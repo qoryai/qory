@@ -818,8 +818,8 @@ func TestARunWritesOnlyWithAccessWriteInItsDocuments(t *testing.T) {
 }
 
 // TestFullSuiteOfTheDocumentsIsTheRunsFullSuite: codeRunOf takes full_suite of the documents'
-// type_settings; a document with false, with none, with one that is not a boolean, or with no
-// type_settings gives false.
+// type_settings. fullSuite is false for a document with false, with none, with one that is not
+// a boolean, with a member name in another case, or with no type_settings.
 func TestFullSuiteOfTheDocumentsIsTheRunsFullSuite(t *testing.T) {
 	for _, c := range []struct {
 		name     string
