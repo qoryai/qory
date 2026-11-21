@@ -687,6 +687,8 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- An `artifact_types` message with a long key shows the key shortened on its first
+  line and in full on its last line.
 - A run from a run code runs the step `workflow`, in place of `explore`: it starts the
   workflow that the run documents set, whichever workflow of the process Qory Apiary
   starts. The documents name what the run is for in `subject`, with a `kind`, such as

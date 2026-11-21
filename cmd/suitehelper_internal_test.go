@@ -767,7 +767,7 @@ func workspaceRepo(t *testing.T) string {
 	return dir
 }
 
-// TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite: with full_suite true, a walled
+// TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite: with fullSuite true, a walled
 // write run with a full row and a git folder gets After; each other case gets none.
 func TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite(t *testing.T) {
 	for _, c := range []struct {

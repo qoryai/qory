@@ -234,7 +234,7 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 // type_settings of a run's documents, and [checkTypeSchema] checks it as it checks the
 // json_schema of an artifact type, within patterns, the budget of the file's patterns.
 // qory checks no run's type_settings against it. The error is fix first, with the file on
-// the last line, see [settingsRefusal].
+// the third line and, for a long key, the key's full name on a fourth, see [settingsRefusal].
 func checkTypeSettings(shown string, settings *yaml.Node, patterns *patternBudget) error {
 	if settings.Kind == 0 {
 		return nil
@@ -344,8 +344,9 @@ func processRefusal(shown, fix, cause string) error {
 }
 
 // settingsRefusal is a refusal of type_settings in the process.yaml shown, fix first: the
-// fix, the cause, and the file on the last line, so the first line stays within 100
-// characters whatever the path. [Errorf] fits it, so a long key in the fix is shortened.
+// fix, the cause, and the file, so the first line stays within 100 characters whatever the
+// path. [Errorf] fits it: a long key in the fix is shortened, and a fourth line has its
+// full name.
 func settingsRefusal(shown, fix, cause string) error {
 	return Errorf("%s\n  %s\n  type_settings is in %s.", fix, cause, shown)
 }

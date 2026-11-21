@@ -266,7 +266,8 @@ func TestASessionThatLeftHeadWhereItStartedPostsNothing(t *testing.T) {
 	wants(t, out, "the full suite did not run: the session left HEAD at the commit it started at")
 }
 
-// TestARunWithFullSuiteFalseRunsNoSuite: with full_suite false, the session has no after step.
+// TestARunWithFullSuiteFalseRunsNoSuite: with SetFullSuite(true) left out, the session has no
+// after step.
 func TestARunWithFullSuiteFalseRunsNoSuite(t *testing.T) {
 	api := newSuiteAPI(t, http.StatusCreated)
 	var seen session.SessionSpec

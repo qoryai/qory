@@ -763,7 +763,8 @@ qory checks `json_schema` as it checks the `json_schema` of an artifact type, wi
 same drafts and limits, see [Artifact types](#artifact-types). qory checks no run's type
 settings against it: Qory Apiary checks them when it writes the run documents. A
 `type_settings` that breaks a rule stops the command with a refusal of three lines: the
-fix, the cause, and the file:
+fix, the cause, and the file. When the fix line shortens a long key, a fourth line has
+the key's full name:
 
 ```text
 Fix json_schema of type_settings so that it compiles as a JSON Schema.
