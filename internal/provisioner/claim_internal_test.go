@@ -184,6 +184,33 @@ func TestAClaimWithAMemberTheSchemaDoesNotDefineIsRead(t *testing.T) {
 	cl.RunCode.Clear()
 }
 
+// TestAMustUnderstandOfAMemberTheReaderLacksIsRefused reads the contract's claim, whose
+// must_understand lists pool_id, into a struct that has only dispatch_id: the schema
+// accepts the answer, and the read stops with the text of a must_understand that the
+// reader does not meet. Into a struct with pool_id, it is read.
+func TestAMustUnderstandOfAMemberTheReaderLacksIsRefused(t *testing.T) {
+	d := claimFixture(t, "machine.json")
+	d["must_understand"] = []any{"/pool_id"}
+	body := marshal(t, d)
+	var lacks struct {
+		DispatchID string `json:"dispatch_id,case:strict"`
+	}
+	const want = "its must_understand lists a member of claim-answer.schema.json that qory does not read"
+	if err := readAnswer("claim-answer.schema.json", body, &lacks); err == nil || err.Error() != want {
+		t.Errorf("a struct without pool_id: %v, want %q", err, want)
+	}
+	if lacks.DispatchID != "" {
+		t.Errorf("the refused answer was decoded: %q", lacks.DispatchID)
+	}
+	var has struct {
+		DispatchID string `json:"dispatch_id,case:strict"`
+		PoolID     string `json:"pool_id,case:strict"`
+	}
+	if err := readAnswer("claim-answer.schema.json", body, &has); err != nil || has.PoolID == "" {
+		t.Errorf("a struct with pool_id: %+v, %v", has, err)
+	}
+}
+
 // TestAClaimMemberInAnotherCaseIsNotRead reads the contract's claim with a second
 // dispatch_id written in capitals, before and after the defined one: the claim keeps the
 // defined member's value. A build that matches member names in any case fails here.
