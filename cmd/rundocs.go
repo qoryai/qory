@@ -211,7 +211,9 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Target != nil && doc.Target.Address != nil {
 		target.System, target.Path, target.Version = doc.Target.Address.System, doc.Target.Address.Path, doc.TargetVersion
 	}
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: doc.FullSuite, hidden: hidden, target: target, access: doc.Access}
+	// shortcut: full_suite moved into type_settings, so fullSuite stays false; Q-68
+	// replaces this with the read of doc.TypeSettings.
+	r := &codeRun{runtime: runtime, settings: settings, harness: harness, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, hidden: hidden, target: target, access: doc.Access}
 	if doc.Subject != nil && doc.Subject.Kind == provisioner.SubjectWorkItem {
 		r.workItem = doc.Subject.ID
 	}

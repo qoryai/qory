@@ -105,17 +105,20 @@ func TestEveryDocumentsFixtureIsRead(t *testing.T) {
 }
 
 // TestDocumentsWithSharedRunAndFullSuiteAreRead reads explore documents that set
-// time_limit_minutes, shared_run and full_suite: each member is read as set.
+// time_limit_minutes, shared_run and type_settings.full_suite: each member is read as set.
 func TestDocumentsWithSharedRunAndFullSuiteAreRead(t *testing.T) {
 	raw := documentsOf(t, "explore-run-settings.json", func(d map[string]any) {
-		d["time_limit_minutes"], d["shared_run"], d["full_suite"] = 45, true, true
+		d["time_limit_minutes"], d["shared_run"], d["type_settings"] = 45, true, map[string]any{"full_suite": true}
 	})
 	doc, err := provisioner.ReadDocuments(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.TimeLimitMinutes != 45 || !doc.SharedRun || !doc.FullSuite {
-		t.Errorf("read time_limit_minutes %d, shared_run %v, full_suite %v", doc.TimeLimitMinutes, doc.SharedRun, doc.FullSuite)
+	var settings struct {
+		FullSuite bool `json:"full_suite"`
+	}
+	if doc.TimeLimitMinutes != 45 || !doc.SharedRun || json.Unmarshal(doc.TypeSettings, &settings) != nil || !settings.FullSuite {
+		t.Errorf("read time_limit_minutes %d, shared_run %v, type_settings %s", doc.TimeLimitMinutes, doc.SharedRun, doc.TypeSettings)
 	}
 }
 
