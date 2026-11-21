@@ -394,37 +394,16 @@ func TestAHandoffTitleOfSpacesDropsTheText(t *testing.T) {
 	}
 }
 
-// TestAHandoffTitleOfInvisibleCharactersIsTheKnownDifferenceFromThePinnedContract is a title of
-// only spaces, U+200C and U+200D: the hand-off drops it, and the pinned contract (integrations
-// e4bf534a) still accepts it as a draft_title line. When the pin moves to a contract that stops
-// it, this test fails: move these titles into the agreement table below and delete this test.
-func TestAHandoffTitleOfInvisibleCharactersIsTheKnownDifferenceFromThePinnedContract(t *testing.T) {
-	for _, title := range []string{"\u200c", "\u200d", " \u200c\u200d "} {
-		lines := strings.Join([]string{
-			contracts.SubmitKeyDraftNumber + " 1", contracts.SubmitKeyDraftURL + " https://git.example.com/a",
-			contracts.SubmitKeyDraftTitle + " " + title, contracts.SubmitKeyDraftState + " draft", contracts.SubmitKeyDraftAction + " opened",
-		}, "\n") + "\n"
-		if contracts.ParseSubmitLines(lines, "git.example.com", contracts.DraftOpen, nil).Draft == nil {
-			t.Errorf("title %q: the pinned contract stops it now; move it into the agreement table", title)
-		}
-		if visibleTitle(title) {
-			t.Errorf("title %q: the hand-off keeps it", title)
-		}
-	}
-}
-
 // TestTheHandoffTitleRuleAgreesWithTheContractOnTheseTitles is a title that the pinned contract
 // accepts or does not accept as the draft_title line of the submit program: the hand-off keeps
 // each one that the contract accepts and drops each one that it does not, so the program's line
-// may return every title that the hand-off keeps. The hand-off also drops the format characters
-// that the contract does not list, such as U+0600 and the tag character U+E0041, which this table leaves out,
-// and a title of only spaces, U+200C and U+200D, see
-// TestAHandoffTitleOfInvisibleCharactersIsTheKnownDifferenceFromThePinnedContract.
+// may return every title that the hand-off keeps. Both stop every Cc and Cf character except
+// U+200C and U+200D, and a title of only spaces, U+200C and U+200D.
 func TestTheHandoffTitleRuleAgreesWithTheContractOnTheseTitles(t *testing.T) {
 	for _, title := range []string{
 		"Add a page", "Add \u00e9 \U0001F468\u200d\U0001F469\u200d\U0001F467", "a\u200cb", " a\u00a0", strings.Repeat("a", maxTitle),
 		"a\u200bb", "a\u202eb", "a\u2028b", "a\u2029b", "a\u00adb", "a\ufeffb", "a\u061cb", "a\x07b", "a\u0085b",
-		"   ", "\u00a0\u3000\u2009", strings.Repeat("a", maxTitle+1),
+		"a\u0600b", "a\U000E0041b", "   ", "\u00a0\u3000\u2009", "\u200c", "\u200d", " \u200c\u200d ", strings.Repeat("a", maxTitle+1),
 	} {
 		lines := strings.Join([]string{
 			contracts.SubmitKeyDraftNumber + " 1", contracts.SubmitKeyDraftURL + " https://git.example.com/a",

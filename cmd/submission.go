@@ -263,8 +263,7 @@ func notTitleRune(r rune) bool { return !submission.TitleRune(r) }
 // The spaces are the ones that the contract's draft_title rule lists (U+0020, U+00A0, U+1680,
 // U+2000 to U+200A, U+202F, U+205F and U+3000), which are the characters that [unicode.IsSpace]
 // passes once controls and U+2028 and U+2029 are out. U+200C and U+200D pass [submission.TitleRune]
-// but show nothing alone. The pinned contract still accepts a title of only these, see
-// TestAHandoffTitleOfInvisibleCharactersIsTheKnownDifferenceFromThePinnedContract.
+// but show nothing alone, and the contract's draft_title rule stops a title of only these.
 func visibleTitle(title string) bool {
 	return strings.ContainsFunc(title, func(r rune) bool { return !unicode.IsSpace(r) && r != '\u200c' && r != '\u200d' })
 }
