@@ -681,8 +681,8 @@ release may change what an existing document does, and states it under Upgrading
   person uploaded write each hidden character as `<U+XXXX>`. A hidden character is a
   control or format character except newline, tab, the zero width joiner and non-joiner,
   or a line or paragraph separator. Qory Apiary keeps the stored text unchanged. `.json`
-  files stay valid JSON, a file that is not valid UTF-8 or has a NUL byte stays as it is,
-  and an escaped file is downloaded again on each pull.
+  files stay valid JSON, any other file that is not valid UTF-8 or has a NUL byte stays as
+  it is, and an escaped file is downloaded again on each pull.
 - The `config.toml` of a Codex home, and of a walled Codex run, sets
   `web_search = "disabled"`. Without the key, Codex 0.169.0 turns web search on: cached,
   or live in a run with `--sandbox danger-full-access`, such as a walled run.

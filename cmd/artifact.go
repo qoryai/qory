@@ -1423,9 +1423,9 @@ func (s *artifactStore) fetch(ctx context.Context, client *runapi.Client, artifa
 
 // escapedFile returns content, the checked bytes of the file filename, as the agent
 // reads it. A filename that ends in .json, in any case, gets [sourcetext.EscapeJSONFile],
-// which keeps the whitespace between tokens and a byte order mark. Other content that is
-// valid UTF-8 with no NUL byte gets [sourcetext.Escape], and so does a .json file that
-// is not JSON text. Any other content is binary, and stays as it is.
+// which keeps the whitespace between tokens and a byte order mark. A .json file that is
+// not JSON text, and other content, gets [sourcetext.Escape] only when it is valid UTF-8
+// with no NUL byte. Any other content is binary, and stays as it is.
 func escapedFile(filename string, content []byte) []byte {
 	if strings.EqualFold(filepath.Ext(filename), ".json") {
 		if escaped, err := sourcetext.EscapeJSONFile(content); err == nil {
