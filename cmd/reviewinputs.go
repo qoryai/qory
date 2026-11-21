@@ -7,10 +7,11 @@ import (
 	"strconv"
 )
 
-// The members of the member qory of inputs.json that a stage with reviewers adds. They are
-// named as the members of qoryInputs are: lower-case words joined by underscores. Q-36 adds
-// qory.start_commits, qory.start_artifacts for a Build session, and the members commit,
-// diff, previous_findings and build_report to qory.review; this file does not define them.
+// The members of the member qory of inputs.json that a stage with reviewers adds. They
+// are named as the members of qoryInputs are: lower-case words joined by underscores.
+// Q-36 adds qory.start_commits, qory.start_artifacts for a Build session, and the members
+// commit, diff, previous_findings and build_report to qory.review; this file does not
+// define them.
 
 // stageInputs is qory.stage, written into the inputs.json of every session of a stage
 // whose workflow entry has reviewers.
@@ -30,9 +31,9 @@ type reviewInputs struct {
 	SuiteResult string `json:"suite_result"`
 }
 
-// reviewStartArtifactTypes are the types of the work item's artifacts that qory pulls into
-// the start_artifacts folder of a reviewer's session: the acceptance criteria, the spec and
-// the build plan, which acceptance-reviewer reads from <start>/<type>/<name>/v<N>/.
+// reviewStartArtifactTypes are the types of the work item's artifacts that qory pulls
+// into the start_artifacts folder of a reviewer's session: the acceptance criteria, the
+// spec and the build plan, which acceptance-reviewer reads below <start>/<type>/.
 var reviewStartArtifactTypes = []string{"acceptance-criteria", "spec", "build-plan"}
 
 // reviewerInputs is the members of qory that a reviewer's inputs.json has beside the ones
