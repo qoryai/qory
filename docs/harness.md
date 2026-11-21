@@ -779,7 +779,7 @@ Three limits apply to a run without a wall:
 
 qory's `config.toml` also sets `features.unified_exec_tty = false`, in a walled run too. A shell that the agent starts with a terminal takes later commands through `write_stdin`, for which Codex runs no `PreToolUse` hook; with this setting, Codex starts no shell with a terminal. A Codex agent cannot start an interactive shell.
 
-qory's `config.toml` also sets `web_search = "disabled"`, in a walled run too, so the model gets no web search tool. Without the key, Codex turns web search on in cached mode. A fragment that sets `web_search` fails the compose.
+qory's `config.toml` also sets `web_search = "disabled"`, in a walled run too. Without the key, Codex 0.169.0 uses cached web search. A fragment that sets `web_search` fails the compose.
 
 ## Removing the harness
 
