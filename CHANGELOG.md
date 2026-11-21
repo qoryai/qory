@@ -469,16 +469,17 @@ release may change what an existing document does, and states it under Upgrading
   since no other user may replace a file in it. qory never writes or removes the file.
   `qory run`, `qory run pool`, `qory run register` and `qory run end` stop with an error
   when the setting is there.
-- A run from a run code whose documents set `target_version` fetches the target's
-  repository, the first entry of `QORY_RUN_REPOSITORIES`, at that commit, by its id, in
-  place of the head of its default branch, onto a local branch with the default branch's
-  name and no upstream. When the documents contain no harness document, the compose reads
+- A run from a run code whose documents set `target_version` fetches the repository at
+  the target's `address`, its `system` and `path`, the first entry of
+  `QORY_RUN_REPOSITORIES`, at that commit, by its id, in place of the head of its default
+  branch, onto a local branch with the default branch's name and no upstream. When the documents contain no harness document, the compose reads
   the checkout's `qory.yaml` or `harness.yaml` as Qory Apiary checked it. Each of these
   stops the run before the compose, exit 1: a target on the run's system that is a later
   entry of `QORY_RUN_REPOSITORIES`, that the list does not contain, or with an empty
   list; a version that is not a commit id; and a commit that the server does not have or
-  does not serve by its id. A target on another system, or a run with no
-  `QORY_RUN_SYSTEM`, does not use `target_version`.
+  does not serve by its id. A target with no address, only an adapter's `collection`,
+  is not fetched and does not use `target_version`, nor does a target on another system
+  or a run with no `QORY_RUN_SYSTEM`.
 - The harness section of a `qory.yaml` that defines a stack, without `extends`, may list
   `workflows`, with the keys and checks of a `qory-stack.yaml`, such as `access`. A
   section that extends a stack takes the base's workflows, and one that also

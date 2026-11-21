@@ -58,9 +58,15 @@ func runAtVersion(t *testing.T, h *hostFetch, repositories, version string) (str
 // runAtVersionOn is [runAtVersion] with the run opened on system, "" for none.
 func runAtVersionOn(t *testing.T, h *hostFetch, system, repositories, version string) (string, error, keyRun, []string) {
 	t.Helper()
+	target := map[string]any{"collection": "R_1001", "address": map[string]any{"system": proxygittest.Host, "path": "acme/site"}}
+	return runAtTarget(t, h, system, repositories, version, target)
+}
+
+// runAtTarget is [runAtVersionOn] with the documents' target, target.
+func runAtTarget(t *testing.T, h *hostFetch, system, repositories, version string, target map[string]any) (string, error, keyRun, []string) {
+	t.Helper()
 	g := newCodeRelay(t)
 	g.documents = codeDocuments(t, func(d map[string]any) {
-		target := map[string]any{"system": proxygittest.Host, "path": "acme/site"}
 		d["target"], d["inputs"].(map[string]any)["target"] = target, target
 		d["target_version"] = version
 		if version == "" {
@@ -229,6 +235,33 @@ func TestARunCodeAtATargetVersionWithNoRepositoryRunsOn(t *testing.T) {
 	lacks(t, out, "qory run: fetched ", first[:12])
 	if i := slices.Index(args, "-p"); i < 0 || i+1 >= len(args) || !strings.Contains(args[i+1], "hello ") {
 		t.Errorf("the session does not start the workflow hello: %q", args)
+	}
+}
+
+// TestARunCodeWhoseTargetHasNoAddressFetchesNothing is a run from a run code whose
+// documents set a target with a collection and no address, and a target_version, while
+// the run configuration sets no QORY_RUN_SYSTEM and lists no repository, as for a place
+// that is not on a host: qory run fetches nothing, uses no version, and composes the
+// qory.yaml in the working folder.
+func TestARunCodeWhoseTargetHasNoAddressFetchesNothing(t *testing.T) {
+	h, first, _, files := versionRepository(t)
+	for name, content := range files {
+		writeFile(t, filepath.Join(h.dir, filepath.FromSlash(name)), content)
+	}
+	out, err, n, args := runAtTarget(t, h, "", "", first, map[string]any{"collection": "profile-7"})
+	if !n.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, "qory run: composed ")
+	lacks(t, out, "qory run: fetched ", first[:12])
+	if i := slices.Index(args, "-p"); i < 0 || i+1 >= len(args) || !strings.Contains(args[i+1], "hello ") {
+		t.Errorf("the session does not start the workflow hello: %q", args)
+	}
+	data, _ := os.ReadFile(h.argv)
+	for line := range strings.Lines(string(data)) {
+		if slices.Contains(strings.Fields(line), "fetch") {
+			t.Errorf("git ran a fetch: %s", line)
+		}
 	}
 }
 

@@ -470,7 +470,7 @@ func TestAMissingWorkflowEndsTheRunWithItsReason(t *testing.T) {
 	const fix = "add a skill workflow-example to "
 	const cause = ", or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-example or example (workflow_not_in_harness); the code is used"
 	doc := &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}
-	target := &contracts.Target{System: "code.example.com", Path: "acme/site"}
+	target := &contracts.Target{Collection: "R_1001", Address: &contracts.TargetAddress{System: "code.example.com", Path: "acme/site"}}
 	for _, c := range []struct {
 		harness *contracts.HarnessDocument
 		target  *contracts.Target
@@ -480,7 +480,8 @@ func TestAMissingWorkflowEndsTheRunWithItsReason(t *testing.T) {
 		{nil, target, "code.example.com", "the checkout's harness in the repository acme/site"},
 		{nil, target, "forge.example.org", "the checkout's harness for the target acme/site"},
 		{nil, target, "", "the checkout's harness for the target acme/site"},
-		{nil, &contracts.Target{System: "tickets.example.com", Path: "queue-7"}, "code.example.com", "the checkout's harness for the target queue-7"},
+		{nil, &contracts.Target{Collection: "queue-7", Address: &contracts.TargetAddress{System: "tickets.example.com", Path: "queue-7"}}, "code.example.com", "the checkout's harness for the target queue-7"},
+		{nil, &contracts.Target{Collection: "queue-7"}, "", "the checkout's harness"},
 		{nil, nil, "code.example.com", "the checkout's harness"},
 		{doc, target, "code.example.com", "the workspace's harness"},
 	} {

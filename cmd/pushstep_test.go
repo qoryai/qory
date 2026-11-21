@@ -412,7 +412,7 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	t.Helper()
 	g := newCodeRelay(t)
 	g.documents = codeDocuments(t, func(d map[string]any) {
-		target := map[string]any{"system": proxygittest.Host, "path": "acme/site"}
+		target := map[string]any{"collection": "R_1001", "address": map[string]any{"system": proxygittest.Host, "path": "acme/site"}}
 		d["target"], d["inputs"].(map[string]any)["target"] = target, target
 		d["target_version"] = p.first
 		d["harness_hidden"] = false

@@ -96,8 +96,9 @@ func fromAnswerOnly(cmd *cobra.Command, runtime string, extra []string) error {
 // documents' time_limit_minutes, the limit of session 1, 0 for none, and
 // harness_hidden. named is set when harness_hidden is true: no text of the run shows
 // the address of a harness source.
-// target is the documents' target and target_version, which the fetch uses for the
-// target's repository. workItem is the id of the documents' work item, "" for none.
+// target is the address of the documents' target and target_version, which the fetch
+// uses for the target's repository, and empty for a target with no address. workItem is
+// the id of the documents' work item, "" for none.
 type codeRun struct {
 	runtime  string
 	settings []provisioner.Setting
@@ -202,9 +203,11 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 		}
 		harness = append(harness, '\n')
 	}
+	// The fetch reads the target's address alone: a target with no address, such as a
+	// place that is not on a host, is not fetched, and its target_version is not used.
 	target := preparation.Target{FromCode: true}
-	if doc.Target != nil {
-		target.System, target.Path, target.Version = doc.Target.System, doc.Target.Path, doc.TargetVersion
+	if doc.Target != nil && doc.Target.Address != nil {
+		target.System, target.Path, target.Version = doc.Target.Address.System, doc.Target.Address.Path, doc.TargetVersion
 	}
 	r := &codeRun{runtime: runtime, settings: settings, harness: harness, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: doc.FullSuite, hidden: hidden, target: target, access: doc.Access}
 	if doc.WorkItem != nil {

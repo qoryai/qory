@@ -2174,10 +2174,10 @@ add a <kind> workflow-<workflow> to <harness>, or set another workflow in Qory A
 `<kind>` is `skill`, the kind that `claude` and `codex`, the runtimes a run code runs
 on, run from a headless start. `<harness>` is `the workspace's harness` for a run whose
 documents contain a harness. For one whose documents contain none, it is `the checkout's
-harness`, with the target's `path` after it when the documents have a target: `the
-checkout's harness in the repository <path>` when the target's `system` is
-`QORY_RUN_SYSTEM`, and `the checkout's harness for the target <path>` on any other
-system. A workflow whose skill or command
+harness`, with the `path` of the target's `address` after it when the documents have a
+target with an address: `the checkout's harness in the repository <path>` when the
+address's `system` is `QORY_RUN_SYSTEM`, and `the checkout's harness for the target
+<path>` on any other system. A workflow whose skill or command
 the runtime runs by no name from a headless start closes the run with `no_session`.
 
 A run sees the checkout read-only when `access` in its documents is `read`, or when
@@ -2192,9 +2192,14 @@ the checkout: with no wall it stops after the compose, exit 1, and qory closes i
 with `write_needs_wall`. A run takes the lower of the two accesses, in the order `read`,
 `write-no-push`, `write`. See [Read workflows](#read-workflows).
 
+A target in the documents is one of an adapter's collections, `collection`, and, when the
+place has one, its `address`: the host name, `system`, and the `path` on it. qory reads
+the address alone, for the fetch. A target with no address, such as a place that is not
+on a host, is not fetched.
+
 The documents of a run with a target may set `target_version`: the version at which Qory
-Apiary checked the target for a harness file. When the target's `system` is
-`QORY_RUN_SYSTEM`, the target is the run's repository: Qory Apiary lists the target's
+Apiary checked the target for a harness file. When the `system` of the target's address
+is `QORY_RUN_SYSTEM`, the target is the run's repository: Qory Apiary lists the address's
 `path` first in `QORY_RUN_REPOSITORIES`, compared in any letter case on github.com. qory
 fetches that repository at the version, which must be a full commit id, by its id, in
 place of the head of its default branch. The fetch goes through the run's gateway at
@@ -2205,8 +2210,8 @@ use. The fetch line shows the commit: `qory run: fetched example-org/shop at
 the checkout's `qory.yaml` or `harness.yaml` as that commit has it. The further
 repositories are fetched at the head of their default branches.
 
-When the target is on another system than `QORY_RUN_SYSTEM`, or `QORY_RUN_SYSTEM` is
-not set, qory does not use `target_version`.
+When the target has no address, its address is on another system than
+`QORY_RUN_SYSTEM`, or `QORY_RUN_SYSTEM` is not set, qory does not use `target_version`.
 
 A run of a work item at a `target_version` of a target on `QORY_RUN_SYSTEM` works on the
 branch `qory/<work item id>`. qory reads the work item and its artifacts through the run API
