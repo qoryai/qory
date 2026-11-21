@@ -678,6 +678,13 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- `qory work-item show`, `qory artifact pull` (`index.json`, the files of a version and
+  their names) and the message of `qory artifact push --withdraw` for a version that a
+  person uploaded write each hidden character as `<U+XXXX>`. A hidden character is a
+  control or format character except newline, tab, the zero width joiner and non-joiner,
+  or a line or paragraph separator. Qory Apiary keeps the stored text unchanged. `.json`
+  files stay valid JSON, any other file that is not valid UTF-8 or has a NUL byte stays as
+  it is, and an escaped file is downloaded again on each pull.
 - A run from a run code runs the step `workflow`, in place of `explore`: it starts the
   workflow that the run documents set, whichever workflow of the process Qory Apiary
   starts. The documents name what the run is for in `subject`, with a `kind`, such as
