@@ -704,7 +704,7 @@ func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 // run from a run code runs on, claude and codex, exit 1. codeDocumentsOf refuses explore documents with no run
 // settings, null ones, or run settings whose runtime is missing, empty or null, before
 // the schema check, since explore starts an agent session, and leaves a prebuild's
-// documents to that check.
+// documents to that check. A step or run_settings member in another case is not read.
 func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
 	want := "The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of claude and codex."
 	for name, settings := range map[string]*contracts.RunSettings{"no run settings": nil, "no runtime": {Model: "opus"}} {
@@ -727,6 +727,9 @@ func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
 		{`{"step":"explore"}`, false},
 		{`{"step":"prebuild","run_settings":{}}`, false},
 		{`{"step":"prebuild"}`, false},
+		{`{"STEP":"workflow","step":"prebuild","run_settings":{}}`, false},
+		{`{"step":"workflow","RUN_SETTINGS":{"runtime":"codex"}}`, true},
+		{`{"step":"workflow","run_settings":{"runtime":"codex"},"RUN_SETTINGS":{}}`, false},
 	} {
 		if got := lacksRuntime(json.RawMessage(c.documents)); got != c.lacks {
 			t.Errorf("%s: lacksRuntime is %v", c.documents, got)

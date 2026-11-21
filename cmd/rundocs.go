@@ -730,8 +730,8 @@ func noRuntime() error {
 // session, and the schema refuses run settings in its documents.
 func lacksRuntime(documents json.RawMessage) bool {
 	var d struct {
-		Step        string          `json:"step"`
-		RunSettings json.RawMessage `json:"run_settings"`
+		Step        string          `json:"step,case:strict"`
+		RunSettings json.RawMessage `json:"run_settings,case:strict"`
 	}
 	if json.Unmarshal(documents, &d) != nil || d.Step != provisioner.StepWorkflow {
 		return false

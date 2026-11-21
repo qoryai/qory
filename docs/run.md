@@ -2088,7 +2088,10 @@ The documents of the step `workflow` can also contain `shared_run` and `full_sui
 suite](#the-full-suite). qory reads `shared_run` and changes nothing for it.
 qory checks the documents as the run contract's `documents.schema.json`, and, for a
 subject of the kind `work_item`, checks that `inputs.domain` and `inputs.work_item.id`
-match the domain and the subject's `id`. Only a run whose subject has the kind
+match the domain and the subject's `id`. qory does not read a member that the schema
+does not define, and matches each member's name by exact case, so `Workflow` is not
+`workflow`. When the documents' `must_understand` lists a member that qory does not read,
+the run stops as it does for documents that break the schema. Only a run whose subject has the kind
 `work_item` works on the branch `qory/<work item id>`. Then a run of the step `workflow`:
 
 - composes the harness that the documents contain, or, when they contain none, the
@@ -2449,9 +2452,8 @@ repository image of exactly the limit is kept. The last line of a successful pre
 prints the size of the final image. Without the member, the build keeps an image of any
 size. The member is set only for a prebuild started from Qory Apiary, from the
 instance's Largest prebuilt image setting. `qory prebuild` on this machine has no limit.
-qory refuses documents whose member is not an integer from 1 to 9223372036854775807, or
-that a run of another step has, as it refuses any member the run documents' schema does
-not define.
+A run stops when its documents set the member to anything but an integer from 1 to
+9223372036854775807, or set it for a run of another step.
 
 The build takes the user from `wall.user` in `forager.yaml`. The wall's helper is
 `wall.helper`, or on Linux the `qory` you run. When `forager.yaml` sets `pool.registry`,
@@ -2513,8 +2515,9 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   pass qory's checks: <reason>; the code is used`, where `<reason>` is a check that failed,
   such as `it breaks documents.schema.json`, and contains no value of the response
   but a member's name, an id, a revision or a byte count. Documents with a step other
-  than `workflow` and `prebuild`, and documents of the step `workflow` with no
-  `workflow`, stop with `it breaks documents.schema.json`
+  than `workflow` and `prebuild`, documents of the step `workflow` with no `workflow`,
+  and documents whose `must_understand` lists a member that the schema does not define,
+  stop with `it breaks documents.schema.json`
 - `set wall.image, pinned by its digest, wall.user and wall.prebuild_image in
   forager.yaml: a prebuild from a run code builds with them; the code is used`
 - `run the prebuild on a machine without an access key: this machine has an access key in

@@ -677,6 +677,16 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- qory reads the run documents, the pool's answers from Qory Apiary, an integration's
+  description and Forager's `runtimes.json` without a member that their contract does not
+  define, and matches each member's name by exact case. Documents with such a member,
+  such as `run_id`, start the run, where they stopped it with `it breaks
+  documents.schema.json`. A document whose `must_understand` lists a member that qory does
+  not read stops as one that breaks its schema.
+- `qory run pool` acts on a signed 403 or 409 from Qory Apiary whose body it cannot read
+  by its status alone: it keeps the dispatch and sends the release or `dispatched` again,
+  where it released the dispatch after `dispatched` and dropped the release after a 403.
+  A machine end still stops on a signed 400, 403 or 404.
 - A run from a run code runs the step `workflow`, in place of `explore`: it starts the
   workflow that the run documents set, whichever workflow of the process Qory Apiary
   starts. The documents name what the run is for in `subject`, with a `kind`, such as
