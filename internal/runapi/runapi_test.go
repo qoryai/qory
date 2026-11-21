@@ -679,9 +679,9 @@ func TestErrorsStartWithTheFix(t *testing.T) {
 	}{
 		{
 			"a message of the run API", http.StatusUnprocessableEntity, "",
-			`{"error":"unknown_type","type":"branch","message":"Define the artifact type branch in the workspace's Artifact types, then run the round again."}`,
+			`{"error":"unknown_type","type":"submission","message":"Define the artifact type submission in the workspace's Artifact types, then run the round again."}`,
 			runapi.CodeUnknownType,
-			"Define the artifact type branch in the workspace's Artifact types, then run the round again.",
+			"Define the artifact type submission in the workspace's Artifact types, then run the round again.",
 		},
 		{
 			"invalid request", http.StatusBadRequest, "", `{"error":"invalid_request","names":["files[0].filename"]}`,

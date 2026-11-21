@@ -19,18 +19,3 @@ func SubmitOf(documents json.RawMessage) (*contracts.Submit, error) {
 	}
 	return r.submit, nil
 }
-
-// SubmitAt is [SubmitOf] for a run whose level, [accessOf], is level: the submit that
-// the run keeps after [codeRun.limitSubmit], nil for none.
-func SubmitAt(documents json.RawMessage, level string) (*contracts.Submit, error) {
-	doc, err := codeDocumentsOf(documents)
-	if err != nil {
-		return nil, err
-	}
-	r, err := codeRunOf(doc)
-	if err != nil {
-		return nil, err
-	}
-	r.limitSubmit(level)
-	return r.submit, nil
-}

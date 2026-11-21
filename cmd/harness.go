@@ -694,6 +694,9 @@ type composed struct {
 	pinFile string
 	// checkoutOnly is, per runtime composed for, what [render.CheckoutOnly] lists.
 	checkoutOnly map[string][]string
+	// submitProgram is the composed harness's submit program, its command with the home's
+	// path in it; nil when no module declares one.
+	submitProgram *compose.SubmitProgram
 	// codex is what a walled Codex run writes its Codex home from, see [codexParts].
 	codex codexParts
 }
@@ -777,7 +780,7 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 		checkoutOnly[rt.Name()] = render.CheckoutOnly(rt, res)
 	}
 	parts := codexParts{skills: codex.AllowedSkills(res), readRules: res.CodexReadRules, sourceDirs: res.SourceDirs()}
-	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, runtimes: runtimes, pinFile: pinFile, checkoutOnly: checkoutOnly, codex: parts}, nil
+	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, runtimes: runtimes, pinFile: pinFile, checkoutOnly: checkoutOnly, submitProgram: res.SubmitProgramFor(at.home), codex: parts}, nil
 }
 
 // pushChecksWritable stops a walled run before the home is written when a module

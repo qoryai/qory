@@ -2,12 +2,14 @@ package preparation
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/qoryai/qory/internal/branchformat"
+	"github.com/qoryai/qory/internal/submission"
 )
 
 const testRef = "qory/wi_1"
@@ -28,17 +30,17 @@ func branchCommit(t *testing.T, base, path, first string, change func(work strin
 
 // versionOf is a version with the commit of each path, given as path, commit, path,
 // commit, on git.example.com.
-func versionOf(pairs ...string) []branchformat.Repository {
-	var entries []branchformat.Repository
+func versionOf(pairs ...string) []submission.Repository {
+	var entries []submission.Repository
 	for i := 0; i < len(pairs); i += 2 {
-		entries = append(entries, branchformat.Repository{System: "git.example.com", Path: pairs[i], Commit: pairs[i+1]})
+		entries = append(entries, submission.Repository{System: "git.example.com", Path: pairs[i], Commit: pairs[i+1]})
 	}
 	return entries
 }
 
 // fetchBranchAt fetches list with the target acme/shop at version and the branch with
 // entries, and returns the branch.
-func fetchBranchAt(t *testing.T, dir, list, version string, entries []branchformat.Repository) *WorkBranch {
+func fetchBranchAt(t *testing.T, dir, list, version string, entries []submission.Repository) *WorkBranch {
 	t.Helper()
 	b := &WorkBranch{Ref: testRef, Version: entries}
 	if _, err := fetchListAt(dir, list, Target{System: "git.example.com", Path: "acme/shop", Version: version, Branch: b}); err != nil {
@@ -64,7 +66,7 @@ func switchTo(dir string, b *WorkBranch) (string, error) {
 	return strings.TrimSuffix(report.String(), "\n"), err
 }
 
-// TestTheTargetStaysAtItsVersionUntilTheSwitch is a run with a branch version: the fetch
+// TestTheTargetStaysAtItsVersionUntilTheSwitch is a run with a submission version: the fetch
 // leaves the working folder at the target version, for the compose, and the switch puts
 // it on the branch at the version's commit.
 func TestTheTargetStaysAtItsVersionUntilTheSwitch(t *testing.T) {
@@ -99,12 +101,12 @@ func TestTheTargetStaysAtItsVersionUntilTheSwitch(t *testing.T) {
 	if got := contentOf(t, filepath.Join(dir, "qory.yaml")); got != "branch\n" {
 		t.Errorf("qory.yaml = %q", got)
 	}
-	if want := (WorkRepository{Path: "acme/shop", Dir: ".", Commit: commit}); len(b.Repositories) != 1 || b.Repositories[0] != want {
+	if want := (WorkRepository{Path: "acme/shop", Dir: ".", Commit: commit, Start: commit, DefaultBranch: "main"}); len(b.Repositories) != 1 || b.Repositories[0] != want {
 		t.Errorf("repositories = %+v", b.Repositories)
 	}
 }
 
-// TestABranchWithNoVersionStartsAtTheTargetVersion is a work item with no branch version:
+// TestABranchWithNoVersionStartsAtTheTargetVersion is a work item with no submission version:
 // the branch is new, at the target version.
 func TestABranchWithNoVersionStartsAtTheTargetVersion(t *testing.T) {
 	needGit(t)
@@ -162,9 +164,9 @@ func TestFurtherRepositoriesGetTheBranch(t *testing.T) {
 		}
 	}
 	want := []WorkRepository{
-		{Path: "acme/shop", Dir: ".", Commit: first},
-		{Path: "acme/api", Dir: ".qory/repositories/acme/api", Commit: apiCommit},
-		{Path: "acme/docs", Dir: ".qory/repositories/acme/docs", Commit: docsHead},
+		{Path: "acme/shop", Dir: ".", Commit: first, Start: first, DefaultBranch: "main"},
+		{Path: "acme/api", Dir: ".qory/repositories/acme/api", Commit: apiCommit, Start: apiCommit, DefaultBranch: "main"},
+		{Path: "acme/docs", Dir: ".qory/repositories/acme/docs", Commit: docsHead, Start: docsHead, DefaultBranch: "main"},
 	}
 	if len(b.Repositories) != len(want) {
 		t.Fatalf("repositories = %+v", b.Repositories)
@@ -225,7 +227,7 @@ func TestAFileInTheWayStopsTheCheckout(t *testing.T) {
 
 			_, err := switchTo(dir, b)
 			want := "qory run: git cannot check out commit " + commit[:12] + " of " + testRef +
-				", the stored version of the artifact branch, so the run did not start; the code is used\n  The checkout in acme/shop failed: "
+				", the stored version of the artifact submission, so the run did not start; the code is used\n  The checkout in acme/shop failed: "
 			if err == nil || !strings.HasPrefix(err.Error(), want) {
 				t.Fatalf("err = %v, want it to start with %s", err, want)
 			}
@@ -245,7 +247,7 @@ func TestStopsOnABranchCommitTheRemoteLacks(t *testing.T) {
 
 	b := &WorkBranch{Ref: testRef, Version: versionOf("acme/shop", strings.Repeat("a", 40))}
 	_, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: first, Branch: b})
-	want := "qory run: The stored version of the artifact branch has commit aaaaaaaaaaaa, which is not a commit on acme/shop on git.example.com, so the run did not start; the code is used\n  The fetch through the run's gateway failed: "
+	want := "qory run: The stored version of the artifact submission has commit aaaaaaaaaaaa, which is not a commit on acme/shop on git.example.com, so the run did not start; the code is used\n  The fetch through the run's gateway failed: "
 	if err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Fatalf("err = %v, want it to start with %s", err, want)
 	}
@@ -260,7 +262,7 @@ func TestStopsOnABranchIDThatIsNoCommit(t *testing.T) {
 
 	b := &WorkBranch{Ref: testRef, Version: versionOf("acme/shop", tree)}
 	_, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: first, Branch: b})
-	want := "qory run: The stored version of the artifact branch has " + tree[:12] + " for acme/shop, which is not a commit, so the run did not start; the code is used"
+	want := "qory run: The stored version of the artifact submission has " + tree[:12] + " for acme/shop, which is not a commit, so the run did not start; the code is used"
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %s", err, want)
 	}
@@ -323,4 +325,74 @@ func TestABranchNeedsATargetVersion(t *testing.T) {
 	if b.Repositories != nil {
 		t.Errorf("repositories = %+v", b.Repositories)
 	}
+}
+
+// TestEachRepositoryKeepsTheNameOfItsDefaultBranch is a run of two repositories whose default
+// branches are trunk and stable: the fetch reads each name, before the switch moves HEAD to the
+// work branch, and [Push] has it as the base's branch of that repository alone.
+func TestEachRepositoryKeepsItsOwnDefaultBranchName(t *testing.T) {
+	needGit(t)
+	base, dir := t.TempDir(), emptyFolder(t)
+	remote(t, base, "acme/shop", "trunk", nil)
+	remote(t, base, "acme/lib", "stable", nil)
+	first := run(t, filepath.Join(base, "acme", "shop.git"), "rev-parse", "HEAD")
+	b := fetchBranchAt(t, dir, "acme/shop,acme/lib", first, nil)
+	if _, err := switchTo(dir, b); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, r := range b.Repositories {
+		got[r.Path] = r.DefaultBranch
+	}
+	if want := map[string]string{"acme/shop": "trunk", "acme/lib": "stable"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("the default branches are %v, want %v", got, want)
+	}
+	var version []submission.Repository
+	for _, r := range b.Repositories {
+		version = withCommit(version, "git.example.com", r.Path, r.Commit, r.Start, r.DefaultBranch, nil)
+	}
+	for _, r := range version {
+		if want := got[r.Path]; r.Base == nil || r.Base.Branch != want {
+			t.Errorf("%s has the base %+v, want the branch %s", r.Path, r.Base, want)
+		}
+	}
+}
+
+// TestTheBaseBranchOfTheSchemaTakesTheNamesThatGitTakes is a list of branch names that git
+// check-ref-format takes after refs/heads/ and one that it refuses: the schema's pattern for
+// base.branch takes and refuses the same names, and refuses one of more than 255 characters.
+func TestTheBaseBranchOfTheSchemaTakesTheNamesThatGitTakes(t *testing.T) {
+	needGit(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "--quiet")
+	names := []string{
+		"main", "trunk", "release/1.0", "feature/a-b_c", "v1.2.3", "@", "a@b", "é/ü", "x.y/z", "a-",
+		"-main", "/main", "main/", "a//b", "a..b", ".hidden", "a/.hidden", "a.lock", "a.lock/b", "a.", "a b", "a~b", "a^b", "a:b",
+		"a?b", "a*b", "a[b", `a\b`, "a@{b", "a\tb", "a\x7fb", "", strings.Repeat("a", 255), strings.Repeat("a", 256),
+	}
+	for _, name := range names {
+		want := name != "" && len(name) <= 255
+		if want {
+			ok, err := BranchName(context.Background(), dir, name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want = ok
+		}
+		raw := `{"ref":"qory/wi_1","verdict":"none","repositories":[{"system":"git.example.com","path":"acme/shop","commit":"` + strings.Repeat("a", 40) +
+			`","base":{"commit":"` + strings.Repeat("b", 40) + `","branch":` + jsonString(t, name) + `},"commits":[],"draft":{"none":"no-text"}}]}`
+		if got := submission.Check([]byte(raw)) == nil; got != want {
+			t.Errorf("branch %q: the schema takes it: %v, git takes it: %v", name, got, want)
+		}
+	}
+}
+
+// jsonString is s as a JSON string.
+func jsonString(t *testing.T, s string) string {
+	t.Helper()
+	raw, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
 }

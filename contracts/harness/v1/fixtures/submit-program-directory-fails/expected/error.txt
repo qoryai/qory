@@ -1,0 +1,2 @@
+Set the submit_program of module forge to a program file.
+  bin/open-draft is not a file.
