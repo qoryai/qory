@@ -142,3 +142,50 @@ func TestReferenceAndLink(t *testing.T) {
 		}
 	}
 }
+
+// TestAmount: an amount has a decimal value as a string, and exactly one of a currency and
+// a unit.
+func TestAmount(t *testing.T) {
+	amount := definition(t, "amount")
+	for _, c := range []struct {
+		doc   string
+		valid bool
+	}{
+		{`{"value": "12.50", "currency": "EUR"}`, true},
+		{`{"value": "-3", "unit": "km"}`, true},
+		{`{"value": "0.000001", "unit": "x"}`, true},
+		{`{"value": "` + strings.Repeat("9", 15) + `", "currency": "USD"}`, true},
+		{`{"value": "-` + strings.Repeat("9", 15) + `.999999", "currency": "USD"}`, true},
+		{`{"value": "1", "unit": "` + strings.Repeat("a", 32) + `"}`, true},
+		{`{"value": "1", "unit": "👨‍👩"}`, true},
+		{`{"value": "1", "currency": "EUR", "unit": "km"}`, false},
+		{`{"value": "1"}`, false},
+		{`{"currency": "EUR"}`, false},
+		{`{"value": "0.1e1", "currency": "EUR"}`, false},
+		{`{"value": "1.", "currency": "EUR"}`, false},
+		{`{"value": ".5", "currency": "EUR"}`, false},
+		{`{"value": "+1", "currency": "EUR"}`, false},
+		{`{"value": "", "currency": "EUR"}`, false},
+		{`{"value": "` + strings.Repeat("9", 16) + `", "currency": "EUR"}`, false},
+		{`{"value": "1.1234567", "currency": "EUR"}`, false},
+		{`{"value": 12.5, "currency": "EUR"}`, false},
+		{`{"value": 1, "unit": "km"}`, false},
+		{`{"value": "1", "currency": "eur"}`, false},
+		{`{"value": "1", "currency": "EURO"}`, false},
+		{`{"value": "1", "currency": "EU"}`, false},
+		{`{"value": "1", "unit": "k󠁁m"}`, false},
+		{`{"value": "1", "unit": "k​m"}`, false},
+		{`{"value": "1", "unit": ""}`, false},
+		{`{"value": "1", "unit": "  "}`, false},
+		{`{"value": "1", "unit": "` + strings.Repeat("a", 33) + `"}`, false},
+		{`{"value": "1", "unit": "km", "note": "x"}`, false},
+	} {
+		var v any
+		if err := json.Unmarshal([]byte(c.doc), &v); err != nil {
+			t.Fatal(err)
+		}
+		if got := amount.Validate(v) == nil; got != c.valid {
+			t.Errorf("amount %.80s: valid is %v, want %v", c.doc, got, c.valid)
+		}
+	}
+}

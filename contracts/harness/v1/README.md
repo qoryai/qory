@@ -778,6 +778,7 @@ artifact types have in common. It is not the schema of a document. Each definiti
 | `title` | is a `line` of 1 to 256 characters with at least one character that is not a space (U+0020, U+00A0, U+1680, U+2000 to U+200A, U+202F, U+205F, U+3000), U+200C or U+200D |
 | `reference` | is an object with a `collection` (a `line` of 1 to 200 characters) and, optionally, an `address` with a `system` (a host name of at most 253 characters) and a `path` (a `line` of 1 to 200 characters); an `address` has both |
 | `link` | is an `https` URL of at most 2048 characters, with a host, with no user information |
+| `amount` | is an object with a `value`, a decimal number written as a string (an optional minus sign, 1 to 15 digits, and optionally a point with 1 to 6 digits, such as `12.50` or `-3`), and exactly one of `currency` (an ISO 4217 code, three capital letters) and `unit` (a `title` of at most 32 characters); it has no other member |
 
 The Cf characters include the bidirectional controls, the soft hyphen, the zero width
 space and the tag characters such as U+E0041. The patterns of `line` and `text` list the
