@@ -772,7 +772,9 @@ func writeCopy(in io.Reader, dst string, perm os.FileMode, limit int64) (int64, 
 // false, so Codex runs commands with bash -c, not bash -lc (codex-rs/core/src/shell.rs);
 // features.goals = false, which would continue a goal the agent set
 // (codex-rs/ext/goal/src/runtime.rs); and features.memories = false. Codex 0.167.2 turns
-// the first three on by default (codex-rs/features/src/lib.rs). A --config flag and a
+// the first three on by default (codex-rs/features/src/lib.rs). It also sets
+// features.unified_exec_tty = false, as Render does, so a shell with a terminal takes no
+// command through write_stdin, which runs no PreToolUse hook. A --config flag and a
 // trusted project's .codex can set them again; projects are untrusted here, and the bind
 // at [SystemInWall] has no config.toml or requirements.toml.
 func WalledConfig(config []byte, projects, disabled, disabledPaths []string) ([]byte, error) {
@@ -813,7 +815,7 @@ func WalledConfig(config []byte, projects, disabled, disabledPaths []string) ([]
 	if features == nil {
 		features = map[string]any{}
 	}
-	for _, f := range []string{"shell_snapshot", "goals", "memories"} {
+	for _, f := range []string{"shell_snapshot", "goals", "memories", "unified_exec_tty"} {
 		features[f] = false
 	}
 	m["features"] = features

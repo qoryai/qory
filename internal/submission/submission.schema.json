@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.dev/contracts/harness/v1/submission.schema.json",
+  "title": "The submission format, version 1",
+  "description": "What a run submits for a work item: its branch, the commits in each repository, the verdict, and the draft pull request. The file of a version of the artifact type submission, which only qory's submit step writes.",
+  "type": "object",
+  "required": ["ref", "verdict", "repositories"],
+  "additionalProperties": false,
+  "properties": {
+    "ref": {"description": "The branch's name, the same in each repository: qory/ followed by the work item's id.", "type": "string", "pattern": "^qory/wi_[A-Za-z0-9_-]{1,64}$"},
+    "verdict": {"description": "The work item's newest verdict at the end of the run.", "type": "string", "enum": ["passed", "changes-requested", "escalate", "none"]},
+    "text": {
+      "description": "The title and the description of the draft pull request, from the session's hand-off file. Absent when the session wrote none.",
+      "type": "object",
+      "required": ["title", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {"description": "One line: no tab and no other control character.", "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\u0000-\u001f\u007f]+$"},
+        "description": {"type": "string", "maxLength": 20000}
+      }
+    },
+    "repositories": {
+      "description": "Each repository with the commit of the branch in it, at least one.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["system", "path", "commit", "draft"],
+        "additionalProperties": false,
+        "properties": {
+          "system": {"description": "The host the repository is on, such as github.com: a lower-case host name of at most 253 characters.", "type": "string", "pattern": "^[a-z0-9.-]{0,252}[a-z0-9-]$"},
+          "path": {
+            "description": "The repository's path on the host, such as acme/web: at most 200 characters of segments joined by slashes, with no ., .. or .git segment.",
+            "type": "string",
+            "maxLength": 200,
+            "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+            "not": {"pattern": "(^|/)(\\.\\.?|\\.[Gg][Ii][Tt])(/|$)"}
+          },
+          "commit": {"description": "The head of the branch: a full commit id, 40 or 64 lower-case hexadecimal digits.", "$ref": "#/$defs/commit"},
+          "commit_url": {"description": "The forge's address of the head. The submit program writes it.", "type": "string", "minLength": 1},
+          "base": {
+            "description": "The commit the run started at.",
+            "type": "object",
+            "required": ["commit"],
+            "additionalProperties": false,
+            "properties": {
+              "commit": {"$ref": "#/$defs/commit"},
+              "branch": {
+                "description": "The name of the repository's default branch when the run started: the branch that a pull request of the run is based on. A branch name that git accepts after refs/heads/, at most 255 characters. Absent when qory did not read it.",
+                "type": "string",
+                "maxLength": 255,
+                "pattern": "^[^\u0000-\u0020\u007f~^:?*\\[\\\\/-][^\u0000-\u0020\u007f~^:?*\\[\\\\]*$",
+                "not": {"pattern": "\\.\\.|//|@\\{|(^|/)\\.|\\.lock(/|$)|[./]$"}
+              },
+              "commit_url": {"type": "string", "minLength": 1}
+            }
+          },
+          "commits": {
+            "description": "Each commit from the base to the head, oldest first, with the ledger step that made it. The last one is the head.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["commit", "step"],
+              "additionalProperties": false,
+              "properties": {"commit": {"$ref": "#/$defs/commit"}, "step": {"type": "string", "minLength": 1, "maxLength": 128}, "commit_url": {"type": "string", "minLength": 1}}
+            }
+          },
+          "draft": {
+            "description": "The draft pull request, or the reason there is none.",
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["number", "url", "title", "state", "action"],
+                "additionalProperties": false,
+                "properties": {
+                  "number": {"type": "integer", "minimum": 1},
+                  "url": {"type": "string", "minLength": 1},
+                  "title": {"type": "string"},
+                  "state": {"enum": ["draft", "open", "closed", "merged"]},
+                  "action": {"enum": ["opened", "updated", "kept"]}
+                }
+              },
+              {
+                "type": "object",
+                "required": ["none"],
+                "additionalProperties": false,
+                "properties": {
+                  "none": {"enum": ["not-passed", "no-text", "escalated", "no-program", "program-failed", "program-timeout", "login-needed"]},
+                  "exit": {"enum": [0, 1, 2, 3]}
+                },
+                "allOf": [
+                  {"if": {"properties": {"none": {"const": "program-failed"}}}, "then": {"required": ["exit"], "properties": {"exit": {"enum": [0, 1, 2]}}}},
+                  {"if": {"properties": {"none": {"const": "login-needed"}}}, "then": {"required": ["exit"], "properties": {"exit": {"const": 3}}}},
+                  {"if": {"properties": {"none": {"enum": ["not-passed", "no-text", "escalated", "no-program", "program-timeout"]}}}, "then": {"not": {"required": ["exit"]}}}
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "commit": {"description": "A full commit id: 40 or 64 lower-case hexadecimal digits.", "type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"}
+  }
+}

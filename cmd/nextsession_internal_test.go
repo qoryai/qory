@@ -59,8 +59,8 @@ func shortWaits(t *testing.T) *[]time.Duration {
 	t.Helper()
 	var mu sync.Mutex
 	waits := &[]time.Duration{}
-	before := branchWait
-	branchWait = func(ctx context.Context, d time.Duration) error {
+	before := submissionWait
+	submissionWait = func(ctx context.Context, d time.Duration) error {
 		mu.Lock()
 		*waits = append(*waits, d)
 		mu.Unlock()
@@ -71,7 +71,7 @@ func shortWaits(t *testing.T) *[]time.Duration {
 			return ctx.Err()
 		}
 	}
-	t.Cleanup(func() { branchWait = before })
+	t.Cleanup(func() { submissionWait = before })
 	return waits
 }
 

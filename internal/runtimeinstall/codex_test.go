@@ -116,8 +116,7 @@ func TestACodexTarballWithoutItsProgramIsRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("no refusal")
 	}
-	first, second, _ := strings.Cut(err.Error(), "\n")
-	if first != "Check the source of the runtime's releases" || !strings.Contains(second, "package/vendor/aarch64-unknown-linux-musl/bin/codex") {
+	if !isReleaseRefusal(err.Error(), "codex") || !strings.Contains(err.Error(), "package/vendor/aarch64-unknown-linux-musl/bin/codex") {
 		t.Fatalf("the error is %q", err)
 	}
 }
@@ -178,9 +177,9 @@ func TestACodexFolderQoryCannotKeepWholeIsRefused(t *testing.T) {
 			if err == nil {
 				t.Fatal("no refusal")
 			}
-			first, second, _ := strings.Cut(err.Error(), "\n")
-			if first != "Check the source of the runtime's releases" || !strings.Contains(second, c.want) {
-				t.Fatalf("the error is %q, want %q on its second line", err, c.want)
+			_, cause, _ := strings.Cut(err.Error(), "\n")
+			if !isReleaseRefusal(err.Error(), "codex") || !strings.Contains(cause, c.want) {
+				t.Fatalf("the error is %q, want the fix line, then %q in the cause", err, c.want)
 			}
 			if _, err := os.Lstat(filepath.Join(folder, "codex", "0.170.0")); !os.IsNotExist(err) {
 				t.Fatalf("the version's folder: %v", err)

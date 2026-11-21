@@ -326,7 +326,8 @@ func fetchRepositories(ctx context.Context, dir string, base []string, getenv fu
 	}
 	start := time.Now()
 	first := integration.Printable(exports.Value(paths[0], false))
-	if err := fetchRun(ctx, g, dir, system, paths[0], commit); err != nil {
+	defaultName, err := fetchRun(ctx, g, dir, system, paths[0], commit)
+	if err != nil {
 		return false, err
 	}
 	head, err := g(ctx, dir, "rev-parse", "HEAD")
@@ -339,7 +340,7 @@ func fetchRepositories(ctx context.Context, dir string, base []string, getenv fu
 	}
 	if branch != nil {
 		branch.system = system
-		branch.Repositories = []WorkRepository{{Path: paths[0], Dir: ".", Commit: strings.TrimSpace(head)}}
+		branch.Repositories = []WorkRepository{{Path: paths[0], Dir: ".", Commit: strings.TrimSpace(head), DefaultBranch: defaultName}}
 		if err := fetchBranchCommit(ctx, g, dir, system, paths[0], branch); err != nil {
 			return false, err
 		}
@@ -371,7 +372,7 @@ func fetchRepositories(ctx context.Context, dir string, base []string, getenv fu
 					return false, notFetched(path, system, err)
 				}
 				at := filepath.ToSlash(filepath.Join(filepath.FromSlash(Repositories), filepath.FromSlash(path)))
-				branch.Repositories = append(branch.Repositories, WorkRepository{Path: path, Dir: at, Commit: strings.TrimSpace(head)})
+				branch.Repositories = append(branch.Repositories, WorkRepository{Path: path, Dir: at, Commit: strings.TrimSpace(head), DefaultBranch: cloneBranch(ctx, g, dest)})
 			}
 		}
 	}
@@ -632,19 +633,35 @@ func initFolder(ctx context.Context, git gitRunner, dir string) error {
 	return nil
 }
 
+// cloneBranch is the name of the branch that the clone at dir has checked out, the remote's
+// default branch, or "" when git names none or the name is not a branch name: the submission
+// has it as base.branch, and a run does not stop for it.
+func cloneBranch(ctx context.Context, git gitRunner, dir string) string {
+	out, err := git(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		return ""
+	}
+	name := strings.TrimSpace(out)
+	if ok, err := branchName(ctx, git, dir, name); err != nil || !ok || name == "" {
+		return ""
+	}
+	return name
+}
+
 // fetchRun fetches the run's repository into dir with git: origin is its URL, and the
 // remote's default branch is fetched at depth one and checked out as the local branch of
 // its name, tracking origin. With commit set, the commit is fetched by its id at depth
 // one in place of the branch, into no ref but FETCH_HEAD, and checked out as the local
 // branch of the default branch's name with no upstream; no remote-tracking ref is
-// written, since the remote's branch may be at another commit.
-func fetchRun(ctx context.Context, git gitRunner, dir, system, path, commit string) error {
+// written, since the remote's branch may be at another commit. It returns the default
+// branch's name.
+func fetchRun(ctx context.Context, git gitRunner, dir, system, path, commit string) (string, error) {
 	if _, err := git(ctx, dir, "remote", "add", "--", "origin", repoURL(system, path)); err != nil {
-		return notFetched(path, system, err)
+		return "", notFetched(path, system, err)
 	}
 	out, err := git(ctx, dir, "ls-remote", "--symref", "origin", "HEAD")
 	if err != nil {
-		return notFetched(path, system, err)
+		return "", notFetched(path, system, err)
 	}
 	branch := defaultBranch(out)
 	if branch == "" {
@@ -652,38 +669,38 @@ func fetchRun(ctx context.Context, git gitRunner, dir, system, path, commit stri
 		// names no default branch.
 		refs, err := git(ctx, dir, "ls-remote", "origin")
 		if err != nil {
-			return notFetched(path, system, err)
+			return "", notFetched(path, system, err)
 		}
 		if strings.TrimSpace(refs) == "" {
-			return notFetched(path, system, errors.New(textNoCommits))
+			return "", notFetched(path, system, errors.New(textNoCommits))
 		}
-		return notFetched(path, system, errors.New(textNoDefault))
+		return "", notFetched(path, system, errors.New(textNoDefault))
 	}
 	// The branch is the remote's word, so it is checked as a branch name, which never
 	// starts with a dash, and it follows "--" where git takes it as a refspec.
 	notBranch := fmt.Errorf(textNotBranch, integration.Printable(exports.Value(branch, false)))
 	if ok, err := branchName(ctx, git, dir, branch); err != nil {
-		return notFetched(path, system, err)
+		return "", notFetched(path, system, err)
 	} else if !ok {
-		return notFetched(path, system, notBranch)
+		return "", notFetched(path, system, notBranch)
 	}
 	if commit != "" {
 		if _, err := git(ctx, dir, "fetch", "--quiet", "--depth", "1", "origin", "--", commit); err != nil {
-			return notAtCommit(path, system, commit, err)
+			return "", notAtCommit(path, system, commit, err)
 		}
 		if _, err := git(ctx, dir, "checkout", "--quiet", "-b", branch, commit); err != nil {
-			return notFetched(path, system, err)
+			return "", notFetched(path, system, err)
 		}
-		return nil
+		return branch, nil
 	}
 	refspec := "+refs/heads/" + branch + ":refs/remotes/origin/" + branch
 	if _, err := git(ctx, dir, "fetch", "--quiet", "--depth", "1", "origin", "--", refspec); err != nil {
-		return notFetched(path, system, err)
+		return "", notFetched(path, system, err)
 	}
 	if _, err := git(ctx, dir, "checkout", "--quiet", "-b", branch, "--track", "origin/"+branch); err != nil {
-		return notFetched(path, system, err)
+		return "", notFetched(path, system, err)
 	}
-	return nil
+	return branch, nil
 }
 
 // defaultBranch is the branch HEAD points to in the output of git ls-remote --symref
@@ -869,9 +886,9 @@ func runGit(ctx context.Context, p *proxygit.Proxy, make func(context.Context) (
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	// A process left holding the output is not waited for past this.
 	cmd.WaitDelay = time.Second
-	group(cmd)
+	hostgit.Group(cmd)
 	err = cmd.Run()
-	stopGroup(cmd)
+	hostgit.StopGroup(cmd)
 	if err != nil {
 		switch {
 		case errors.Is(context.Cause(call), errLimit):

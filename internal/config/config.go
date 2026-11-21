@@ -400,16 +400,19 @@ type harnessSection struct {
 	// Workflows are the workflows of the stack the section defines, as a stack file
 	// sets them; a section that extends a stack takes the base's and sets none.
 	Workflows map[string]stack.Workflow `yaml:"workflows,omitempty"`
+	// RuntimePins are the versions of the runtimes that qory run installs, as a stack file
+	// sets them; only the checkout root's file sets them, see [Config.apply].
+	RuntimePins map[string]stack.RuntimePin `yaml:"runtimes,omitempty"`
 	// Hooks are the workflow hooks the checkout adds at the hook points of the stack it
 	// extends; a section that defines a stack sets none.
 	Hooks []stack.Hook `yaml:"hooks,omitempty"`
 }
 
 // composes reports whether the section carries a compose document: modules, extends,
-// bindings, extensions, workflows or hooks. A section of machine harness settings alone is
-// not a document.
+// bindings, extensions, workflows, runtimes or hooks. A section of machine harness
+// settings alone is not a document.
 func (h *harnessSection) composes() bool {
-	return h != nil && (len(h.Modules) > 0 || h.extends() || h.Bind.Len() > 0 || len(h.Extensions) > 0 || len(h.Workflows) > 0 || len(h.Hooks) > 0)
+	return h != nil && (len(h.Modules) > 0 || h.extends() || h.Bind.Len() > 0 || len(h.Extensions) > 0 || len(h.Workflows) > 0 || len(h.RuntimePins) > 0 || len(h.Hooks) > 0)
 }
 
 // extends reports whether the section names a stack to extend, by directory or by export.
@@ -471,8 +474,13 @@ func Load(root string, own bool) (Config, error) {
 	if c.Forager, err = LoadForager(); err != nil {
 		return c, err
 	}
+	user, err := UserDir()
+	if err != nil {
+		return c, err
+	}
 	for _, path := range files {
-		f, err := c.apply(path, own || filepath.Dir(path) != root, filepath.Dir(path) == root)
+		dir := filepath.Dir(path)
+		f, err := c.apply(path, own || dir != root, dir == root, user != "" && dir == user)
 		if err != nil {
 			return c, err
 		}
@@ -500,7 +508,7 @@ func LoadUser() (Config, error) {
 	if err != nil || path == "" {
 		return c, err
 	}
-	_, err = c.apply(path, true, false)
+	_, err = c.apply(path, true, false, true)
 	return c, err
 }
 
@@ -623,7 +631,9 @@ func closedAtRoot(path string) error {
 }
 
 // composeIn returns the one document dir holds for a compose, "" for none, and an error
-// for both. With owned, a file the current user does not own does not count. A qory.yaml
+// for both. With owned, dir is an ancestor's, a file the current user does not own does
+// not count, and a qory.yaml whose harness section pins a runtime is refused, since it
+// would be the compose document: a pin makes the harness section compose. A qory.yaml
 // that cannot be read is that error, so a mistake in it is reported where it is.
 func composeIn(dir string, owned bool) (string, error) {
 	var found []string
@@ -639,6 +649,11 @@ func composeIn(dir string, owned bool) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if owned {
+			if err := ancestorPin(path, f); err != nil {
+				return "", err
+			}
+		}
 		if f.Harness.composes() {
 			found = append(found, path)
 		}
@@ -650,6 +665,51 @@ func composeIn(dir string, owned bool) (string, error) {
 		return found[0], nil
 	}
 	return "", exports.Refuse(fmt.Sprintf("Remove %s, or the harness section of %s.", stack.FileName, filepath.Base(path)), fmt.Sprintf("%s contains both, and a directory contains one of the two.", exports.HidePath(dir)))
+}
+
+// SelectedDocument is the refusal of the qory.yaml or harness.yaml at path, which compose
+// -f selected, when the file is in an ancestor directory of the checkout at root and its
+// harness section pins a runtime, as [DiscoverStack] refuses an ancestor's document that
+// pins; nil for any other file. A file that cannot be read is that error.
+func SelectedDocument(root, path string) error {
+	if !IsDocument(path) {
+		return nil
+	}
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(resolved(filepath.Dir(path)), resolved(root))
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	f, err := read(path)
+	if err != nil {
+		return err
+	}
+	return ancestorPin(path, f)
+}
+
+// resolved is path with its links resolved, or path when that fails, so that a folder
+// reached through a link, such as /tmp on macOS, compares equal to its target.
+func resolved(path string) string {
+	if r, err := filepath.EvalSymlinks(path); err == nil {
+		return r
+	}
+	return path
+}
+
+// ancestorPin is the refusal of f, the qory.yaml at path in an ancestor directory and the
+// compose document, when its harness section pins a runtime; nil otherwise.
+func ancestorPin(path string, f file) error {
+	if f.Harness != nil && len(f.Harness.RuntimePins) > 0 {
+		return pinOutsideCheckout(path)
+	}
+	return nil
 }
 
 // LoadStack reads the document at path as [DiscoverStack] or -f selected it: a
@@ -725,7 +785,7 @@ func OnBase(path, base string) (*stack.Stack, stack.Source, error) {
 // document is the file's harness section as the stack it holds, before validation.
 func (f file) document() *stack.Stack {
 	h := f.Harness
-	return &stack.Stack{APIVersion: f.APIVersion, RetiredAPIVersion: f.retired, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Bind: h.Bind, Extensions: h.Extensions, Workflows: h.Workflows, Hooks: h.Hooks}
+	return &stack.Stack{APIVersion: f.APIVersion, RetiredAPIVersion: f.retired, Qory: f.Qory, Name: h.Name, Description: h.Description, Extends: h.Extends, Target: h.Target, Modules: h.Modules, Bind: h.Bind, Extensions: h.Extensions, Workflows: h.Workflows, RuntimePins: h.RuntimePins, Hooks: h.Hooks}
 }
 
 // ErrRelativeConfigHome is the refusal of an XDG_CONFIG_HOME that is no absolute path,
@@ -762,13 +822,25 @@ func ownedFile(path string) bool {
 	return err == nil && stack.OwnedByCurrentUser(info)
 }
 
+// pinOutsideCheckout is the refusal of harness.runtimes in the file at path: the user's
+// file, or an ancestor's that is the compose document. Only the checkout root's file and
+// the base stack pin a runtime.
+func pinOutsideCheckout(path string) error {
+	return exports.Refuse("Move runtimes to the checkout's "+FileName+" or to the base "+stack.FileName+".",
+		"Only the checkout's "+FileName+" and the base stack pin a runtime's version.",
+		"harness.runtimes is in "+exports.HidePath(path)+".")
+}
+
 // apply reads one file, sets the keys it names and returns the file as read. With
 // machine false, only the worktree section, the qory key and the tiers are taken: the
 // other harness keys, git and env are the machine's and left out. With root, the file is
 // the checkout root's, and its tiers are the repository's map; any other file's are the
-// machine's. A refusal prints a value the file sets as [exports.Value] prints it, and a
-// variable's or a tier's name as [accesskey.ShownName] prints it.
-func (c *Config) apply(path string, machine, root bool) (file, error) {
+// machine's. With user, the file is the user's, in [UserDir], and harness.runtimes in it
+// is refused. An ancestor's harness.runtimes is left unread, as its other compose keys
+// are; [composeIn] refuses it when that file is the compose document. A refusal prints a
+// value the file sets as [exports.Value] prints it, and a variable's or a tier's name as
+// [accesskey.ShownName] prints it.
+func (c *Config) apply(path string, machine, root, user bool) (file, error) {
 	f, err := read(path)
 	if err != nil {
 		return f, err
@@ -782,6 +854,9 @@ func (c *Config) apply(path string, machine, root bool) (file, error) {
 	}
 	if err := c.applyWorktree(path, f.Worktree); err != nil {
 		return f, err
+	}
+	if f.Harness != nil && len(f.Harness.RuntimePins) > 0 && user {
+		return f, pinOutsideCheckout(path)
 	}
 	if f.Harness != nil && f.Harness.Tiers != nil {
 		if err := c.applyTiers(path, f.Harness.Tiers, root); err != nil {

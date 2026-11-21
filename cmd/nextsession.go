@@ -76,7 +76,7 @@ func askNextSession(ctx context.Context, send nextSender, session int, out sessi
 		}
 		// shortcut: the link of the pinned Forager passes no Retry-After on, so every wait
 		// doubles; read Retry-After here once Forager's link error has it.
-		if ctx.Err() != nil || branchWait(ctx, wait) != nil {
+		if ctx.Err() != nil || submissionWait(ctx, wait) != nil {
 			return contracts.NextSessionAnswer{}, "", fmt.Errorf(textNextNoAnswer, session, limitText(nextSessionLimit), nextDetail(err))
 		}
 		wait = min(2*wait, nextMaxWait)

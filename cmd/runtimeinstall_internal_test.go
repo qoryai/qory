@@ -2,6 +2,10 @@ package cmd
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoryai/forager/accesskey"
 
@@ -148,7 +153,7 @@ func TestTheInstallCausesStandAlone(t *testing.T) {
 	}
 	install := installStub
 	noTarballOf := func(version string) runtimeinstall.Fetch {
-		return func(context.Context, string) (runtimeinstall.Release, error) {
+		return func(context.Context, string, string) (runtimeinstall.Release, error) {
 			integrity := rt.Integrity(rt.PlainTarball(t, version))
 			signed := "@anthropic-ai/claude-code-linux-x64@" + version
 			return runtimeinstall.Release{Version: version, Integrity: integrity, Signed: signed, Signatures: rt.Signatures(signed, integrity)}, nil
@@ -206,11 +211,96 @@ func TestTheInstallCausesStandAlone(t *testing.T) {
 		err  error
 		want string
 	}{
-		{install(t, noTarball), "Check the source of the runtime's releases\nThe source of the runtime's releases returned no tarball\n  of claude 2.1.320"},
+		{install(t, noTarball), "Check the source of claude's releases.\n  The source of the runtime's releases returned no tarball\n  of claude 2.1.320."},
 		{noURL(t), "Set the address of Qory Apiary to an https URL\nThe run's address of Qory Apiary is not an http or https URL\n  with a host and no user"},
 	} {
 		if person := installFailed(c.err).Error(); person != c.want {
 			t.Errorf("a person's run shows %q, want %q", person, c.want)
+		}
+	}
+}
+
+// TestTheDispatchedCauseOfTheLongestPinFits is the line a run from a run code prints for
+// a pin that the registry does not have, and the lines it prints for a release signed
+// with a bad signature, a key qory does not have and an expired key, with the longest
+// runtime name of runtimeinstall.Runtimes() and a pin of 32 characters, the longest one a
+// stack may set: with "qory run: " and [codeUsed], each line has at most 100 characters.
+func TestTheDispatchedCauseOfTheLongestPinFits(t *testing.T) {
+	runtime := ""
+	for _, r := range runtimeinstall.Runtimes() {
+		if len(r) > len(runtime) {
+			runtime = r
+		}
+	}
+	pin := "1" + strings.Repeat("0", 31)
+	if !runtimeinstall.ValidVersion(pin) || runtimeinstall.ValidVersion(pin+"0") {
+		t.Fatalf("the longest pin a stack may set is not %d characters", len(pin))
+	}
+	err := fmt.Errorf(textNotPublished, runtime, "qory-stack.yaml", runtime, pin)
+	line := "qory run: " + causeOnly(installFailed(err)).Error() + codeUsed
+	if want := "qory run: the registry has no " + runtime + " " + pin + "; the code is used"; line != want {
+		t.Fatalf("a dispatched run shows %q, want %q", line, want)
+	}
+	if len(line) > 100 {
+		t.Errorf("the line has %d characters: %s", len(line), line)
+	}
+
+	// The test's source signs only claude, so the signature cases need claude to be the
+	// longest name.
+	if runtime != "claude" {
+		t.Fatalf("the longest runtime name is %s, and the signature cases install claude", runtime)
+	}
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad, unknown, expired := rt.Keys(), rt.Keys(), rt.Keys()
+	bad[0].Key = &other.PublicKey
+	unknown[0].KeyID = "SHA256:another"
+	expired[0].Expires = time.Date(2025, 1, 29, 0, 0, 0, 0, time.UTC)
+	for first, keys := range map[string][]runtimeinstall.SigningKey{
+		"npm's signature of claude " + pin + " does not verify.":               bad,
+		"npm signed claude " + pin + " with a key this qory does not have.":    unknown,
+		"npm signed claude " + pin + " with a key that expired on 2025-01-29.": expired,
+	} {
+		src := &rt.Source{}
+		src.Publish(pin, rt.PlainTarball(t, pin))
+		_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: src.Fetch, Runtime: runtime, Version: pin, Folder: t.TempDir(), Keys: keys})
+		if err == nil {
+			t.Fatalf("%s: the install succeeded", first)
+		}
+		out := "qory run: " + causeOnly(installFailed(err)).Error() + codeUsed
+		if want := "qory run: " + first + "\n  The key is " + rt.KeyID + codeUsed; out != want {
+			t.Errorf("a dispatched run shows %q, want %q", out, want)
+		}
+		for l := range strings.SplitSeq(out, "\n") {
+			if len(l) > 100 {
+				t.Errorf("the line has %d characters: %s", len(l), l)
+			}
+		}
+	}
+}
+
+// TestAnExpiredKeysCauseStandsAlone installs claude 2.1.320, signed only by a key that
+// expired on 2025-01-29, pinned and with no pin. A dispatched run shows the same cause
+// for both, alone, with no indent on its first line; a person's run shows the fix line
+// of each, then the cause on indented lines.
+func TestAnExpiredKeysCauseStandsAlone(t *testing.T) {
+	keys := rt.Keys()
+	keys[0].Expires = time.Date(2025, 1, 29, 0, 0, 0, 0, time.UTC)
+	const cause = "npm signed claude 2.1.320 with a key that expired on 2025-01-29.\n  The key is " + rt.KeyID
+	for pin, fix := range map[string]string{"2.1.320": "Pin a newer version of claude.", "": "Check the source of claude's releases."} {
+		src := &rt.Source{}
+		src.Publish("2.1.320", rt.PlainTarball(t, "2.1.320"))
+		_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: src.Fetch, Runtime: "claude", Version: pin, Folder: t.TempDir(), Keys: keys})
+		if err == nil {
+			t.Fatalf("pin %q: the install succeeded", pin)
+		}
+		if got := causeOnly(installFailed(err)).Error(); got != cause {
+			t.Errorf("pin %q: a dispatched run shows %q, want %q", pin, got, cause)
+		}
+		if got, want := installFailed(err).Error(), fix+"\n  "+cause+"."; got != want {
+			t.Errorf("pin %q: a person's run shows %q, want %q", pin, got, want)
 		}
 	}
 }

@@ -1,0 +1,2 @@
+Add bin/open-draft to module forge, or change its submit_program.
+  Module forge has no file at bin/open-draft.

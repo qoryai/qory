@@ -1182,7 +1182,7 @@ func TestArtifactTypesSchemaMatchesTheReader(t *testing.T) {
 }
 
 // TestContractSchemasPassAsCustomTypes is each structured format of the contract,
-// acceptance-criteria.schema.json, verification.schema.json, branch.schema.json,
+// acceptance-criteria.schema.json, verification.schema.json, submission.schema.json,
 // questions.schema.json, review-comments.schema.json, proposal-sources.schema.json and
 // verdict.schema.json, as the json_schema of a custom type: it passes the check and
 // process.schema.json, with a size limit that a structured type can have. The same type
@@ -1195,7 +1195,7 @@ func TestContractSchemasPassAsCustomTypes(t *testing.T) {
 	for _, c := range []struct{ name, sizeLimit string }{
 		{"acceptance-criteria", "65536"},
 		{"verification", "65536"},
-		{"branch", "65536"},
+		{"submission", "262144"},
 		{"questions", "1048576"},
 		{"review-comments", "1048576"},
 		{"proposal-sources", "1048576"},

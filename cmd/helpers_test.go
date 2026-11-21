@@ -80,20 +80,27 @@ func TestMain(m *testing.M) {
 		args := os.Args[slices.Index(os.Args, "--")+1:]
 		os.Exit(enginePull(args[0], args[1], args[2]))
 	}
-	// The child of TestForagerRunKeepsThePushCredentialOnThePushProxyAlone, which that test starts
-	// with the marker and runs only that test, keeps the marker and the SSL_CERT_FILE of
-	// its parent through the fixed environment below. The marker without that argument
-	// keeps nothing.
-	realPush, certFile := "", os.Getenv("SSL_CERT_FILE")
-	if slices.Contains(os.Args, "-test.run=^TestForagerRunKeepsThePushCredentialOnThePushProxyAlone$") {
-		realPush = os.Getenv("QORY_TEST_REAL_PUSH")
+	// The child of TestForagerRunKeepsThePushCredentialOnThePushProxyAlone and of
+	// TestForagerRunReadsTheBranchHeadWithTheReadCredential, which the test starts with its
+	// marker and runs only that test, keeps the marker and the SSL_CERT_FILE of its parent
+	// through the fixed environment below. The marker without that argument keeps nothing. A
+	// child that finds its marker gone fails its test, see realSetup.
+	certFile := os.Getenv("SSL_CERT_FILE")
+	realMarkers := map[string]string{}
+	for marker, name := range map[string]string{
+		"QORY_TEST_REAL_PUSH": "TestForagerRunKeepsThePushCredentialOnThePushProxyAlone",
+		"QORY_TEST_REAL_HEAD": "TestForagerRunReadsTheBranchHeadWithTheReadCredential",
+	} {
+		if slices.Contains(os.Args, "-test.run=^"+name+"$") {
+			realMarkers[marker] = os.Getenv(marker)
+		}
 	}
-	// The child of TestARealWalledCodexRunReachesTheModelThroughTheGateway, and of
-	// TestARealWalledCodexRunsAHookOfEtcCodexTurnedOff, keeps its setup,
-	// QORY_TEST_REAL_CODEX_CHILD, in the same way. Without it, the child starts another
-	// child binary, which does the same, until the time runs out.
+	// The child of each test of a real walled Codex run that runRealCodexChild starts keeps
+	// its setup, QORY_TEST_REAL_CODEX_CHILD, in the same way. Without it, the child starts
+	// another child binary, which does the same, until the time runs out.
 	realCodex := ""
-	for _, name := range []string{"TestARealWalledCodexRunReachesTheModelThroughTheGateway", "TestARealWalledCodexRunsAHookOfEtcCodexTurnedOff"} {
+	for _, name := range []string{"TestARealWalledCodexRunReachesTheModelThroughTheGateway", "TestARealWalledCodexRunsAHookOfEtcCodexTurnedOff",
+		"TestARealWalledCodexRunsTheGuardHook", "TestARealWalledCodexRunsTheReportsGuardOfTheHarness"} {
 		if slices.Contains(os.Args, "-test.run=^"+name+"$") {
 			realCodex = os.Getenv("QORY_TEST_REAL_CODEX_CHILD")
 		}
@@ -112,9 +119,11 @@ func TestMain(m *testing.M) {
 	cmd.RunGitSessionsOnHost()
 	// No variable of the developer's shell but the fixed ones reaches a session spec.
 	testenv.StartFromFixedEnvironment()
-	if realPush != "" {
-		os.Setenv("QORY_TEST_REAL_PUSH", realPush)
-		os.Setenv("SSL_CERT_FILE", certFile)
+	for marker, value := range realMarkers {
+		if value != "" {
+			os.Setenv(marker, value)
+			os.Setenv("SSL_CERT_FILE", certFile)
+		}
 	}
 	if realCodex != "" {
 		os.Setenv("QORY_TEST_REAL_CODEX_CHILD", realCodex)

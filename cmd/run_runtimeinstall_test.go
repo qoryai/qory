@@ -22,6 +22,7 @@ import (
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/proxygit/proxygittest"
+	"github.com/qoryai/qory/internal/render/codex"
 	rt "github.com/qoryai/qory/internal/runtimeinstall/runtimeinstalltest"
 )
 
@@ -53,6 +54,9 @@ type installSetup struct {
 	// runtime is the runtime of the run; empty means claude. version is the version the
 	// image's fetch looks for in qory's state folder; empty means 2.1.320.
 	runtime, version string
+	// runtimes is the harness section's runtimes key, such as
+	// "runtimes:\n  claude:\n    version: 2.1.300\n"; empty for none.
+	runtimes string
 	// args are flags that follow the run key's.
 	args []string
 	// during, when set, runs in its own goroutine while the run goes on.
@@ -120,7 +124,7 @@ func runInstalling(t *testing.T, s installSetup) installRun {
 		},
 	})
 	defer restore()
-	writeFile(t, filepath.Join(h.dir, "qory.yaml"), ownStack("apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: "+runtime+"\nmodules:\n  - name: core\n    source: {git: \""+h.server.URL("acme/harness")+"\", ref: main, path: modules/core}\n"))
+	writeFile(t, filepath.Join(h.dir, "qory.yaml"), ownStack("apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: "+runtime+"\nmodules:\n  - name: core\n    source: {git: \""+h.server.URL("acme/harness")+"\", ref: main, path: modules/core}\n"+s.runtimes))
 	args = append(args, s.args...)
 	if s.during != nil {
 		go s.during()
@@ -679,6 +683,32 @@ func TestAStepThatRunsPastTheSetupLimitIsTheOneNamed(t *testing.T) {
 	lacks(t, r.out, "during the copy")
 }
 
+// TestACodexHomeWritePastTheSetupLimitIsTheOneNamed is a dispatched walled Codex run
+// whose write of the Codex home takes 200ms past a setup limit of 5 seconds and then
+// ends: the image's fetch after it fails at once, and the line names the write of the
+// Codex home, the step that ran past the limit, not the image's fetch.
+func TestACodexHomeWritePastTheSetupLimitIsTheOneNamed(t *testing.T) {
+	const limit = 5 * time.Second
+	defer cmd.SetSetupLimit(limit)()
+	defer cmd.SetWriteWalledHome(func(dir, files string, run codex.WalledRun) ([]codex.Bound, error) {
+		time.Sleep(limit + 200*time.Millisecond)
+		return codex.WriteWalledHome(dir, files, run)
+	})()
+	reg, npm, proxy := rt.StartCodexRegistry(t), rt.StartCodexNpm(t), rt.StartProxy(t)
+	reg.PublishPlain("0.170.0")
+	r := endsWithin(t, 30*time.Second, func() installRun {
+		return runInstalling(t, installSetup{reg: reg, npm: npm, proxy: proxy, walled: true, runtime: "codex", version: "0.170.0"})
+	})
+	if cmd.ExitCode(r.err) != 124 || len(r.joins) != 0 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out, "✗ the run was cancelled during the write of the Codex home:\n  the steps before codex starts may take at most 5s\n")
+	lacks(t, r.out, "during the fetch of the run's image", "smaller Codex skills")
+	if len(r.closes) != 1 || r.closes[0].State != event.StateCancelled || r.closes[0].Reason != event.ReasonTimeout || r.closes[0].ExitCode != 124 {
+		t.Errorf("the closes: %+v, want one cancelled with timeout and 124", r.closes)
+	}
+}
+
 // TestARegistryThatKeepsReturning503StopsAtSIGTERM sends SIGTERM to qory run while the
 // registry's tries go on: the tries stop, the run is cancelled with the line of a run
 // that got a signal before its session joined, exit 1, and no line asks for more time.
@@ -783,14 +813,15 @@ func TestAnOrphanContainerKeepsItsVersionWithNoWall(t *testing.T) {
 }
 
 // signatureCases are the npm signatures of claude 2.1.320 that stop an install, with the
-// cause of each, and the fix line that a person's run prints before it.
+// cause of each, and the fix line that a person's run prints before it. The cause's first
+// line has no indent here; a person's run indents it two spaces.
 var signatureCases = []struct {
 	name, fix, cause string
 	sign             func(signed, integrity string) any
 }{
-	{"no signature", "Check the source of the runtime's releases", "npm has no signature of claude 2.1.320",
+	{"no signature", "Check the source of claude's releases.", "npm has no signature of claude 2.1.320.",
 		func(string, string) any { return nil }},
-	{"a key qory does not have", "Update qory.", "npm signed claude 2.1.320 with a key that this qory does not have.\nThe key is SHA256:another.",
+	{"a key qory does not have", "Update qory.", "npm signed claude 2.1.320 with a key this qory does not have.\n  The key is SHA256:another.",
 		func(s, i string) any {
 			return []map[string]string{{"keyid": "SHA256:another", "sig": rt.Sign(s + ":" + i)}}
 		}},
@@ -871,7 +902,7 @@ func TestADispatchedRunShowsTheCauseOfAOneLineInstallError(t *testing.T) {
 
 // TestAPersonsRunShowsTheFixAndTheCauseOfAFailedInstall runs claude in a checkout on a
 // person's machine, with no run key, on an npm whose signature of claude 2.1.320 stops
-// the install: qory run prints the fix line, then the cause.
+// the install: qory run prints the fix line, then the cause on indented lines.
 func TestAPersonsRunShowsTheFixAndTheCauseOfAFailedInstall(t *testing.T) {
 	for _, c := range signatureCases {
 		t.Run(c.name, func(t *testing.T) {
@@ -889,7 +920,7 @@ func TestAPersonsRunShowsTheFixAndTheCauseOfAFailedInstall(t *testing.T) {
 			if err == nil || cmd.ExitCode(err) != 1 {
 				t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 			}
-			wants(t, out+err.Error(), c.fix+"\n"+c.cause)
+			wants(t, out+err.Error(), c.fix+"\n  "+c.cause)
 		})
 	}
 }

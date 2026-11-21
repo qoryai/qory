@@ -11,7 +11,7 @@ What `qory harness compose` reads and what it writes.
 | `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use and the submit step of a run. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | a role contract | optional; a file of a module that declares an agents role, at the path that `roles.agents.<role>.contract` in the module's `qory-module.yaml` is set to | the parts an agent needs to fill the role: level-2 headings, front-matter keys, tools, a tier, and the form of its report (§The role contract). The compose checks every agent that fills the role against it; the harness's checks read the report's form |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for, the modules it appends and the workflow hooks it adds, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
-| a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
+| a submission document | the file of a version of the structured artifact type `submission` | what a run submits for a work item: its branch, the commits in each repository, the verdict and the draft pull request (§The submission format). No compose reads it |
 | an acceptance criteria document | the file of a version of a structured artifact type for a work item's acceptance criteria | a summary of what the work item must achieve and the criteria that say when it is achieved, each with its check (§The acceptance criteria format). No compose reads it |
 | a verification document | the file of a version of a structured artifact type for a work item's verification | the result of checking the criteria against one version of the work (§The verification format). No compose reads it |
 | a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
@@ -128,6 +128,8 @@ workflows:                       # optional; the settings of the workflows a dis
     plan: change-plan            # optional; an artifact type, only with access write, none when left out
     hook_points:                 # optional; where a checkout extending the stack may add workflow hooks
       after-review-round: {at: end, kinds: [check, review]}
+runtimes:                        # optional; the version qory run installs of a runtime, its latest when left out
+  codex: {version: 0.167.2}      # an exact version: a digit first, never latest
 ```
 
 A stack has no `target`: it is delivered to be extended, and the checkout extending it
@@ -162,10 +164,12 @@ harness:
       source: {git: git@git.example.com:acme/harness, ref: v2.4.0, module: marketing}
   hooks:                         # optional; workflow hooks at the base's hook points (§Workflow hooks)
     - {at: after-review-round, kind: check, run: scripts/check-licences.sh}
+  runtimes:                      # optional; this pin of codex wins over the base's
+    codex: {version: 0.170.0}
 ```
 
-The section takes `name`, `description`, `modules`, `bind` and `extensions` as a stack
-does, `workflows` when it defines a stack, `hooks` when it extends one (§Workflow hooks),
+The section takes `name`, `description`, `modules`, `bind`, `extensions` and `runtimes` as
+a stack does, `workflows` when it defines a stack, `hooks` when it extends one (§Workflow hooks),
 and `target`, which a stack does not; never `extending`, since a stack to be extended is
 a `qory-stack.yaml`. A section extends a
 stack or defines one. A section that extends a stack takes the base's `workflows`; one
@@ -210,9 +214,11 @@ schema is [config.schema.json](config.schema.json).
 | `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it. A run from Qory Apiary, from a run code or a run key, writes the report's `extensions` into the run's `inputs.json` as `qory.harness_extensions` (docs/run.md, §The run key from a run code) |
 | `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most, so `workflow-<name>` has at most 64 characters. A run that Qory Apiary dispatches from a run code starts the first of these that the runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill `<name>`, the command `<name>` (docs/run.md, §The run key from a run code). A plain name works, and when a harness ships both names, the prefixed one runs. The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command under either name, after the modules' `exclude` and `only`: `Add skill or command workflow-<name> to a module of <stack>, or remove workflow <name>.`, then `The base stack <stack> declares the workflow <name> in its qory-stack.yaml.` and `No module of <stack> ships a skill or command workflow-<name> or <name>.` on the next two lines, or, for a stack that extends none, `Add skill or command workflow-<name> to a module of the stack in <file>, or remove workflow <name>.`, then `The stack in <file> declares the workflow <name>.` and `No module of the stack in <file> ships …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count, and neither does a checkout's exclude: the compose checks what the stack's modules ship before it applies that exclude. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.hook_points` | no | the points of the workflow where a checkout extending the stack may add workflow hooks, by the point's name: `{at: end, kinds: [check, review]}`. `at` is where the point sits in the workflow's session, `end`, `start` or `inside`; `kinds` is one or more of `check`, `review` and `enrich`, each once. A point's name has the form of a workflow's name, and is unique in the stack, since a hook selects a point by its name alone. Only a `qory-stack.yaml` declares points: a `qory.yaml` that defines a stack, which nothing extends, is refused with `Remove hook_points from the workflows in qory.yaml.` (§Workflow hooks) |
-| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on: `read`, `write-no-push`, or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access to a valid level.` with `The levels are read, write-no-push, and write.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. A run takes the lower of this access and `access` in the run's documents, in the order `read`, `write-no-push`, `write`; documents with no target have no `access`, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A `write-no-push` run has a writable checkout, no push step, no submit, and no version of the artifact `branch`. At `write` the checkout is writable and qory pushes what the agent left |
+| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on: `read`, `write-no-push`, or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access to a valid level.` with `The levels are read, write-no-push, and write.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. A run takes the lower of this access and `access` in the run's documents, in the order `read`, `write-no-push`, `write`; documents with no target have no `access`, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A `write-no-push` run has a writable checkout, no push step, no submit, and no version of the artifact `submission`. At `write` the checkout is writable and qory pushes what the agent left |
 | `workflows.<name>.tier` | no | the tier that names the main session's model and effort for a dispatched run of the workflow: `light`, `balanced`, or `thinking`; none when left out. qory stops with an error on any other value: `Set workflows.<name>.tier to a valid tier.` with `The tiers are light, balanced, and thinking.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. qory passes nothing new to the run: Qory Apiary resolves the session's model and effort from the tier, and sends them as it sends the session's model. `qory run` does not read it |
 | `workflows.<name>.plan` | no | the artifact type whose launch version sets what a dispatched run of the workflow may push, such as `build-plan`: lowercase letters and digits in groups joined by single hyphens, 64 bytes at most; none when left out. Only a workflow with `access: write` names one. qory stops with an error on a value that is no artifact type: `Set workflows.<name>.plan to an artifact type.` with `An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines; and on a `plan` in a workflow whose access is `read`, `write-no-push` or left out: `` Remove `plan` from <name>, or set its access to write. `` with `Only a workflow with access write has a plan, and the access of <name> is <access>.` and `workflows.<name> is in <file>.` on the next two lines. The compose stops when no module of the stack declares the scope check for the type in `scope_checks` (§The module manifest): `Add a scope check for <type> to a module's scope_checks.` with `` You can also remove `plan: <type>` from <name> in the stack. `` on the next line, or both on one line when the first line has at most 98 characters, then `No module of the stack declares a scope check for <type>.` and `workflows.<name> is in <file>.` on the next lines. `qory run` does not read `plan` |
+| `runtimes` | no | the version `qory run` installs of each runtime, by the runtime's name, `claude` or `codex`: `runtimes: {codex: {version: 0.167.2}}`. A runtime that no layer pins installs its latest version (docs/run.md, §The runtime's program). The harness section of a checkout's `qory.yaml` takes the same key, beside `extends` or in a stack it defines, and its pin of a runtime wins over the base's; a runtime only the base pins keeps the base's pin. qory stops with `Remove <name> from runtimes.` on another runtime's name, then `qory installs and pins only claude and codex.` and `runtimes is in <file>.` on the next two lines. qory stops with an error on `harness.runtimes` in the user's file, and in an ancestor's file that discovery or `-f` selects to compose; in another ancestor's file, qory leaves the pin unread (§The configuration) |
+| `runtimes.<runtime>.version` | yes, in an entry | an exact version, as a string: a digit, then up to 31 letters, digits, `.` or `-`, 32 characters at most, such as `2.1.320` or `0.167.2`; `latest` is not one. qory stops with an error on any other value: `Set runtimes.<runtime>.version to an exact version, or remove runtimes.<runtime>.` with `An exact version starts with a digit, followed by up to 31 letters, digits, . or -. A runtime with no pin installs its latest version.`, `The value is <value>.` and `runtimes.<runtime> is in <file>.` on the next three lines. A version that YAML reads as a number or a date, such as an unquoted `2.1` or `2024-01-01`, stops with `Put runtimes.<runtime>.version in quotes, such as version: "2.1.320".`, then `Without quotes, YAML reads the version as a number or a date, and an exact version is a string.` and the same value and file lines. A version that npm, or the registry's runtime cache, does not have stops the run before its session (docs/run.md, §The runtime's program) |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
 | `extending.hooks` | no | lets a checkout extending the stack add workflow hooks at the points of its workflows: `per_point`, the most hooks one point takes, 3 when left out; `per_workflow`, the most the points of one workflow take together, 10 when left out; `timeout`, a duration in whole seconds, 1s or more, the longest a hook may run and the timeout of a hook that sets none, 10 minutes when left out. A count below 1 is refused. Without the block a checkout adds no workflow hook (§Workflow hooks) |
 | `extending.target` | no | the runtimes and the models the stack is written for, `runtime` and `model`, each one name or a list, one of the two at least. A checkout's resolved target outside either list fails the compose; listed models make the model required, since a target without one runs whatever the runtime defaults to, which is a model the stack did not list. Left out, every target is accepted, a model left out included (§Extending a stack) |
@@ -755,34 +761,49 @@ Remove the key "command" from submit.
   submit is in /src/acme-harness/harness/modules/support-desk/process.yaml.
 ```
 
-## The branch format
+## The submission format
 
-A branch document records a work item's branch and the commit in each repository. This
-is version 1 of the format ([branch.schema.json](branch.schema.json)):
+A submission document records what a run submits for a work item: the branch, the commits
+in each repository, the verdict, and the draft pull request. Only qory's submit step
+writes it, after the push. This is version 1 of the format
+([submission.schema.json](submission.schema.json)):
 
 ```json
 {"ref": "qory/wi_7k2m9pq4xt3a8b1c",
- "repositories": [{"system": "github.com", "path": "acme/web", "commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e"}]}
+ "verdict": "passed",
+ "text": {"title": "Add an orders page", "description": "The page lists open orders."},
+ "repositories": [{
+   "system": "github.com", "path": "acme/web",
+   "commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
+   "base": {"commit": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b", "branch": "main"},
+   "commits": [{"commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e", "step": "deliverable:d-1"}],
+   "draft": {"none": "no-program"}}]}
 ```
 
 | Member | Meaning |
 |---|---|
 | `ref` | the branch's name, the same in each repository: `qory/` followed by the work item's id |
+| `verdict` | the work item's newest verdict, when this run wrote it: `passed`, `changes-requested`, `escalate`, or `none` |
+| `text` | the title and the description of the draft pull request, from the session's hand-off file. The title has 1 to 256 characters and no control character: no tab, no line end. Absent when the session wrote none |
 | `repositories` | each repository with the commit of the branch in it, at least one |
 | `system` | the host the repository is on, a lower-case host name of at most 253 characters |
 | `path` | the repository's path on the host: at most 200 characters of segments joined by slashes, with no `.`, `..` or `.git` segment |
-| `commit` | a full commit id, 40 or 64 lower-case hexadecimal digits |
+| `commit` | the head of the branch: a full commit id, 40 or 64 lower-case hexadecimal digits. Each commit id of the format has this form |
+| `base` | the commit the run started at (`commit`), and the name of the repository's default branch when the run started (`branch`, optional, at most 255 characters, a name that git accepts after `refs/heads/`): the branch that a pull request of the run is based on |
+| `commits` | each commit from the base to the head, oldest first, with the ledger step that made it, at most 128 characters: the id of a ledger row, such as `deliverable:d-1`, `fix:f1`, `plan`, `checks`, `small-change` or `script:scenario-2#3`. A commit that a step made gets that step. Any commit with no step gets `unreviewed` |
+| `draft` | the draft pull request (`number`, `url`, `title`, `state`, `action`), or `{"none": <reason>}` with the reason `not-passed`, `no-text`, `escalated`, `no-program`, `program-failed` (with `exit`, 0, 1 or 2), `program-timeout` or `login-needed` (with `exit` 3). The `state` of a draft is `draft`, `open`, `closed` or `merged` |
+| `commit_url` | the forge's address of a commit, from the submit program of a run with no run code |
 
 A document has no other member. A software factory can use the format as the JSON Schema
 of a custom artifact type in its `process.yaml`:
 
 ```yaml
 artifact_types:
-  - name: branch
+  - name: submission
     base_view: structured
-    size_limit: 65536
+    size_limit: 262144
     max_files: 1
-    json_schema: {…}             # the content of branch.schema.json
+    json_schema: {…}             # the content of submission.schema.json
 ```
 
 ## The acceptance criteria format
@@ -1092,6 +1113,8 @@ push_checks:                     # optional: a check for the files of one artifa
   - type: spec
     command: [scripts/checks.js, push, spec]  # a program in the module, then its arguments
     reads: [questions]           # optional: the other artifact types the check reads
+submit_program:                  # optional: the program of the submit step, one per composed harness
+  command: [bin/open-draft]      # a program in the module, then its arguments
 scope_checks:                    # optional: the checks of the plan of one artifact type
   build-plan: [scripts/checks.js, scope, --plan]   # the type a workflow names in `plan`: one command, a program in the module, then its arguments
 ```
@@ -1198,6 +1221,24 @@ line 1 past 98 characters. The home contains
 `push-checks.json` with each check, sorted by type, with its `reads` and its program's
 absolute path in the home; a harness whose modules declare no check has no such file.
 
+`submit_program`, optional, declares the program of the submit step: a forge's module ships
+the program that opens or updates the draft pull request and prints the forge's address of
+each commit. `command` is the program, a file in the module and a relative path with no `..`
+part, then its arguments. A composed harness has at most one: two modules that declare
+one fail the compose, `Remove submit_program from module core or module web.` with `A
+composed harness has one submit program, and both modules declare one.` on the next line.
+An empty command, a word that is not a string, and a program that is not a file in the
+module, or is in an entry an `exclude` or an `only` of the module leaves out, fail the
+compose as they do for a push check, with `submit_program` in place of the push check.
+A run from a run code, or with a run key, runs no submit program: the forge's adapter opens the
+draft from the stored submission. A run with neither a run code nor a run key runs the program on
+the person's machine, outside the wall, once for each repository after the push, with the person's login of the forge's command
+line. The program gets the inputs `QORY_SUBMIT_*` and prints result lines on its standard output,
+as the submit program contract of the integrations repository lists them
+(`contracts/run/v1/submit-program/README.md`). qory reads the lines and checks each value,
+prints the draft's address as a `Draft: <address>` line, and stores nothing of them.
+Exit 0 is done, exit 1 a failed call to the forge, and exit 2 an input the program cannot use.
+See docs/run.md, §The submit program.
 `scope_checks`, optional, declares the checks of the plan of an artifact type, the type that a
 workflow of the stack names in `plan`. It is a map from the type to one command, a list:
 the program, a file in the module as for `push_checks`, then its arguments. The command is
@@ -2009,9 +2050,14 @@ Per runtime, the files written into its directory:
   text (§Launching); neither is linked into the checkout, whose
   `.claude/rules/qory-harness.md` and `.claude/agents` register the bare names.
 - **codex**: `config.toml` with the model, the servers as `[mcp_servers.<name>]` tables,
-  and any other `settings/codex/` file, without `shell_environment_policy.set`, whose
-  variables are the launch's, one `agents/<name>.toml` per agent with the body as
-  `developer_instructions`, with `[features]` `shell_tool = false` when the agent's
+  `features.unified_exec_tty = false`, a `hooks.state."<file>:<event>:<group>:<hook>"`
+  table with the `trusted_hash` of each `command` hook of `hooks.json` and `config.toml`
+  that has no U+2028 or U+2029 in its command, status message or matcher, `<file>` being
+  the file in the home's `codex` folder with links resolved and each name in the case on
+  disk, and any other `settings/codex/` file, without `shell_environment_policy.set`,
+  whose variables are the launch's, one `agents/<name>.toml` per agent with the body as
+  `developer_instructions`, with the tier as `model` and `model_reasoning_effort` in a
+  home composed for codex alone, with `[features]` `shell_tool = false` when the agent's
   `tools` key lists no `Bash` or `PowerShell` (an agent with no `tools` key keeps the
   shell; Codex 0.149.0 or later reads this setting), and for a launch the skills copied
   under `skills/` as folders and regular files, since Codex 0.167.2 skips a `SKILL.md`
@@ -2027,50 +2073,65 @@ Per runtime, the files written into its directory:
   `experimental_realtime_*_base_url`, `profile`, `profiles`, `cli_auth_credentials_store`,
   `allow_login_shell`, `model_instructions_file`, `experimental_compact_prompt_file`,
   `model_catalog_json`, `js_repl_node_path`, `sqlite_home` or `log_dir` fails the compose
-  with ``Remove `<key>` from `settings/codex/config.toml`.`` and the next line ``A Codex
-  run takes this key from qory and Forager, not from the harness.`` A walled run whose
+  with ``Remove the reserved key from `settings/codex/config.toml`.`` and the next line
+  ``qory reserves `<key>`; a Codex run takes no value for it from the harness.``, with
+  each control character of the key written as an escape, such as `\n`. A walled run whose
   Codex arguments before `--` set one of these keys, `model_reasoning_effort`, `skills` or
   `cloud.skills`, a key under one, or a table above one, such as `cloud`, with `--config`,
   `--config=`, `-c`, `-c<key>=<value>` or `-c=<key>=<value>`, stops before the agent
-  starts with ``Remove `--config <key>` from the run's Codex arguments.`` and the next
-  line ``A Codex run takes this key from qory and Forager, not from the arguments.`` A
-  fragment may still set `model_reasoning_effort`. Such a run also stops on `--oss` or
-  `--local-provider` before `--`, with ``Remove `<flag>` from the run's Codex arguments.``
-  and the next line ``A Codex run takes its model provider from qory and Forager, not from
-  the arguments.``, and on `--profile` or `-p`, with ``Remove `--profile` from the run's
-  Codex arguments.`` and the next line ``A Codex run takes its settings from qory and
-  Forager, not from a profile.``, and on `--enable` or `--disable` with any feature, which
-  Codex reads as `--config features.<feature>=true` or `false`, with ``Remove `--enable
-  <feature>` from the run's Codex arguments.`` and the next line ``A Codex run takes this
-  key from qory and Forager, not from the arguments.`` (`--disable <feature>` likewise).
-  It stops on `--ignore-user-config` with ``Remove `--ignore-user-config` from the run's
-  Codex arguments.`` and the next line ``A Codex run takes its settings from qory and
-  Forager, not from the arguments.``, and on `--search` with ``Remove `--search` from the
-  run's Codex arguments.`` and the next line ``A Codex run takes its web search setting
-  from qory and Forager, not from the arguments.`` It stops on
-  `--dangerously-bypass-hook-trust` with ``Remove `--dangerously-bypass-hook-trust` from
-  the run's Codex arguments.`` and the next line ``A Codex run takes its hook trust from
-  qory and Forager, not from the arguments.``, and on `--remote` or
+  starts with ``Remove the `<flag>` flag and its value from the run's Codex arguments.``
+  and the next line ``In this run, qory reserves `<key>`; the run takes no value for it
+  from the arguments.``, where `<flag>` is `-c` or `--config` as typed. For a table above
+  a reserved key, such as `cloud`, the next line is `` `cloud` is a table that contains
+  `cloud.skills`, which qory reserves in this run. `` A fragment may still set
+  `model_reasoning_effort`. Such a run also stops on `--oss` or `--local-provider` before
+  `--`, with ``Remove `<flag>` from the run's Codex arguments.`` and the next line ``A
+  Codex run takes its model provider from qory and Forager, not from the arguments.``, and
+  on `--profile` or `-p`, with ``Remove `--profile` from the run's Codex arguments.`` and
+  the next line ``A Codex run takes its settings from qory and Forager, not from a
+  profile.``, and on `--enable` or `--disable` with every feature other than `hooks`,
+  `codex_hooks` and `unified_exec_tty`, which Codex reads as `--config
+  features.<feature>=true` or `false`, with ``Remove the `--enable` flag and its value
+  from the run's Codex arguments.`` and the next line ``A walled Codex run takes no
+  feature from its arguments, `<feature>` included.`` (`--disable` likewise). It stops on
+  `--ignore-user-config` with ``Remove `--ignore-user-config` from the run's Codex
+  arguments.`` and the next line ``A Codex run takes its settings from qory and Forager,
+  not from the arguments.``, and on `--search` with ``Remove `--search` from the run's
+  Codex arguments.`` and the next line ``A Codex run takes its web search setting from
+  qory and Forager, not from the arguments.`` It stops on `--remote` or
   `--remote-auth-token-env`, also with `=`, with ``Remove `--remote` from the run's Codex
   arguments.`` and the next line ``A Codex run takes its app server from qory and Forager,
-  not from the arguments.`` (`--remote-auth-token-env` likewise). A key or feature in
-  these lines has each control character written as an escape. A hook in
-  `settings/codex/config.toml` or `settings/codex/hooks.json` whose `timeout` or
-  `additionalContextLimit` is negative or fractional, such as 2.0, fails the compose with
-  ``Set `<key>` of the `<event>` hook to a whole number of 0 or more.`` and the next line
-  ``The hook is in the harness's `settings/codex/<file>`, and Codex ignores the whole file
-  otherwise.`` A hook group or a hook there that Codex 0.170.0 cannot decode, such as a
-  `command` hook with no `command` text or a `type` other than `command`, `mcp_tool`,
-  `prompt` and `agent`, fails the compose with ``Fix `hooks.<event>[<group>].hooks[<hook>]`
-  in `settings/codex/<file>`.``, the indexes counted from 0, and the next line ``<cause>,
-  and Codex reads no hook of a file with such a hook.`` Codex has no allow list of skills, so the `Skill(harness:<name>)` rules in
-  `permissions.allow` of `settings/claude/settings.json` are the Codex list too. In the
-  home of a walled Codex run, `config.toml` disables every other skill by name, with a
-  `[[skills.config]]` entry with `enabled = false` after any entry the fragment has: each
-  skill of the home's `skills/` and of the checkout's `.codex/skills` and
-  `.agents/skills`, by its frontmatter `name` and its folder's name, and after the name of
-  each plugin above it. It also sets `skills.bundled.enabled = false` and
-  `cloud.skills.enabled = false`. Any other rule with a pattern, such as
+  not from the arguments.`` (`--remote-auth-token-env` likewise). Every Codex run, walled
+  or not, stops before the agent starts on `--dangerously-bypass-hook-trust`, with
+  ``Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.`` and the
+  next line ``A Codex run takes its hook trust from qory and Forager, not from the
+  arguments.``; on `--trust`, also with `=`, with ``Remove `--trust` from the run's Codex
+  arguments.`` and the next line `` `--trust` saves trust for a project folder with no
+  trust setting, and Codex then reads the folder's `.codex/config.toml`, which can set
+  `features.hooks = false`. ``; on a `--config` or `-c` key at `hooks`, `features.hooks`,
+  `features.codex_hooks`, `features.unified_exec_tty` or `projects`, under one, or
+  `features`, with the `--config` lines; and on `--enable` or `--disable` of `hooks`,
+  `codex_hooks` or `unified_exec_tty`, with ``Remove the `<flag>` flag and its value from
+  the run's Codex arguments.``, where `<flag>` is `--enable` or `--disable` as typed, and
+  the next line ``In this run, qory reserves `features.<feature>`; the run takes no value
+  for it from the arguments.`` A key or feature in these lines has each control character
+  written as an escape. A hook in `settings/codex/config.toml` or
+  `settings/codex/hooks.json` whose `timeout` or `additionalContextLimit` is negative or
+  fractional, such as 2.0, fails the compose with ``Set `<key>` of the `<event>` hook to a
+  whole number of 0 or more.`` and the next line ``The hook is in the harness's
+  `settings/codex/<file>`, and Codex ignores the whole file otherwise.`` A hook group or a
+  hook there that Codex 0.170.0 cannot decode, such as a `command` hook with no `command`
+  text or a `type` other than `command`, `mcp_tool`, `prompt` and `agent`, fails the
+  compose with ``Fix `hooks.<event>[<group>].hooks[<hook>]` in `settings/codex/<file>`.``,
+  the indexes counted from 0, and the next line ``<cause>, and Codex reads no hook of a
+  file with such a hook.`` Codex has no allow list of skills, so the
+  `Skill(harness:<name>)` rules in `permissions.allow` of `settings/claude/settings.json`
+  are the Codex list too. In the home of a walled Codex run, `config.toml` disables every
+  other skill by name, with a `[[skills.config]]` entry with `enabled = false` after any
+  entry the fragment has: each skill of the home's `skills/` and of the checkout's
+  `.codex/skills` and `.agents/skills`, by its frontmatter `name` and its folder's name,
+  and after the name of each plugin above it. It also sets `skills.bundled.enabled =
+  false` and `cloud.skills.enabled = false`. Any other rule with a pattern, such as
   `Skill(harness:review-*)`, allows no skill. Every skill of the checkout's
   `.codex/skills` and `.agents/skills` also gets a `[[skills.config]]` entry with its
   `SKILL.md` path in the wall and `enabled = false`, after the name entries, so a checkout
@@ -2106,7 +2167,7 @@ Per runtime, the files written into its directory:
 - **goose**: `agents/<name>.md` with `name`, `description` and `model`.
 - **any**: nothing.
 
-An agent's tier is written as `model` and `effort` in a claude agent, and as `model` and `reasoning-effort` in a copilot agent. The effort is one of `low`, `medium`, `high`, `xhigh` and `max` for claude, and one of `minimal`, `low`, `medium`, `high`, `xhigh` and `max` for copilot; another value fails the compose with exit 2. Copilot CLI reports a level the agent's model does not offer and leaves it unapplied. Cursor and opencode take an agent's effort only inside `model`, as `<id>[effort=<level>]` and `<provider>/<model>#<variant>`, which qory does not write: a tier is written as `model` alone for cursor, opencode and goose, and the agent runs at the session's effort, with a `skipped` row that lists the agents. A tier is not written at all for codex and gemini, with a row. On every compose for claude, qory refuses `env` in a `settings/claude/settings.json` fragment that sets `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_EFFORT` or `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`. It refuses them the same way in the configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export. With the home inside the checkout, it also refuses them in the checkout's `.claude/settings.json` and `.claude/settings.local.json` and in the user's Claude Code settings file.
+An agent's tier is written as `model` and `effort` in a claude agent, and as `model` and `reasoning-effort` in a copilot agent. The effort is one of `low`, `medium`, `high`, `xhigh` and `max` for claude, and one of `minimal`, `low`, `medium`, `high`, `xhigh` and `max` for copilot; another value fails the compose with exit 2. Copilot CLI reports a level the agent's model does not offer and leaves it unapplied. Cursor and opencode take an agent's effort only inside `model`, as `<id>[effort=<level>]` and `<provider>/<model>#<variant>`, which qory does not write: a tier is written as `model` alone for cursor, opencode and goose, and the agent runs at the session's effort, with a `skipped` row that lists the agents. A tier is written as `model` and `model_reasoning_effort` for codex in a home composed for codex alone, the effort one of `none`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra`, another value failing the compose with exit 2. In a home composed for codex and another runtime, a tier is not written for codex, since one tier map serves every runtime, with a row. A tier is not written at all for gemini, with a row. On every compose for claude, qory refuses `env` in a `settings/claude/settings.json` fragment that sets `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_EFFORT` or `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`. It refuses them the same way in the configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export. With the home inside the checkout, it also refuses them in the checkout's `.claude/settings.json` and `.claude/settings.local.json` and in the user's Claude Code settings file.
 
 Programs that read `AGENTS.md` and `.agents/skills` and have no separate package include
 DeepSeek Harness, Kilo Code, Kimi CLI, Factory Droid, Mistral Vibe, JetBrains Junie, Augment
@@ -2306,6 +2367,7 @@ exports:                         # in a repository delivering stacks or modules 
 | `harness.model` | the document's `target.model` | `--model` wins over it |
 | `harness.effort` | none | the effort value the main agent runs at, one of the values the runtime's descriptor in Forager lists for a run, passed in the place the descriptor lists for the effort: for `claude`, the flag `--effort`, with `low`, `medium`, `high`, `xhigh` or `max`. A runtime whose descriptor has no place for it gets none, and the compose prints a row. An empty value is no effort. `--effort` wins over it |
 | `harness.tiers` | none | the model id each tier maps to, for the agents whose `model` is `${qory:<tier>}`: a model id, or `{model, effort}`, the effort one of the values the runtime takes for an agent. The tiers are `light`, `balanced` and `thinking`. In the user's file and an ancestor's it is the machine's map, the nearest file per tier; in the checkout root's file it is the repository's map, read under `extends` too. Per tier, `--tier`, with the effort of `--tier-effort` for the same tier, wins over the machine's map, and the machine's map over the repository's; an entry comes whole from one of the three, so `--tier-effort` needs `--tier` for its tier. |
+| `harness.runtimes` | none | the version `qory run` installs of each runtime, as in a stack (§The stack). Only the checkout root's file sets it. In the user's file, and in an ancestor's file that discovery or `-f` selects to compose (§Discovery), qory stops with `Move runtimes to the checkout's qory.yaml or to the base qory-stack.yaml.`, then `Only the checkout's qory.yaml and the base stack pin a runtime's version.` and `harness.runtimes is in <file>.` on the next two lines. In another ancestor's file, qory leaves the pin unread |
 | `harness.force` | `false` | what `--force` does on every compose; `--force=false` wins over it |
 | `harness.update` | `never` | `always` fetches every git source again on each compose; `--update` and `--update=false` win over it |
 | `harness.home` | `.qory/harness` | where the harness is composed: `.qory/harness` in the checkout, or a directory outside it, absolute or under `~`, containing one home per checkout as `<name>-<digest>` (§Rendering); `--home` wins over it |

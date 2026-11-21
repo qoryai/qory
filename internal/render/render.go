@@ -181,6 +181,29 @@ type AgentModel interface {
 	AgentEfforts() []string
 }
 
+// AloneModel is an [AgentModel] that writes the agents' tiers only into a home composed
+// for it alone. One tier map serves every runtime of a home, so in a home composed for
+// several runtimes its agents would get model ids meant for another runtime's provider.
+type AloneModel interface {
+	AgentModel
+	// TiersAlone marks the runtime; it does nothing.
+	TiersAlone()
+}
+
+// TierWriter is rt as an [AgentModel] and true when rt writes the agents' tiers in a home
+// composed for runtimes: false for a runtime that writes none, and for an [AloneModel] in
+// a home with more than one runtime.
+func TierWriter(rt Runtime, runtimes []Runtime) (AgentModel, bool) {
+	am, ok := rt.(AgentModel)
+	if !ok {
+		return nil, false
+	}
+	if _, alone := rt.(AloneModel); alone && len(runtimes) > 1 {
+		return nil, false
+	}
+	return am, true
+}
+
 // TierFront returns an agent file with its tier written into the frontmatter keys model
 // and effort, the form of an agent file that takes both: the mapped model id, and the
 // entry's effort when it sets one, in place of the agent's. An agent whose tier has no
@@ -273,6 +296,14 @@ type Walled interface {
 	// error when args set what a walled run takes from qory and Forager alone; the run
 	// then stops before the launch. home is the composed harness home.
 	WalledArgs(args []string, home string) ([]string, error)
+}
+
+// ArgsChecker is a [Launcher] whose launch arguments a run without a wall checks too. A
+// walled run checks them in [Walled].
+type ArgsChecker interface {
+	// CheckArgs is an error when args, the launch's arguments, set what every run takes
+	// from qory alone; the run then stops before the launch.
+	CheckArgs(args []string) error
 }
 
 // SettingsInliner is a [Launcher] whose settings file a run passes to Forager as its
@@ -695,7 +726,15 @@ func BuildAt(res *compose.Result, stage, home string, runtimes ...Runtime) error
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
-		if err := p.Render(res, dir, home); err != nil {
+		// An AloneModel in a home of several runtimes renders with no tier map, so its
+		// agents get no model, see [TierWriter].
+		r := res
+		if _, alone := p.(AloneModel); alone && len(runtimes) > 1 && res.Tiers != nil {
+			noTiers := *res
+			noTiers.Tiers = nil
+			r = &noTiers
+		}
+		if err := p.Render(r, dir, home); err != nil {
 			return err
 		}
 		if err := linkFiles(res, p, dir); err != nil {

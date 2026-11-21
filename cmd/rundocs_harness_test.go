@@ -368,8 +368,8 @@ func TestARunCodeComposesTheWorkspacesHarnessThroughTheStackProxy(t *testing.T) 
 	if json.Unmarshal(data, &doc) != nil || statErr != nil || st.Mode().Perm() != 0o600 || doc.Harness.Extends.Git != r.url || doc.Harness.Extends.Ref != namedRef || doc.Harness.Extends.Path != r.folder {
 		t.Errorf("harness.yaml (%v) has:\n%s", statErr, data)
 	}
-	if r.spec.Timeout <= 5*time.Hour-time.Minute || r.spec.Timeout > 5*time.Hour {
-		t.Errorf("the time limit left is %v, want 5h less the time before the join", r.spec.Timeout)
+	if r.spec.Timeout != 5*time.Hour {
+		t.Errorf("the time limit is %v, want the whole 5h", r.spec.Timeout)
 	}
 	r.noAddress(t)
 }
@@ -406,8 +406,8 @@ func TestARunCodeComposesAHarnessDocumentThatDefinesAStack(t *testing.T) {
 			if want := []session.HarnessSource{{Source: "module hello", Commit: r.commit}}; !slices.Equal(r.spec.Harness, want) {
 				t.Errorf("the harness list is %+v, want %+v", r.spec.Harness, want)
 			}
-			if r.spec.Timeout <= 45*time.Minute-time.Minute || r.spec.Timeout > 45*time.Minute {
-				t.Errorf("the time limit left is %v, want 45m less the time before the join", r.spec.Timeout)
+			if r.spec.Timeout != 45*time.Minute {
+				t.Errorf("the time limit is %v, want the whole 45m", r.spec.Timeout)
 			}
 			r.noAddress(t)
 		})
@@ -624,8 +624,8 @@ func TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile(t *testing.T) {
 				t.Errorf("the calls %q, %d tunnels, want the stack proxy opened and closed before the join, and no host proxy", r.calls, r.server.Tunnels())
 			}
 			r.noHarnessFile(t)
-			if r.spec.Timeout <= 5*time.Hour-time.Minute || r.spec.Timeout > 5*time.Hour {
-				t.Errorf("the time limit left is %v, want 5h less the time before the join", r.spec.Timeout)
+			if r.spec.Timeout != 5*time.Hour {
+				t.Errorf("the time limit is %v, want the whole 5h", r.spec.Timeout)
 			}
 			if shown {
 				return

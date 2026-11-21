@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -326,15 +327,42 @@ func SetLoadPushChecks(f func(home string) ([]compose.PushCheck, error)) func() 
 	return func() { loadPushChecks = before }
 }
 
+// RegisterPushCheck sets the push check with name for a local run, called with the repository's
+// folder and the commit about to be pushed, as the real checks get it, and returns what restores
+// the checks.
+func RegisterPushCheck(name string, check func(ctx context.Context, dir, head string) error) func() {
+	before := maps.Clone(localPushChecks)
+	registerPushCheck(name, func(ctx context.Context, repo localRepository) error { return check(ctx, repo.Dir, repo.Head) })
+	return func() { localPushChecks = before }
+}
+
+// PushChecksRequired is the names of the push checks that a local run needs.
+func PushChecksRequired() []string { return slices.Clone(requiredPushChecks) }
+
+// SetLocalPushAddress makes a local run's push of address go to route(address), a repository on
+// disk, by a real url.<route>.insteadOf rule in the push's configuration, and returns what
+// restores it. The checks and the program still get the address.
+func SetLocalPushAddress(route func(address string) string) func() {
+	before := localPushConfig
+	localPushConfig = func(address string) []string {
+		to := route(address)
+		if to == address {
+			return nil
+		}
+		return []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=url." + to + ".insteadOf", "GIT_CONFIG_VALUE_0=" + address}
+	}
+	return func() { localPushConfig = before }
+}
+
 // SetBranchWait makes the push step pass each wait to f in place of waiting, and returns
 // what restores the default.
 func SetBranchWait(f func(time.Duration)) func() {
-	before := branchWait
-	branchWait = func(_ context.Context, d time.Duration) error {
+	before := submissionWait
+	submissionWait = func(_ context.Context, d time.Duration) error {
 		f(d)
 		return nil
 	}
-	return func() { branchWait = before }
+	return func() { submissionWait = before }
 }
 
 // SetRecordAttemptLimit makes each send of the report of a push have d, and returns what

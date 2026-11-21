@@ -63,6 +63,13 @@ const realRunDocument = `{"version":1,"security_policy":{"version":1,"egress":{"
 	`{"name":"work-1","apply":[{"hosts":["localhost"],"scheme":"basic","username":"x-access-token","paths":["/acme/site.git/*"]}]},` +
 	`{"name":"push-1","purpose":"push","apply":[{"hosts":["localhost"],"scheme":"basic","username":"x-access-token","paths":["/acme/site.git/*"],"push_ref":"` + realBranch + `"}]}]}`
 
+// narrowRunDocument is [realRunDocument] with a push credential whose items are the two
+// paths of a git push, the ref list and receive-pack, and no path for git-upload-pack: the
+// shape of the push list that the adapter forms for a push credential.
+const narrowRunDocument = `{"version":1,"security_policy":{"version":1,"egress":{"mode":"enforce","allow":["localhost"]}},"credentials":[` +
+	`{"name":"work-1","apply":[{"hosts":["localhost"],"scheme":"basic","username":"x-access-token","paths":["/acme/site.git/*"]}]},` +
+	`{"name":"push-1","purpose":"push","apply":[{"hosts":["localhost"],"scheme":"basic","username":"x-access-token","paths":["/acme/site.git/info/refs","/acme/site.git/git-receive-pack"],"push_ref":"` + realBranch + `"}]}]}`
+
 // TestForagerRunKeepsThePushCredentialOnThePushProxyAlone is a run at a real Forager
 // gateway, with a stand-in control that serves a run configuration with a read credential
 // and a push credential, and a forge that is git over https. It calls
@@ -80,18 +87,44 @@ func TestForagerRunKeepsThePushCredentialOnThePushProxyAlone(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Go reads the authorities of SSL_CERT_FILE on Linux alone, and the gateway must trust the test forge's")
 	}
-	if dir := os.Getenv(envRealPush); dir != "" {
+	if dir := realSetup(t, envRealPush); dir != "" {
 		realPush(t, dir)
 		return
 	}
-	dir, err := os.MkdirTemp("", "q-rp")
+	startRealChild(t, "q-rp", "TestForagerRunKeepsThePushCredentialOnThePushProxyAlone", envRealPush)
+}
+
+// realChildArg is the argument after "--" that marks the child process of a test of a real
+// gateway. A child never starts a child: it takes the parent branch of its test only when its
+// marker is missing and this argument is too.
+const realChildArg = "qory-real-child"
+
+// realSetup is the folder that the parent of a test of a real gateway gave its child in the
+// variable env, "" in the parent. It fails the test when the child has no folder, as
+// when TestMain does not keep the variable: the child would be a parent and start a child
+// without end.
+func realSetup(t *testing.T, env string) string {
+	t.Helper()
+	dir := os.Getenv(env)
+	if dir == "" && slices.Contains(os.Args, realChildArg) {
+		t.Fatalf("this child of %s has no %s, so it would start another child; TestMain must keep the variable", os.Args[0], env)
+	}
+	return dir
+}
+
+// startRealChild writes the certificates of a test forge in a new folder, whose name starts
+// with prefix, and runs this binary again with only test, the folder in env, and SSL_CERT_FILE
+// set to its authority. It fails the test when the child fails.
+func startRealChild(t *testing.T, prefix, test, env string) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	writeRealCertificates(t, dir)
-	child := exec.Command(os.Args[0], "-test.run=^TestForagerRunKeepsThePushCredentialOnThePushProxyAlone$", "-test.count=1")
-	child.Env = append(os.Environ(), envRealPush+"="+dir, "SSL_CERT_FILE="+filepath.Join(dir, "ca.pem"))
+	child := exec.Command(os.Args[0], "-test.run=^"+test+"$", "-test.count=1", "--", realChildArg)
+	child.Env = append(os.Environ(), env+"="+dir, "SSL_CERT_FILE="+filepath.Join(dir, "ca.pem"))
 	if out, err := child.CombinedOutput(); err != nil {
 		t.Fatalf("the child run failed: %v\n%s", err, out)
 	}
@@ -214,6 +247,12 @@ type realControl struct {
 
 func startRealControl(t *testing.T) *realControl {
 	t.Helper()
+	return startRealControlWith(t, realRunDocument)
+}
+
+// startRealControlWith is [startRealControl] with document as the run configuration.
+func startRealControlWith(t *testing.T, document string) *realControl {
+	t.Helper()
 	accessKey, err := accesskey.Generate()
 	if err != nil {
 		t.Fatal(err)
@@ -245,7 +284,7 @@ func startRealControl(t *testing.T) *realControl {
 			return []byte(doc), "sha256=" + strconv.Itoa(len(doc))
 		},
 		RunConfiguration: func(receiver.Run) ([]byte, string, *receiver.Refusal) {
-			return []byte(realRunDocument), "", nil
+			return []byte(document), "", nil
 		},
 	}
 	c.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -389,6 +428,131 @@ func realPush(t *testing.T, dir string) {
 	want := "POST /acme/site.git/git-receive-pack " + basic(realPushSecret)
 	if got := forge.requests()[before:]; !slices.Contains(got, want) || slices.Contains(got, strings.TrimSuffix(want, basic(realPushSecret))+basic(realWorkSecret)) {
 		t.Errorf("the forge got\n%q\nfrom the push through the push proxy, want %q and no push with the work credential", got, want)
+	}
+	if _, err := r.Close(ctx, session.Outcome{State: event.StateSucceeded}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// envRealHead is [envRealPush] for [TestForagerRunReadsTheBranchHeadWithTheReadCredential].
+const envRealHead = "QORY_TEST_REAL_HEAD"
+
+// TestForagerRunReadsTheBranchHeadWithTheReadCredential is a run at a real Forager gateway
+// whose push credential has no path for git-upload-pack. The read of the branch's head, which
+// under git's protocol v2 posts to git-upload-pack, goes through the run's host proxy and
+// reaches the forge with the read credential and never the push credential, both while the
+// branch is missing and after the push; the push through the push proxy, a push with the
+// lease on the head, succeeds. It is the setup of [TestForagerRunKeepsThePushCredentialOnThePushProxyAlone],
+// and starts this binary again for the same reason; it skips off Linux.
+func TestForagerRunReadsTheBranchHeadWithTheReadCredential(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Go reads the authorities of SSL_CERT_FILE on Linux alone, and the gateway must trust the test forge's")
+	}
+	if dir := realSetup(t, envRealHead); dir != "" {
+		realHead(t, dir)
+		return
+	}
+	startRealChild(t, "q-rh", "TestForagerRunReadsTheBranchHeadWithTheReadCredential", envRealHead)
+}
+
+// realHead is the run of the child process of [TestForagerRunReadsTheBranchHeadWithTheReadCredential].
+func realHead(t *testing.T, dir string) {
+	ctx := context.Background()
+	forge := startRealForge(t, dir)
+	control := startRealControlWith(t, narrowRunDocument)
+	runs := t.TempDir()
+	g, err := gateway.Start(ctx, gateway.Config{
+		RunDir:       func(id string) string { return filepath.Join(runs, id) },
+		NoLinkSocket: true,
+		Report:       func(string) {},
+		Server:       control.server(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close(ctx)
+	r, err := session.Open(ctx, session.OpenSpec{RunID: event.NewRunID(), RunsDir: runs, Report: func(string) {}, Gateway: session.LocalGateway(g.LocalLink())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := foragerRun{r}
+	_, port, _ := net.SplitHostPort(forge.srv.Listener.Addr().String())
+	url := "https://localhost:" + port + "/acme/site.git"
+	basic := func(secret string) string {
+		return "Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+secret))
+	}
+	// wantRead fails the test for a request since mark that carries any credential but the read one.
+	wantRead := func(what string, mark int) {
+		t.Helper()
+		got := forge.requests()[mark:]
+		if len(got) == 0 {
+			t.Errorf("%s: the forge got no request", what)
+		}
+		for _, request := range got {
+			if !strings.HasSuffix(request, basic(realWorkSecret)) {
+				t.Errorf("%s: the forge got %q, want the read credential alone", what, request)
+			}
+		}
+	}
+
+	host, err := run.HostProxy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	if out, err := gitThrough(t, work, host.proxy, "clone", "--quiet", url, "."); err != nil {
+		t.Fatalf("the fetch through the run's proxy failed: %v\n%s", err, out)
+	}
+	mark := len(forge.requests())
+	if out, err := gitThrough(t, work, host.proxy, "ls-remote", "--", url, "refs/heads/qory/wi_01"); err != nil || strings.TrimSpace(out) != "" {
+		t.Fatalf("the head read of a missing branch: %v, %q, want no head", err, out)
+	}
+	wantRead("the head read of a missing branch", mark)
+
+	if err := os.WriteFile(filepath.Join(work, "left.txt"), []byte("left\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	proxygittest.Git(t, work, "add", "left.txt")
+	proxygittest.Git(t, work, "-c", "user.name=Example", "-c", "user.email=example@example.com", "commit", "--quiet", "-m", "Left by the agent")
+	head := proxygittest.Git(t, work, "rev-parse", "HEAD")
+
+	push, err := run.PushProxy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := gitThrough(t, work, push.proxy, "push", "--quiet", "origin", "HEAD:"+realBranch); err != nil {
+		t.Fatalf("the first push through the push proxy failed: %v\n%s", err, out)
+	}
+	mark = len(forge.requests())
+	out, err := gitThrough(t, work, host.proxy, "ls-remote", "--", url, realBranch)
+	if err != nil || !strings.HasPrefix(out, head) {
+		t.Fatalf("the head read after the push: %v, %q, want %s", err, out, head)
+	}
+	wantRead("the head read after the push", mark)
+
+	// The lease push: a second commit, with a lease on the head that the read returned.
+	if err := os.WriteFile(filepath.Join(work, "more.txt"), []byte("more\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	proxygittest.Git(t, work, "add", "more.txt")
+	proxygittest.Git(t, work, "-c", "user.name=Example", "-c", "user.email=example@example.com", "commit", "--quiet", "-m", "More")
+	next := proxygittest.Git(t, work, "rev-parse", "HEAD")
+	mark = len(forge.requests())
+	if out, err := gitThrough(t, work, push.proxy, "push", "--quiet", "--force-with-lease="+realBranch+":"+head, "origin", "HEAD:"+realBranch); err != nil {
+		t.Fatalf("the lease push through the push proxy failed: %v\n%s", err, out)
+	}
+	if got := forge.branch(t); got != next {
+		t.Errorf("the forge has the branch at %q, want %s", got, next)
+	}
+	want := "POST /acme/site.git/git-receive-pack " + basic(realPushSecret)
+	if got := forge.requests()[mark:]; !slices.Contains(got, want) {
+		t.Errorf("the forge got\n%q\nfrom the lease push, want %q", got, want)
+	}
+	if err := host.close(); err != nil {
+		t.Error(err)
+	}
+	if err := push.close(); err != nil {
+		t.Error(err)
 	}
 	if _, err := r.Close(ctx, session.Outcome{State: event.StateSucceeded}); err != nil {
 		t.Fatal(err)

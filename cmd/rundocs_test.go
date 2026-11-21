@@ -382,8 +382,8 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 	if _, err := os.Stat(r.inputDir); !os.IsNotExist(err) {
 		t.Errorf("the inputs are left after the run: %v", err)
 	}
-	if r.spec.Timeout <= 7*time.Hour-time.Minute || r.spec.Timeout > 7*time.Hour {
-		t.Errorf("the time limit left is %v, want 7h less the time before the join", r.spec.Timeout)
+	if r.spec.Timeout != 7*time.Hour {
+		t.Errorf("the time limit is %v, want the whole 7h", r.spec.Timeout)
 	}
 	if i := slices.Index(r.spec.Args, "--settings"); i < 0 || i+1 >= len(r.spec.Args) || !strings.Contains(r.spec.Args[i+1], `"model": "example-large"`) {
 		t.Errorf("Claude Code's settings have no model example-large: %q", r.spec.Args)
@@ -439,13 +439,13 @@ func TestARunCodeWithoutATimeLimitHasNone(t *testing.T) {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
 	if r.spec.Timeout != 0 {
-		t.Errorf("the time limit left is %v, want none", r.spec.Timeout)
+		t.Errorf("the time limit is %v, want none", r.spec.Timeout)
 	}
 }
 
 // TestARunCodesTimeLimitMinutesIsTheSessionsTimeLimit is a run from a run code whose
 // documents set time_limit_minutes at the top: each session of the workflow, session 1,
-// stops at that many minutes, counted from the run's open, whatever the workflow
+// stops at that many minutes, counted from the agent's start, whatever the workflow
 // declares.
 func TestARunCodesTimeLimitMinutesIsTheSessionsTimeLimit(t *testing.T) {
 	for _, c := range []struct {
@@ -460,8 +460,8 @@ func TestARunCodesTimeLimitMinutesIsTheSessionsTimeLimit(t *testing.T) {
 			if !r.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}
-			if r.spec.Timeout <= 45*time.Minute-time.Minute || r.spec.Timeout > 45*time.Minute {
-				t.Errorf("the time limit left is %v, want 45m less the time before the join", r.spec.Timeout)
+			if r.spec.Timeout != 45*time.Minute {
+				t.Errorf("the time limit is %v, want the whole 45m", r.spec.Timeout)
 			}
 		})
 	}
@@ -478,8 +478,8 @@ func TestARunCodeWithSharedRunAndFullSuiteStartsSession1(t *testing.T) {
 	if !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	if r.spec.Timeout <= 60*time.Minute-time.Minute || r.spec.Timeout > 60*time.Minute {
-		t.Errorf("the time limit left is %v, want 60m less the time before the join", r.spec.Timeout)
+	if r.spec.Timeout != 60*time.Minute {
+		t.Errorf("the time limit is %v, want the whole 60m", r.spec.Timeout)
 	}
 }
 

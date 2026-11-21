@@ -42,10 +42,10 @@ const composed = `model = "gpt-6.1-sol"
 
 // TestWalledConfigIsGolden is the config.toml a walled run binds, for a copy of the
 // checkout: the compose's keys as they were, without the hooks, which the run binds in
-// /etc/codex, the login kept in memory only, the login shell, the shell snapshot, goals
-// and memories off, each project path untrusted, the skills Codex ships and a cloud's
-// skills off, and a disabling entry for each skill name, then for each skill path, after
-// the compose's entry.
+// /etc/codex, the login kept in memory only, the login shell, the shell snapshot, goals,
+// memories and a shell with a terminal off, each project path untrusted, the skills Codex
+// ships and a cloud's skills off, and a disabling entry for each skill name, then for
+// each skill path, after the compose's entry.
 func TestWalledConfigIsGolden(t *testing.T) {
 	got, err := codex.WalledConfig([]byte(composed), []string{"/cache/qory/runs/r1/work", "/workspace"}, []string{"deploying", "plugin:review", "review"}, []string{"/workspace/.agents/skills/review/SKILL.md"})
 	if err != nil {
@@ -63,6 +63,7 @@ model = "gpt-6.1-sol"
   goals = false
   memories = false
   shell_snapshot = false
+  unified_exec_tty = false
 
 [mcp_servers]
   [mcp_servers.db]
@@ -112,7 +113,7 @@ func TestWalledConfigTrustsNoProjectAndAddsNoState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "allow_login_shell = false\ncli_auth_credentials_store = \"ephemeral\"\nmodel = \"m\"\n\n[cloud]\n  [cloud.skills]\n    enabled = false\n\n[features]\n  goals = false\n  memories = false\n  shell_snapshot = false\n\n[skills]\n  [skills.bundled]\n    enabled = false\n"; string(got) != want {
+	if want := "allow_login_shell = false\ncli_auth_credentials_store = \"ephemeral\"\nmodel = \"m\"\n\n[cloud]\n  [cloud.skills]\n    enabled = false\n\n[features]\n  goals = false\n  memories = false\n  shell_snapshot = false\n  unified_exec_tty = false\n\n[skills]\n  [skills.bundled]\n    enabled = false\n"; string(got) != want {
 		t.Errorf("config.toml %q", got)
 	}
 }

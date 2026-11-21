@@ -81,6 +81,9 @@ type Manifest struct {
 	// PushChecks are the checks the module declares for the files of an artifact type,
 	// one per type, in the order of the file; nil when the manifest has none.
 	PushChecks []PushCheck
+	// SubmitProgram is the program of the submit step the module ships, nil when the
+	// manifest has no submit_program key. See [SubmitProgram].
+	SubmitProgram *SubmitProgram
 	// ScopeChecks are the scope checks the module declares, by the artifact type of a
 	// plan: for each type, one command, the program, a path inside the module, cleaned,
 	// and its arguments. Nil when the manifest has none.
@@ -104,6 +107,15 @@ type PushCheck struct {
 	// Reads are the other artifact types the check reads, each once, in the order of the
 	// file; nil for none.
 	Reads []string
+}
+
+// SubmitProgram is the program a module ships for the submit step: it reads the
+// submission and writes the forge's links and draft into it. A composed harness has at
+// most one.
+type SubmitProgram struct {
+	// Command is the program and its arguments. The program is a path inside the module,
+	// relative to its root, cleaned, with no .. part.
+	Command []string
 }
 
 // InsideModule reports whether path is a relative path that stays inside the module:
@@ -134,7 +146,15 @@ type rawManifest struct {
 	Roles       yaml.Node              `yaml:"roles,omitempty"`
 	Provides    yaml.Node              `yaml:"provides,omitempty"`
 	PushChecks  []rawPushCheck         `yaml:"push_checks,omitempty"`
-	ScopeChecks yaml.Node              `yaml:"scope_checks,omitempty"`
+	// SubmitProgram is the submit_program item as it is written; nil when absent.
+	SubmitProgram *rawSubmitProgram `yaml:"submit_program,omitempty"`
+	ScopeChecks   yaml.Node         `yaml:"scope_checks,omitempty"`
+}
+
+// rawSubmitProgram is the submit_program item as it is written. The command's items stay
+// nodes for the reason [rawPushCheck] gives.
+type rawSubmitProgram struct {
+	Command []yaml.Node `yaml:"command"`
 }
 
 // rawPushCheck is one push_checks item as it is written. The command's items stay nodes,
@@ -494,6 +514,9 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	if m.PushChecks, err = readPushChecks(path, raw.PushChecks); err != nil {
 		return nil, err
 	}
+	if m.SubmitProgram, err = readSubmitProgram(path, raw.SubmitProgram); err != nil {
+		return nil, err
+	}
 	if m.ScopeChecks, err = readScopeChecks(path, &raw.ScopeChecks); err != nil {
 		return nil, err
 	}
@@ -597,6 +620,33 @@ func readPushChecks(path string, items []rawPushCheck) ([]PushCheck, error) {
 		out = append(out, PushCheck{Type: item.Type, Command: command, Reads: reads})
 	}
 	return out, nil
+}
+
+// readSubmitProgram checks the submit_program item of the manifest at path: a command
+// whose first item is a path inside the module with no .. part, and whose other items are
+// strings. It returns the item with the program's path cleaned, nil for none.
+func readSubmitProgram(path string, item *rawSubmitProgram) (*SubmitProgram, error) {
+	if item == nil {
+		return nil, nil
+	}
+	refuse := func(fix string, lines ...string) error {
+		return exports.Refuse(fix, append(lines, "The manifest is "+path+".")...)
+	}
+	if len(item.Command) == 0 {
+		return nil, refuse("Set submit_program.command to the program's path inside the module, then its arguments.", "The list is empty.")
+	}
+	words := make([]string, len(item.Command))
+	for i, node := range item.Command {
+		if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
+			return nil, refuse(fmt.Sprintf("Set submit_program.command[%d] to a string, quoted when it reads as a number or a boolean.", i), "The item is not a string.")
+		}
+		words[i] = node.Value
+	}
+	program, ok := InsideModule(words[0])
+	if !ok || slices.Contains(strings.Split(filepath.ToSlash(words[0]), "/"), "..") {
+		return nil, refuse("Set the first item of submit_program.command to a path inside the module.", exports.Value(words[0], true)+" is not one.")
+	}
+	return &SubmitProgram{Command: append([]string{program}, words[1:]...)}, nil
 }
 
 // readScopeChecks checks the scope_checks key of the manifest at path, a map from an

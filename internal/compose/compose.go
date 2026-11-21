@@ -232,6 +232,9 @@ type Result struct {
 	// sorted by type, one per type; nil when no module declares one. [Result.PushChecksFor]
 	// renders them for a home.
 	PushChecks []PushCheck
+	// SubmitProgram is the program of the submit step that a module declares; nil when no
+	// module declares one. [Result.SubmitProgramFor] renders it for a home.
+	SubmitProgram *SubmitProgram
 	// ScopeChecks are the scope checks the modules of the base stack declare, by the
 	// artifact type of a plan; nil when no module declares one. A module that a checkout
 	// adds to the base declares none that counts, since the repository under work must
@@ -341,8 +344,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	// declared is every entry, as <kind>/<name>, that the modules of the stack whose
 	// workflows the compose checks compose, see [workflowsShipped].
 	declared := map[string]bool{}
-	for _, pl := range p.Modules {
-		ps := p.SourceOf(pl)
+	// open resolves the module pl at ps and reads its manifest. who names the module in
+	// a message.
+	open := func(pl stack.Module, ps stack.Source) (openedModule, error) {
 		who := "module " + accesskey.ShownName(pl.Name, false)
 		if pl.Name == "" {
 			who = "module at " + ps.Shown()
@@ -364,7 +368,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			if pl.Name == "" {
 				fix = "Check the source of a module in the stack.\n  The module is at " + ps.Shown() + "."
 			}
-			return nil, fmt.Errorf("%s\n  %w", fix, exports.HideError(err))
+			return openedModule{}, fmt.Errorf("%s\n  %w", fix, exports.HideError(err))
 		}
 		o := openedModule{pl: pl, ps: ps, src: src}
 		if opts.Copies != nil {
@@ -382,26 +386,40 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			o.m, err = module.ReadManifest(src.Dir)
 		}
 		if err != nil {
-			return nil, module.Prefixed(who, err)
+			return openedModule{}, module.Prefixed(who, err)
 		}
 		if afterManifest != nil {
 			afterManifest(src.Dir)
 		}
 		if pl.Name != "" && o.m.Name != pl.Name {
-			return nil, exports.Refuse(fmt.Sprintf("Use one name for the module in %s and in its %s.", listedIn(p, pl), module.ManifestName),
+			return openedModule{}, exports.Refuse(fmt.Sprintf("Use one name for the module in %s and in its %s.", listedIn(p, pl), module.ManifestName),
 				fmt.Sprintf("The module %s at %s has the name %s in its %s.", accesskey.ShownName(pl.Name, false), ps.Shown(), accesskey.ShownName(o.m.Name, false), module.ManifestName))
 		}
+		return o, nil
+	}
+	// add checks the module o against the modules before it, and appends it.
+	add := func(o openedModule) error {
 		if other, ok := dirs[o.m.Name]; ok {
-			return nil, exports.Refuse(fmt.Sprintf("Remove one of the two sources of module %s.", accesskey.ShownName(o.m.Name, false)),
-				fmt.Sprintf("Module %s is composed from %s and from %s.", accesskey.ShownName(o.m.Name, false), other, ps.Shown()))
+			return exports.Refuse(fmt.Sprintf("Remove one of the two sources of module %s.", accesskey.ShownName(o.m.Name, false)),
+				fmt.Sprintf("Module %s is composed from %s and from %s.", accesskey.ShownName(o.m.Name, false), other, o.ps.Shown()))
 		}
-		dirs[o.m.Name] = ps.Shown()
-		if !pl.Base && opts.Base != nil {
+		dirs[o.m.Name] = o.ps.Shown()
+		if !o.pl.Base && opts.Base != nil {
 			if err := checkProvides(o.m, opts.Base); err != nil {
-				return nil, err
+				return err
 			}
 		}
 		opened = append(opened, o)
+		return nil
+	}
+	for _, pl := range p.Modules {
+		o, err := open(pl, p.SourceOf(pl))
+		if err != nil {
+			return nil, err
+		}
+		if err := add(o); err != nil {
+			return nil, err
+		}
 	}
 	// The roles before the selection: a provided entry that the providing module's exclude
 	// lists provides nothing, and a role that two modules provide keeps the name of the
@@ -473,6 +491,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			return nil, err
 		}
 		if err := addPushChecks(res, checkers, l.Dir, root, name, m.PushChecks); err != nil {
+			return nil, err
+		}
+		if err := addSubmitProgram(res, l.Dir, root, name, m.SubmitProgram); err != nil {
 			return nil, err
 		}
 		// A module that a checkout adds declares no scope check that counts.
@@ -672,6 +693,66 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 		res.PushChecks = append(res.PushChecks, PushCheck{Type: c.Type, Module: name, Command: command, Reads: c.Reads})
 	}
 	return nil
+}
+
+// SubmitProgram is the program of the submit step that the composed harness declares.
+type SubmitProgram struct {
+	// Module is the module that declares the program.
+	Module string `json:"module"`
+	// Command is the program and its arguments. The program is
+	// $QORY_HARNESS_HOME/modules/<module>/<path>, before substitution.
+	Command []string `json:"command"`
+}
+
+// addSubmitProgram sets the submit program of the module name at dir in the result. A
+// second module that declares one fails the compose, and so does a program that is not a
+// file in the module, read through root when it is not nil, and one in an entry the
+// module's exclude or only leaves out.
+func addSubmitProgram(res *Result, dir string, root *os.Root, name string, program *module.SubmitProgram) error {
+	if program == nil {
+		return nil
+	}
+	if res.SubmitProgram != nil {
+		return exports.Errorf("Remove submit_program from module %s or module %s.\n  A composed harness has one submit program, and both modules declare one.", shown(res.SubmitProgram.Module), shown(name))
+	}
+	if root == nil {
+		opened, err := os.OpenRoot(dir)
+		if err != nil {
+			return exports.HideError(err)
+		}
+		defer opened.Close()
+		root = opened
+	}
+	path := program.Command[0]
+	shownProgram := exports.Value(filepath.ToSlash(path), false)
+	info, err := root.Stat(path)
+	if err != nil {
+		return exports.Errorf("Add %s to module %s, or change its submit_program.\n  Module %s has no file at %s.", shownProgram, shown(name), shown(name), shownProgram)
+	}
+	if !info.Mode().IsRegular() {
+		return exports.Errorf("Set the submit_program of module %s to a program file.\n  %s is not a file.", shown(name), shownProgram)
+	}
+	if e, ok := excludedProgram(res, dir, name, path); ok {
+		return exports.Errorf("%s\n  The submit_program of module %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
+			altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), shown(name), e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
+	}
+	command := append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(path)}, program.Command[1:]...)
+	res.SubmitProgram = &SubmitProgram{Module: name, Command: command}
+	return nil
+}
+
+// SubmitProgramFor is a copy of the submit program rendered for a home, with every
+// $QORY_HARNESS_HOME in the command replaced the way [Result.PushChecksFor] replaces it;
+// nil when no module declares one.
+func (r *Result) SubmitProgramFor(home string) *SubmitProgram {
+	if r.SubmitProgram == nil {
+		return nil
+	}
+	command := make([]string, len(r.SubmitProgram.Command))
+	for i, word := range r.SubmitProgram.Command {
+		command[i] = ForHome(word, home).(string)
+	}
+	return &SubmitProgram{Module: r.SubmitProgram.Module, Command: command}
 }
 
 // duplicatePushCheck is the refusal for a type that the modules first and second both

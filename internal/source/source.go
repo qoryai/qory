@@ -999,12 +999,6 @@ func cacheName(v string) string {
 	return clean + "-" + hex.EncodeToString(sum[:4])
 }
 
-// gitWaitDelay is how long [git] waits for the output of a git it stopped: a helper that
-// git started, such as git-remote-https, can hold the output open after git is killed.
-// shortcut: the helper is not killed and runs on until its connection ends; kill git's
-// process group, as preparation's group does, if such helpers are seen to pile up.
-const gitWaitDelay = time.Second
-
 // git runs one git command in dir and returns its combined output. A command still
 // running after opts.Timeout is killed and the error says so; a timeout of zero is no
 // limit. A command still running when opts.Context ends is killed too, and the error
@@ -1041,8 +1035,12 @@ func git(dir string, opts Options, args ...string) ([]byte, error) {
 		// for a repository no higher than dir, so the configuration of a repository
 		// above it sets no proxy, URL or header.
 		cmd.Env = append(proxygit.Env(cmd.Env, p), "GIT_CEILING_DIRECTORIES="+filepath.Dir(dir))
-		cmd.WaitDelay = gitWaitDelay
+		// A helper git started stops with git; a process left holding the output is not
+		// waited for past a second.
+		cmd.WaitDelay = time.Second
+		hostgit.Group(cmd)
 		out, err := cmd.CombinedOutput()
+		hostgit.StopGroup(cmd)
 		out = []byte(proxygit.Hide(string(out), p))
 		if parent.Err() != nil {
 			return out, fmt.Errorf("git %s was stopped: %w", args[0], context.Cause(parent))
@@ -1063,8 +1061,10 @@ func git(dir string, opts Options, args ...string) ([]byte, error) {
 	if os.Getenv("GIT_SSH_COMMAND") == "" {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
 	}
-	cmd.WaitDelay = gitWaitDelay
+	cmd.WaitDelay = time.Second
+	hostgit.Group(cmd)
 	out, err := cmd.CombinedOutput()
+	hostgit.StopGroup(cmd)
 	if parent.Err() != nil {
 		return out, fmt.Errorf("git %s was stopped: %w", args[0], context.Cause(parent))
 	}

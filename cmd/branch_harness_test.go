@@ -107,7 +107,7 @@ func commandLimit(rep report.Report) any {
 }
 
 // TestABranchCommitDoesNotChangeTheHarnessOfTheNextRun is a run of a work item whose
-// branch version has a commit that changes what the compose reads: the run composes the
+// submission version has a commit that changes what the compose reads: the run composes the
 // harness at target_version, so the report and the home are the ones of a run at
 // target_version whose branch has no version yet, and the working folder is on the
 // branch's commit.
@@ -187,7 +187,7 @@ func TestABranchCommitReachesTheHarnessOnceMerged(t *testing.T) {
 }
 
 // TestABranchCommitThatChangesQoryStopsAfterTheCompose is a run of a work item whose
-// branch version has a commit that adds a file under .qory, where qory keeps the files
+// submission version has a commit that adds a file under .qory, where qory keeps the files
 // of a run: the compose reads the target version, as it does for any branch, and the
 // checkout of the branch then stops the run before the agent starts.
 func TestABranchCommitThatChangesQoryStopsAfterTheCompose(t *testing.T) {

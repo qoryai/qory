@@ -32,6 +32,7 @@ const (
 	stepPushChecks
 	stepSwitch
 	stepCopy
+	stepCodexHome
 	stepImage
 	stepSetupCommands
 	stepSetupRemoval
@@ -50,6 +51,7 @@ var setupSteps = map[prepStep]struct{ name, fix string }{
 	stepPushChecks:    {"the load of the push checks", "check that this machine's container engine responds, then start the run again"},
 	stepSwitch:        {"the switch to the work item's branch", "check the disk that holds the checkout, then start the run again"},
 	stepCopy:          {"the copy of the checkout", "make the checkout smaller, with less history, Git LFS content and .qory/artifacts"},
+	stepCodexHome:     {"the write of the Codex home", "check your cache directory's disk, or use fewer or smaller Codex skills, rules and agents"},
 	stepImage:         {"the fetch of the run's image", "pull the run's image on this machine before the run, or start fewer runs at once"},
 	stepSetupCommands: {"the setup commands", "move slow work of the lifecycle commands in devcontainer.json into the run's image"},
 	stepSetupRemoval:  {"the removal of the setup container", "check that this machine's container engine responds, then start the run again"},
@@ -64,17 +66,16 @@ func installs(runtime string) bool {
 // setupPassed is the error of a run whose setup passed its limit, limit, in step, before
 // runtime, "" when it is not known yet, started. Line 1 is the step's fix, and the cause
 // names the step and then the runtime and the limit on the two lines after it, which
-// [ui.UI.Fail] indents. A dispatched run shows the cause alone, with its first letter in
-// lower case and no full stop, since [codeUsed] may follow: the fix advises a person who
-// runs qory. The cause's first line has no runtime's name, so its length does not
-// depend on one.
+// [ui.UI.Fail] indents. A dispatched run shows the cause alone, see [causeOnly]. The
+// cause's first line has no runtime's name, so its length does not depend on one.
 func setupPassed(step prepStep, runtime string, limit time.Duration, dispatched bool) error {
 	s := setupSteps[step]
 	cause := fmt.Sprintf("the run was cancelled during %s:\nthe steps before %s starts may take at most %s", s.name, agentName(runtime), limitText(limit))
+	err := errors.New(s.fix + "\n" + cause)
 	if dispatched {
-		return errors.New(cause)
+		return causeOnly(err)
 	}
-	return errors.New(s.fix + "\n" + cause)
+	return err
 }
 
 // limitText is d as a line says a limit: "30 minutes" for whole minutes, else d itself.
