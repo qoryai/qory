@@ -1020,7 +1020,19 @@ func TestVerdictSchema(t *testing.T) {
 		{`{"verdict": "changes-requested"}`, true},
 		{`{}`, false},
 		{`[]`, false},
-		{`{"verdict": "failed"}`, false},
+		// a kind is passed, changes-requested, escalate, or one in their form that a later
+		// version adds: a lower-case letter, then lower-case letters, digits and hyphens, at
+		// most 64 characters.
+		{`{"verdict": "failed"}`, true},
+		{`{"verdict": "approve-spend", "points": [{"text": "Approve the spend.", "action": "approve_spend"}]}`, true},
+		{`{"verdict": "` + strings.Repeat("a", 64) + `"}`, true},
+		{`{"verdict": "` + strings.Repeat("a", 65) + `"}`, false},
+		{`{"verdict": "Failed"}`, false},
+		{`{"verdict": "1st"}`, false},
+		{`{"verdict": "-failed"}`, false},
+		{`{"verdict": "approve_spend"}`, false},
+		{`{"verdict": ""}`, false},
+		{`{"verdict": 1}`, false},
 		// points is required with escalate, optional with changes-requested, and absent
 		// with passed.
 		{`{"verdict": "escalate"}`, false},
@@ -1050,7 +1062,18 @@ func TestVerdictSchema(t *testing.T) {
 		// text and action are required.
 		{replace(`, "action": "run_again"`, ``), false},
 		{replace(`"text": "The checks script failed on the spec's links.", `, ``), false},
-		{replace(`"action": "run_again"`, `"action": "ask"`), false},
+		// an action is answer, run_again, or one in their form that a later version adds: a
+		// lower-case letter, then lower-case letters, digits and underscores, at most 64
+		// characters. The rules for question and fix are for answer and run_again alone.
+		{replace(`"action": "run_again"`, `"action": "ask"`), true},
+		{replace(`"action": "run_again"`, `"action": "ask", "question": "q4", "fix": "Ask Sam."`), true},
+		{replace(`"action": "run_again"`, `"action": "`+strings.Repeat("a", 64)+`"`), true},
+		{replace(`"action": "run_again"`, `"action": "`+strings.Repeat("a", 65)+`"`), false},
+		{replace(`"action": "run_again"`, `"action": "Ask"`), false},
+		{replace(`"action": "run_again"`, `"action": "run-again"`), false},
+		{replace(`"action": "run_again"`, `"action": "_ask"`), false},
+		{replace(`"action": "run_again"`, `"action": ""`), false},
+		{replace(`"action": "run_again"`, `"action": 1`), false},
 		// question is required with answer and absent with run_again.
 		{replace(`, "question": "q4"`, ``), false},
 		{replace(`"action": "run_again"`, `"action": "run_again", "question": "q4"`), false},
