@@ -86,6 +86,7 @@ func TestNoUpdateCheckInsideTheWall(t *testing.T) {
 		d.HoldArgs,
 		append(slices.Clone(spec.Exec[1:]), "--unset", "CLAUDE_CONFIG_DIR", "--", "/bin/sh", "-c", "true"),
 		append(slices.Clone(prebuild.StepArgs), "--out", "/w/out", "--run-id", "0191f2a4-3c5e-7b8d-9e0f-1a2b3c4d5e6f"),
+		{"destination", "clone", "tg_web0000000000000"},
 	} {
 		if !walledVerb(args) {
 			t.Errorf("%v: not a verb the wall runs inside", args)

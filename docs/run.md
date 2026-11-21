@@ -4152,7 +4152,7 @@ These calls exit 2 and clone nothing, with the fix on line 1:
 | Line 1 | When |
 | ------ | ---- |
 | `Use an id from destinations in the run's inputs: <id> is not one of them.` | The inputs do not list the id. |
-| `Clone at most 100 destinations in one run: this call would make clone <n>.` | The session would clone more than 100 destinations. |
+| `Clone at most 100 destinations in one run: this call would make clone 101.` | The call would take the session past 100 clones. |
 | `Clone only a destination with an address: <id> has none, so it has no repository.` | The destination's target has no address. |
 | `Clone only a repository: the address of <id> is not a repository path.` | The address's path is not a path of a repository. |
 | `Run qory destination clone inside a run's session: <variable> is not set.` | `QORY_RUN_API` or `QORY_HARNESS_HOME` is not set. |

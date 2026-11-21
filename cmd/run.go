@@ -719,6 +719,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return failed(err)
 			}
+			// fetches is whether the run fetches repositories before its session: the run
+			// configuration lists some, and the run's inputs list no destinations, which the
+			// agent clones in the session instead. Each step that works on the fetched
+			// repositories reads it.
+			fetches := run.Repositories() != "" && !fromCode.listsDestinations()
 			// Only an open that went through makes the run's id this run's: before it, a folder
 			// at runHome can be the home of another run that has this id.
 			if runHome != "" {
@@ -887,7 +892,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return false, err
 					}
 					// A run with no setup binds the checkout itself, see hostWork.
-					if run.Repositories() == "" {
+					if !fetches {
 						if err := bindsReserved(textReadBindsReserved, at.root, cwd, homeOrState); err != nil {
 							return false, err
 						}
@@ -1002,7 +1007,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					ref = branch.Ref
 				}
 				var err error
-				if copied, err = startCopy(setupCtx, at.root, spec.RunID, ref, remote && run.Repositories() == "", state, spec.RunsDir); err != nil {
+				if copied, err = startCopy(setupCtx, at.root, spec.RunID, ref, remote && !fetches, state, spec.RunsDir); err != nil {
 					return &runLineError{codeLine(err)}
 				}
 				cleanups = append(cleanups, func() { copied.done(said) })
@@ -1069,9 +1074,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// clones each destination it needs with qory destination clone.
 			hostWork := func() error {
 				switch {
-				case fromCode.listsDestinations():
-					// Nothing is fetched before the session.
-				case run.Repositories() != "":
+				case fetches:
 					var err error
 					enter(stepBranchRead)
 					if branch, err = fromCode.readBranch(ctx, run, setupDeadline); err != nil {
@@ -1096,6 +1099,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err != nil {
 						return err
 					}
+				case fromCode.listsDestinations():
+					// Nothing is fetched before the session.
 				default:
 					if err := preparation.Unlisted(runValues(run), fromCode.fetchTarget()); err != nil {
 						return &runLineError{err}
@@ -1183,7 +1188,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// A read run with no setup binds the person's checkout read-only. A setup can write
 				// what it binds, the .git too, so a read run with one gets a copy. A write run from a
 				// run code works in the checkout, and its push step pushes from there.
-				if !walled || readOnly && run.Repositories() == "" || code != nil && !readOnly {
+				if !walled || readOnly && !fetches || code != nil && !readOnly {
 					return nil
 				}
 				if err := makeCopy(); err != nil {
@@ -1315,7 +1320,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if prepErr == nil && walled {
 					prepErr = imageWork()
 				}
-				if prepErr == nil && walled && run.Repositories() != "" {
+				if prepErr == nil && walled && fetches {
 					prepErr = setupWork()
 				}
 				if prepErr == nil && readOnly {
@@ -1325,7 +1330,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					spec.setupWhere != config.SetupInside && canPush(fromCode, level, branch) {
 					prepErr = recordSetupWork()
 				}
-				if prepErr == nil && copied != nil && !copied.plain && !copied.readOnly && run.Repositories() != "" && spec.setupWhere != config.SetupInside {
+				if prepErr == nil && copied != nil && !copied.plain && !copied.readOnly && fetches && spec.setupWhere != config.SetupInside {
 					prepErr = recordSetupWork()
 				}
 				if beforeJoin != nil {
