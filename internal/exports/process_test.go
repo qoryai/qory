@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/primitives"
 )
 
 // process is a valid process.yaml whose stack is support, which declares draft-an-answer
@@ -1313,10 +1314,31 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		other = "The top-level target in json_schema of artifact type a-type is not the primitive reference."
 	)
 	send := ", deliver: {send: end_of_run}"
+	// written is $defs reference of the primitives, copied into a schema, as the schemas
+	// of the harness write it out; broken is the copy without the required system.
+	var primitive struct {
+		Defs map[string]any `json:"$defs"`
+	}
+	if err := json.Unmarshal(primitives.Schema, &primitive); err != nil {
+		t.Fatal(err)
+	}
+	written, err := json.Marshal(primitive.Defs["reference"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := strings.Replace(string(written), `"system",`, "", 1)
+	if broken == string(written) {
+		t.Fatal("the reference of the primitives has no required system to remove")
+	}
+	copyOf := func(def string) string {
+		return "{$defs: {line: {type: string}, reference: " + def + "}, properties: {target: {$ref: '#/$defs/reference'}}}"
+	}
 	for _, c := range []struct {
 		body, want string
 		schemaOK   bool // process.schema.json passes the entry
 	}{
+		{structured(send, copyOf(string(written))), "", true},
+		{structured(send, copyOf(broken)), fix + other + place, true},
 		{structured("", withTarget), "", true},
 		{structured(send, withTarget), "", true},
 		{structured(", deliver: {send: after_gate}", withTarget), "", true},

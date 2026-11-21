@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"regexp/syntax"
 	"slices"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -272,8 +274,8 @@ const primitiveReference = primitives.URL + "#/$defs/reference"
 // checkDeliverTarget checks that schema, the json_schema of the artifact type label, a
 // compiled JSON Schema, has a top-level property target that is the primitive reference:
 // the property is a $ref to [primitiveReference], or to a definition of the schema's
-// $defs that is, or has one in its allOf. It returns the fix for a message with
-// [FilePlace] for the file, "" for a type that passes.
+// $defs that is, a written-out copy of the definition, or an allOf that has one. It
+// returns the fix for a message with [FilePlace] for the file, "" for a type that passes.
 func checkDeliverTarget(label string, schema *yaml.Node) string {
 	doc, why := jsonValue(schema, "json_schema of "+label)
 	if why != "" {
@@ -292,10 +294,23 @@ func checkDeliverTarget(label string, schema *yaml.Node) string {
 	return fmt.Sprintf("Add a top-level `target` of the primitive `reference` to the schema, or remove `deliver`.\n  %s\n  The type is in %s.", cause, FilePlace)
 }
 
+// primitiveReferenceDefinition is $defs reference of the primitives schema, as JSON
+// decoded into Go values.
+var primitiveReferenceDefinition = sync.OnceValue(func() any {
+	var doc struct {
+		Defs map[string]any `json:"$defs"`
+	}
+	if err := json.Unmarshal(primitives.Schema, &doc); err != nil {
+		panic("exports: the embedded primitives schema is no JSON: " + err.Error())
+	}
+	return doc.Defs["reference"]
+})
+
 // isPrimitiveReference reports whether node, a member of root, a JSON Schema, is the
-// primitive reference: a $ref to [primitiveReference], a $ref to a definition under
-// "#/$defs/" of root that is, or an allOf with an entry that is. depth stops a loop of
-// definitions.
+// primitive reference: a $ref to [primitiveReference]; a copy of its definition, written
+// out as a member does under $defs reference of the schemas of the harness; a $ref to a
+// definition under "#/$defs/" of root that is one of these; or an allOf with an entry
+// that is. depth stops a loop of definitions.
 func isPrimitiveReference(root map[string]any, node any, depth int) bool {
 	m, _ := node.(map[string]any)
 	if m == nil || depth > 8 {
@@ -306,6 +321,12 @@ func isPrimitiveReference(root map[string]any, node any, depth int) bool {
 	} else if name, local := strings.CutPrefix(ref, "#/$defs/"); local {
 		defs, _ := root["$defs"].(map[string]any)
 		if isPrimitiveReference(root, defs[name], depth+1) {
+			return true
+		}
+	}
+	if data, err := json.Marshal(m); err == nil {
+		var same any
+		if json.Unmarshal(data, &same) == nil && reflect.DeepEqual(same, primitiveReferenceDefinition()) {
 			return true
 		}
 	}
