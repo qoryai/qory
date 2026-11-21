@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -77,23 +78,28 @@ func numbered() func() (*session.Result, error) {
 // claude, each of which commits: session 1's commit is on the forge's branch, with its
 // version stored, before session 2 joins; session 2's commit follows it, with a second
 // version; and the run closes succeeded after two push steps and two next-session requests.
-// The checkout's setup, the image's fetch and the stack proxy are once for the run.
+// The checkout's setup, the image's fetch and the stack proxy are once for the run. Session
+// 1 writes the hand-off file and session 2 does not: session 2's version has session 1's
+// text, its step for session 1's commit, and unreviewed for session 2's commit.
 func TestTheNextSessionStartsAfterThePushOfTheSessionBefore(t *testing.T) {
 	p, requests := sharedPushRepo(t, laterAnswer(2, "claude", "example-provider-2", 30))
 	joins := 0
-	var beforeSecond string
+	var beforeSecond, first, second string
 	var postsBeforeSecond int
 	r := p.run(t, func(d string) {
 		joins++
 		if joins == 1 {
 			writeFile(t, filepath.Join(d, "first.txt"), "first\n")
 			commitAll(t, d, "Add a first file")
+			first = gitHead(t, d)
+			writeFile(t, filepath.Join(d, ".qory", "handoff", "submission.json"), `{"text":{"title":"Add a first file","description":"A file."},"steps":{"`+first+`":"implement"}}`)
 			return
 		}
 		beforeSecond = p.branchHead(t)
 		postsBeforeSecond, _, _ = p.api.counts()
 		writeFile(t, filepath.Join(d, "second.txt"), "second\n")
 		commitAll(t, d, "Add a second file")
+		second = gitHead(t, d)
 	}, numbered())
 	r.wantsClose(t, event.StateSucceeded, 0)
 	if joins != 2 || requests() != 2 {
@@ -111,6 +117,17 @@ func TestTheNextSessionStartsAfterThePushOfTheSessionBefore(t *testing.T) {
 	}
 	if got := r.pushSteps(); len(got) != 2 || got[0] != event.StateSucceeded || got[1] != event.StateSucceeded {
 		t.Errorf("the push steps exited %v, want two succeeded", got)
+	}
+	doc := p.api.document(t, 2)
+	if doc.Text == nil || doc.Text.Title != "Add a first file" {
+		t.Errorf("session 2's version has the text %+v, want session 1's", doc.Text)
+	}
+	steps := map[string]string{}
+	for _, c := range doc.Repositories[0].Commits {
+		steps[c.Commit] = c.Step
+	}
+	if want := map[string]string{first: "implement", second: stepUnreviewedName}; !maps.Equal(steps, want) {
+		t.Errorf("session 2's version has the steps %q, want %q", steps, want)
 	}
 	for call, want := range map[string]int{"setup": 1, "fetch image": 1, "stack proxy": 1} {
 		n := 0

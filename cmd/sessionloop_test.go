@@ -74,9 +74,11 @@ func homeReport(home string) report.Report {
 // changes the documents, and nowhere the run's [cmd.Nowhere]. joined, when set, gets the
 // spec of session n as it joins. extends, when true, makes the harness document extend the
 // stack of the folder examples/hello in place of defining one. files are more files of the
-// checkout, by path, beside the module hello's.
+// checkout, by path, beside the module hello's. stack, when set, changes the base's
+// qory-stack.yaml of a harness document that extends it.
 type loopSetup struct {
 	extends bool
+	stack   func(string) string
 	files   map[string]string
 	answers []string
 	joined  func(n int, spec session.SessionSpec)
@@ -129,6 +131,7 @@ func runLoop(t *testing.T, s loopSetup) loopRun {
 	maps.Copy(files, s.files)
 	r.harnessRun = codeHarness{
 		defines: defines,
+		stack:   s.stack,
 		// Codex starts a workflow by its skill, and the module hello ships a command. The
 		// skill workflow-edit is there for a workflow edit that a test adds.
 		files: files,
@@ -262,9 +265,10 @@ func TestARunOfSeveralSessionsJoinsOncePerSession(t *testing.T) {
 
 // bothNpm is an npm stub of Claude Code and of Codex at one address, as npm serves both:
 // a request for Codex's package goes to codex, every other request to claude. It
-// publishes claude 2.1.320 and codex 0.170.0 for x64 and arm64, with their tarballs at that
-// address; with codexToo false it publishes no codex.
-func bothNpm(t *testing.T, claude, codex *rt.Npm, codexToo bool) string {
+// publishes claude 2.1.320 and each of codexVersions for x64 and arm64, with their
+// tarballs at that address, and makes the last of codexVersions latest; with none it
+// publishes no codex.
+func bothNpm(t *testing.T, claude, codex *rt.Npm, codexVersions ...string) string {
 	t.Helper()
 	to := func(raw string) *httputil.ReverseProxy {
 		u, err := url.Parse(raw)
@@ -285,14 +289,14 @@ func bothNpm(t *testing.T, claude, codex *rt.Npm, codexToo bool) string {
 	for cpu, arch := range map[string]string{"x64": "amd64", "arm64": "arm64"} {
 		b := rt.PlainTarball(t, "2.1.320 "+arch)
 		claude.PublishWith(cpu, "2.1.320", b, rt.Integrity(b), srv.URL+"/@anthropic-ai/claude-code-linux-"+cpu+"/-/claude-code-linux-"+cpu+"-2.1.320.tgz")
-		if codexToo {
-			b = rt.CodexTarball(t, "0.170.0", arch)
-			codex.PublishWith(cpu, "0.170.0", b, rt.Integrity(b), srv.URL+"/@openai/codex/-/codex-0.170.0-linux-"+cpu+".tgz")
+		for _, v := range codexVersions {
+			b = rt.CodexTarball(t, v, arch)
+			codex.PublishWith(cpu, v, b, rt.Integrity(b), srv.URL+"/@openai/codex/-/codex-"+v+"-linux-"+cpu+".tgz")
 		}
 	}
 	claude.SetLatest("2.1.320")
-	if codexToo {
-		codex.SetLatest("0.170.0")
+	if len(codexVersions) > 0 {
+		codex.SetLatest(codexVersions[len(codexVersions)-1])
 	}
 	return srv.URL
 }
@@ -306,7 +310,7 @@ func TestARunOfClaudeCodexAndClaudeInstallsEachRuntimeOnce(t *testing.T) {
 	defer cmd.SetInstallRuntimes(true)()
 	defer cmd.SetRuntimeKeys(rt.Keys())()
 	claude, codex, proxy := rt.StartNpm(t), rt.StartCodexNpm(t), rt.StartProxy(t)
-	defer cmd.SetNpmRegistry(bothNpm(t, claude, codex, true))()
+	defer cmd.SetNpmRegistry(bothNpm(t, claude, codex, "0.170.0"))()
 	r := runLoop(t, loopSetup{
 		answers: []string{laterAnswer(2, "codex", "example-provider-2", 30), laterAnswer(3, "claude", "example-provider-3", 30)},
 		nowhere: func(n *cmd.Nowhere) {
@@ -457,7 +461,7 @@ func TestACodexInstallThatFailsBeforeSession2EndsTheRun(t *testing.T) {
 	defer cmd.SetInstallRuntimes(true)()
 	defer cmd.SetRuntimeKeys(rt.Keys())()
 	claude, codex, proxy := rt.StartNpm(t), rt.StartCodexNpm(t), rt.StartProxy(t)
-	defer cmd.SetNpmRegistry(bothNpm(t, claude, codex, false))()
+	defer cmd.SetNpmRegistry(bothNpm(t, claude, codex))()
 	r := runLoop(t, loopSetup{
 		answers: []string{laterAnswer(2, "codex", "example-provider-2", 30)},
 		nowhere: func(n *cmd.Nowhere) {
@@ -475,6 +479,68 @@ func TestACodexInstallThatFailsBeforeSession2EndsTheRun(t *testing.T) {
 		"qory run: the dist-tags of @openai/codex returned 404: npm has no such codex release; the code is used\n")
 	lacks(t, r.out, "installed codex")
 	lacks(t, r.out, rt.ProxyPassword)
+}
+
+// TestALaterSessionInstallsThePinnedVersionOfItsRuntime is a walled run of claude whose
+// harness document extends a base stack that pins codex to 0.167.2, on an npm that has
+// codex 0.167.2 and 0.170.0, the latest: the answer starts session 2 on codex, and qory
+// installs codex 0.167.2, which session 2 starts.
+func TestALaterSessionInstallsThePinnedVersionOfItsRuntime(t *testing.T) {
+	defer cmd.SetInstallRuntimes(true)()
+	defer cmd.SetRuntimeKeys(rt.Keys())()
+	claude, codex, proxy := rt.StartNpm(t), rt.StartCodexNpm(t), rt.StartProxy(t)
+	defer cmd.SetNpmRegistry(bothNpm(t, claude, codex, "0.167.2", "0.170.0"))()
+	r := runLoop(t, loopSetup{
+		extends: true,
+		stack:   func(s string) string { return s + pinOf("codex", "0.167.2") },
+		answers: []string{laterAnswer(2, "codex", "example-provider-2", 30)},
+		nowhere: func(n *cmd.Nowhere) {
+			n.Proxy = proxy.URL()
+			n.PushProxy = "http://qory:nowhere@127.0.0.1:9"
+		},
+	})
+	if r.err != nil || len(r.joins) != 2 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out, "qory run: installed codex 0.167.2\n")
+	lacks(t, r.out, "installed codex 0.170.0")
+	want := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "codex", "0.167.2", "bin", "codex")
+	if got := startedProgram(r.joins[1].spec); got != want {
+		t.Errorf("session 2 starts %q, want %q", got, want)
+	}
+}
+
+// TestACodexSignatureThatFailsBeforeSession2EndsTheRun is a walled run of claude whose
+// answer starts session 2 on codex, on an npm that has no signature of codex 0.170.0:
+// session 1 joins, the install of codex stops on the missing signature, as session 1's
+// install would, so the run closes failed, exit 1, with the cause, and session 2 does not
+// join.
+func TestACodexSignatureThatFailsBeforeSession2EndsTheRun(t *testing.T) {
+	defer cmd.SetInstallRuntimes(true)()
+	defer cmd.SetRuntimeKeys(rt.Keys())()
+	claude, codex, proxy := rt.StartNpm(t), rt.StartCodexNpm(t), rt.StartProxy(t)
+	defer cmd.SetNpmRegistry(bothNpm(t, claude, codex, "0.170.0"))()
+	codex.SignWith(func(string, string) any { return nil })
+	r := runLoop(t, loopSetup{
+		answers: []string{laterAnswer(2, "codex", "example-provider-2", 30)},
+		nowhere: func(n *cmd.Nowhere) {
+			n.Proxy = proxy.URL()
+			n.PushProxy = "http://qory:nowhere@127.0.0.1:9"
+		},
+	})
+	if len(r.joins) != 1 || len(r.bodies) != 1 {
+		t.Fatalf("%d joins and %d requests, %v\n%s", len(r.joins), len(r.bodies), r.err, r.out)
+	}
+	if len(r.closes) != 1 || r.closes[0].State != event.StateFailed || cmd.ExitCode(r.err) != 1 {
+		t.Errorf("the run closed with %+v, exit %d (%v)\n%s", r.closes, cmd.ExitCode(r.err), r.err, r.out)
+	}
+	wants(t, r.out, "qory run: installed claude 2.1.320\n", "qory run: session 2 starts the workflow hello on codex\n",
+		"qory run: npm has no signature of codex 0.170.0")
+	lacks(t, r.out, "installed codex")
+	state := filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes", "codex")
+	if entries, _ := os.ReadDir(state); len(entries) != 0 {
+		t.Errorf("the runtimes folder of codex has %d entries, want none", len(entries))
+	}
 }
 
 // TestASignalWhileTheNextSessionRequestWaitsStopsTheRun is a run whose first next-session
