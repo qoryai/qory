@@ -1,6 +1,7 @@
 package pushcheck
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -53,5 +54,38 @@ func TestReviewStageVerdictCutsALongVerdict(t *testing.T) {
 	err := ReviewStageVerdict(session.RunAPIRequest{Path: "/verdict", Body: []byte(`{"verdict":"` + strings.Repeat("a\\u0007", 5000) + `"}`)})
 	if err == nil || len(err.Error()) > 1500 || strings.ContainsRune(err.Error(), 7) {
 		t.Errorf("error is %d bytes: %.80q", len(err.Error()), err)
+	}
+}
+
+// verdictPush is the body of a POST of /artifacts of artifactType with one file.
+func verdictPush(t *testing.T, artifactType, content string) []byte {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"type": artifactType, "name": "main", "files": []map[string]any{
+		{"filename": "verdict.json", "content_type": "application/json", "content_base64": []byte(content)},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func TestReviewStageVerdictChecksAPushOfTheTypeVerdict(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		body    []byte
+		refused bool
+	}{
+		{"changes-requested pushed", verdictPush(t, "verdict", `{"verdict":"changes-requested"}`), false},
+		{"passed pushed", verdictPush(t, "verdict", `{"verdict":"passed"}`), true},
+		{"escalate pushed", verdictPush(t, "verdict", `{"verdict":"escalate","points":[{"text":"x"}]}`), true},
+		{"a file that is no verdict", verdictPush(t, "verdict", `nope`), true},
+		{"another type is not checked", verdictPush(t, "spec", `{"verdict":"passed"}`), false},
+		{"a push in no form is left to the run API", []byte(`nope`), false},
+		{"a withdrawal has no file", []byte(`{"type":"verdict","name":"main","withdraw":true}`), false},
+	} {
+		err := ReviewStageVerdict(session.RunAPIRequest{Path: "/artifacts", Body: c.body})
+		if (err != nil) != c.refused {
+			t.Errorf("%s: error %v, refused want %t", c.name, err, c.refused)
+		}
 	}
 }

@@ -15,22 +15,45 @@ import (
 const verdictPath = "/verdict"
 
 // ReviewStageVerdict is the check of a POST to the run API in a stage with reviewers:
-// nil for every request but a POST of /verdict, and for a verdict of
-// [runapi.VerdictChangesRequested]. In that stage qory sends the other verdicts after the
-// reviewers ran, so a session may record only changes-requested. A verdict of any other
-// value, and a body that is no verdict in the run API's form or that can be read in more
-// than one way, such as one with a member twice, is an error. The first line of the error
-// has the fix and is at most 100 characters.
+// nil for every request but a POST of /verdict and a POST of /artifacts of the type
+// verdict, and for a verdict of [runapi.VerdictChangesRequested]. In that stage qory
+// sends the other verdicts after the reviewers ran, so a session may record only
+// changes-requested. A verdict of any other value, and a body that is no verdict in the
+// run API's form or that can be read in more than one way, such as one with a member
+// twice, is an error. The first line of the error has the fix and is at most 100
+// characters. A push of the type verdict is checked in each of its files; a push that is
+// no push in the run API's form is left to the run API.
 //
 // shortcut: not called yet; wired in when cmd/run.go, cmd/rundocs.go and
-// cmd/pushstep.go can change (after Q-01, Q-36 and Q-73). A verdict that a session
-// pushes as an artifact of type verdict through /artifacts is not checked here.
+// cmd/pushstep.go can change (after Q-01, Q-36 and Q-73).
+// shortcut: only a push of the type verdict is read as a verdict document. A session
+// that pushes a verdict document as another type is not checked; how the run API treats
+// that was not read, so check it before wiring.
 func ReviewStageVerdict(req session.RunAPIRequest) error {
-	if req.Path != verdictPath {
-		return nil
+	switch req.Path {
+	case verdictPath:
+		return checkVerdictDocument(req.Body)
+	case artifactsPath:
+		artifactType, files, _, err := readPush(req.Body)
+		if err != nil || artifactType != verdictType {
+			return nil
+		}
+		for _, f := range files {
+			if err := checkVerdictDocument(f.Content); err != nil {
+				return err
+			}
+		}
 	}
+	return nil
+}
+
+// verdictType is the artifact type of a verdict document.
+const verdictType = "verdict"
+
+// checkVerdictDocument is the check of [ReviewStageVerdict] for one verdict document.
+func checkVerdictDocument(body []byte) error {
 	const fix = "Record only changes-requested: qory sends every other verdict after the review."
-	top, err := members(req.Body, []string{"verdict", "points", "track"})
+	top, err := members(body, []string{"verdict", "points", "track"})
 	if err != nil {
 		if errors.Is(err, errAmbiguous) {
 			return fmt.Errorf("%s\n  The verdict has a member twice, or one that differs only in case.", fix)
