@@ -26,6 +26,7 @@ var ruleSchemas = []struct {
 	{"review-comments", true},
 	{"proposal-sources", false},
 	{"verdict", false},
+	{"review-report", false},
 	{"process", false},
 }
 
