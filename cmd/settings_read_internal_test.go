@@ -26,6 +26,12 @@ const (
 	editStoreRule = "Edit(//tmp/qory-artifacts/**)"
 )
 
+// The rules of a read run for qory destination clone and the folder of its clones.
+const (
+	destinationRule = "Bash(/qory/qory destination *)"
+	readClonesRule  = "Read(//tmp/qory-destinations/**)"
+)
+
 // TestReadRulesLeaveNoWriteUnderTheCheckout is the settings of a read run whose composed
 // settings allow every edit: an Edit rule that denies the checkout's path and /workspace
 // is present, and a deny wins over any allow in Claude Code. The only edit qory allows is
@@ -47,7 +53,7 @@ func TestReadRulesLeaveNoWriteUnderTheCheckout(t *testing.T) {
 		t.Errorf("deny %v removes a file tool", deny)
 	}
 	allow, _ := p["allow"].([]any)
-	if want := []any{"Edit", "Write", "Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)", readStoreRule, editStoreRule}; !reflect.DeepEqual(allow, want) {
+	if want := []any{"Edit", "Write", "Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)", destinationRule, readStoreRule, editStoreRule, readClonesRule}; !reflect.DeepEqual(allow, want) {
 		t.Errorf("allow %v, want %v", allow, want)
 	}
 	for _, under := range []string{"/home/a/co", workspaceInWall} {
@@ -73,7 +79,7 @@ func TestReadRulesOpenTheStoreToAComposedBlock(t *testing.T) {
 	if p["blockReadsOutsideWorkingDirectories"] != true {
 		t.Errorf("the block is gone: %v", p)
 	}
-	if got, want := p["additionalDirectories"], []any{"/data", "/tmp/qory-artifacts"}; !reflect.DeepEqual(got, want) {
+	if got, want := p["additionalDirectories"], []any{"/data", "/tmp/qory-artifacts", "/tmp/qory-destinations"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("additionalDirectories %v, want %v", got, want)
 	}
 	_, err = readRules(map[string]any{"permissions": map[string]any{"additionalDirectories": "/data"}}, "", "/co")
@@ -96,7 +102,7 @@ func TestReadRulesEscapeTheCheckoutsPath(t *testing.T) {
 }
 
 // TestReadAllowOpensOnlyTheCommandsOfAWorkItem is the Bash rules of a read run: one for
-// each group of work item commands. No rule opens the helper as a whole, because its
+// each group of work item commands, and one for qory destination. No rule opens the helper as a whole, because its
 // hidden verbs, such as run exec, start any program past dontAsk. Each rule leads to a
 // command that exists and is not hidden.
 func TestReadAllowOpensOnlyTheCommandsOfAWorkItem(t *testing.T) {
@@ -106,7 +112,7 @@ func TestReadAllowOpensOnlyTheCommandsOfAWorkItem(t *testing.T) {
 			got = append(got, rule)
 		}
 	}
-	want := []string{"Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)"}
+	want := []string{"Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)", destinationRule}
 	if !slices.Equal(got, want) {
 		t.Errorf("Bash rules %q, want %q", got, want)
 	}
@@ -116,7 +122,7 @@ func TestReadAllowOpensOnlyTheCommandsOfAWorkItem(t *testing.T) {
 		}
 	}
 	root := Root()
-	for _, verbs := range [][]string{{"artifact"}, {"run", "verdict"}, {"work-item"}} {
+	for _, verbs := range [][]string{{"artifact"}, {"run", "verdict"}, {"work-item"}, {"destination"}} {
 		c, rest, err := root.Find(verbs)
 		if err != nil || len(rest) != 0 || c.Hidden || c.Name() != verbs[len(verbs)-1] {
 			t.Errorf("%v finds %s, rest %q, hidden %v, %v", verbs, c.Name(), rest, c.Hidden, err)
@@ -126,8 +132,9 @@ func TestReadAllowOpensOnlyTheCommandsOfAWorkItem(t *testing.T) {
 
 // TestInlineSettingsAddsTheReadRules is the settings of a read workflow's run: the
 // file's permissions get NotebookEdit and an Edit rule for the checkout and for
-// /workspace in deny, and a Bash rule for each command of a work item and a Read and an
-// Edit rule for the store in allow, each once, after the rules the file has, the store in additionalDirectories,
+// /workspace in deny, and a Bash rule for each command of a work item and for qory
+// destination, a Read and an Edit rule for the store, and a Read rule for the folder of
+// the clones in allow, each once, after the rules the file has, both folders in additionalDirectories,
 // and defaultMode dontAsk in place of the file's; every other key stays, < > & as they are. Settings the launch passes as
 // JSON get the same, and a launch with no settings gets --settings with the rules alone.
 func TestInlineSettingsAddsTheReadRules(t *testing.T) {
@@ -139,11 +146,11 @@ func TestInlineSettingsAddsTheReadRules(t *testing.T) {
 	}
 	p := permissionsOf(t, got[1])
 	want := map[string]any{
-		"allow":       []any{"WebSearch", "Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)", readStoreRule, editStoreRule},
+		"allow":       []any{"WebSearch", "Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)", destinationRule, readStoreRule, editStoreRule, readClonesRule},
 		"deny":        []any{"Bash", "Write", "NotebookEdit", "Edit(//co/**)", "Edit(//workspace/**)"},
 		"defaultMode": "dontAsk",
 
-		"additionalDirectories": []any{"/tmp/qory-artifacts"},
+		"additionalDirectories": []any{"/tmp/qory-artifacts", "/tmp/qory-destinations"},
 	}
 	if !reflect.DeepEqual(p, want) {
 		t.Errorf("permissions %v, want %v", p, want)
@@ -157,11 +164,11 @@ func TestInlineSettingsAddsTheReadRules(t *testing.T) {
 		t.Fatalf("JSON already: got %q, %v", got, err)
 	}
 	want = map[string]any{
-		"allow":       []any{"Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)", readStoreRule, editStoreRule},
+		"allow":       []any{"Bash(/qory/qory artifact *)", "Bash(/qory/qory run verdict *)", "Bash(/qory/qory work-item *)", destinationRule, readStoreRule, editStoreRule, readClonesRule},
 		"deny":        []any{"NotebookEdit", "Edit(//co/**)", "Edit(//workspace/**)"},
 		"defaultMode": "dontAsk",
 
-		"additionalDirectories": []any{"/tmp/qory-artifacts"},
+		"additionalDirectories": []any{"/tmp/qory-artifacts", "/tmp/qory-destinations"},
 	}
 	if p := permissionsOf(t, strings.TrimPrefix(got[0], "--settings=")); !reflect.DeepEqual(p, want) {
 		t.Errorf("JSON already: permissions %v, want %v", p, want)

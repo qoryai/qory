@@ -2,6 +2,7 @@ package cmd_test
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -65,8 +66,15 @@ func runAtVersionOn(t *testing.T, h *hostFetch, system, repositories, version st
 // runAtTarget is [runAtVersionOn] with the documents' target, target.
 func runAtTarget(t *testing.T, h *hostFetch, system, repositories, version string, target map[string]any) (string, error, keyRun, []string) {
 	t.Helper()
+	return runAtTargetWith(t, h, system, repositories, version, target, nil)
+}
+
+// runAtTargetWith is [runAtTarget] with inputs added to the documents' inputs.
+func runAtTargetWith(t *testing.T, h *hostFetch, system, repositories, version string, target, inputs map[string]any) (string, error, keyRun, []string) {
+	t.Helper()
 	g := newCodeRelay(t)
 	g.documents = codeDocuments(t, func(d map[string]any) {
+		maps.Copy(d["inputs"].(map[string]any), inputs)
 		d["target"], d["inputs"].(map[string]any)["target"] = target, target
 		d["target_version"] = version
 		if version == "" {
@@ -281,6 +289,48 @@ func TestARunCodeWhoseTargetHasNoAddressUsesNoVersion(t *testing.T) {
 			t.Errorf("the working folder is at %s, want the head %s", got, head)
 		}
 		wants(t, out+err.Error(), "add a skill workflow-hello to the checkout's harness, or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-hello or hello (workflow_not_in_harness); the code is used")
+	})
+}
+
+// TestARunCodeWhoseInputsListDestinationsFetchesNothing is a run from a run code on
+// git.test that lists acme/site, at a commit of acme/site:
+//   - with inputs that list destinations, as an Explore run's do, qory run fetches
+//     nothing and reads no branch before the session, which joins with the qory.yaml in
+//     the working folder; the agent clones what it needs with qory destination clone;
+//   - with inputs that list none, as a Build run's, qory run fetches its target at the
+//     commit.
+func TestARunCodeWhoseInputsListDestinationsFetchesNothing(t *testing.T) {
+	target := map[string]any{"collection": "R_1001", "address": map[string]any{"system": proxygittest.Host, "path": "acme/site"}}
+	t.Run("destinations", func(t *testing.T) {
+		h, first, _, files := versionRepository(t)
+		for name, content := range files {
+			writeFile(t, filepath.Join(h.dir, filepath.FromSlash(name)), content)
+		}
+		destinations := []any{map[string]any{"id": "tg_site000000000000", "target": target}}
+		out, err, n, _ := runAtTargetWith(t, h, proxygittest.Host, "acme/site", first, target, map[string]any{"destinations": destinations})
+		if !n.joined {
+			t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
+		}
+		wants(t, out, "qory run: composed ")
+		lacks(t, out, "qory run: fetched ", first[:12])
+		data, _ := os.ReadFile(h.argv)
+		if m := gitFetches.FindString(string(data)); m != "" {
+			t.Errorf("git reached a remote before the session:\n%s", data)
+		}
+		if h.server.Tunnels() != 0 {
+			t.Errorf("the host proxy led %d connections", h.server.Tunnels())
+		}
+	})
+	t.Run("no destinations", func(t *testing.T) {
+		h, first, _, _ := versionRepository(t)
+		out, err, n, _ := runAtTargetWith(t, h, proxygittest.Host, "acme/site", first, target, nil)
+		if !n.joined {
+			t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
+		}
+		wants(t, out, "qory run: fetched acme/site at "+first[:12]+" in ")
+		if got := gitOut(t, h.dir, "rev-parse", "HEAD"); got != first {
+			t.Errorf("the working folder is at %s, want %s", got, first)
+		}
 	})
 }
 

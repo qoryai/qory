@@ -18,6 +18,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- `qory destination clone <id>...` clones destinations of a run inside its session: each
+  id from `destinations` in `$QORY_HARNESS_HOME/inputs.json`, at depth 1, through the
+  wall's proxy, into `/tmp/qory-destinations/<system>/<path>`. It prints one line per id,
+  the id and the folder, and clones a destination once per session, at most 100 per
+  session. See [Clone a destination](docs/run.md#clone-a-destination).
 - In a home composed for codex alone, a Codex agent with a tier gets the tier's model as
   `model` and its effort as `model_reasoning_effort` in `agents/<name>.toml`. An effort
   outside `none`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra` stops the compose
@@ -678,6 +683,13 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A run whose inputs list `destinations`, such as an Explore run, fetches nothing before
+  its session; the agent clones the destinations it needs with `qory destination clone`. A
+  run with no `destinations`, such as Build or Verify, fetches its target as before.
+- On Claude Code, a read workflow's run allows `Bash(/qory/qory destination *)` and
+  `Read(//tmp/qory-destinations/**)`, adds `/tmp/qory-destinations` to
+  `permissions.additionalDirectories`, and gets that folder, new and empty with mode 700,
+  before the agent starts.
 - `qory work-item show`, `qory artifact pull` (`index.json`, the files of a version and
   their names) and the message of `qory artifact push --withdraw` for a version that a
   person uploaded write each hidden character as `<U+XXXX>`. A hidden character is a

@@ -43,6 +43,7 @@ More: https://github.com/qoryai/qory
 * [qory apiary](qory_apiary.md)	 - Debug runs on a Qory Apiary server
 * [qory artifact](qory_artifact.md)	 - Pull and push the artifacts of a work item
 * [qory config](qory_config.md)	 - Show every setting, its value, and the file it came from
+* [qory destination](qory_destination.md)	 - Clone the destinations of this run
 * [qory gateway](qory_gateway.md)	 - Run this machine's gateway for the runs of other machines
 * [qory harness](qory_harness.md)	 - Build the agent's harness from modules
 * [qory image](qory_image.md)	 - Check an image the wall runs the agent in

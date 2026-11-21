@@ -839,6 +839,38 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	}, args[0])
 }
 
+// CloneError is a [Clone] that failed: the status git exited with, -1 when git did not
+// exit by itself, what git wrote on stderr, which contains the repository's address, and
+// Stopped, true when the limit of the call or the caller stopped git.
+type CloneError struct {
+	Exit    int
+	Output  string
+	Stopped bool
+}
+
+func (e *CloneError) Error() string { return "git clone failed" }
+
+// Clone clones the repository at path on system, values [Check] passed, at depth one into
+// dest, a folder that does not exist, inside the wall: the image's git from PATH, over
+// https alone, with the [hardened] options and the environment [gitEnv] makes, so the
+// proxy and the certificate authority that the wall gives stay as given, and with
+// LC_ALL=C, which keeps git's lines in English. A failure is a [*CloneError].
+func Clone(ctx context.Context, system, path, dest string) error {
+	_, err := runGit(ctx, nil, func(ctx context.Context) (*exec.Cmd, error) {
+		args := slices.Concat(hardened, protocols, []string{"clone", "--quiet", "--depth", "1", "--", repoURL(system, path), dest})
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = filepath.Dir(dest)
+		cmd.Env = append(gitEnv(os.Environ()), "LC_ALL=C")
+		return cmd, nil
+	}, "clone")
+	var g *gitError
+	if !errors.As(err, &g) {
+		return err
+	}
+	stopped := g.exit < 0 && g.output == "" && strings.HasPrefix(g.line, "git clone ")
+	return &CloneError{Exit: g.exit, Output: g.output, Stopped: stopped}
+}
+
 // hostRunner is the [gitRunner] of a fetch on this machine through the run's host proxy
 // p: the git [hostgit.Unchecked] finds in the environment [hostgit.Base] of ctx, with
 // its options, the [hardened] ones and [protocols], and the environment [proxygit.Env]

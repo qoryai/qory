@@ -180,6 +180,40 @@ func TestFreshFolderOfTheStore(t *testing.T) {
 	}
 }
 
+// TestReadFoldersMakesTheStoreAndTheClones is the folders a read run gets before its agent
+// starts: the folder of its artifact files and the folder of its clones, each new, empty
+// and of mode 0700. Something at the folder of the clones stops with its line, not the
+// store's.
+func TestReadFoldersMakesTheStoreAndTheClones(t *testing.T) {
+	dir := realTemp(t)
+	store, clones := filepath.Join(dir, "qory-artifacts"), filepath.Join(dir, "qory-destinations")
+	if err := readFolders(store, clones); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{store, clones} {
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.IsDir() || info.Mode().Perm() != 0o700 {
+			t.Errorf("%s has mode %v, want a folder of mode 0700", path, info.Mode())
+		}
+		if entries, _ := os.ReadDir(path); len(entries) != 0 {
+			t.Errorf("%s has %d entries", path, len(entries))
+		}
+	}
+
+	other := realTemp(t)
+	taken := filepath.Join(other, "qory-destinations")
+	if err := os.Mkdir(taken, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := "remove " + taken + " from the image: qory makes the folder of a run's clones only where nothing is, so a read run does not start"
+	if err := readFolders(filepath.Join(other, "qory-artifacts"), taken); err == nil || err.Error() != want {
+		t.Errorf("a folder at the clones' path: %v, want %q", err, want)
+	}
+}
+
 // TestAgentHomeRefusesManagedSettings is Claude Code's managed settings in the image, as
 // a folder, a file or a link: refused in one line naming the path, and no home is made.
 // With nothing there, the home is made.

@@ -1064,9 +1064,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// repository while the target is on its system. A run of a work item at that
 			// version reads the work item's branch first: the fetch takes its commit, the
 			// compose reads the target version, and the branch is checked out last, so no
-			// file of the branch reaches the harness.
+			// file of the branch reaches the harness. A run whose inputs list destinations,
+			// such as an Explore run, fetches nothing here and reads no branch: the agent
+			// clones each destination it needs with qory destination clone.
 			hostWork := func() error {
-				if run.Repositories() != "" {
+				switch {
+				case fromCode.listsDestinations():
+					// Nothing is fetched before the session.
+				case run.Repositories() != "":
 					var err error
 					enter(stepBranchRead)
 					if branch, err = fromCode.readBranch(ctx, run, setupDeadline); err != nil {
@@ -1091,8 +1096,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err != nil {
 						return err
 					}
-				} else if err := preparation.Unlisted(runValues(run), fromCode.fetchTarget()); err != nil {
-					return &runLineError{err}
+				default:
+					if err := preparation.Unlisted(runValues(run), fromCode.fetchTarget()); err != nil {
+						return &runLineError{err}
+					}
 				}
 				var freshHome bool
 				enter(stepCompose)

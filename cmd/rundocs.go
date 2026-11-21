@@ -458,6 +458,12 @@ func (r *codeRun) readExposed(root, cwd, report string) error {
 	return nil
 }
 
+// listsDestinations reports whether the inputs of the run from the run code r list
+// destinations; false for a run with no run code.
+func (r *codeRun) listsDestinations() bool {
+	return r != nil && hasDestinations(r.inputs)
+}
+
 // fetchTarget is the target the fetch of the run's repositories takes, as
 // [preparation.RunAt] uses it: r's target and target_version, and none for a nil r, a
 // run not from a run code.

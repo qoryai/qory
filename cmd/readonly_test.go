@@ -94,8 +94,8 @@ func checkoutMounts(spec session.SessionSpec) []wall.Mount {
 // write-no-push and the stack declares its workflow read or not at all. The session
 // binds the workspace read-only, the checkout's mount is read-only, the checkout stays
 // among the places the run may write, and Claude Code's settings deny the edit tools,
-// allow the commands of a work item on /qory/qory in Bash and set defaultMode to
-// dontAsk.
+// allow the commands of a work item and qory destination clone on /qory/qory in Bash,
+// allow reads of the folder of the clones, and set defaultMode to dontAsk.
 func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 	for _, c := range []struct {
 		name      string
@@ -127,16 +127,17 @@ func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 			settings := settingsOf(t, r.spec.Args)
 			wants(t, settings, `"Edit(/`+r.spec.Dir+`/**)"`, `"Edit(//workspace/**)"`, `"NotebookEdit"`,
 				`"Bash(/qory/qory artifact *)"`, `"Bash(/qory/qory run verdict *)"`, `"Bash(/qory/qory work-item *)"`,
-				`"Read(//tmp/qory-artifacts/**)"`, `"Edit(//tmp/qory-artifacts/**)"`, `"defaultMode": "dontAsk"`)
-			lacks(t, settings, `"Edit"`, `"Write"`, `"Bash(/qory/qory *)"`)
+				`"Read(//tmp/qory-artifacts/**)"`, `"Edit(//tmp/qory-artifacts/**)"`, `"defaultMode": "dontAsk"`,
+				`"Bash(/qory/qory destination *)"`, `"Read(//tmp/qory-destinations/**)"`)
+			lacks(t, settings, `"Edit"`, `"Write"`, `"Bash(/qory/qory *)"`, `"Edit(//tmp/qory-destinations/**)"`)
 		})
 	}
 }
 
 // TestAReadRunOpensTheStoreToAComposedBlock is a read run whose module sets
 // blockReadsOutsideWorkingDirectories in its settings, as the software factory's does: the
-// compose keeps the setting, and the settings of the launch list the store in
-// additionalDirectories, without which Read in the store fails on Claude Code.
+// compose keeps the setting, and the settings of the launch list the store and the folder
+// of the clones in additionalDirectories, without which Read there fails on Claude Code.
 func TestAReadRunOpensTheStoreToAComposedBlock(t *testing.T) {
 	r := runFromCodeLinks(t, func(string) []string {
 		docker, _ := fakeDocker(t)
@@ -149,7 +150,7 @@ func TestAReadRunOpensTheStoreToAComposedBlock(t *testing.T) {
 	if !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, settingsOf(t, r.spec.Args), `"blockReadsOutsideWorkingDirectories": true`, `"additionalDirectories": [`, `"/tmp/qory-artifacts"`)
+	wants(t, settingsOf(t, r.spec.Args), `"blockReadsOutsideWorkingDirectories": true`, `"additionalDirectories": [`, `"/tmp/qory-artifacts"`, `"/tmp/qory-destinations"`)
 }
 
 // TestAWriteWorkflowSeesTheCheckoutWritable is a walled run from a run code whose
@@ -172,7 +173,7 @@ func TestAWriteWorkflowSeesTheCheckoutWritable(t *testing.T) {
 	if got := checkoutMounts(r.spec); len(got) != 1 || got[0] != (wall.Mount{Path: r.spec.Dir}) {
 		t.Errorf("the mounts of the checkout are %+v, want %s writable alone", got, r.spec.Dir)
 	}
-	lacks(t, settingsOf(t, r.spec.Args), "/qory/qory", "dontAsk", "NotebookEdit", "additionalDirectories")
+	lacks(t, settingsOf(t, r.spec.Args), "/qory/qory", "dontAsk", "NotebookEdit", "additionalDirectories", "qory-destinations")
 }
 
 // noTarget leaves out the target of a run's documents, and with it access and
