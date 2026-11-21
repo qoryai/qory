@@ -48,6 +48,9 @@ func fillHasShape(root, member map[string]any, value string) bool {
 // only, its value is one of [fillShapes], no value is on two properties, and the
 // property has the shape of its value. It returns the fix for a message with [FilePlace]
 // for the file, "" for a schema that passes.
+// shortcut: a nested property or a definition named x-qory-fill counts as a mark and
+// fails the type, as does a property of that name in a type with no deliver; replace it
+// when a type needs such a name.
 func checkFillMarks(label string, root map[string]any) string {
 	where := "json_schema of " + label
 	// A key on the root, or in any value of the root but the properties, is below the top
@@ -100,7 +103,7 @@ func checkFillMarks(label string, root map[string]any) string {
 
 // checkNoFillMarks checks that schema, the json_schema of the artifact type label, a type
 // with no deliver, has no [fillKey]: qory fills a member from a push only for a type that
-// it sends.
+// Apiary delivers.
 func checkNoFillMarks(label string, schema *yaml.Node) string {
 	doc, _ := jsonValue(schema, "json_schema of "+label)
 	if !hasKey(doc, false, fillKey) {

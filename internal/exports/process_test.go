@@ -1398,7 +1398,7 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		{structured(send, "{$defs: {line: "+string(line)+", 're%66erence': "+string(written)+", reference: {type: number}}, properties: {target: {$ref: '#/$defs/re%66erence'}}}"), fix + other + place, true},
 		// The size of a type with deliver is at most 786432 bytes.
 		{custom("structured", "size_limit: 786432, max_files: 1, json_schema: "+delivered+send), "", true},
-		{custom("structured", "size_limit: 786433, max_files: 1, json_schema: "+delivered+send), "Set size_limit of artifact type a-type to at most 786432.\n  A type with deliver is sent in one version of at most 786432 bytes, and size_limit is 786433." + place, false},
+		{custom("structured", "size_limit: 786433, max_files: 1, json_schema: "+delivered+send), "Set size_limit to at most 786432.\n  Apiary delivers one version of a type with deliver, of at most 786432 bytes, and size_limit of artifact type a-type is 786433." + place, false},
 		{custom("structured", "size_limit: 1048576, max_files: 1, json_schema: "+withTarget), "", true},
 		// A type with deliver has target in the required list of the root.
 		{custom("structured", limits+", json_schema: "+withTarget+send), requiredFix + place, true},
@@ -1422,10 +1422,10 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		{structured(", deliver: end_of_run", withTarget), "Set deliver to an object with send, or remove it.\n  deliver of artifact type a-type is a string." + place, false},
 		{structured(", deliver: ~", withTarget), "Set deliver to an object with send, or remove it.\n  deliver of artifact type a-type is null." + place, false},
 		// The types that may have it.
-		{"\n  - {name: a-type" + send + "}", "Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is sent, and artifact type a-type is a standard type." + place, false},
-		{custom("document", limits+send), "Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is sent, and artifact type a-type has base_view document." + place, false},
-		{custom("image", limits+send), "Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is sent, and artifact type a-type has base_view image." + place, false},
-		{custom("file", limits+send), "Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is sent, and artifact type a-type has base_view file." + place, false},
+		{"\n  - {name: a-type" + send + "}", "Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is delivered, and artifact type a-type is a standard type." + place, false},
+		{custom("document", limits+send), "Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is delivered, and artifact type a-type has base_view document." + place, false},
+		{custom("image", limits+send), "Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is delivered, and artifact type a-type has base_view image." + place, false},
+		{custom("file", limits+send), "Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is delivered, and artifact type a-type has base_view file." + place, false},
 		// The target.
 		{structured(send, "{type: object}"), fix + gone + place, true},
 		{structured(send, "{type: object, properties: {name: {type: string}}}"), fix + gone + place, true},
@@ -1516,7 +1516,7 @@ func TestVerifyChecksOutputs(t *testing.T) {
 		{"mockup", types, "Set outputs of the stage to a list, or remove it.\n  outputs of stage Check is a string." + place, false},
 		{"~", types, "Set outputs of the stage to a list, or remove it.\n  outputs of stage Check is null." + place, false},
 		{"[mockup]", types, "Set the entry of outputs to an object with type and required.\n  Entry 1 of outputs of stage Check is a string." + place, false},
-		{"[{type: mockup, extra: 1}]", types, "Remove the key \"extra\" from the entry of outputs.\n  Entry 1 of outputs of stage Check has the key, and an output has only type and required." + place, false},
+		{"[{type: mockup, extra: 1}]", types, "Remove the unknown key from the entry of outputs.\n  Entry 1 of outputs of stage Check has the key \"extra\", and an output has only type and required." + place, false},
 		{"[{required: true}]", types, "Add type to the entry of outputs, the name of an entry of artifact_types.\n  Entry 1 of outputs of stage Check has no type." + place, false},
 		{"[{type: 5}]", types, "Set type of the entry of outputs to a quoted string, a name from artifact_types.\n  type of entry 1 of outputs of stage Check is a number." + place, false},
 		{"[{type: Bad_Name}]", types, "Set type of the entry of outputs to a name such as reply-draft, at most 64 bytes.\n  type of entry 1 of outputs of stage Check is \"Bad_Name\"." + place, false},
@@ -1548,6 +1548,31 @@ func TestVerifyChecksOutputs(t *testing.T) {
 	want := "List each output type of the stage once.\n  Entry 2 of outputs of stage " + long + " has the type mockup, which an earlier entry has.\n  The file is " + filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName) + "."
 	if err := e.Verify(); err == nil || err.Error() != want {
 		t.Errorf("a long stage name: %v\nwant:\n%s", err, want)
+	}
+}
+
+// TestVerifyKeepsTheFirstLineShort is a failure whose message could have a long name of
+// the file on line 1: the size limit of a type with a 64-byte name, and an unknown key of
+// 300 characters in an output. Line 1 has the fix only, at most 100 characters.
+func TestVerifyKeepsTheFirstLineShort(t *testing.T) {
+	const reference = "https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference"
+	name := strings.Repeat("a", 64)
+	size := strings.Replace(custom("structured", "size_limit: 786433, max_files: 1, json_schema: {required: [target], properties: {target: {$ref: '"+reference+"'}}}, deliver: {send: after_gate}"), "a-type", name, 1)
+	key := strings.Repeat("k", 300)
+	body := strings.Replace(process, "    - name: Check\n", "    - name: Check\n      outputs: [{type: mockup, "+key+": 1}]\n", 1) + "artifact_types:\n  - name: mockup\n"
+	for _, c := range []struct{ name, body, want, cause string }{
+		{"size_limit", withTypes(size), "Set size_limit to at most 786432.", "size_limit of artifact type " + name + " is 786433."},
+		{"an unknown key", body, "Remove the unknown key from the entry of outputs.", "has the key \"" + key + "\""},
+	} {
+		err := factory(t, c.body).Verify()
+		if err == nil {
+			t.Errorf("%s: no error", c.name)
+			continue
+		}
+		first, _, _ := strings.Cut(err.Error(), "\n")
+		if first != c.want || len(first) > 100 || !strings.Contains(err.Error(), c.cause) {
+			t.Errorf("%s: line 1 is %q (%d characters), want %q, and the error has %q: %v", c.name, first, len(first), c.want, c.cause, err)
+		}
 	}
 }
 
@@ -1585,8 +1610,10 @@ left_out: {type: integer, x-qory-fill: pushed-commits-left-out}`
 		{"a: {type: string, x-qory-fill: pushed-branch}, b: {type: string, x-qory-fill: pushed-branch}", send, "Remove the second x-qory-fill pushed-branch from the json_schema.\n  Properties a and b in json_schema of artifact type a-type have it."},
 		{"a: {type: object, properties: {b: {type: string, x-qory-fill: pushed-branch}}}", send, belowFix},
 		{"a: {type: array, items: {$ref: '#/$defs/reference', x-qory-fill: pushed-head}}", send, belowFix},
+		{"a: {type: object, properties: {x-qory-fill: {type: string}}}", send, belowFix},
 		{"a: {allOf: [{type: string, x-qory-fill: pushed-branch}]}", send, belowFix},
 		{"a: {type: string, x-qory-fill: pushed-branch}", "", "Remove x-qory-fill from the json_schema, or add `deliver`.\n  json_schema of artifact type a-type has x-qory-fill, and qory reads it only for a type with deliver."},
+		{"x-qory-fill: {type: string}", "", "Remove x-qory-fill from the json_schema, or add `deliver`.\n  json_schema of artifact type a-type has x-qory-fill, and qory reads it only for a type with deliver."},
 		// Another shape than the value needs.
 		{"a: {type: string, x-qory-fill: pushed-commits}", send, shapeFix + "pushed-commits on property a" + inType + "a list of primitive references."},
 		{"a: {type: array, items: {type: string}, x-qory-fill: pushed-commits}", send, shapeFix + "pushed-commits on property a" + inType + "a list of primitive references."},

@@ -337,7 +337,7 @@ func checkOutputs(shown string, stages, types *yaml.Node) error {
 			for k := 0; k+1 < len(entry.Content); k += 2 {
 				key := entry.Content[k]
 				if key.Kind != yaml.ScalarNode || key.Value != "type" && key.Value != "required" {
-					return processRefusal(shown, "Remove the key "+scalarText(key)+" from the entry of outputs.", capital(at)+" has the key, and an output has only type and required.")
+					return processRefusal(shown, "Remove the unknown key from the entry of outputs.", capital(at)+" has the key "+scalarText(key)+", and an output has only type and required.")
 				}
 				if seen[key.Value] {
 					return processRefusal(shown, "Remove the second "+key.Value+" from the entry of outputs.", capital(at)+" has the key "+key.Value+" twice.")

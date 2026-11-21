@@ -222,7 +222,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 		}
 		var limit int64
 		if size.Decode(&limit) == nil && limit > maxDeliveredBytes {
-			return name, fmt.Sprintf("Set size_limit of %s to at most %d.\n  A type with deliver is sent in one version of at most %d bytes, and size_limit is %d.\n  The type is in %s.", label, maxDeliveredBytes, maxDeliveredBytes, limit, FilePlace)
+			return name, fmt.Sprintf("Set size_limit to at most %d.\n  Apiary delivers one version of a type with deliver, of at most %d bytes, and size_limit of %s is %d.\n  The type is in %s.", maxDeliveredBytes, maxDeliveredBytes, label, limit, FilePlace)
 		}
 		return name, checkDeliverTarget(label, schema)
 	}
@@ -230,11 +230,11 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 }
 
 // maxDeliveredBytes is the most bytes of the size_limit of a type with deliver: the size
-// of the one version that qory sends.
+// of the one version that Apiary delivers.
 const maxDeliveredBytes = 786432
 
-// deliverSends is each value deliver.send may have, the values of submit.send: when the
-// type's versions are sent.
+// deliverSends is each value deliver.send may have, the values of submit.send: when
+// Apiary delivers the type's versions.
 var deliverSends = []string{"end_of_run", "after_gate"}
 
 // checkDeliver checks n, the deliver of the artifact type label: an object with send, one
@@ -275,7 +275,7 @@ func checkDeliver(label string, n *yaml.Node) string {
 // notDelivered is the message for a deliver on the artifact type label that is not a
 // structured type with a json_schema; what says what the type is or has.
 func notDelivered(label, what string) string {
-	return fmt.Sprintf("Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is sent, and %s %s.\n  The type is in %s.", label, what, FilePlace)
+	return fmt.Sprintf("Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is delivered, and %s %s.\n  The type is in %s.", label, what, FilePlace)
 }
 
 // primitiveReference is the $ref that a schema writes for the definition reference of the
