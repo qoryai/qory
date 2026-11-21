@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+
+	"github.com/qoryai/qory/internal/sourcetext"
 )
 
 // MaxTailLines is the most lines of the full suite's output that [Result] keeps.
@@ -21,14 +23,15 @@ type Result struct {
 }
 
 // NewResult is the [Result] of counts and output, the full suite's output as it ended:
-// OutputTail has at most the last [MaxTailLines] lines of output.
+// OutputTail has at most the last [MaxTailLines] lines of output, with each hidden
+// character written as <U+XXXX> (see sourcetext.Escape), since a reviewer reads the text.
 //
 // shortcut: not called yet; wired in when cmd/run.go, cmd/rundocs.go and
 // cmd/pushstep.go can change (after Q-01, Q-36 and Q-73).
 // shortcut: no limit on the bytes of a line, so one very long line makes a large
 // file; cap the output where the caller reads it, when the caller exists.
 func NewResult(counts Counts, output []byte) Result {
-	return Result{Counts: counts, OutputTail: Tail(output, MaxTailLines)}
+	return Result{Counts: counts, OutputTail: sourcetext.Escape(Tail(output, MaxTailLines))}
 }
 
 // Tail is the last n lines of output as text, with the line break at the end of the
@@ -45,7 +48,8 @@ func Tail(output []byte, n int) string {
 	return string(bytes.Join(lines, []byte("\n")))
 }
 
-// WriteResult writes r as JSON to path, a new file of mode 0600. It returns an error
+// WriteResult writes r as JSON to path, a new file of mode 0644, so the run's user can
+// read it as a reviewer does. It returns an error
 // that starts with the fix when the file exists or cannot be written.
 //
 // shortcut: not called yet; wired in when cmd/run.go, cmd/rundocs.go and
@@ -55,13 +59,17 @@ func WriteResult(path string, r Result) error {
 	if err != nil {
 		return fmt.Errorf("Give the suite result counts and text that JSON can write: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return fmt.Errorf("Give the suite result a new file in a folder qory can write.\n%s: %w", strconv.Quote(path), err)
 	}
-	if _, err := f.Write(append(data, '\n')); err != nil {
+	err = f.Chmod(0o644)
+	if err == nil {
+		_, err = f.Write(append(data, '\n'))
+	}
+	if err != nil {
 		f.Close()
-		return fmt.Errorf("Free space for the suite result file.\n%s: %w", strconv.Quote(path), err)
+		return fmt.Errorf("Check space and rights for the suite result file.\n%s: %w", strconv.Quote(path), err)
 	}
 	return f.Close()
 }

@@ -65,10 +65,17 @@ func TestWriteResultMembers(t *testing.T) {
 	if len(got) != 4 || got["tests"] != 3.0 || got["failed"] != 1.0 || got["skipped"] != 0.0 || got["output_tail"] != "FAIL TestX" {
 		t.Errorf("members = %v", got)
 	}
-	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
-		t.Errorf("mode = %v, want 0600", info.Mode().Perm())
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o644 {
+		t.Errorf("mode = %v, want 0644", info.Mode().Perm())
 	}
 	if err := WriteResult(path, want); err == nil || !strings.HasPrefix(err.Error(), "Give the suite result a new file") {
 		t.Errorf("a second write returned %v, want an error that starts with the fix", err)
+	}
+}
+
+func TestNewResultEscapesHiddenCharacters(t *testing.T) {
+	r := NewResult(Counts{}, []byte("ok\n\u202e<evil>\x1b[2J\n"))
+	if want := "ok\n<U+202E><evil><U+001B>[2J"; r.OutputTail != want {
+		t.Errorf("OutputTail = %q, want %q", r.OutputTail, want)
 	}
 }
