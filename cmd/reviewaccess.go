@@ -23,3 +23,13 @@ func workflowJudges(workflows map[string]stack.Workflow, name string) bool {
 	j := workflows[name].Judges
 	return j == nil || *j
 }
+
+// reviewGroupOf is the review_group of the workflow name in workflows, the composed
+// stack's table: the name of the group role whose members' reports a session of the
+// workflow needs, "" when the entry is missing or has none.
+//
+// shortcut: not called yet; wired in when cmd/run.go, cmd/rundocs.go and
+// cmd/pushstep.go can change (after Q-01, Q-36 and Q-73).
+func reviewGroupOf(workflows map[string]stack.Workflow, name string) string {
+	return workflows[name].ReviewGroup
+}

@@ -12,9 +12,9 @@ import (
 // reviewCheck is what [checkReviewRound] needs after a review-changes session ends.
 type reviewCheck struct {
 	// Expected are the names of the reviewers whose report the round needs: the members
-	// of the composed group role agents/reviewers (compose.Result.Groups) whose paths
-	// match the change, as the harness's panel verb picks them. No Go code matches a
-	// member's paths yet, so the caller passes the names.
+	// of the composed group role agents/<review_group> (compose.Result.Groups) whose
+	// paths match the change, as the harness's panel verb picks them, see
+	// [expectedReviewersFor], which the caller passes here.
 	Expected []string
 	// Reports is the folder where each reviewer writes <agent>.json, the value of
 	// qory.review_session.reports.

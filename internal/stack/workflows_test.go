@@ -122,6 +122,38 @@ func TestLoadReadsJudges(t *testing.T) {
 	}
 }
 
+// TestLoadReadsReviewGroup reads review_group as written, and a workflow that leaves it
+// out as none; a value that is no string or no group role name is refused, and a key
+// that is not read is still refused.
+func TestLoadReadsReviewGroup(t *testing.T) {
+	isolate(t)
+	p, err := Load(write(t, withWorkflows("  a:\n    review_group: reviewers\n  b:\n    review_group: \"no\"\n  c: {}\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"a": "reviewers", "b": "no", "c": ""} {
+		if got := p.Workflows[name].ReviewGroup; got != want {
+			t.Errorf("%s: review_group %q, want %q", name, got, want)
+		}
+	}
+	for _, value := range []string{"5", "true", "[reviewers]", "{a: b}", "", "\"\"", "a/b", "a@b", "\".hidden\"", "\"a b\""} {
+		if _, err := Load(write(t, withWorkflows("  a:\n    review_group: "+value+"\n"))); err == nil {
+			t.Errorf("%q: no error", value)
+		}
+	}
+	_, err = Load(write(t, withWorkflows("  a:\n    review_group: 5\n")))
+	if err == nil || !strings.Contains(err.Error(), "cannot unmarshal !!int into string") {
+		t.Errorf("a number: %v", err)
+	}
+	_, err = Load(write(t, withWorkflows("  a:\n    review_group: a/b\n")))
+	if err == nil || !strings.Contains(err.Error(), "Set workflows.a.review_group to a group role.") {
+		t.Errorf("a name with a slash: %v", err)
+	}
+	if _, err := Load(write(t, withWorkflows("  a:\n    review_groups: reviewers\n"))); err == nil || !strings.Contains(err.Error(), `Key "review_groups" is not one qory-stack.yaml reads.`) {
+		t.Errorf("unknown key: %v", err)
+	}
+}
+
 // TestLoadReadsTheTier reads each workflow's tier as written, and a workflow with no
 // tier, or none listed, as none.
 func TestLoadReadsTheTier(t *testing.T) {

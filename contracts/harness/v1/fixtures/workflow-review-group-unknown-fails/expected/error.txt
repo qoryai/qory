@@ -1,0 +1,3 @@
+Change review_group of verify-a-ticket to a group role.
+  No module of the stack declares the group role agents/verify-reviewers.
+  workflows.verify-a-ticket is in the qory-stack.yaml of the base stack core@working-tree.

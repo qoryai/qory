@@ -467,6 +467,10 @@ type Workflow struct {
 	// Judges is judges as written: false when a later workflow in the loop judges the
 	// work of a session of this workflow, true or nil otherwise. nil is the same as true.
 	Judges *bool `yaml:"judges,omitempty"`
+	// ReviewGroup is review_group as written: the name of the group role, such as
+	// reviewers, whose members' reports a review session of the workflow needs, "" when
+	// the workflow sets none. The compose checks that the harness has the group.
+	ReviewGroup string `yaml:"review_group,omitempty"`
 	// Tier is tier as written, the tier of [Tiers] that names the main session's model
 	// and effort for a dispatched run of the workflow, "" when the workflow sets none.
 	// Qory Apiary resolves it; qory reads it only to refuse a value that is no tier.
@@ -482,10 +486,12 @@ type Workflow struct {
 }
 
 // workflowKeys are the keys of a workflow entry.
-var workflowKeys = []string{"access", "judges", "tier", "plan", "hook_points"}
+var workflowKeys = []string{"access", "judges", "review_group", "tier", "plan", "hook_points"}
 
 // UnmarshalYAML reads an entry of workflows. judges is read only as true or false: the
-// decoder reads a quoted y, yes, on, n, no or off as a boolean, and qory does not. A key
+// decoder reads a quoted y, yes, on, n, no or off as a boolean, and qory does not.
+// review_group is read only as a non-empty string: the decoder reads a number or a
+// boolean into a string field, and qory does not. A key
 // that the entry does not have is reported as the decoder reports an unknown field: the
 // decode of the entry into plain runs without the decoder's check of keys.
 func (w *Workflow) UnmarshalYAML(n *yaml.Node) error {
@@ -502,6 +508,8 @@ func (w *Workflow) UnmarshalYAML(n *yaml.Node) error {
 				problems = append(problems, fmt.Sprintf("line %d: field %s not found in type stack.Workflow", key.Line, key.Value))
 			case key.Value == "judges" && (value.Kind != yaml.ScalarNode || value.ShortTag() != "!!bool" || (value.Value != "true" && value.Value != "false")):
 				problems = append(problems, fmt.Sprintf("line %d: cannot unmarshal %s into bool", value.Line, value.ShortTag()))
+			case key.Value == "review_group" && (value.Kind != yaml.ScalarNode || value.ShortTag() != "!!str" || value.Value == ""):
+				problems = append(problems, fmt.Sprintf("line %d: cannot unmarshal %s into string", value.Line, value.ShortTag()))
 			}
 		}
 	}
@@ -883,6 +891,13 @@ func (p *Stack) validate(compose bool) error {
 				fmt.Sprintf("Set workflows.%s.access to a valid level.", name),
 				"The levels are read, write-no-push, and write.",
 				fmt.Sprintf("The value is %s.", exports.Value(w.Access, true)),
+				fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
+		}
+		if w.ReviewGroup != "" && !entryName(w.ReviewGroup) {
+			return exports.Refuse(
+				fmt.Sprintf("Set workflows.%s.review_group to a group role.", name),
+				"A group role's name is one path segment with no space, @, or leading dot.",
+				fmt.Sprintf("The value is %s.", exports.Value(w.ReviewGroup, true)),
 				fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 		}
 		if w.Tier != "" && !IsTier(w.Tier) {

@@ -233,6 +233,17 @@ func TestFixtures(t *testing.T) {
 			if _, err := os.Stat("expected/access.txt"); err == nil || b.Len() > 0 {
 				expectText(t, "expected/access.txt", b.String())
 			}
+			// expected/review-groups.txt is each workflow that sets review_group, with the
+			// group and its members in order, when the stack has any.
+			b.Reset()
+			for _, name := range slices.Sorted(maps.Keys(res.Stack.Workflows)) {
+				if group := res.Stack.Workflows[name].ReviewGroup; group != "" {
+					fmt.Fprintf(&b, "%s %s %s\n", name, group, strings.Join(res.Groups["agents/"+group], " "))
+				}
+			}
+			if _, err := os.Stat("expected/review-groups.txt"); err == nil || b.Len() > 0 {
+				expectText(t, "expected/review-groups.txt", b.String())
+			}
 			// expected/runtimes.txt is the version each runtime is pinned to, with the file
 			// of the layer that pins it, when the stack pins any.
 			b.Reset()

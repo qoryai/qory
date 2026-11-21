@@ -38,3 +38,21 @@ func TestWorkflowJudges(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewGroupOf(t *testing.T) {
+	table := map[string]stack.Workflow{
+		"review-changes":  {ReviewGroup: "reviewers"},
+		"verify-a-ticket": {Access: stack.AccessWriteNoPush, ReviewGroup: "verify-reviewers"},
+		"bare":            {},
+	}
+	for name, want := range map[string]string{
+		"review-changes": "reviewers", "verify-a-ticket": "verify-reviewers", "bare": "", "missing": "",
+	} {
+		if got := reviewGroupOf(table, name); got != want {
+			t.Errorf("reviewGroupOf(%q) = %q, want %q", name, got, want)
+		}
+	}
+	if got := reviewGroupOf(nil, "any"); got != "" {
+		t.Errorf("a nil table: %q, want none", got)
+	}
+}

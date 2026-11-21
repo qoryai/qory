@@ -21,6 +21,11 @@ release may change what an existing document does, and states it under Upgrading
 - `contracts/harness/v1/path-cases.json`: 50 cases of a `paths` glob against a changed
   file, that every matcher of `paths` must pass; qory's Go matcher passes them. qory will
   pick the reviewers of a `review-changes` round with the Go matcher.
+- A workflow entry of a stack takes `review_group`, the name of a group role:
+  `workflows: {review-changes: {review_group: reviewers}}`. A review session of the
+  workflow expects a report from the members of the group `agents/<review_group>`. A
+  value that is no string or no group role name stops the compose with exit 2, and so
+  does a group that no module declares.
 - A workflow entry of a stack takes `judges`, a boolean: `workflows: {implement-changes:
   {judges: false}}`. `false` says that a later workflow in the loop judges the work of
   the workflow's session; a value other than `true` or `false`, a quoted `"no"` included,
