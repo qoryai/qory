@@ -821,17 +821,19 @@ writes it, after the push. This is version 1 of the format
 |---|---|
 | `ref` | the branch's name, the same in each repository: `qory/` followed by the work item's id |
 | `verdict` | the work item's newest verdict, when this run wrote it: `passed`, `changes-requested`, `escalate`, or `none` |
-| `text` | the title and the description of the draft pull request, from the session's hand-off file. The title has 1 to 256 characters and no control character: no tab, no line end. Absent when the session wrote none |
+| `text` | the title and the description of the draft pull request, from the session's hand-off file. The title is a `title` of the primitives, 1 to 256 characters; the description is a `text` of the primitives, at most 20,000 characters. Absent when the session wrote none |
 | `repositories` | each repository with the commit of the branch in it, at least one |
 | `system` | the host the repository is on, a lower-case host name of at most 253 characters |
 | `path` | the repository's path on the host: at most 200 characters of segments joined by slashes, with no `.`, `..` or `.git` segment |
 | `commit` | the head of the branch: a full commit id, 40 or 64 lower-case hexadecimal digits. Each commit id of the format has this form |
 | `base` | the commit the run started at (`commit`), and the name of the repository's default branch when the run started (`branch`, optional, at most 255 characters, a name that git accepts after `refs/heads/`): the branch that a pull request of the run is based on |
-| `commits` | each commit from the base to the head, oldest first, with the ledger step that made it, at most 128 characters: the id of a ledger row, such as `deliverable:d-1`, `fix:f1`, `plan`, `checks`, `small-change` or `script:scenario-2#3`. A commit that a step made gets that step. Any commit with no step gets `unreviewed` |
-| `draft` | the draft pull request (`number`, `url`, `title`, `state`, `action`), or `{"none": <reason>}` with the reason `not-passed`, `no-text`, `escalated`, `no-program`, `program-failed` (with `exit`, 0, 1 or 2), `program-timeout` or `login-needed` (with `exit` 3). The `state` of a draft is `draft`, `open`, `closed` or `merged` |
+| `commits` | each commit from the base to the head, oldest first, with the ledger step that made it, at most 128 characters on one line (a `line` of the primitives): the id of a ledger row, such as `deliverable:d-1`, `fix:f1`, `plan`, `checks`, `small-change` or `script:scenario-2#3`. A commit that a step made gets that step. Any commit with no step gets `unreviewed` |
+| `draft` | the draft pull request (`number`, `url`, `title`, a `title` of the primitives, `state`, `action`), or `{"none": <reason>}` with the reason `not-passed`, `no-text`, `escalated`, `no-program`, `program-failed` (with `exit`, 0, 1 or 2), `program-timeout` or `login-needed` (with `exit` 3). The `state` of a draft is `draft`, `open`, `closed` or `merged` |
 | `commit_url` | the forge's address of a commit, from the submit program of a run with no run code |
 
-A document has no other member. A software factory can use the format as the JSON Schema
+A document has no other member. The schema writes the patterns of the primitives in its
+`$defs` `line`, `text` and `visible`, and a test compares them with the primitives file. A
+software factory can use the format as the JSON Schema
 of a custom artifact type in its `process.yaml`:
 
 ```yaml

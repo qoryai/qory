@@ -15,8 +15,8 @@
       "required": ["title", "description"],
       "additionalProperties": false,
       "properties": {
-        "title": {"description": "One line: no tab and no other control character.", "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\u0000-\u001f\u007f]+$"},
-        "description": {"type": "string", "maxLength": 20000}
+        "title": {"description": "One line of text with a character that shows, as $defs title defines it.", "type": "string", "minLength": 1, "maxLength": 256, "allOf": [{"$ref": "#/$defs/line"}, {"$ref": "#/$defs/visible"}]},
+        "description": {"description": "Markdown, as $defs text defines it.", "type": "string", "maxLength": 20000, "$ref": "#/$defs/text"}
       }
     },
     "repositories": {
@@ -62,7 +62,7 @@
               "type": "object",
               "required": ["commit", "step"],
               "additionalProperties": false,
-              "properties": {"commit": {"$ref": "#/$defs/commit"}, "step": {"type": "string", "minLength": 1, "maxLength": 128}, "commit_url": {"type": "string", "minLength": 1}}
+              "properties": {"commit": {"$ref": "#/$defs/commit"}, "step": {"type": "string", "minLength": 1, "maxLength": 128, "$ref": "#/$defs/line"}, "commit_url": {"type": "string", "minLength": 1}}
             }
           },
           "draft": {
@@ -75,7 +75,7 @@
                 "properties": {
                   "number": {"type": "integer", "minimum": 1},
                   "url": {"type": "string", "minLength": 1},
-                  "title": {"type": "string"},
+                  "title": {"description": "One line of text with a character that shows, as $defs title defines it.", "type": "string", "allOf": [{"$ref": "#/$defs/line"}, {"$ref": "#/$defs/visible"}]},
                   "state": {"enum": ["draft", "open", "closed", "merged"]},
                   "action": {"enum": ["opened", "updated", "kept"]}
                 }
@@ -101,6 +101,20 @@
     }
   },
   "$defs": {
-    "commit": {"description": "A full commit id: 40 or 64 lower-case hexadecimal digits.", "type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"}
+    "commit": {"description": "A full commit id: 40 or 64 lower-case hexadecimal digits.", "type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"},
+    "line": {
+      "description": "One line of text: no control character (so no tab, line feed or carriage return), no U+2028 or U+2029, and no format character (Unicode category Cf) but U+200C and U+200D, the joiners of emoji. The pattern is the one of $defs line in primitives.schema.json.",
+      "type": "string",
+      "pattern": "^[^\u0000-\u001f\u007f-\u009f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\ud804\udcbd\ud804\udccd\ud80d\udc30-\ud80d\udc3f\ud82f\udca0-\ud82f\udca3\ud834\udd73-\ud834\udd7a\udb40\udc01\udb40\udc20-\udb40\udc7f]*$"
+    },
+    "text": {
+      "description": "Markdown that may span lines. Of the control characters it has only tab, line feed and carriage return, and it has no U+2028, U+2029 or format character (Unicode category Cf) but U+200C and U+200D, the joiners of emoji. The pattern is the one of $defs text in primitives.schema.json.",
+      "type": "string",
+      "pattern": "^[^\u0000-\b\u000b\f\u000e-\u001f\u007f-\u009f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\ud804\udcbd\ud804\udccd\ud80d\udc30-\ud80d\udc3f\ud82f\udca0-\ud82f\udca3\ud834\udd73-\ud834\udd7a\udb40\udc01\udb40\udc20-\udb40\udc7f]*$"
+    },
+    "visible": {
+      "description": "A title has a character other than spaces and joiners (U+200C, U+200D). The pattern is the one in $defs title of primitives.schema.json.",
+      "pattern": "[^ \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u200c\u200d]"
+    }
   }
 }

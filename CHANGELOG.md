@@ -1766,6 +1766,11 @@ release may change what an existing document does, and states it under Upgrading
   characters themselves, and the lists stopped at U+FFFF: U+0600 and a tag character such
   as U+E0041 passed. Each `$defs` `line` and `text` now has the pattern of the primitives.
   The checks of `qory run verdict` and of the review round stop the same characters.
+- The submission format stops the same characters. The title of the text and the title of a
+  draft are a line with a character that is not a space, U+200C or U+200D; a step is a line;
+  the description is a text. Until this change, the title stopped only the control
+  characters U+0000 to U+001F and U+007F, and a step, a description and the title of a
+  draft had no rule.
 - A stack, a stage name or a workflow in a `process.yaml` that has U+200B, U+2028, U+2029
   or another character that a line does not have is stopped, with the fix `Set stack in
   process.yaml to one line of text.` and the cause `The value has the character U+200B,
