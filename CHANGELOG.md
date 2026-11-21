@@ -683,9 +683,12 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
-- A run whose inputs list `destinations`, such as an Explore run, fetches nothing before
-  its session; the agent clones the destinations it needs with `qory destination clone`. A
-  run with no `destinations`, such as Build or Verify, fetches its target as before.
+- A read run whose documents contain a harness document and whose inputs list
+  `destinations`, such as an Explore run, fetches nothing before its session; the agent
+  clones the destinations it needs with `qory destination clone`. Every other run fetches
+  its target as before: a run with no `destinations`, such as Build or Verify, a run that
+  may write, which also reads its branch and runs its push step, and a run whose documents
+  contain no harness document.
 - On Claude Code, a read workflow's run allows `Bash(/qory/qory destination *)` and
   `Read(//tmp/qory-destinations/**)`, adds `/tmp/qory-destinations` to
   `permissions.additionalDirectories`, and gets that folder, new and empty with mode 700,

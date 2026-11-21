@@ -720,10 +720,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return failed(err)
 			}
 			// fetches is whether the run fetches repositories before its session: the run
-			// configuration lists some, and the run's inputs list no destinations, which the
-			// agent clones in the session instead. Each step that works on the fetched
-			// repositories reads it.
-			fetches := run.Repositories() != "" && !fromCode.listsDestinations()
+			// configuration lists some, and the run does not clone its destinations in the
+			// session instead, see [codeRun.clonesDestinations]. Each step that works on the
+			// fetched repositories reads it.
+			fetches := run.Repositories() != "" && !fromCode.clonesDestinations()
 			// Only an open that went through makes the run's id this run's: before it, a folder
 			// at runHome can be the home of another run that has this id.
 			if runHome != "" {
@@ -1069,9 +1069,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// repository while the target is on its system. A run of a work item at that
 			// version reads the work item's branch first: the fetch takes its commit, the
 			// compose reads the target version, and the branch is checked out last, so no
-			// file of the branch reaches the harness. A run whose inputs list destinations,
-			// such as an Explore run, fetches nothing here and reads no branch: the agent
-			// clones each destination it needs with qory destination clone.
+			// file of the branch reaches the harness. A read run whose documents contain a
+			// harness document and whose inputs list destinations, such as an Explore run,
+			// fetches nothing here and reads no branch: the agent clones each destination it
+			// needs with qory destination clone.
 			hostWork := func() error {
 				switch {
 				case fetches:
@@ -1099,7 +1100,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err != nil {
 						return err
 					}
-				case fromCode.listsDestinations():
+				case fromCode.clonesDestinations():
 					// Nothing is fetched before the session.
 				default:
 					if err := preparation.Unlisted(runValues(run), fromCode.fetchTarget()); err != nil {

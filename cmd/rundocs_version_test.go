@@ -91,6 +91,7 @@ func runAtTargetWith(t *testing.T, h *hostFetch, system, repositories, version s
 	closes, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{
 		System: system, Repositories: repositories,
 		Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
+		StackProxy: h.server.Stack.URL, StackCABundle: h.server.Stack.CABundle,
 	})
 	defer restore()
 	out, err := run(t, "run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL, "--home", filepath.Join(tempDir(t), "home"))
@@ -293,59 +294,113 @@ func TestARunCodeWhoseTargetHasNoAddressUsesNoVersion(t *testing.T) {
 	})
 }
 
-// TestARunCodeWhoseInputsListDestinationsFetchesNothing is a run from a run code on
-// git.test at a commit of acme/site, its target:
-//   - with inputs that list destinations, as an Explore run's do, qory run fetches
-//     nothing and reads no branch before the session, which joins with the qory.yaml in
-//     the working folder, whether the run configuration lists acme/site or no repository,
-//     and whether the run may write or only reads; the agent clones what it needs with
-//     qory destination clone;
-//   - with inputs that list none, as a Build run's, qory run fetches its target at the
-//     commit.
+// harnessFiles is the files of examples/hello, whose workflow hello declares access. It
+// reads them from the repository, so a test calls it before it changes the working folder.
+func harnessFiles(t *testing.T, access string) map[string]string {
+	t.Helper()
+	files := helloFiles(t)
+	files["examples/hello/qory-stack.yaml"] = declares(access)(withExtendable(files["examples/hello/qory-stack.yaml"]))
+	return files
+}
+
+// servedHarness serves acme/stack with files, from [harnessFiles], on h's server, and
+// returns a harness document that extends its stack examples/hello, as the documents of a
+// run whose workspace has a harness contain it.
+func servedHarness(t *testing.T, h *hostFetch, files map[string]string) map[string]any {
+	t.Helper()
+	commit := h.server.Repository(t, "acme/stack", "main", files)
+	return map[string]any{"harness": map[string]any{"extends": map[string]any{"git": h.server.URL("acme/stack"), "ref": commit, "path": "examples/hello"}}}
+}
+
+// siteTarget is the target acme/site on git.test, and siteDestinations the inputs'
+// destinations with that target, as an Explore run's inputs list them.
+var (
+	siteTarget       = map[string]any{"collection": "R_1001", "address": map[string]any{"system": proxygittest.Host, "path": "acme/site"}}
+	siteDestinations = []any{map[string]any{"id": "tg_s000000000000000", "target": siteTarget}}
+)
+
+// TestARunCodeWhoseInputsListDestinationsFetchesNothing is a read run from a run code on
+// git.test at a commit of acme/site, its target, whose documents contain a harness
+// document and whose inputs list destinations, as an Explore run's do: qory run fetches
+// nothing through the host proxy and reads no branch before the session, composes the
+// harness document's stack, fetched through the stack proxy, and joins, whether the run
+// configuration lists acme/site or no repository. The agent clones what it needs with
+// qory destination clone.
 func TestARunCodeWhoseInputsListDestinationsFetchesNothing(t *testing.T) {
-	target := map[string]any{"collection": "R_1001", "address": map[string]any{"system": proxygittest.Host, "path": "acme/site"}}
-	destinations := []any{map[string]any{"id": "tg_site000000000000", "target": target}}
-	for _, c := range []struct {
-		name, repositories, access string
-	}{
-		{"listed, write", "acme/site", "write"},
-		{"listed, read", "acme/site", "read"},
-		{"none listed", "", "write"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			h, first, _, files := versionRepository(t)
-			for name, content := range files {
-				writeFile(t, filepath.Join(h.dir, filepath.FromSlash(name)), content)
-			}
-			out, err, n, _ := runAtTargetWith(t, h, proxygittest.Host, c.repositories, first, target, func(d map[string]any) {
-				d["inputs"].(map[string]any)["destinations"] = destinations
-				d["access"] = c.access
+	for name, repositories := range map[string]string{"listed": "acme/site", "none listed": ""} {
+		t.Run(name, func(t *testing.T) {
+			files := harnessFiles(t, "read")
+			h, first, _, _ := versionRepository(t)
+			harness := servedHarness(t, h, files)
+			out, err, n, _ := runAtTargetWith(t, h, proxygittest.Host, repositories, first, siteTarget, func(d map[string]any) {
+				d["inputs"].(map[string]any)["destinations"] = siteDestinations
+				d["access"] = "read"
+				d["harness"] = harness
 			})
 			if !n.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
 			}
 			wants(t, out, "qory run: composed ")
-			lacks(t, out, "qory run: fetched ", first[:12])
-			data, _ := os.ReadFile(h.argv)
-			if gitFetches.MatchString(string(data)) {
-				t.Errorf("git reached a remote before the session:\n%s", data)
+			lacks(t, out, "qory run: fetched acme/site", first[:12])
+			if n := h.server.Tunnels(); n != 0 {
+				t.Errorf("the host proxy led %d connections", n)
 			}
-			if h.server.Tunnels() != 0 {
-				t.Errorf("the host proxy led %d connections", h.server.Tunnels())
+			if h.server.StackTunnels() == 0 {
+				t.Error("the stack proxy led no connection, want the harness's fetch")
+			}
+			if _, err := os.Lstat(filepath.Join(h.dir, "qory.yaml")); !os.IsNotExist(err) {
+				t.Errorf("the working folder has a qory.yaml: %v", err)
 			}
 		})
 	}
-	t.Run("no destinations", func(t *testing.T) {
-		h, first, _, _ := versionRepository(t)
-		out, err, n, _ := runAtTargetWith(t, h, proxygittest.Host, "acme/site", first, target, nil)
-		if !n.joined {
-			t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
-		}
-		wants(t, out, "qory run: fetched acme/site at "+first[:12]+" in ")
-		if got := gitOut(t, h.dir, "rev-parse", "HEAD"); got != first {
-			t.Errorf("the working folder is at %s, want %s", got, first)
-		}
-	})
+}
+
+// TestARunCodeFetchesItsTargetUnlessItClonesDestinations is a run from a run code on
+// git.test at a commit of acme/site, its target, that the run configuration lists, which
+// fetches the target at the commit before the session and joins:
+//   - a read run whose inputs list destinations and whose documents contain no harness
+//     document: qory composes the qory.yaml of the fetched commit;
+//   - a run that may write, whose inputs list destinations and whose documents contain a
+//     harness document;
+//   - a run whose inputs list no destinations, as a Build run's.
+//
+// In each, git reaches no remote repository other than acme/site and the harness's.
+func TestARunCodeFetchesItsTargetUnlessItClonesDestinations(t *testing.T) {
+	for _, c := range []struct {
+		name, access          string
+		destinations, harness bool
+	}{
+		{"read, no harness document", "read", true, false},
+		{"write, harness document", "write", true, true},
+		{"no destinations", "write", false, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			files := harnessFiles(t, c.access)
+			h, first, _, _ := versionRepository(t)
+			out, err, n, _ := runAtTargetWith(t, h, proxygittest.Host, "acme/site", first, siteTarget, func(d map[string]any) {
+				if c.destinations {
+					d["inputs"].(map[string]any)["destinations"] = siteDestinations
+				}
+				if c.harness {
+					d["harness"] = servedHarness(t, h, files)
+				}
+				d["access"] = c.access
+			})
+			if !n.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
+			}
+			wants(t, out, "qory run: fetched acme/site at "+first[:12]+" in ", "qory run: composed ")
+			if got := gitOut(t, h.dir, "rev-parse", "HEAD"); got != first {
+				t.Errorf("the working folder is at %s, want %s", got, first)
+			}
+			data, _ := os.ReadFile(h.argv)
+			for line := range strings.Lines(string(data)) {
+				if strings.Contains(line, "://") && !strings.Contains(line, "/acme/site") && !strings.Contains(line, "/acme/stack") {
+					t.Errorf("git reached another repository: %s", line)
+				}
+			}
+		})
+	}
 }
 
 // TestARunCodeWhoseTargetIsNotTheFirstRepositoryStops is a run from a run code whose

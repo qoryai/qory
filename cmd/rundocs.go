@@ -458,10 +458,16 @@ func (r *codeRun) readExposed(root, cwd, report string) error {
 	return nil
 }
 
-// listsDestinations reports whether the inputs of the run from the run code r list
-// destinations; false for a run with no run code.
-func (r *codeRun) listsDestinations() bool {
-	return r != nil && hasDestinations(r.inputs)
+// clonesDestinations reports whether the run from the run code r skips the fetch before
+// its session, and its agent clones what it needs with qory destination clone: the
+// documents' access is read, the documents contain a harness document, and the inputs list
+// destinations. A run whose documents contain no harness document fetches its target, whose
+// harness it composes; a run that may write fetches its target, works on its branch and
+// pushes. False for a run with no run code. It reads the documents' access, not the level
+// that the composed harness's workflow lowers it to, since the fetch comes before the
+// compose.
+func (r *codeRun) clonesDestinations() bool {
+	return r != nil && r.access == stack.AccessRead && r.harness != nil && hasDestinations(r.inputs)
 }
 
 // fetchTarget is the target the fetch of the run's repositories takes, as
