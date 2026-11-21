@@ -537,6 +537,21 @@ type composeOptions struct {
 	// compose's lock: qory run adds the rows of a run of several sessions, see
 	// [report.Report.Sessions].
 	sessions func(*report.Report)
+	// alone is set for the compose of a later session of a qory run: the home holds the
+	// session's runtime alone, see [composeOptions.homeRuntimes].
+	alone bool
+}
+
+// homeRuntimes is every runtime the home holds after a compose for targets, see
+// [allRuntimes]. A later session of a run composes for its runtime alone, as a home of one
+// runtime gets the tiers of an [render.AloneModel]: the build replaces the home whole, so
+// the runtime of the session before leaves it. The runtime's install is outside the home,
+// so qory still installs each runtime once per run.
+func (o composeOptions) homeRuntimes(home string, targets []render.Runtime) []render.Runtime {
+	if o.alone {
+		return targets
+	}
+	return allRuntimes(home, targets)
 }
 
 // named is the harness o composes with no address shown, see [source.Named]; nil for any
@@ -759,7 +774,7 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 	// composed for others before. The home is one tree that a build replaces
 	// whole, so every runtime it is to hold goes into one call: the targets and
 	// the runtimes already there, whose links would otherwise stop resolving.
-	all := allRuntimes(at.home, targets)
+	all := o.homeRuntimes(at.home, targets)
 	// The report's target is every runtime the home holds after this compose,
 	// the targets first, since the harness was rendered for all of them.
 	rep.Target.Runtimes = nil
@@ -1176,7 +1191,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	}
 	// The runtimes the home holds after this compose, the targets and the ones a previous
 	// compose wrote, all get the agents' tiers.
-	all := allRuntimes(at.home, targets)
+	all := o.homeRuntimes(at.home, targets)
 	if err := checkTierEfforts(res, all, at.root); err != nil {
 		return nil, input(err)
 	}

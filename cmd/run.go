@@ -793,7 +793,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			prepareLaunch := func(stepCtx context.Context, w io.Writer, n int) (freshHome bool, err error) {
 				// later is a session after the run's first.
 				later := n > 1
-				composing.writable, composing.ctx = nil, stepCtx
+				composing.writable, composing.ctx, composing.alone = nil, stepCtx, later
 				// The report of a run of several sessions has each session's runtime and tier
 				// map, which the compose writes with the rest of its report.
 				composing.sessions = nil

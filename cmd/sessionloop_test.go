@@ -660,6 +660,50 @@ func TestALaterSessionComposesWithTheTiersOfItsAnswer(t *testing.T) {
 	}
 }
 
+// TestALaterCodexSessionAfterClaudeGetsItsTiers is a run of claude whose answer starts
+// session 2 on codex with the tier balanced mapped to example-other at the effort high,
+// with a module agent whose model is ${qory:balanced}: session 2's home is composed for
+// codex alone, so its Codex agent mid has the tier's model and effort, and no row says
+// that the tier was skipped.
+func TestALaterCodexSessionAfterClaudeGetsItsTiers(t *testing.T) {
+	models := []any{map[string]any{"id": "example-large"}, map[string]any{"id": "example-other", "effort": []any{"high"}}}
+	var second map[string]any
+	if err := json.Unmarshal([]byte(laterAnswer(2, "codex", "example-provider-2", 30)), &second); err != nil {
+		t.Fatal(err)
+	}
+	second["model_choice"] = map[string]any{
+		"runtime": "codex", "model": "example-large", "provider_models": models,
+		"tiers": map[string]any{"light": "example-large", "balanced": map[string]any{"model": "example-other", "effort": "high"}, "thinking": "example-large"},
+	}
+	answer, _ := json.Marshal(second)
+	var agent string
+	r := runLoop(t, loopSetup{
+		answers: []string{string(answer)},
+		files: map[string]string{
+			"examples/hello/modules/hello/agents/mid.md": "---\nname: mid\ndescription: Works in the middle tier.\nmodel: ${qory:balanced}\n---\n\nWorks.\n",
+		},
+		change: func(d map[string]any) {
+			d["run_settings"] = map[string]any{
+				"runtime": "claude", "model": "example-large", "provider_models": models,
+				"tiers": map[string]any{"light": "example-large", "balanced": "example-large", "thinking": "example-large"},
+			}
+		},
+		joined: func(n int, spec session.SessionSpec) {
+			if n == 2 {
+				data, _ := os.ReadFile(filepath.Join(spec.HarnessHome, "codex", "agents", "mid.toml"))
+				agent = string(data)
+			}
+		},
+	})
+	if r.err != nil || len(r.joins) != 2 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if !strings.Contains(agent, "model = \"example-other\"\n") || !strings.Contains(agent, "model_reasoning_effort = \"high\"\n") {
+		t.Errorf("session 2's Codex agent mid is %q, want the model example-other at the effort high", agent)
+	}
+	lacks(t, r.out, "skipped", "only in a home composed for codex alone")
+}
+
 // TestASessionWithoutAKeyAfterOneWithAKeyJoinsWithNone is a run whose answers start session
 // 2 with the model key example-provider-2 and session 3 with no
 // model_provider_credential_name: session 3 joins with no key, and not with session 2's.
