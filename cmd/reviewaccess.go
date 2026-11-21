@@ -33,3 +33,13 @@ func workflowJudges(workflows map[string]stack.Workflow, name string) bool {
 func reviewGroupOf(workflows map[string]stack.Workflow, name string) string {
 	return workflows[name].ReviewGroup
 }
+
+// startsReviewers reports whether a session of the workflow name starts reviewer agents:
+// its entry in workflows names a review_group. Only such a session gets
+// qory.review_session in its inputs.json.
+//
+// shortcut: not called yet; wired in when cmd/run.go, cmd/rundocs.go and
+// cmd/pushstep.go can change (after Q-01, Q-36 and Q-73).
+func startsReviewers(workflows map[string]stack.Workflow, name string) bool {
+	return reviewGroupOf(workflows, name) != ""
+}

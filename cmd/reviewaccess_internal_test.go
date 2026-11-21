@@ -56,3 +56,23 @@ func TestReviewGroupOf(t *testing.T) {
 		t.Errorf("a nil table: %q, want none", got)
 	}
 }
+
+// Only a session whose stack entry names a review_group gets qory.review_session.
+func TestStartsReviewers(t *testing.T) {
+	no := false
+	workflows := map[string]stack.Workflow{
+		"review-changes":    {Access: "read", ReviewGroup: "reviewers"},
+		"verify-a-ticket":   {Access: "write-no-push", ReviewGroup: "verify-reviewers"},
+		"implement-changes": {Access: "write", Judges: &no},
+	}
+	for name, want := range map[string]bool{
+		"review-changes":    true,
+		"verify-a-ticket":   true,
+		"implement-changes": false,
+		"not-in-the-table":  false,
+	} {
+		if got := startsReviewers(workflows, name); got != want {
+			t.Errorf("startsReviewers(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
