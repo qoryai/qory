@@ -144,8 +144,9 @@ func TestEveryInvalidDocumentsFixtureFails(t *testing.T) {
 }
 
 // TestBrokenDocumentsAreRefused refuses documents that break the schema, a rule it
-// states, or the rules of the inputs of a work item's run: each error contains no value
-// of the documents.
+// states, or the rules of the inputs of a work item's run, and documents whose
+// must_understand lists a member the schema does not define: each error contains no
+// value of the documents.
 func TestBrokenDocumentsAreRefused(t *testing.T) {
 	const broken = "it breaks documents.schema.json"
 	inputs := func(doc map[string]any) map[string]any { return doc["inputs"].(map[string]any) }
@@ -167,8 +168,13 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 		{"no member", json.RawMessage(`{}`), broken},
 		{"a run key", documentsOf(t, "explore-workflow.json", func(d map[string]any) { d["run_key"] = "qrk_a.b" }), "it contains a run_key member"},
 		{"a run code", documentsOf(t, "explore-workflow.json", func(d map[string]any) { d["run_code"] = "qecr_x" }), "it contains a run_code member"},
-		{"a member the schema does not define", documentsOf(t, "explore-workflow.json", func(d map[string]any) { d["prompt"] = "x" }), broken},
-		{"a run id", documentsOf(t, "explore-workflow.json", func(d map[string]any) { d["run_id"] = "0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d" }), broken},
+		{"a member the schema does not define that it must understand", documentsOf(t, "explore-workflow.json", func(d map[string]any) {
+			d["prompt"], d["must_understand"] = "x", []any{"/prompt"}
+		}), broken},
+		{"a pointer to no member", documentsOf(t, "explore-workflow.json", func(d map[string]any) { d["must_understand"] = []any{"/zz"} }), broken},
+		{"a key in the run settings that it must understand", withSettings(func(d map[string]any) {
+			settings(d)["api_key"], d["must_understand"] = "example-key", []any{"/run_settings/api_key"}
+		}), broken},
 		{"harness_hidden without a workflow", documentsOf(t, "explore-workflow.json", func(d map[string]any) { delete(d, "workflow") }), broken},
 		{"another domain in inputs", documentsOf(t, "explore-workflow.json", func(d map[string]any) { inputs(d)["domain"] = "marketing" }), "its inputs.domain is not its domain"},
 		{"another work item in inputs", documentsOf(t, "explore-workflow.json", func(d map[string]any) {
@@ -191,14 +197,11 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 			s["tiers"] = map[string]any{"light": "example-small"}
 		}), broken},
 		{"a runtime with a trailing line feed", withSettings(func(d map[string]any) { settings(d)["runtime"] = "claude\n" }), broken},
-		{"a key in the run settings", withSettings(func(d map[string]any) { settings(d)["api_key"] = "example-key" }), broken},
-		{"a time limit in the run settings", withSettings(func(d map[string]any) { settings(d)["time_limit_minutes"] = 45 }), broken},
 		{"a time limit of 0 minutes", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 0 }), broken},
 		{"a time limit of 1441 minutes", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 1441 }), broken},
 		{"a time limit with a fraction", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 45.5 }), broken},
 		{"shared_run that is not a boolean", withSettings(func(d map[string]any) { d["shared_run"] = "yes" }), broken},
 		{"a prebuild with a time limit", documentsOf(t, "prebuild.json", func(d map[string]any) { d["time_limit_minutes"] = 45 }), broken},
-		{"a prebuild with full_suite", documentsOf(t, "prebuild.json", func(d map[string]any) { d["full_suite"] = true }), broken},
 		{"a model not listed", withSettings(func(d map[string]any) { settings(d)["model"] = "example-tiny" }), broken},
 		{"an effort not listed for the model", withSettings(func(d map[string]any) { settings(d)["effort"] = "huge" }), broken},
 		{"an effort for a model with none", withSettings(func(d map[string]any) {
@@ -224,6 +227,62 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 			t.Errorf("%s: %q, want %q", c.name, err, c.want)
 		}
 		noValue(t, c.name, err)
+	}
+}
+
+// TestDocumentsWithMembersTheSchemaDoesNotDefineAreRead reads documents with a member
+// that the schema does not define, at the top or in run_settings: each is read as the
+// fixture is, without the member. Documents whose must_understand lists only members the
+// schema defines are read too, and a member in another case never fills the defined one.
+func TestDocumentsWithMembersTheSchemaDoesNotDefineAreRead(t *testing.T) {
+	settings := func(doc map[string]any) map[string]any { return doc["run_settings"].(map[string]any) }
+	for _, c := range []struct {
+		name    string
+		fixture string
+		edit    func(d map[string]any)
+	}{
+		{"a member at the top", "explore-workflow.json", func(d map[string]any) { d["prompt"] = "x" }},
+		{"a run id", "explore-workflow.json", func(d map[string]any) { d["run_id"] = "0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d" }},
+		{"a key in the run settings", "explore-run-settings.json", func(d map[string]any) { settings(d)["api_key"] = "example-key" }},
+		{"a time limit in the run settings", "explore-run-settings.json", func(d map[string]any) { settings(d)["time_limit_minutes"] = 45 }},
+		{"a prebuild with full_suite", "prebuild.json", func(d map[string]any) { d["full_suite"] = true }},
+		{"a must_understand of members the schema defines", "explore-run-settings.json", func(d map[string]any) {
+			d["must_understand"] = []any{"/run_settings/runtime", "/subject/kind", "/inputs/work_item"}
+		}},
+		{"a workflow in another case", "explore-workflow.json", func(d map[string]any) { d["WORKFLOW"] = "other" }},
+	} {
+		// The fixture through the same marshal, so its inputs have the same bytes.
+		want, err := provisioner.ReadDocuments(documentsOf(t, c.fixture, func(map[string]any) {}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := provisioner.ReadDocuments(documentsOf(t, c.fixture, c.edit))
+		want.MustUnderstand = got.MustUnderstand
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: %+v, %v, want %+v", c.name, got, err, want)
+		}
+	}
+}
+
+// TestADocumentsMemberInAnotherCaseIsNotRead reads the documents of a fixture with a
+// second workflow member written in capitals, before and after the defined one: the
+// documents keep the defined member's value. A build that matches member names in any
+// case fails here.
+func TestADocumentsMemberInAnotherCaseIsNotRead(t *testing.T) {
+	body := documentsOf(t, "explore-workflow.json", nil)
+	want, err := provisioner.ReadDocuments(body)
+	if err != nil || want.Workflow == "" {
+		t.Fatalf("%+v, %v", want, err)
+	}
+	const variant = `"WORKFLOW":"other"`
+	for name, b := range map[string][]byte{
+		"before": bytes.Replace(body, []byte("{"), []byte("{"+variant+","), 1),
+		"after":  append(bytes.TrimSuffix(bytes.TrimSpace(body), []byte("}")), []byte(","+variant+"}")...),
+	} {
+		got, err := provisioner.ReadDocuments(b)
+		if err != nil || got.Workflow != want.Workflow {
+			t.Errorf("the variant %s: %q, %v, want %q", name, got.Workflow, err, want.Workflow)
+		}
 	}
 }
 
@@ -276,8 +335,9 @@ func TestLargestPrebuiltImageBytes(t *testing.T) {
 }
 
 // TestRunSettingsWithTheTierBalancedMapToCompose maps the tiers light, balanced and
-// thinking of a documents fixture to the tier and tier-effort flags of the compose, and
-// refuses run settings whose tier map has the key fast, which is no tier.
+// thinking of a documents fixture to the tier and tier-effort flags of the compose. Run
+// settings whose tier map has the key fast, which is no tier, are read without it, and
+// refused when their must_understand lists it.
 func TestRunSettingsWithTheTierBalancedMapToCompose(t *testing.T) {
 	doc, err := provisioner.ReadDocuments(documentsOf(t, "explore-run-settings.json", nil))
 	if err != nil {
@@ -294,10 +354,17 @@ func TestRunSettingsWithTheTierBalancedMapToCompose(t *testing.T) {
 	if !reflect.DeepEqual(tiers, want) {
 		t.Errorf("the tier flags are %q, want %q", tiers, want)
 	}
-	fast := documentsOf(t, "explore-run-settings.json", func(d map[string]any) {
-		d["run_settings"].(map[string]any)["tiers"] = map[string]any{"fast": "example-small"}
+	fast := func(d map[string]any) {
+		d["run_settings"].(map[string]any)["tiers"].(map[string]any)["fast"] = "example-small"
+	}
+	if got, err := provisioner.ReadDocuments(documentsOf(t, "explore-run-settings.json", fast)); err != nil || !reflect.DeepEqual(got.RunSettings, doc.RunSettings) {
+		t.Errorf("run settings with the tier fast: %+v, %v", got.RunSettings, err)
+	}
+	mustFast := documentsOf(t, "explore-run-settings.json", func(d map[string]any) {
+		fast(d)
+		d["must_understand"] = []any{"/run_settings/tiers/fast"}
 	})
-	if _, err := provisioner.ReadDocuments(fast); err == nil {
-		t.Error("run settings with the tier fast are read")
+	if _, err := provisioner.ReadDocuments(mustFast); err == nil {
+		t.Error("run settings that must understand the tier fast are read")
 	}
 }

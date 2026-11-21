@@ -108,24 +108,18 @@ func TestARunCodeOutsideItsShapeIsRefused(t *testing.T) {
 }
 
 // TestAClaimOfAnotherRevisionIsRefused reads the contract's claim, then changes it in
-// one place each: another revision, a member of revision 3, a member twice, a member
-// the schema does not define, and a lifetime outside its bounds. Each is refused, and
-// the error contains no value.
+// one place each: another revision, a member twice, a bad value of a member the schema
+// defines, and a lifetime outside its bounds. Each is refused, and the error contains no
+// value.
 func TestAClaimOfAnotherRevisionIsRefused(t *testing.T) {
 	if _, err := readClaim(marshal(t, claimFixture(t, "machine.json"))); err != nil {
 		t.Fatal(err)
 	}
 	for name, edit := range map[string]func(d map[string]any){
-		"revision 0":  func(d map[string]any) { d["revision"] = 0 },
-		"revision 2":  func(d map[string]any) { d["revision"] = 2 },
-		"revision 3":  func(d map[string]any) { d["revision"] = 3 },
-		"no revision": func(d map[string]any) { delete(d, "revision") },
-		"a run id":    func(d map[string]any) { d["run_id"] = "0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d" },
-		"a step":      func(d map[string]any) { d["step"] = "explore" },
-		"a target": func(d map[string]any) {
-			d["target"] = map[string]any{"system": "code.example.com", "path": "acme/shop"}
-		},
-		"a run key":                  func(d map[string]any) { d["run_key"] = "qrk_abc.def" },
+		"revision 0":                 func(d map[string]any) { d["revision"] = 0 },
+		"revision 2":                 func(d map[string]any) { d["revision"] = 2 },
+		"revision 3":                 func(d map[string]any) { d["revision"] = 3 },
+		"no revision":                func(d map[string]any) { delete(d, "revision") },
 		"a lifetime of 14":           func(d map[string]any) { d["max_lifetime_minutes"] = 14 },
 		"a lifetime of 1471":         func(d map[string]any) { d["max_lifetime_minutes"] = 1471 },
 		"a gateway over http":        func(d map[string]any) { d["gateway_url"] = "http://gateway.example" },
@@ -149,6 +143,67 @@ func TestAClaimOfAnotherRevisionIsRefused(t *testing.T) {
 	twice := bytes.Replace(marshal(t, claimFixture(t, "machine.json")), []byte(`"revision":1,`), []byte(`"revision":1,"revision":1,`), 1)
 	if _, err := readClaim(twice); err != errNotOneDocument {
 		t.Errorf("a member twice: %v", err)
+	}
+}
+
+// TestAClaimWithAMemberTheSchemaDoesNotDefineIsRead reads the contract's claim with one
+// member the schema does not define: the claim is read as the fixture, and the member is
+// not. The same claim whose must_understand lists that member is refused, and its error
+// contains no value.
+func TestAClaimWithAMemberTheSchemaDoesNotDefineIsRead(t *testing.T) {
+	want, err := readClaim(marshal(t, claimFixture(t, "machine.json")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want.RunCode.Clear()
+	for name, member := range map[string]any{
+		"run_id":  "0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d",
+		"step":    "workflow",
+		"target":  map[string]any{"system": "code.example.com", "path": "acme/shop"},
+		"run_key": "qrk_abc.def",
+	} {
+		d := claimFixture(t, "machine.json")
+		d[name] = member
+		cl, err := readClaim(marshal(t, d))
+		if err != nil || cl.DispatchID != want.DispatchID || cl.PoolID != want.PoolID || cl.GatewayURL != want.GatewayURL || cl.RunCode.Len() == 0 {
+			t.Errorf("a claim with %s: %+v, %v", name, cl, err)
+		}
+		cl.RunCode.Clear()
+		d["must_understand"] = []any{"/" + name}
+		cl, err = readClaim(marshal(t, d))
+		if err == nil || cl.RunCode.Len() != 0 || strings.Contains(err.Error(), "qrk_") || strings.Contains(err.Error(), "qecr_") {
+			t.Errorf("a claim that must understand %s: %v", name, err)
+		}
+	}
+	d := claimFixture(t, "machine.json")
+	d["must_understand"] = []any{"/dispatch_id", "/run_code"}
+	cl, err := readClaim(marshal(t, d))
+	if err != nil || cl.DispatchID != want.DispatchID {
+		t.Errorf("a claim that must understand two members qory reads: %v", err)
+	}
+	cl.RunCode.Clear()
+}
+
+// TestAClaimMemberInAnotherCaseIsNotRead reads the contract's claim with a second
+// dispatch_id written in capitals, before and after the defined one: the claim keeps the
+// defined member's value. A build that matches member names in any case fails here.
+func TestAClaimMemberInAnotherCaseIsNotRead(t *testing.T) {
+	body := marshal(t, claimFixture(t, "machine.json"))
+	want, err := readClaim(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want.RunCode.Clear()
+	const variant = `"DISPATCH_ID":"dp_0000000000000000"`
+	for name, b := range map[string][]byte{
+		"before": bytes.Replace(body, []byte("{"), []byte("{"+variant+","), 1),
+		"after":  append(bytes.TrimSuffix(body, []byte("}")), []byte(","+variant+"}")...),
+	} {
+		cl, err := readClaim(b)
+		if err != nil || cl.DispatchID != want.DispatchID {
+			t.Errorf("the variant %s: %q, %v, want %q", name, cl.DispatchID, err, want.DispatchID)
+		}
+		cl.RunCode.Clear()
 	}
 }
 

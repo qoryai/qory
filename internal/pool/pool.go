@@ -866,14 +866,32 @@ func writeCode(name string, c provisioner.Claimed, m runtimeinstall.Machine) (*o
 // gone, with its journal entry at ended. A signed 429 is waited out up to
 // [maxRateLimited] times while the lease lasts. On 409 lease_expired or 410 gone the
 // dispatch is not released, and gets gone: an earlier try of dispatched may have been
-// taken with its response lost. Any other end releases the dispatch, as [Pool.giveBack]
+// taken with its response lost. A signed 403 or 409 that is [provisioner.Unread] changes
+// nothing: dispatched is sent again after a wait that doubles from [firstBackoff] up to
+// [maxBackoff], while the lease lasts. Any other end releases the dispatch, as [Pool.giveBack]
 // has it: for the pool's stop during a wait, the lease, or a failure. A dispatched that
 // succeeded but could not be journaled starts no qory run: Qory Apiary does not release
 // the dispatch then, so it gets gone, as one whose qory run could not start does.
 func (p *Pool) dispatched(stop context.Context, c provisioner.Claimed) (started, gone bool) {
 	id := c.DispatchID
 	work := context.WithoutCancel(stop)
-	for limited := 0; ; limited++ {
+	// wait is the next wait after a refusal that is not read.
+	wait := firstBackoff
+	// again waits pause before dispatched is sent again, and reports whether it is: the
+	// lease lasts past the wait, and the pool did not stop during it. Otherwise the
+	// dispatch is released.
+	again := func(pause time.Duration) bool {
+		if !p.now().Add(pause).Before(c.LeaseUntil) {
+			p.giveBack(stop, id, ReasonLeasePassed)
+			return false
+		}
+		if p.sleep(stop, pause) != nil {
+			p.giveBack(stop, id, ReasonStoppedBeforeStart)
+			return false
+		}
+		return true
+	}
+	for limited := 0; ; {
 		err := p.Client.Dispatched(work, id)
 		var r *provisioner.Refusal
 		switch {
@@ -886,12 +904,16 @@ func (p *Pool) dispatched(stop context.Context, c provisioner.Claimed) (started,
 			}
 			return true, false
 		case errors.Is(err, provisioner.ErrRateLimited) && errors.As(err, &r) && limited < maxRateLimited:
-			if !p.now().Add(r.RetryAfter).Before(c.LeaseUntil) {
-				p.giveBack(stop, id, ReasonLeasePassed)
+			limited++
+			if !again(r.RetryAfter) {
 				return false, false
 			}
-			if p.sleep(stop, r.RetryAfter) != nil {
-				p.giveBack(stop, id, ReasonStoppedBeforeStart)
+			continue
+		case provisioner.Unread(err):
+			p.log.Warn(lineNotRecorded, slog.String("dispatch_id", id), errAttr(err))
+			pause := wait
+			wait = min(wait*2, maxBackoff)
+			if !again(pause) {
 				return false, false
 			}
 			continue

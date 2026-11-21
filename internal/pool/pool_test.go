@@ -285,7 +285,8 @@ func TestTheRunsCap(t *testing.T) {
 
 // TestDispatchedFailures: a signed 429 is waited out up to three times; 409
 // lease_expired and 410 drop the dispatch with no release, and get gone, also after a
-// try whose response was lost and which the fake took; anything else releases it, and
+// try whose response was lost and which the fake took; a signed 409 or 403 whose body
+// is not read changes nothing, and dispatched is sent again; anything else releases it, and
 // a release that gets 204 from the fake gets no gone. While such a gone is held, the
 // journal entry is at ended and the dispatch's folder is gone. qory run starts after
 // dispatched alone, and a qory run that ran gets gone.
@@ -310,6 +311,8 @@ func TestDispatchedFailures(t *testing.T) {
 		{name: "gone after a lost answer", replies: []provisionertest.Reply{lost, {Status: 410, Code: "gone"}}, gone: true},
 		{name: "lease_expired after a lost answer", replies: []provisionertest.Reply{lost, {Status: 409, Code: "lease_expired"}}, gone: true},
 		{name: "gone after a lost answer and a 429", replies: []provisionertest.Reply{lost, limited, {Status: 410, Code: "gone"}}, waits: 1, gone: true},
+		{name: "unreadable 409", replies: []provisionertest.Reply{{Status: 409, Body: `{}`}}, ran: true},
+		{name: "403 with an unmet must_understand", replies: []provisionertest.Reply{{Status: 403, Body: `{"error":"forbidden","zz":1,"must_understand":["/zz"]}`}}, ran: true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t, 1)
@@ -364,9 +367,11 @@ func TestDispatchedFailures(t *testing.T) {
 // lease_expired as the dispatch over already, and logs a release that ended without
 // it, 409 machine_exists and a signed 400 among them, which it does not send again.
 // After 409 machine_exists alone the pool sends gone, with the journal entry at ended
-// and no folder of the dispatch while that gone is held. A fourth 429 and an unsigned
-// answer are sent again, after the 429's Retry-After or a second, with a line that has
-// the wait, and the fake then releases the dispatch.
+// and no folder of the dispatch while that gone is held. A fourth 429, an unsigned
+// answer, and a signed 409 or 403 whose body is not read are sent again, after the
+// 429's Retry-After or a second, with a line that has the wait, and the fake then
+// releases the dispatch. A 403 forbidden with a member the schema does not define is
+// read as forbidden.
 func TestTheRelease(t *testing.T) {
 	limited := provisionertest.Reply{Status: 429, Code: "rate_limited", RetryAfter: "3"}
 	for _, c := range []struct {
@@ -385,6 +390,9 @@ func TestTheRelease(t *testing.T) {
 		{name: "forbidden", replies: []provisionertest.Reply{{Status: 403, Code: "forbidden"}}, line: lineRelease403, releases: 1},
 		{name: "not_found", replies: []provisionertest.Reply{{Status: 404, Code: "not_found"}}, line: lineRelease404, releases: 1},
 		{name: "unsigned", replies: slices.Repeat([]provisionertest.Reply{{Status: 500, Unsigned: true}}, 5), line: releaseFailed(time.Second), releases: 6},
+		{name: "unreadable 409", replies: []provisionertest.Reply{{Status: 409, Body: `{}`}}, line: releaseFailed(time.Second), releases: 2},
+		{name: "403 with an unmet must_understand", replies: []provisionertest.Reply{{Status: 403, Body: `{"error":"forbidden","zz":1,"must_understand":["/zz"]}`}}, line: releaseFailed(time.Second), releases: 2},
+		{name: "403 forbidden with an undefined member", replies: []provisionertest.Reply{{Status: 403, Body: `{"error":"forbidden","zz":1}`}}, line: lineRelease403, releases: 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t, 1)
