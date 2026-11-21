@@ -14,6 +14,9 @@ import (
 // agent with its tools removed, so a run on one of them can have a review round. Neither
 // a render.Runtime nor Forager's descriptor of a runtime has a field for that, so the list
 // follows what qory builds a launch for: Claude Code, see [claudeReviewArgs].
+//
+// shortcut: Claude Code only, because the Codex reviewer profile (Q-35c) comes after the
+// first run; replace the list with a field of the runtime's descriptor when it has one.
 var reviewerRuntimes = []string{claude.Runtime}
 
 // reviewerRuntimeEscalation is the point of the escalate verdict for a run on runtime that
