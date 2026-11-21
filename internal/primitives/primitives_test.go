@@ -1,0 +1,144 @@
+package primitives_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"unicode"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
+
+	"github.com/qoryai/qory/internal/primitives"
+)
+
+// definition compiles $defs/name of the embedded schema, with no loader.
+func definition(t *testing.T, name string) *jsonschema.Schema {
+	t.Helper()
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(primitives.Schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource(primitives.URL, doc); err != nil {
+		t.Fatal(err)
+	}
+	s, err := c.Compile(primitives.URL + "#/$defs/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// TestSchemaIsTheContract keeps the embedded copy equal to the contract, byte for byte.
+func TestSchemaIsTheContract(t *testing.T) {
+	want, err := os.ReadFile(filepath.Join("..", "..", primitives.ContractPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(primitives.Schema, want) {
+		t.Fatalf("internal/primitives/primitives.schema.json differs from %s", primitives.ContractPath)
+	}
+}
+
+// TestRuleAgreesWithTheDefinitions: for every code point that is not a surrogate, a string
+// of that code point alone is valid for $defs line, text and title if and only if the rule
+// of the package accepts it. A change of Go's Unicode tables or of the schema that moves
+// one code point fails here.
+func TestRuleAgreesWithTheDefinitions(t *testing.T) {
+	line, text, title := definition(t, "line"), definition(t, "text"), definition(t, "title")
+	stopped := 0
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if r >= 0xd800 && r <= 0xdfff {
+			continue
+		}
+		s := string(r)
+		if primitives.StopsLine(r) {
+			stopped++
+		}
+		for _, c := range []struct {
+			name  string
+			def   *jsonschema.Schema
+			valid bool
+		}{
+			{"line", line, !primitives.StopsLine(r)},
+			{"text", text, !primitives.StopsText(r)},
+			{"title", title, primitives.ShowsInTitle(r)},
+		} {
+			if got := c.def.Validate(s) == nil; got != c.valid {
+				t.Errorf("U+%04X: the schema's %s is valid: %v, the rule says %v", r, c.name, got, c.valid)
+			}
+		}
+	}
+	t.Logf("%d code points stopped in a line", stopped)
+}
+
+// TestDefinitionsOnExamples checks what the rule is for, on whole strings.
+func TestDefinitionsOnExamples(t *testing.T) {
+	line, text, title := definition(t, "line"), definition(t, "text"), definition(t, "title")
+	family := "\U0001F468‍\U0001F469‍\U0001F467"
+	for _, c := range []struct {
+		name  string
+		def   *jsonschema.Schema
+		value string
+		valid bool
+	}{
+		{"line", line, "Add the export " + family, true},
+		{"line", line, "a‌b", true},
+		{"line", line, "a\U000E0041b", false},
+		{"line", line, "a​b", false},
+		{"line", line, "a\tb", false},
+		{"line", line, "a\nb", false},
+		{"text", text, "# Title\n\n\tindented\r\n" + family, true},
+		{"text", text, "a\U000E0041b", false},
+		{"text", text, "a​b", false},
+		{"text", text, "a b", false},
+		{"title", title, "Add " + family, true},
+		{"title", title, "", false},
+		{"title", title, "  　", false},
+		{"title", title, "‌‍ ‌", false},
+		{"title", title, "‌‍a", true},
+		{"title", title, "a\U000E0041", false},
+	} {
+		if got := c.def.Validate(c.value) == nil; got != c.valid {
+			t.Errorf("%s %q: valid is %v, want %v", c.name, c.value, got, c.valid)
+		}
+	}
+}
+
+// TestReferenceAndLink: a reference's address has a host and a path, and a link is https.
+func TestReferenceAndLink(t *testing.T) {
+	reference, link := definition(t, "reference"), definition(t, "link")
+	for _, c := range []struct {
+		doc   string
+		valid bool
+	}{
+		{`{"collection": "acme/web"}`, true},
+		{`{"collection": "acme/web", "address": {"system": "github.com", "path": "acme/web"}}`, true},
+		{`{"collection": "acme/web", "address": {"path": "acme/web"}}`, false},
+		{`{"collection": "acme/web", "address": {"system": "", "path": "acme/web"}}`, false},
+		{`{"collection": "a​b"}`, false},
+		{`{"collection": "acme/web", "address": {"system": "github.com", "path": "a‮b"}}`, false},
+	} {
+		var v any
+		if err := json.Unmarshal([]byte(c.doc), &v); err != nil {
+			t.Fatal(err)
+		}
+		if got := reference.Validate(v) == nil; got != c.valid {
+			t.Errorf("reference %s: valid is %v, want %v", c.doc, got, c.valid)
+		}
+	}
+	for url, valid := range map[string]bool{
+		"https://example.com/a?b=c#d":                      true,
+		"http://example.com":                               false,
+		"https://user@example.com":                         false,
+		"https://example.com/a b":                          false,
+		"https://example.com/" + strings.Repeat("a", 2048): false,
+	} {
+		if got := link.Validate(url) == nil; got != valid {
+			t.Errorf("link %.40q: valid is %v, want %v", url, got, valid)
+		}
+	}
+}
