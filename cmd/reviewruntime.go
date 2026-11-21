@@ -33,7 +33,7 @@ func reviewerRuntimeEscalation(runtime string) *runapi.Point {
 	}
 	shown := accesskey.ShownNames(reviewerRuntimes)
 	return &runapi.Point{
-		Text: fmt.Sprintf("The review round did not run: qory starts a reviewer as the main agent with its tools removed only on %s, and this run uses %s.",
+		Text: fmt.Sprintf("The review round did not run: qory starts reviewers only on %s, and this run uses %s.",
 			listOf(shown), accesskey.ShownName(runtime, false)),
 		Action: runapi.ActionRunAgain,
 		Fix:    "Run the workflow again on " + strings.Join(shown, " or ") + ".",
