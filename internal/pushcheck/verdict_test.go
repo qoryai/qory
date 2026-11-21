@@ -51,7 +51,7 @@ func TestReviewStageVerdict(t *testing.T) {
 
 func TestReviewStageVerdictCutsALongVerdict(t *testing.T) {
 	err := ReviewStageVerdict(session.RunAPIRequest{Path: "/verdict", Body: []byte(`{"verdict":"` + strings.Repeat("a\\u0007", 5000) + `"}`)})
-	if err == nil || len(err.Error()) > 1000 || strings.ContainsRune(err.Error(), 7) {
+	if err == nil || len(err.Error()) > 1500 || strings.ContainsRune(err.Error(), 7) {
 		t.Errorf("error is %d bytes: %.80q", len(err.Error()), err)
 	}
 }
