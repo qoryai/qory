@@ -1772,12 +1772,13 @@ release may change what an existing document does, and states it under Upgrading
   `Description: has the character U+200B, which a text does not have, at character 4. qory
   dropped the text.`, and the commit is `unreviewed`. Until this change, the run stored the
   description and the submission then failed the check of the format.
-- The step leaves out the `draft_title` line of a submit program whose title has a character
+- The step leaves out each `draft_title` line of a submit program whose title has a character
   that a title does not have, such as U+200B or a tag character, or has no character that is
   not a space, U+200C or U+200D. It lists the line as a line that qory cannot use, with the
   cause and the character as a code point, and the draft is `program-failed` as for any draft
-  line that qory leaves out. Until this change, the step stored such a title and the submission
-  then failed the check of the format.
+  line that qory leaves out. After a timeout, a program that did not start or an exit status
+  above 3, the step lists no line, because qory reads none. Until this change, the step stored
+  such a title and the submission then failed the check of the format.
 - The submission format stops the same characters. The title of the text and the title of a
   draft are a line with a character that is not a space, U+200C or U+200D; a step is a line;
   the description is a text. Until this change, the title stopped only the control

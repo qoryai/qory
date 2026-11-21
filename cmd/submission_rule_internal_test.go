@@ -64,7 +64,7 @@ func TestAHandoffDescriptionWithAStoppedCharacterDropsTheText(t *testing.T) {
 		{"a line separator", `Fix\u2028it`, fmt.Sprintf(textDroppedChar, '\u2028', 4)},
 		{"a bell", `Fix\u0007it`, fmt.Sprintf(textDroppedChar, '\a', 4)},
 		{"a bidirectional override", `Fix\u202eit`, fmt.Sprintf(textDroppedChar, '\u202e', 4)},
-		{"a NUL keeps its own line", `Fix\u0000it`, fmt.Sprintf(textDroppedNUL, 4)},
+		{"a NUL character", `Fix\u0000it`, fmt.Sprintf(textDroppedNUL, 4)},
 		{"tab, line feed and carriage return", `# Fix\n\n\tit\r\nnow`, ""},
 		{"a joiner", `Fix\u200cit`, ""},
 		{"an emoji sequence", `Fix \ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67`, ""},
@@ -138,5 +138,73 @@ printf 'draft_action opened\n'
 		if !strings.HasPrefix(string(got.Repositories[0].Draft), `{"number":7,`) || strings.Contains(printed, "cannot use") {
 			t.Errorf("title %s: the draft is %s, the step printed %q", title, got.Repositories[0].Draft, printed)
 		}
+	}
+}
+
+// TestEveryUnusableDraftTitleLineIsLeftOut is a submit program that prints several draft_title
+// lines. The contract's reader uses the first title that passes its checks, so qory leaves out
+// each line that its rule stops, also after a line that the reader rejects for its length, and
+// a good title after a bad one is stored.
+func TestEveryUnusableDraftTitleLineIsLeftOut(t *testing.T) {
+	const (
+		zeroWidth = `a\342\200\213b`
+		tagged    = `c\363\240\201\201d`
+		joiners   = `\342\200\214`
+		long      = `'; i=0; while [ $i -lt 300 ]; do printf a; i=$((i+1)); done; printf '`
+	)
+	program := func(titles ...string) *submitProgram {
+		body := "printf 'draft_number 7\\ndraft_url https://git.example.com/acme/shop/pull/7\\n'\n"
+		for _, title := range titles {
+			body += "printf 'draft_title " + title + "\\n'\n"
+		}
+		body += "printf 'draft_state draft\\ndraft_action opened\\n'\n"
+		return &submitProgram{command: []string{programScript(t, body)}}
+	}
+	for _, c := range []struct {
+		name   string
+		titles []string
+		stored string // the title stored, empty for a draft of program-failed
+		left   []string
+	}{
+		{"two bad lines", []string{zeroWidth, tagged}, "", []string{"  Line 3:", "  Line 4:"}},
+		{"blank, then a tag", []string{joiners, tagged}, "", []string{"  Line 3:", "  Line 4:"}},
+		{"300 characters, then a tag", []string{long, tagged}, "", []string{"  Line 4:"}},
+		{"bad, then good", []string{zeroWidth, `Add a page`}, "Add a page", []string{"  Line 3:"}},
+		{"good, then bad", []string{`Add a page`, tagged}, "Add a page", []string{"  Line 4:"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, printed := runProgram(t, program(c.titles...), passedDocument())
+			draft := string(got.Repositories[0].Draft)
+			if c.stored == "" && draft != `{"none":"program-failed","exit":0}` {
+				t.Errorf("the draft is %s", draft)
+			}
+			if c.stored != "" && !strings.Contains(draft, `"title":"`+c.stored+`"`) {
+				t.Errorf("the draft is %s, want the title %q", draft, c.stored)
+			}
+			if strings.Contains(draft, "\U000E0041") {
+				t.Errorf("the draft has the tag character: %s", draft)
+			}
+			for _, want := range c.left {
+				if !strings.Contains(printed, want) {
+					t.Errorf("the step did not print %q:\n%s", want, printed)
+				}
+			}
+		})
+	}
+}
+
+// TestAnUnusableTitleIsNotListedWhenTheReaderIgnoresTheOutput is a program that prints a
+// title with a tag character and then exits with status 9: the reader ignores the output, so
+// the step lists no line as one that qory cannot use.
+func TestAnUnusableTitleIsNotListedWhenTheReaderIgnoresTheOutput(t *testing.T) {
+	p := &submitProgram{command: []string{programScript(t, `printf 'draft_title c\363\240\201\201d\n'
+exit 9
+`)}}
+	got, printed := runProgram(t, p, passedDocument())
+	if d := string(got.Repositories[0].Draft); d != `{"none":"program-failed","exit":1}` {
+		t.Errorf("the draft is %s", d)
+	}
+	if strings.Contains(printed, "cannot use") {
+		t.Errorf("the step lists a line that the reader never read:\n%s", printed)
 	}
 }

@@ -131,7 +131,11 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 	stdout, unusable := withoutUnusableTitle(end.stdout, input.Draft)
 	rec := contracts.ReadSubmitRun(contracts.SubmitEnd{Started: end.startErr == "", TimedOut: end.timedOut, Exit: end.exit},
 		stdout, r.System, input.Draft, append([]string{r.Base.Commit}, commits...))
-	rec.Invalid = append(rec.Invalid, unusable...)
+	// The reader ignores the output after a timeout, a program that did not start and an
+	// exit status other than 0, 1 or 2, so those runs list no line.
+	if end.startErr == "" && !end.timedOut && end.exit >= contracts.SubmitExitDone && end.exit < contracts.SubmitExitLogin {
+		rec.Invalid = append(rec.Invalid, unusable...)
+	}
 	slices.SortFunc(rec.Invalid, func(a, b contracts.SubmitLineError) int { return a.Line - b.Line })
 	for i, bad := range rec.Invalid {
 		if i == maxLeftOut {
@@ -295,18 +299,23 @@ const (
 	reasonTitleBlank = "the title has no character that is not a space, U+200C or U+200D"
 )
 
-// withoutUnusableTitle is stdout, the lines of a submit program, with the first draft_title
-// line blanked out when its title is not one that the submission format stores: the title of
-// the contract is a line with a character that shows. It also returns that line as a line
+// withoutUnusableTitle is stdout, the lines of a submit program, with each draft_title line
+// blanked out whose title is not one that the submission format stores: the title of the
+// contract is a line with a character that shows. It also returns each such line as a line
 // that qory cannot use, with its number. A blank line keeps the numbers of the others, and the
 // contract's reader then finds the draft incomplete and records program-failed, as for any
 // draft line it leaves out. A draft of none has no draft lines to read, so nothing is left
-// out. The contract's own checks of the title, such as its length, stay with its reader.
+// out. The checks that the reader makes of the title, such as its length, stay with the
+// reader. Every line is tested, because the reader uses the first title that passes its
+// checks, and that may come after a line that passes qory's test and fails the reader's.
+// shortcut: qory tests the title beside the reader, until the repin to T-28 gives the reader
+// the rule of the primitives; then delete this function.
 func withoutUnusableTitle(stdout, draft string) (string, []contracts.SubmitLineError) {
 	if draft == contracts.SubmitDraftNone {
 		return stdout, nil
 	}
 	lines := strings.Split(stdout, "\n")
+	var unusable []contracts.SubmitLineError
 	for i, line := range lines[:len(lines)-1] {
 		key, title, ok := strings.Cut(strings.TrimSuffix(line, "\r"), " ")
 		if !ok || title == "" || key != contracts.SubmitKeyDraftTitle || strings.ContainsFunc(title, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
@@ -318,11 +327,10 @@ func withoutUnusableTitle(stdout, draft string) (string, []contracts.SubmitLineE
 		} else if !visibleTitle(title) {
 			reason = reasonTitleBlank
 		} else {
-			// The first line of the key is the one that the reader uses.
-			return stdout, nil
+			continue
 		}
 		lines[i] = ""
-		return strings.Join(lines, "\n"), []contracts.SubmitLineError{{Line: i + 1, Reason: reason}}
+		unusable = append(unusable, contracts.SubmitLineError{Line: i + 1, Reason: reason})
 	}
-	return stdout, nil
+	return strings.Join(lines, "\n"), unusable
 }
