@@ -176,6 +176,95 @@ func TestEscapeJSONInvalid(t *testing.T) {
 	}
 }
 
+func TestEscapeJSONFile(t *testing.T) {
+	const bom = "\xef\xbb\xbf"
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			"BOM and CRLF kept",
+			bom + "{\r\n  \"a\": \"x\u202Ey\",\r\n  \"b\": \"c\"\r\n}\r\n",
+			bom + "{\r\n  \"a\": \"x<U+202E>y\",\r\n  \"b\": \"c\"\r\n}\r\n",
+		},
+		{"BOM and JSON escape", bom + `{"a":"x\u202ey"}`, bom + `{"a":"x<U+202E>y"}`},
+		{
+			"lone surrogate kept, other string escaped",
+			`["\ud800","\u202e","\udc00x"]`,
+			`["\ud800","<U+202E>","\udc00x"]`,
+		},
+		{"invalid UTF-8 kept", "[\"caf\xe9\",\"\\u202e\"]", "[\"caf\xe9\",\"<U+202E>\"]"},
+		{"hidden and invalid in one string", "[\"\xff\\u202e\"]", "[\"\uFFFD<U+202E>\"]"},
+		{"member name", `{"k\u202e":"\ud800"}`, `{"k<U+202E>":"\ud800"}`},
+		{"valid input as EscapeJSON", `{"a":"\udb40\udc41"}`, `{"a":"<U+E0041>"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := sourcetext.EscapeJSONFile([]byte(tt.in))
+			if err != nil {
+				t.Fatalf("EscapeJSONFile(%q) error: %v", tt.in, err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("EscapeJSONFile(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEscapeJSONFileNothingHidden(t *testing.T) {
+	for _, in := range []string{
+		"\xef\xbb\xbf{\"a\":\"b\"}", `["\ud800"]`, "[\"\xff\"]", "\xef\xbb\xbf1", `{"a":1}`,
+	} {
+		got, err := sourcetext.EscapeJSONFile([]byte(in))
+		if err != nil || string(got) != in {
+			t.Errorf("EscapeJSONFile(%q) = %q, %v, want the same bytes", in, got, err)
+		}
+	}
+}
+
+func TestEscapeJSONFileInvalid(t *testing.T) {
+	for _, in := range []string{
+		``, "\xef\xbb\xbf", `{`, `{ x\u202e`, `{"a":1} {"b":1}`, "\xef\xbb\xbf{",
+		"\xef\xbb\xbf\xef\xbb\xbf{}", `{"a":"x"} ,`,
+	} {
+		if got, err := sourcetext.EscapeJSONFile([]byte(in)); err == nil {
+			t.Errorf("EscapeJSONFile(%q) = %q, want an error", in, got)
+		}
+	}
+}
+
+func FuzzEscapeJSONFile(f *testing.F) {
+	for _, seed := range []string{
+		`{"a":"x\u202ey"}`, `["\ud800","\u202e"]`, "{\r\n\"k\\u0000\": null\r\n}",
+		"[\"\xff\u202e\"]", `1`,
+	} {
+		f.Add([]byte(seed), true)
+		f.Add([]byte(seed), false)
+	}
+	f.Fuzz(func(t *testing.T, doc []byte, withBOM bool) {
+		const bom = "\xef\xbb\xbf"
+		if withBOM {
+			doc = append([]byte(bom), doc...)
+		}
+		out, err := sourcetext.EscapeJSONFile(doc)
+		if err != nil {
+			return
+		}
+		body := bytes.TrimPrefix(out, []byte(bom))
+		if withBOM && len(body) == len(out) {
+			t.Fatalf("EscapeJSONFile(%q) = %q, which lost the byte order mark", doc, out)
+		}
+		if !json.Valid(body) {
+			t.Fatalf("EscapeJSONFile(%q) = %q, which is not valid JSON after its byte order mark", doc, out)
+		}
+		again, err := sourcetext.EscapeJSONFile(out)
+		if err != nil || !bytes.Equal(again, out) {
+			t.Fatalf("EscapeJSONFile is not stable: %q then %q (%v)", out, again, err)
+		}
+	})
+}
+
 func FuzzEscapeJSON(f *testing.F) {
 	for _, seed := range []string{
 		`{"a":"x\u202ey"}`, `["\udb40\udc41",1.50,1e3]`, "{\r\n\"k\\u0000\": null\r\n}",

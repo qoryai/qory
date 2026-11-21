@@ -178,7 +178,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 
 				shown, err := sourcetext.EscapeJSON(snapshot.Raw)
 				if err != nil {
-					return fmt.Errorf("Contact support: the run API sent a work item that is not valid JSON text. %w", err)
+					return fmt.Errorf("Contact support: the run API sent a work item that is not valid JSON text.\n  %w", err)
 				}
 
 				_, err = fmt.Fprintln(c.OutOrStdout(), string(shown))
@@ -216,7 +216,7 @@ func showLocalWorkItem(c *cobra.Command) error {
 
 	shown, err := sourcetext.EscapeJSON(bytes.TrimSpace(raw))
 	if err != nil {
-		return input(fmt.Errorf("Fix %s. It has a string that is not valid UTF-8 or JSON text: %w", path, err))
+		return input(fmt.Errorf("Fix %s.\n  It has a string that is not valid UTF-8 or JSON text: %w", path, err))
 	}
 
 	_, err = fmt.Fprintln(c.OutOrStdout(), string(shown))
@@ -349,7 +349,7 @@ func pullArtifacts(c *cobra.Command, client *runapi.Client, artifactType string,
 
 	shown, err := sourcetext.EscapeJSON(index.Raw)
 	if err != nil {
-		return fmt.Errorf("Contact support: the run API sent an artifact index that is not valid JSON text. %w", err)
+		return fmt.Errorf("Contact support: the run API sent an artifact index that is not valid JSON text.\n  %w", err)
 	}
 
 	if err := store.writeIndex(shown); err != nil {
@@ -1387,11 +1387,11 @@ func (s *artifactStore) fetch(ctx context.Context, client *runapi.Client, artifa
 
 		name := sourcetext.Escape(file.Filename)
 		if !runapi.LocalFilename(name) {
-			return fmt.Errorf("Rename the file %q in its artifact, then pull again. With its hidden characters written as <U+XXXX>, its name is longer than %d bytes.", file.Filename, runapi.MaxFilename)
+			return fmt.Errorf("Rename the file in its artifact, then pull again.\n  With its hidden characters written as <U+XXXX>, the name %q is longer than %d bytes.", file.Filename, runapi.MaxFilename)
 		}
 
 		if other, ok := named[name]; ok && other != file.Filename {
-			return fmt.Errorf("Rename one of the files %q and %q in its artifact, then pull again. With their hidden characters written as <U+XXXX>, both have the name %q in the version %s.", other, file.Filename, name, version.ID)
+			return fmt.Errorf("Rename one of the two files in its artifact, then pull again.\n  With their hidden characters written as <U+XXXX>, the files %q and %q both have the name %q in the version %s.", other, file.Filename, name, version.ID)
 		}
 
 		named[name] = file.Filename
@@ -1422,13 +1422,13 @@ func (s *artifactStore) fetch(ctx context.Context, client *runapi.Client, artifa
 }
 
 // escapedFile returns content, the checked bytes of the file filename, as the agent
-// reads it. A filename that ends in .json, in any case, gets [sourcetext.EscapeJSON],
-// which keeps the whitespace between tokens. Other content that is valid UTF-8 with no
-// NUL byte gets [sourcetext.Escape], and so does a .json file that is not JSON text. Any
-// other content is binary, and stays as it is.
+// reads it. A filename that ends in .json, in any case, gets [sourcetext.EscapeJSONFile],
+// which keeps the whitespace between tokens and a byte order mark. Other content that is
+// valid UTF-8 with no NUL byte gets [sourcetext.Escape], and so does a .json file that
+// is not JSON text. Any other content is binary, and stays as it is.
 func escapedFile(filename string, content []byte) []byte {
 	if strings.EqualFold(filepath.Ext(filename), ".json") {
-		if escaped, err := sourcetext.EscapeJSON(content); err == nil {
+		if escaped, err := sourcetext.EscapeJSONFile(content); err == nil {
 			return escaped
 		}
 	}

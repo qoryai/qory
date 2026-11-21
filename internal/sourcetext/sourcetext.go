@@ -2,10 +2,10 @@
 //
 // qory hands source text (work items, run inputs, answers of the run API) to an AI agent.
 // A hidden character in that text can mislead the agent: U+202E (right-to-left override)
-// reorders the text that follows, and the tag characters U+E0000 to U+E007F spell words
-// that no person sees. [Escape] and [EscapeJSON] write each hidden character as
-// `<U+XXXX>`, so the agent reads the same text a person reads. [Hidden] is the one
-// definition of which characters are hidden.
+// reorders the text that follows, and the tag characters U+E0001 and U+E0020 to U+E007F
+// spell words that no person sees. [Escape], [EscapeJSON] and [EscapeJSONFile] write each
+// hidden character as `<U+XXXX>`, so the agent reads the same text a person reads.
+// [Hidden] is the one definition of which characters are hidden.
 package sourcetext
 
 import (
@@ -78,7 +78,37 @@ func Escape(s string) string {
 // UTF-8 or an unpaired surrogate escape in a string. Duplicate member names are allowed,
 // and two names that differ only by a hidden character become the same name.
 func EscapeJSON(doc []byte) ([]byte, error) {
-	dec := jsontext.NewDecoder(bytes.NewReader(doc), jsontext.AllowDuplicateNames(true))
+	out, _, err := escapeJSON(doc, false)
+
+	return out, err
+}
+
+// bom is the UTF-8 byte order mark, which some tools write at the start of a file.
+const bom = "\xEF\xBB\xBF"
+
+// EscapeJSONFile is [EscapeJSON] for the content of a stored file, which a tool reads
+// as JSON text although it is not strict.
+//
+// It keeps a byte order mark (U+FEFF) at the start, and it accepts invalid UTF-8 and an
+// unpaired surrogate escape such as `\ud800` in a string. A string with no hidden rune
+// keeps its bytes. A string with one is written again, and each invalid sequence in it
+// becomes U+FFFD. EscapeJSONFile returns an error when the rest is not one JSON value.
+func EscapeJSONFile(doc []byte) ([]byte, error) {
+	rest := bytes.TrimPrefix(doc, []byte(bom))
+	out, changed, err := escapeJSON(rest, true)
+	if err != nil || !changed {
+		return doc, err
+	}
+
+	return append(append([]byte(nil), doc[:len(doc)-len(rest)]...), out...), nil
+}
+
+// escapeJSON is the one reader of [EscapeJSON] and [EscapeJSONFile]. With lenient, a
+// string may have invalid UTF-8 and unpaired surrogate escapes. It returns doc itself,
+// and false, when no string changes.
+func escapeJSON(doc []byte, lenient bool) ([]byte, bool, error) {
+	dec := jsontext.NewDecoder(bytes.NewReader(doc),
+		jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(lenient))
 	var out []byte // doc with each changed string replaced; nil until one changes
 	copied := 0    // doc[:copied] is already in out
 	for {
@@ -87,21 +117,23 @@ func EscapeJSON(doc []byte) ([]byte, error) {
 		if dec.PeekKind() == '"' {
 			v, err := dec.ReadValue()
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			end = int(dec.InputOffset())
 			start = end - len(v)
-			decoded, err := jsontext.AppendUnquote(nil, v)
+			decoded, err := unquote(v, lenient)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
-			if escaped := Escape(string(decoded)); escaped != string(decoded) {
-				if changed, err = jsontext.AppendQuote(nil, escaped); err != nil {
-					return nil, err
+			// An invalid sequence is U+FFFD in decoded, which is not hidden, so a string
+			// with no hidden rune keeps its bytes.
+			if strings.IndexFunc(decoded, Hidden) >= 0 {
+				if changed, err = jsontext.AppendQuote(nil, Escape(decoded)); err != nil {
+					return nil, false, err
 				}
 			}
 		} else if _, err := dec.ReadToken(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if changed != nil {
 			out = append(out, doc[copied:start]...)
@@ -116,10 +148,27 @@ func EscapeJSON(doc []byte) ([]byte, error) {
 		if err == nil {
 			err = errors.New("sourcetext: more than one JSON value in the document")
 		}
-		return nil, err
+		return nil, false, err
 	}
 	if out == nil {
-		return doc, nil
+		return doc, false, nil
 	}
-	return append(out, doc[copied:]...), nil
+	return append(out, doc[copied:]...), true, nil
+}
+
+// unquote returns the text of the JSON string v. [jsontext.AppendUnquote] is strict, so
+// with lenient the text is read as a token, which turns each invalid sequence into U+FFFD.
+func unquote(v jsontext.Value, lenient bool) (string, error) {
+	if !lenient {
+		decoded, err := jsontext.AppendUnquote(nil, v)
+
+		return string(decoded), err
+	}
+	dec := jsontext.NewDecoder(bytes.NewReader(v), jsontext.AllowInvalidUTF8(true))
+	tok, err := dec.ReadToken()
+	if err != nil {
+		return "", err
+	}
+
+	return tok.String(), nil
 }

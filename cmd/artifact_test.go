@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -277,7 +278,7 @@ func TestWorkItemShowStopsOnTextThatIsNotUTF8InARun(t *testing.T) {
 	server.snapshot = "{\"version\":1,\"ticket\":{\"title\":\"\xff\"}}"
 
 	out, err := run(t, "work-item", "show")
-	if err == nil || !strings.HasPrefix(err.Error(), "Contact support: the run API sent a work item that is not valid JSON text. ") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Contact support: the run API sent a work item that is not valid JSON text.\n  ") {
 		t.Errorf("err = %v", err)
 	}
 
@@ -1842,7 +1843,7 @@ func TestArtifactPullStopsOnAnIndexThatIsNotUTF8(t *testing.T) {
 	server.index = "{\"version\":1,\"artifacts\":[],\"x\":\"\xff\"}"
 
 	_, err := run(t, "artifact", "pull")
-	if err == nil || !strings.HasPrefix(err.Error(), "Contact support: the run API sent an artifact index that is not valid JSON text. ") {
+	if err == nil || !strings.HasPrefix(err.Error(), "Contact support: the run API sent an artifact index that is not valid JSON text.\n  ") {
 		t.Errorf("err = %v", err)
 	}
 
@@ -1857,6 +1858,8 @@ func TestArtifactPullEscapesTheFilesOfAVersion(t *testing.T) {
 	hiddenFixture(server, map[string]string{
 		"data.json":   "{\r\n\"a\": \"x" + rlo + "y\",\r\n\"n\": 1.50\r\n}\r\n",
 		"upper.JSON":  "[\"" + tagA + "\"]",
+		"bom.json":    "\xef\xbb\xbf{\r\n\"a\": \"x" + rlo + "y\"\r\n}\r\n",
+		"lone.json":   `{"a":"\ud800","b":"` + rlo + `","c":"caf` + "\xe9" + `"}`,
 		"broken.json": "{ x" + rlo,
 		"notes.md":    "line" + rlo + "\n\ttab \u200d",
 		"clean.md":    "nothing hidden\n",
@@ -1872,6 +1875,8 @@ func TestArtifactPullEscapesTheFilesOfAVersion(t *testing.T) {
 	dir := filepath.Join(root, ".qory", "artifacts", "brief", "main", "v1")
 	wantFile(t, filepath.Join(dir, "data.json"), "{\r\n\"a\": \"x<U+202E>y\",\r\n\"n\": 1.50\r\n}\r\n")
 	wantFile(t, filepath.Join(dir, "upper.JSON"), "[\"<U+E0041>\"]")
+	wantFile(t, filepath.Join(dir, "bom.json"), "\xef\xbb\xbf{\r\n\"a\": \"x<U+202E>y\"\r\n}\r\n")
+	wantFile(t, filepath.Join(dir, "lone.json"), `{"a":"\ud800","b":"<U+202E>","c":"caf`+"\xe9"+`"}`)
 	wantFile(t, filepath.Join(dir, "broken.json"), "{ x<U+202E>")
 	wantFile(t, filepath.Join(dir, "notes.md"), "line<U+202E>\n\ttab \u200d")
 	wantFile(t, filepath.Join(dir, "clean.md"), "nothing hidden\n")
@@ -1882,6 +1887,11 @@ func TestArtifactPullEscapesTheFilesOfAVersion(t *testing.T) {
 	got, err := os.ReadFile(filepath.Join(dir, "data.json"))
 	if err != nil || !json.Valid(got) {
 		t.Errorf("data.json is not valid JSON: %v", err)
+	}
+
+	got, err = os.ReadFile(filepath.Join(dir, "bom.json"))
+	if err != nil || !json.Valid(bytes.TrimPrefix(got, []byte("\xef\xbb\xbf"))) {
+		t.Errorf("bom.json is not valid JSON after its byte order mark: %v", err)
 	}
 
 	if _, err := os.Stat(filepath.Join(dir, "a"+rlo)); !os.IsNotExist(err) {
@@ -1932,7 +1942,7 @@ func TestArtifactPullStopsOnTwoFilesOfOneEscapedName(t *testing.T) {
 	hiddenFixture(server, map[string]string{"a" + rlo: "one", "a<U+202E>": "two"})
 
 	_, err := run(t, "artifact", "pull")
-	want := fmt.Sprintf("Rename one of the files %q and %q in its artifact, then pull again. With their hidden characters written as <U+XXXX>, both have the name %q in the version av_h1.",
+	want := fmt.Sprintf("Rename one of the two files in its artifact, then pull again.\n  With their hidden characters written as <U+XXXX>, the files %q and %q both have the name %q in the version av_h1.",
 		"a<U+202E>", "a"+rlo, "a<U+202E>")
 
 	if err == nil || err.Error() != want {
@@ -1963,8 +1973,13 @@ func TestArtifactPullStopsOnAnEscapedNameThatIsTooLong(t *testing.T) {
 	hiddenFixture(server, map[string]string{name: "x"})
 
 	_, err := run(t, "artifact", "pull")
-	if err == nil || !strings.HasPrefix(err.Error(), "Rename the file ") ||
-		!strings.Contains(err.Error(), "in its artifact, then pull again. With its hidden characters written as <U+XXXX>, its name is longer than 255 bytes.") {
+	if err == nil {
+		t.Fatal("err = nil")
+	}
+
+	first, rest, _ := strings.Cut(err.Error(), "\n")
+	if first != "Rename the file in its artifact, then pull again." ||
+		!strings.HasSuffix(rest, " is longer than 255 bytes.") || !strings.Contains(rest, `"`+strings.Repeat("a", 250)) {
 		t.Errorf("err = %v", err)
 	}
 }
