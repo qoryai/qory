@@ -2083,9 +2083,12 @@ documents set, whichever workflow of the process Qory Apiary starts. The `subjec
 what the run is for: its `kind`, such as `work_item` or `ticket`, its `id`, and, when
 Qory Apiary has them, its `url` and `title`. The documents may also contain a `trigger`,
 what started the run, such as `take_in`; qory reads it and changes nothing for it.
-The documents of the step `workflow` can also contain `shared_run` and `full_suite`. With
-`full_suite` true, the session runs the full test suite when it ends, see [The full
-suite](#the-full-suite). qory reads `shared_run` and changes nothing for it.
+The documents of the step `workflow` can also contain `shared_run` and `type_settings`, the
+settings of the workspace type, whose schema the workspace type's `process.yaml` registers.
+With `full_suite` true in `type_settings`, the session runs the full test suite when it
+ends, see [The full suite](#the-full-suite). qory reads `shared_run` and changes nothing for
+it. qory checks no member of `type_settings`: Qory Apiary checks them against that schema
+when it writes the documents.
 qory checks the documents as the run contract's `documents.schema.json`, and, for a
 subject of the kind `work_item`, checks that `inputs.domain` and `inputs.work_item.id`
 match the domain and the subject's `id`. qory does not read a member that the schema
@@ -4157,8 +4160,9 @@ channel `qory_host`.
 
 qory runs the repository's full test suite after a session, in the session's after step, and
 posts a verdict for a suite that did not pass. A session runs the suite when the run documents
-have `full_suite` true, the run has a wall, the run may write, and the work item's build plan has
-a `full` row with a command. A session of such a run that does not move HEAD runs none.
+have `full_suite` true in `type_settings`, the run has a wall, the run may write, and the work
+item's build plan has a `full` row with a command. A session of such a run that does not move
+HEAD runs none.
 
 **Command.** The command is the `full` row of the table under `## Commands` in the build plan
 of the artifact `build-plan`: the name `main`, or the one name the work item has, at its newest

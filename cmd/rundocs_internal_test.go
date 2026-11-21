@@ -821,17 +821,24 @@ func TestARunWritesOnlyWithAccessWriteInItsDocuments(t *testing.T) {
 }
 
 // TestFullSuiteOfTheDocumentsIsTheRunsFullSuite: codeRunOf takes full_suite of the documents'
-// type_settings; a document with false or none gives false.
+// type_settings. fullSuite is false for a document with false, with none, with one that is not
+// a boolean, with a member name in another case, or with no type_settings.
 func TestFullSuiteOfTheDocumentsIsTheRunsFullSuite(t *testing.T) {
-	yes, no := true, false
 	for _, c := range []struct {
-		name string
-		full *bool
-		want bool
-	}{{"true", &yes, true}, {"false", &no, false}, {"absent", nil, false}} {
+		name     string
+		settings string
+		want     bool
+	}{
+		{"true", `{"full_suite":true}`, true},
+		{"false", `{"full_suite":false}`, false},
+		{"absent", `{}`, false},
+		{"not a boolean", `{"full_suite":"true"}`, false},
+		{"another case", `{"Full_Suite":true}`, false},
+		{"no type_settings", "", false},
+	} {
 		doc := contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}}
-		if c.full != nil {
-			doc.TypeSettings = json.RawMessage(fmt.Sprintf(`{"full_suite":%v}`, *c.full))
+		if c.settings != "" {
+			doc.TypeSettings = json.RawMessage(c.settings)
 		}
 		r, err := codeRunOf(doc)
 		if err != nil {

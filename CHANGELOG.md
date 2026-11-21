@@ -18,6 +18,13 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A factory's `process.yaml` may register the JSON Schema of a run's type settings, the
+  settings of the workspace type that Qory Apiary sends as `type_settings` in the run
+  documents: `type_settings: {json_schema: {…}}`. qory checks the schema as it checks the
+  `json_schema` of an artifact type, and the patterns of both count toward one limit of
+  16 MiB for the file. A schema that does not compile stops the command with
+  `Fix json_schema of type_settings so that it compiles as a JSON Schema.` and the file
+  on the last line. See "Type settings" in `contracts/harness/v1/README.md`.
 - In a home composed for codex alone, a Codex agent with a tier gets the tier's model as
   `model` and its effort as `model_reasoning_effort` in `agents/<name>.toml`. An effort
   outside `none`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra` stops the compose
@@ -636,7 +643,10 @@ release may change what an existing document does, and states it under Upgrading
   setup container of `wall.setup: outside` gets neither the variable nor the route. See The
   route to qory in `docs/run.md`.
 - A session runs the repository's full test suite when the run documents have `full_suite`
-  true. Forager's after step runs it after the agent's container is removed: when HEAD moved,
+  true in `type_settings`. A session runs no suite when `full_suite` is false, when
+  `type_settings` has no `full_suite`, when the documents have no `type_settings`, and when
+  `full_suite` is outside `type_settings`.
+  Forager's after step runs it after the agent's container is removed: when HEAD moved,
   the `full` command of the build plan that the work item had at the launch runs in a fresh
   clone of HEAD, in a container of the run's image on the run's network, so the run's egress
   policy applies. A session that left HEAD where it started runs no suite. The limit is
@@ -704,6 +714,8 @@ release may change what an existing document does, and states it under Upgrading
   and only such a run works on the branch `qory/<work item id>`. Documents with the step
   `explore` or the member `work_item` stop the run after the redemption, exit 1, with `it
   breaks documents.schema.json`.
+- An `artifact_types` message whose first line has more than 98 characters shows each
+  long key or type name shortened on that line and in full on its last line.
 - The `config.toml` of a Codex home, and of a walled Codex run, sets
   `web_search = "disabled"`. Without the key, Codex 0.169.0 turns web search on: cached,
   or live in a run with `--sandbox danger-full-access`, such as a walled run.
@@ -864,9 +876,9 @@ release may change what an existing document does, and states it under Upgrading
   minutes for a workflow with no Time limit. The limit counts from the agent's start, as
   `--timeout` does. At the limit the session stops, and the
   full suite's after step and the push step still run. The documents can
-  also contain `shared_run` and `full_suite`. With `full_suite` true, the session runs the full
-  test suite when it ends, as The full suite in `docs/run.md` describes; qory reads `shared_run`
-  and changes nothing for it.
+  also contain `shared_run` and `type_settings`. With `full_suite` true in `type_settings`,
+  the session runs the full test suite when it ends, as The full suite in `docs/run.md`
+  describes; qory reads `shared_run` and changes nothing for it.
 - The push step of a write run pushes through the run's push proxy, which sets the run
   configuration's push credentials alone, and the run's proxy no longer adds push
   credentials. A run with no push credential stops at the push with `Contact

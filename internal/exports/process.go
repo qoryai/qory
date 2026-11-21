@@ -38,12 +38,13 @@ const (
 
 // processFile is a process.yaml as written: the texts a list of templates shows, the
 // workspace type, the stack of the same repository its workflows run on, the process
-// document, and optionally the artifact types the workspaces use and the submit step of
-// a run. In the document, qory checks the schema, that the stages are a list, that each
-// workflow of a stage is a non-empty string of one line that the stack declares, and
-// that each stage name has no line break or other control character, and checks nothing
-// else in it. In artifact_types, qory checks each entry as [checkArtifactType] has it,
-// and submit as [checkSubmit] has it.
+// document, and optionally the artifact types the workspaces use, the schema of a run's
+// type settings and the submit step of a run. In the document, qory checks the schema,
+// that the stages are a list, that each workflow of a stage is a non-empty string of one
+// line that the stack declares, and that each stage name has no line break or other
+// control character, and checks nothing else in it. In artifact_types, qory checks each
+// entry as [checkArtifactType] has it, type_settings as [checkTypeSettings] has it, and
+// submit as [checkSubmit] has it.
 //
 //	apiVersion: qory.dev/v1alpha1
 //	name: Support desk
@@ -59,6 +60,8 @@ const (
 //	    base_view: document
 //	    size_limit: 65536
 //	    max_files: 1
+//	type_settings:
+//	  json_schema: {type: object, properties: {tone: {enum: [formal, friendly]}}}
 type processFile struct {
 	APIVersion    string    `yaml:"apiVersion"`
 	Name          string    `yaml:"name"`
@@ -68,6 +71,7 @@ type processFile struct {
 	Stack         string    `yaml:"stack"`
 	Process       yaml.Node `yaml:"process"`
 	ArtifactTypes yaml.Node `yaml:"artifact_types"`
+	TypeSettings  yaml.Node `yaml:"type_settings"`
 	Submit        yaml.Node `yaml:"submit"`
 }
 
@@ -131,9 +135,11 @@ func escapes(root *os.Root, err error) bool {
 // [Exports.Stacks], process is an object with schema qory.process/v1 and a list of
 // stages, every workflow of a stage's sequence, a loop's body included, is declared
 // under workflows in the stack's qory-stack.yaml, as [Exports.checkWorkflows] checks,
-// artifact_types, when it is set, is as [checkArtifactTypes] checks, and submit, when it
-// is set, is as [checkSubmit] checks. Each refusal has the file in it; for the
-// workflows and the artifact types the error has one refusal for each entry.
+// artifact_types, when it is set, is as [checkArtifactTypes] checks, type_settings, when
+// it is set, is as [checkTypeSettings] checks, and submit, when it is set, is as
+// [checkSubmit] checks. The JSON Schemas of the artifact types and of type_settings
+// share one [patternBudget]. Each refusal has the file in it; for the workflows and the
+// artifact types the error has one refusal for each entry.
 func (e *Exports) checkProcess(path string, data []byte) error {
 	shown := HidePath(path)
 	if err := RefuseAliases(shown, data); err != nil {
@@ -213,10 +219,47 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 	if err := e.checkWorkflows(shown, t.Stack, stages); err != nil {
 		return err
 	}
-	if err := checkArtifactTypes(shown, &t.ArtifactTypes); err != nil {
+	patterns := &patternBudget{counted: map[string]bool{}}
+	if err := checkArtifactTypes(shown, &t.ArtifactTypes, patterns); err != nil {
+		return err
+	}
+	if err := checkTypeSettings(shown, &t.TypeSettings, patterns); err != nil {
 		return err
 	}
 	return checkSubmit(shown, &t.Submit, &t.ArtifactTypes)
+}
+
+// checkTypeSettings checks type_settings in the process.yaml shown, which may be left out:
+// an object with json_schema and no other key. json_schema is the JSON Schema of the
+// type_settings of a run's documents, and [checkTypeSchema] checks it as it checks the
+// json_schema of an artifact type, within patterns, the budget of the file's patterns.
+// qory checks no run's type_settings against it. The error is fix first, with the file on
+// the third line and, for a long key, the key's full name on a fourth, see [settingsRefusal].
+func checkTypeSettings(shown string, settings *yaml.Node, patterns *patternBudget) error {
+	if settings.Kind == 0 {
+		return nil
+	}
+	if settings.Kind != yaml.MappingNode {
+		return settingsRefusal(shown, "Set type_settings to an object with json_schema, or remove it.", "type_settings is "+nodeKind(settings)+".")
+	}
+	for j := 0; j+1 < len(settings.Content); j += 2 {
+		key := settings.Content[j]
+		if key.Kind != yaml.ScalarNode || key.Value != "json_schema" {
+			return settingsRefusal(shown, "Remove the key "+scalarText(key)+" from type_settings.", "type_settings has only json_schema.")
+		}
+		if j > 0 {
+			return settingsRefusal(shown, "Remove the second json_schema from type_settings.", "type_settings has the key twice.")
+		}
+	}
+	schema := value(settings, "json_schema")
+	if schema == nil {
+		return settingsRefusal(shown, "Add json_schema to type_settings, the JSON Schema of a run's type settings.", "type_settings has no json_schema.")
+	}
+	if why := checkTypeSchema("type_settings", schema, patterns); why != "" {
+		fix, cause, _ := strings.Cut(why, "\n  ")
+		return settingsRefusal(shown, fix, cause)
+	}
+	return nil
 }
 
 // checkSubmit checks submit in the process.yaml shown, which may be left out: an object
@@ -298,6 +341,14 @@ func checkSubmitType(shown, name string, types *yaml.Node) error {
 // the path.
 func processRefusal(shown, fix, cause string) error {
 	return fmt.Errorf("%s\n  %s\n  The file is %s.", fix, cause, shown)
+}
+
+// settingsRefusal is a refusal of type_settings in the process.yaml shown, fix first: the
+// fix, the cause, and the file, so the first line stays within 100 characters whatever the
+// path. [Errorf] fits it: a long key in the fix is shortened, and a fourth line has its
+// full name.
+func settingsRefusal(shown, fix, cause string) error {
+	return Errorf("%s\n  %s\n  type_settings is in %s.", fix, cause, shown)
 }
 
 // submitRefusal is a refusal of submit in the process.yaml shown, fix first: the fix,

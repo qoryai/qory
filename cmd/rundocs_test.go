@@ -528,11 +528,11 @@ func TestARunCodesTimeLimitMinutesIsTheSessionsTimeLimit(t *testing.T) {
 }
 
 // TestARunCodeWithSharedRunAndFullSuiteRunsOneSession is a run from a run code whose
-// documents set shared_run and full_suite to true: qory takes the documents and starts
+// documents set shared_run and type_settings.full_suite to true: qory takes the documents and starts
 // the run as it does without them, with the time limit of the documents.
 func TestARunCodeWithSharedRunAndFullSuiteRunsOneSession(t *testing.T) {
 	r := runFromCodeWith(t, behindAWall(t), nil, writesHello, func(d map[string]any) {
-		d["time_limit_minutes"], d["shared_run"], d["full_suite"] = 60, true, true
+		d["time_limit_minutes"], d["shared_run"], d["type_settings"] = 60, true, map[string]any{"full_suite": true}
 	})
 	if !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
@@ -542,19 +542,22 @@ func TestARunCodeWithSharedRunAndFullSuiteRunsOneSession(t *testing.T) {
 	}
 }
 
-// TestARunCodeWithFullSuiteSetsTheAfterStep: a run from a run code behind a wall, whose documents
-// have full_suite true and whose work item has a build plan with a full row, gives its session
-// the after step with the suite's cap as its time limit. Documents with full_suite false, or with
-// none, give none. No test seam sets the input.
+// TestARunCodeWithFullSuiteSetsTheAfterStep: the session of a run from a run code behind a wall,
+// whose documents have full_suite true in type_settings and whose work item has a build plan
+// with a full row, has the after step with the suite's cap as its time limit. With full_suite
+// false, with type_settings and no full_suite in it, with no type_settings, or with full_suite
+// outside type_settings, the session has none. No test seam sets the input.
 func TestARunCodeWithFullSuiteSetsTheAfterStep(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		change func(map[string]any)
 		after  bool
 	}{
-		{"full_suite true", func(d map[string]any) { d["full_suite"] = true }, true},
-		{"full_suite false", func(d map[string]any) { d["full_suite"] = false }, false},
-		{"no full_suite", nil, false},
+		{"full_suite true", func(d map[string]any) { d["type_settings"] = map[string]any{"full_suite": true} }, true},
+		{"full_suite false", func(d map[string]any) { d["type_settings"] = map[string]any{"full_suite": false} }, false},
+		{"no full_suite", func(d map[string]any) { d["type_settings"] = map[string]any{} }, false},
+		{"no type_settings", nil, false},
+		{"full_suite outside type_settings", func(d map[string]any) { d["full_suite"] = true }, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			api := newSuiteAPI(t, http.StatusCreated)

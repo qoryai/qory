@@ -95,7 +95,8 @@ type suiteSetup struct {
 	walled bool
 	// readOnly is whether the run only reads the checkout, so no commit comes of it.
 	readOnly bool
-	// fullSuite is the run documents' full_suite: whether the session runs the full suite.
+	// fullSuite is full_suite of the run documents' type_settings: whether the session runs
+	// the full suite.
 	fullSuite bool
 	// extensions is the harness extensions of the report that the run composed.
 	extensions map[string]any
@@ -156,8 +157,8 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 // limit covers the agent's runtime only.
 func afterLimit(minutes int) time.Duration { return time.Duration(minutes) * suiteMinutes }
 
-// fullSuiteOf is whether the session of a run from Qory Apiary runs the full suite: the run
-// documents' full_suite, false for a run with no run code.
+// fullSuiteOf is whether the session of a run from Qory Apiary runs the full suite: full_suite
+// of the run documents' type_settings, false for a run with no run code.
 var fullSuiteOf = func(c *codeRun) bool { return c != nil && c.fullSuite }
 
 // suitePlanWait is the longest the read of the build plan at the run's start may take.

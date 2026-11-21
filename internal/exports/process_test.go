@@ -373,6 +373,14 @@ func TestProcessSchemaMatchesTheReader(t *testing.T) {
 		{process + structured("submission") + "submit:\n  - {type: submission, send: end_of_run}\n", false},
 		{process + structured("submission") + "submit: ~\n", false},
 		{process + structured("submission") + "submit: submission\n", false},
+		{process + "type_settings: {json_schema: {type: object, required: [full_suite], properties: {full_suite: {type: boolean}}}}\n", true},
+		{process + "type_settings: {json_schema: {}}\n", true},
+		{process + "type_settings: {}\n", false},
+		{process + "type_settings: ~\n", false},
+		{process + "type_settings: [a]\n", false},
+		{process + "type_settings: {json_schema: {}, owner: acme}\n", false},
+		{process + "type_settings: {json_schema: [a]}\n", false},
+		{process + "type_settings: {json_schema: ~}\n", false},
 	} {
 		var doc any
 		if err := yaml.Unmarshal([]byte(c.body), &doc); err != nil {
@@ -646,6 +654,79 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 	}
 }
 
+// withSettings is process with type_settings set to the YAML value body.
+func withSettings(body string) string { return process + "type_settings:" + body + "\n" }
+
+// TestVerifyPassesTypeSettings is each shape of type_settings that passes: a JSON Schema
+// that requires full_suite, one with no rules, and one in each draft qory reads.
+func TestVerifyPassesTypeSettings(t *testing.T) {
+	for _, body := range []string{
+		"\n  json_schema:\n    type: object\n    required: [full_suite]\n    properties:\n      full_suite: {type: boolean}",
+		" {json_schema: {}}",
+		" {json_schema: {$schema: 'http://json-schema.org/draft-07/schema#', type: object}}",
+		" {json_schema: {$schema: 'https://json-schema.org/draft/2020-12/schema', properties: {tone: {enum: [formal, friendly]}}}}",
+	} {
+		if err := factory(t, withSettings(body)).Verify(); err != nil {
+			t.Errorf("%q: %v", body, err)
+		}
+	}
+}
+
+// TestVerifyChecksTypeSettings is each mistake in type_settings, each refusal fix first
+// with the file on the last line. Its json_schema is checked as an artifact type's is.
+func TestVerifyChecksTypeSettings(t *testing.T) {
+	const last = "\n  type_settings is in {file}."
+	for _, c := range []struct{ body, want string }{
+		{" ~", "Set type_settings to an object with json_schema, or remove it.\n  type_settings is null." + last},
+		{" [a]", "Set type_settings to an object with json_schema, or remove it.\n  type_settings is a list." + last},
+		{" full_suite", "Set type_settings to an object with json_schema, or remove it.\n  type_settings is a string." + last},
+		{" {}", "Add json_schema to type_settings, the JSON Schema of a run's type settings.\n  type_settings has no json_schema." + last},
+		{" {full_suite: true}", "Remove the key \"full_suite\" from type_settings.\n  type_settings has only json_schema." + last},
+		{" {json_schema: {}, owner: acme}", "Remove the key \"owner\" from type_settings.\n  type_settings has only json_schema." + last},
+		{" {json_schema: {}, json_schema: {}}", "Remove the second json_schema from type_settings.\n  type_settings has the key twice." + last},
+		{" {json_schema: [a]}", "Set json_schema of type_settings to an object, a JSON Schema.\n  json_schema is a list." + last},
+		{" {json_schema: ~}", "Set json_schema of type_settings to an object, a JSON Schema.\n  json_schema is null." + last},
+		{" {json_schema: {1: a}}", `Quote the key "1" in json_schema of type_settings.` + "\n  A JSON key is a string." + last},
+		{" {json_schema: {$schema: 'http://json-schema.org/draft-04/schema#'}}", "Set $schema in json_schema of type_settings to a draft qory reads, or remove it.\n  $schema is \"http://json-schema.org/draft-04/schema#\", and qory reads https://json-schema.org/draft/2020-12/schema and http://json-schema.org/draft-07/schema." + last},
+		{" {json_schema: {x-a: [" + strings.Repeat("1, ", 1100) + "1]}}", "Shorten json_schema of type_settings.\n  It has a list of more than 1024 entries." + last},
+		{" {json_schema: {type: objekt}}", "Fix json_schema of type_settings so that it compiles as a JSON Schema.\n  The schema does not compile: at '/type': value must be one of 'array', 'boolean', 'integer', 'null', 'number', 'object', 'string'; at '/type': got string, want array" + last},
+		{" {json_schema: {$ref: 'https://schema.example/a.json'}}", "Fix json_schema of type_settings so that it compiles as a JSON Schema.\n  The schema does not compile: failing loading \"https://schema.example/a.json\": no URLLoader registered for \"https://schema.example/a.json\"" + last},
+	} {
+		e := factory(t, withSettings(c.body))
+		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
+		want := refusalIn(file, c.want)
+		if err := e.Verify(); err == nil || err.Error() != want {
+			t.Errorf("%q: %v\nwant %s", c.body, err, want)
+		}
+	}
+}
+
+// TestVerifyShortensALongKey is a key of 200 characters in a refusal of artifact_types and of
+// type_settings, outside a JSON Schema and inside one: the fix line has at most
+// [exports.LineMax] characters, with the key shortened, and the last line has the full key.
+func TestVerifyShortensALongKey(t *testing.T) {
+	key := strings.Repeat("k", 200)
+	full := "The full name of \"kkkkkkkk…kkkkkkkkk\" is \"" + key + "\"."
+	for _, c := range []struct{ body, fix string }{
+		{withTypes("\n  - {name: mockup, " + key + ": acme}"), `Remove the key "kkkkkkkk…kkkkkkkkk" from entry 1 of artifact_types.`},
+		{withTypes(structuredWith("a-type", "{"+key+": 1, "+key+": 2}")), `Remove the second "kkkkkkkk…kkkkkkkkk" from its object in json_schema of artifact type a-type.`},
+		{withSettings(" {json_schema: {}, " + key + ": acme}"), `Remove the key "kkkkkkkk…kkkkkkkkk" from type_settings.`},
+		{withSettings(" {json_schema: {" + key + ": 1, " + key + ": 2}}"), `Remove the second "kkkkkkkk…kkkkkkkkk" from its object in json_schema of type_settings.`},
+	} {
+		err := factory(t, c.body).Verify()
+		if err == nil {
+			t.Fatalf("%.80s: no error", c.body)
+		}
+		lines := strings.Split(err.Error(), "\n")
+		if lines[0] != c.fix || utf8.RuneCountInString(lines[0]) > exports.LineMax {
+			t.Errorf("%.80s: the fix line is %q, want %q", c.body, lines[0], c.fix)
+		}
+		if last := strings.TrimSpace(lines[len(lines)-1]); last != full {
+			t.Errorf("%.80s: the last line is %q, want %q", c.body, last, full)
+		}
+	}
+}
+
 // TestNotWithdrawable is the names that the process.yaml of an exported module sets
 // withdrawable: false for.
 func TestNotWithdrawable(t *testing.T) {
@@ -895,7 +976,7 @@ func repeated(n int, text string) string {
 // pattern can be. The message starts with the fix.
 func TestVerifyBoundsThePatterns(t *testing.T) {
 	const fix = "Shorten the patterns in json_schema of artifact type "
-	const limit = ".\n  The estimate for the patterns of all artifact types in the file is at most 16777216 bytes, and this one brings it to "
+	const limit = ".\n  The estimate for the patterns of all JSON Schemas in the file is at most 16777216 bytes, and this one brings it to "
 	half := repeated(207, "a")
 	for _, c := range []struct{ body, want string }{
 		{structuredWith("a-type", "{pattern: '"+repeated(417, "a")+"'}"), ""},
@@ -907,6 +988,9 @@ func TestVerifyBoundsThePatterns(t *testing.T) {
 		{structuredWith("a-type", "{pattern: '"+repeated(417, "a")+"'}") + structuredWith("b-type", "{pattern: '"+repeated(417, "a")+"'}"), ""},
 		{structuredWith("a-type", "{pattern: '"+half+"'}") + structuredWith("b-type", "{pattern: '"+repeated(208, "b")+"'}"), ""},
 		{structuredWith("a-type", "{pattern: '"+half+"'}") + structuredWith("b-type", "{pattern: '"+repeated(209, "b")+"'}"), fix + "b-type" + limit + "16802208" + "." + "\n  The type is in {file}."},
+		// type_settings shares the limit with the artifact types.
+		{structuredWith("a-type", "{pattern: '"+half+"'}") + "\ntype_settings: {json_schema: {pattern: '" + repeated(208, "b") + "'}}", ""},
+		{structuredWith("a-type", "{pattern: '"+half+"'}") + "\ntype_settings: {json_schema: {pattern: '" + repeated(209, "b") + "'}}", "Shorten the patterns in json_schema of type_settings" + limit + "16802208" + "." + "\n  type_settings is in {file}."},
 	} {
 		e := factory(t, withTypes(c.body))
 		err := e.Verify()
