@@ -1403,7 +1403,9 @@ literal, and a glob without a slash matches at any depth only through `**/`. An 
 contains the `paths` of each member of a group role (§References), for a script that
 starts the members a change needs. qory leaves the key and its whole value out of every
 agent file it writes for a runtime, since not every runtime accepts a key it does not
-know. The compose checks the `paths` of every agent, and any other value fails it:
+know. `contracts/harness/v1/path-cases.json` lists cases of a glob and a path that
+every matcher of `paths` must pass. The compose checks the `paths` of every agent, and
+any other value fails it:
 `Set paths to globs, such as ["**/*.py"], or remove it.` as line 1, then `The value is not
 a glob or a list of globs.` and `The agent is in agents/python-reviewer.md of module core.`
 on the lines after it.

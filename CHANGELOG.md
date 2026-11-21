@@ -18,6 +18,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- `contracts/harness/v1/path-cases.json`: 50 cases of a `paths` glob against a changed
+  file, that every matcher of `paths` must pass; qory's Go matcher passes them. qory will
+  pick the reviewers of a `review-changes` round with the Go matcher.
 - A workflow entry of a stack takes `judges`, a boolean: `workflows: {implement-changes:
   {judges: false}}`. `false` says that a later workflow in the loop judges the work of
   the workflow's session; a value other than `true` or `false`, a quoted `"no"` included,
