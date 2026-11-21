@@ -77,15 +77,14 @@ func newFakeRound(t *testing.T, names ...string) *fakeRound {
 	return f
 }
 
-func TestPointFreeChangesRequestedStartsNoReviewer(t *testing.T) {
+func TestChangesRequestedFromTheSessionStartsNoReviewer(t *testing.T) {
 	for _, c := range []struct {
 		name     string
-		recorded *recordedVerdict
+		recorded string
 		review   bool
 	}{
-		{"changes-requested with no points", &recordedVerdict{Verdict: runapi.VerdictChangesRequested}, false},
-		{"changes-requested with a point", &recordedVerdict{Verdict: runapi.VerdictChangesRequested, Points: 1}, true},
-		{"no verdict", nil, true},
+		{"changes-requested, with no points", runapi.VerdictChangesRequested, false},
+		{"no verdict", "", true},
 	} {
 		f := newFakeRound(t, "code-reviewer", "test-reviewer")
 		f.run.Recorded = c.recorded
@@ -97,8 +96,8 @@ func TestPointFreeChangesRequestedStartsNoReviewer(t *testing.T) {
 			t.Errorf("%s: ran = %t with %d joins, want a round: %t", c.name, out.Ran, len(f.joins), c.review)
 		}
 		if !c.review {
-			if len(f.copies) != 0 || len(f.verdicts) != 0 || len(f.nexts) != 1 || f.nexts[0] != 4 || out.Session != 4 {
-				t.Errorf("%s: copies %v, verdicts %v, requests %v, session %d; want one request with 4", c.name, f.copies, f.verdicts, f.nexts, out.Session)
+			if len(f.copies) != 0 || len(f.verdicts) != 0 || len(f.nexts) != 0 || out.Session != 4 {
+				t.Errorf("%s: copies %v, verdicts %v, requests %v, session %d; want none of the first three and session 4", c.name, f.copies, f.verdicts, f.nexts, out.Session)
 			}
 			if _, err := os.Stat(f.run.OpenFindingsPath); !os.IsNotExist(err) {
 				t.Errorf("%s: open-findings.json was written (%v)", c.name, err)

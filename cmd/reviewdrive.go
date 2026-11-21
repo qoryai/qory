@@ -20,13 +20,6 @@ import (
 // through a read-only mount, and the file has no secret.
 const openFindingsMode = 0o644
 
-// recordedVerdict is the verdict that a session recorded before it ended, with how many
-// points the verdict has.
-type recordedVerdict struct {
-	Verdict string
-	Points  int
-}
-
 // reviewJoin is one reviewer's join as [reviewRun.Join] starts it.
 type reviewJoin struct {
 	Spec reviewSessionSpec
@@ -60,8 +53,8 @@ type reviewRun struct {
 	NextID int
 	// BuildSession is the number of the session that made the change.
 	BuildSession int
-	// Recorded is what that session recorded, nil for no verdict.
-	Recorded *recordedVerdict
+	// Recorded is the verdict that session recorded before it ended, "" for none.
+	Recorded string
 	// Suite is the result of the full suite on the reviewed commit, nil for none.
 	Suite *reviewround.Suite
 	// Previous is the open findings of the round before, nil in round 1.
@@ -95,22 +88,21 @@ type reviewOutcome struct {
 	Ran bool
 	// Decision is the round's decision, the zero value when Ran is false.
 	Decision reviewround.Decision
-	// Session is the number that the next-session request carried: the last join's, or
-	// BuildSession when no reviewer joined.
+	// Session is the session number of the next-session request: the last join's, or
+	// BuildSession when no reviewer joined, in which case the round sent no request.
 	Session int
 }
 
-// shouldReview reports whether the session that recorded v is followed by a review round:
-// not when it recorded changes-requested with no points, as the loop then goes back to
-// implement-changes. The verdict of a reviewer's session is never recorded this way.
-func shouldReview(v *recordedVerdict) bool {
-	return v == nil || v.Verdict != runapi.VerdictChangesRequested || v.Points > 0
-}
+// shouldReview reports whether the session that recorded verdict is followed by a review
+// round: not when it recorded changes-requested, with or without points, as the loop then
+// goes back to implement-changes. A session with points runs no round (C-7, section 2).
+func shouldReview(recorded string) bool { return recorded != runapi.VerdictChangesRequested }
 
 // runReviewRound runs the round r: each reviewer's session in turn, the decision of
 // [reviewround.Decide], open-findings.json, the verdict, and one next-session request
 // with the last session's number. A round that [shouldReview] skips starts no reviewer
-// and sends the request with BuildSession and no verdict. A reviewer whose session
+// and sends no verdict and no request: the session loop sends its usual request for the
+// Build session. A reviewer whose session
 // crashed or reached its limit is a finding. An error from a step stops the round, and
 // the steps after it do not run: a round that cannot place a reviewer's join, or whose
 // join got another session number than predicted, sends no verdict and no request.
@@ -120,7 +112,7 @@ func shouldReview(v *recordedVerdict) bool {
 // user decision 905, so Reviewers is an input.
 func runReviewRound(ctx context.Context, r reviewRun) (reviewOutcome, error) {
 	if !shouldReview(r.Recorded) {
-		return reviewOutcome{Session: r.BuildSession}, r.SendNext(ctx, r.BuildSession)
+		return reviewOutcome{Session: r.BuildSession}, nil
 	}
 	if len(r.Reviewers) == 0 {
 		return reviewOutcome{}, errors.New("Give the round at least one reviewer.\nThe round has none.")
