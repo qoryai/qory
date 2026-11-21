@@ -29,11 +29,11 @@ release may change what an existing document does, and states it under Upgrading
   that session's runtime alone. A home from `--home` or `harness.home` keeps every
   runtime, so a later Codex session there gets no tier models. The route to qory serves
   the session that runs, and the harness report lists each session's runtime and tiers in
-  `sessions`. qory sends the request again for 10 minutes after no response, a refusal of the gateway's, Qory
-  Apiary's refusals with a status of 500 or above, and `rate_limited`; any other refusal of
-  Qory Apiary's closes the run `failed`. The steps before a later session need a wall and no
-  container of the run kept, and past the setup's limit they close the run `cancelled` with
-  `timeout`, exit 124.
+  `sessions`. qory sends the request again for 10 minutes after no response, a refusal of
+  the gateway's, Qory Apiary's refusals with a status of 500 or above, and `rate_limited`;
+  any other refusal of Qory Apiary's closes the run `failed`. The steps before a later
+  session need a wall and no container of the run kept, and past the setup's limit they
+  close the run `cancelled` with `timeout`, exit 124.
 - The agent of a walled run gets `QORY_SESSION`, the session's number from 1, which Forager
   sets at each join: `qory run agent-env` keeps the name, as it keeps `QORY_RUN_ID`. Before,
   the verb removed it, and the agent of a walled run had no session number.
