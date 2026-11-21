@@ -24,8 +24,8 @@ release may change what an existing document does, and states it under Upgrading
   its workflow, runtime, model settings, model key and time limit. Each session's harness is
   composed from the run's sources at session 1's commits; a runtime is installed once per
   run, at the version the stack pins, with npm's signature checked as for session 1; a
-  Codex session gets a new Codex home; each session's push step stores a version of
-  `submission`. The route to qory serves the session that runs,
+  Codex session gets a new Codex home; each push step that pushes commits stores a
+  version of `submission`. The route to qory serves the session that runs,
   and the harness report lists each session's runtime and tiers in `sessions`. qory sends
   the request again for 10 minutes after no response, a refusal of the gateway's, Qory
   Apiary's refusals with a status of 500 or above, and `rate_limited`; any other refusal of

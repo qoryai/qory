@@ -2885,11 +2885,12 @@ doubles. Then:
   work item in again: qory could not remove the Codex home of session <n-1> before session
   <n>: <error>`.
 
-Each session's push step stores a version of the artifact `submission`, from the
-hand-off file as it is after that session (see [The submit step](#the-submit-step)). qory
-does not empty the file between sessions, so a session that does not write it hands over
-the text and steps of the session before. The commits that earlier sessions pushed stay on
-the branch.
+Each push step that pushes commits stores a version of the artifact `submission`, from
+the hand-off file as it is after that session (see [The submit step](#the-submit-step)).
+qory does not empty the file between sessions: after a session that does not write it,
+qory reads the text and steps that the session before wrote. Each version lists every
+commit of the run, since the run's start commit is set once, at session 1. The commits that
+earlier sessions pushed stay on the branch.
 
 ### The push step of a write run
 
