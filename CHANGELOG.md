@@ -685,15 +685,15 @@ release may change what an existing document does, and states it under Upgrading
   target in the run documents, at the end of the run or after the gate of the run's
   stage passes; a type without `deliver` is stored and never delivered. Only a
   structured type has `deliver`, with a `size_limit` of at most 786432 bytes, and its
-  `json_schema` has a root `type` of `object` or none and a top-level property `target`
-  that is the primitive `reference`, written as a `$ref` to
-  `primitives.schema.json#/$defs/reference`, in an `allOf`, or through a definition
-  under `$defs`, or as a written-out copy of that definition. In a written-out copy,
-  each definition that it refers to under `$defs` is the definition of that name in the
-  primitives. Its name is in the `required` list of the root, and only the root list
-  counts. A schema fails when `$id`, `$anchor` or `$dynamicAnchor` is a key anywhere in
-  it, also as the name of a property or a definition, because `$id` changes where a
-  `$ref` points. It fails when the root `$schema` is anything other than
+  `json_schema` has the root `type` `object`, so that no value but an object validates,
+  and a top-level property `target` that is the primitive `reference`, written as a
+  `$ref` to `primitives.schema.json#/$defs/reference`, in an `allOf`, or through a
+  definition under `$defs`, or as a written-out copy of that definition. In a
+  written-out copy, each definition that it refers to under `$defs` is the definition of
+  that name in the primitives. Its name is in the `required` list of the root, and only
+  the root list counts. A schema fails when `$id`, `$anchor` or `$dynamicAnchor` is a
+  key anywhere in it, also as the name of a property or a definition, because `$id`
+  changes where a `$ref` points. It fails when the root `$schema` is anything other than
   `https://json-schema.org/draft/2020-12/schema`, with or without a final `#`, because
   draft-07 ignores the keys next to a `$ref`. It fails when the `$ref` that leads to the
   `target` goes through a `$defs` name with a character other than a letter, a digit,
@@ -705,11 +705,11 @@ release may change what an existing document does, and states it under Upgrading
   one of these values, each on one property at most: `pushed-commits` on a list whose
   `items` are the primitive `reference` (the commits qory pushed to the target, oldest
   first), `pushed-head` and `pushed-base` on a `reference` that the property takes
-  through a `$ref`, to the primitives or to a local `$defs` `reference`, `pushed-branch`
-  and `pushed-base-branch` on a string, and `pushed-commits-left-out` on an integer.
-  qory stops the command with the fix on the first line when `x-qory-fill` is on
-  `target`, below the top level, on a property of another shape, a value that qory does
-  not fill, or in a type without `deliver`.
+  through a `$ref`, to the primitives or to a local `$defs` `reference`, with no `type`
+  beside the `$ref` but `object`, `pushed-branch` and `pushed-base-branch` on a string,
+  and `pushed-commits-left-out` on an integer. qory stops the command with the fix on
+  the first line when `x-qory-fill` is on `target`, below the top level, on a property
+  of another shape, a value that qory does not fill, or in a type without `deliver`.
 - A stage of the `process` of a `process.yaml` can have `outputs`, a list of objects
   with `type`, the name of an entry of `artifact_types`, and `required`, `true` or
   `false`, `false` when left out. An output has no other key. qory stops the command
@@ -1802,11 +1802,11 @@ release may change what an existing document does, and states it under Upgrading
   other stops. Until this change, the schemas of the questions, acceptance criteria,
   verification, review comments, proposal sources and verdict formats listed the stopped
   characters themselves, and the lists stopped at U+FFFF: U+0600 and a tag character such
-  as U+E0041 passed. Each `$defs` `line` and `text` now has the pattern of the primitives.
+  as U+E0041 passed. Each `$defs` `line` and `text` has the pattern of the primitives.
   The checks of `qory run verdict` and of the review round stop the same characters.
-  The `point` of a finding in `review-report.schema.json` is a `line` too: before, it
-  stopped only line breaks and a point of spaces, so a tab, U+200B and U+E0041 passed,
-  and a report with such a point now does not match the format.
+  The `point` of a finding in `review-report.schema.json` is a `line` too: a tab, U+200B
+  and U+E0041 in a point fail the report format. Until this change, the point stopped
+  only line breaks and a point of spaces.
 - The hand-off drops a `description` that has a character that a text does not have: a control
   character other than tab, line feed and carriage return, U+2028, U+2029, or a Cf character
   other than U+200C and U+200D, such as U+200B or the tag character U+E0041. It prints
