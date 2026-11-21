@@ -301,8 +301,10 @@ func checkDeliverTarget(label string, schema *yaml.Node) string {
 	if draft, has := root["$schema"]; has && !slices.Contains(typeSchemaDrafts[:2], fmt.Sprint(draft)) {
 		return typeRefusal("Set the root $schema of the json_schema to the 2020-12 draft, or remove it.", "json_schema of "+label+" has another draft, and draft-07 ignores the keys next to a $ref.")
 	}
-	if kind, has := root["type"]; has && kind != "object" {
-		return typeRefusal("Set type of the json_schema to object, or remove `deliver`.", "json_schema of "+label+" has another root type, and a target is a member of an object.")
+	// With the root type object, a keyword such as anyOf or not can only narrow the
+	// schema, so no value but an object validates.
+	if kind, _ := root["type"].(string); kind != "object" {
+		return typeRefusal("Set type of the json_schema to object, or remove `deliver`.", "json_schema of "+label+" has no root type object, and a target is a member of an object.")
 	}
 	if hasResolutionKey(root) {
 		return typeRefusal("Remove $id, $anchor and $dynamicAnchor from the json_schema, or remove `deliver`.", "json_schema of "+label+" has one. A $ref under such a key can resolve to a different schema.")
@@ -334,6 +336,9 @@ func hasResolutionKey(node any) bool {
 
 // hasKey reports whether node, a decoded JSON Schema, has one of keys in any object. With
 // skipOwn, the keys of node itself do not count, and those of the objects in it do.
+// shortcut: a nested property or a definition named x-qory-fill counts as a mark and
+// fails the type, as does a property of that name in a type with no deliver; replace it
+// when a type needs such a name.
 func hasKey(node any, skipOwn bool, keys ...string) bool {
 	switch v := node.(type) {
 	case map[string]any:
@@ -366,6 +371,8 @@ const defsPrefix = "#/$defs/"
 // and whether ref has one. A name has letters, digits, "_" and "-" only: the compiler
 // decodes "%", "~" and "/" in a JSON Pointer, so a name with one could reach another
 // definition than the name spells.
+// shortcut: a definition name outside letters, digits, "_" and "-" on the chain of the
+// target fails; replace it when a type needs such a name.
 func localName(ref string) (string, bool) {
 	name, local := strings.CutPrefix(ref, defsPrefix)
 	if !local || name == "" {

@@ -1317,9 +1317,14 @@ func TestVerifyResolvesTheReferencesToThePrimitives(t *testing.T) {
 func TestVerifyChecksDeliver(t *testing.T) {
 	const reference = "https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference"
 	const limits = "size_limit: 1, max_files: 1"
-	// structured has the schema with required: [target], as a delivered type needs.
+	// structured has the schema with required: [target] and the root type object, as a
+	// delivered type needs, unless the schema has a type first.
 	structured := func(extra, schema string) string {
-		return custom("structured", limits+", json_schema: {required: [target], "+schema[1:]+extra)
+		root := "{required: [target], "
+		if !strings.HasPrefix(schema, "{type:") {
+			root += "type: object, "
+		}
+		return custom("structured", limits+", json_schema: "+root+schema[1:]+extra)
 	}
 	withTarget := "{type: object, properties: {target: {$ref: '" + reference + "'}}}"
 	delivered := "{required: [target], " + withTarget[1:]
@@ -1330,7 +1335,7 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		draftFix = "Set the root $schema of the json_schema to the 2020-12 draft, or remove it.\n  json_schema of artifact type a-type has another draft, and draft-07 ignores the keys next to a $ref."
 		place    = "\n  The type is in {file}."
 		fix      = "Add a top-level `target` of the primitive `reference` to the schema, or remove `deliver`.\n  "
-		typeFix  = "Set type of the json_schema to object, or remove `deliver`.\n  json_schema of artifact type a-type has another root type, and a target is a member of an object."
+		typeFix  = "Set type of the json_schema to object, or remove `deliver`.\n  json_schema of artifact type a-type has no root type object, and a target is a member of an object."
 		gone     = "artifact type a-type has no top-level target in json_schema."
 		other    = "The top-level target in json_schema of artifact type a-type is not the primitive reference."
 	)
@@ -1406,6 +1411,8 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		{custom("structured", limits+", json_schema: {allOf: [{required: [target]}], "+withTarget[1:]+send), requiredFix + place, true},
 		// The root of the schema is an object, and a $schema below the root is no draft.
 		{structured(send, "{type: array, properties: {target: {$ref: '"+reference+"'}}}"), typeFix + place, true},
+		{custom("structured", limits+", json_schema: {required: [target], anyOf: [{type: array}], properties: {target: {$ref: '"+reference+"'}}}"+send), typeFix + place, true},
+		{custom("structured", limits+", json_schema: {required: [target], properties: {target: {$ref: '"+reference+"'}}}"+send), typeFix + place, true},
 		{structured(send, "{type: [object, 'null'], properties: {target: {$ref: '"+reference+"'}}}"), typeFix + place, true},
 		{structured(send, "{type: object, properties: {target: {$ref: '"+reference+"'}, note: {$schema: 'http://json-schema.org/draft-07/schema#', type: string}}}"), "", true},
 		{structured("", withTarget), "", true},
@@ -1605,6 +1612,7 @@ left_out: {type: integer, x-qory-fill: pushed-commits-left-out}`
 		{all, send, ""},
 		{"commits: {type: array, items: {$ref: '" + reference + "'}, x-qory-fill: pushed-commits}", send, ""},
 		{"head: {$ref: '" + reference + "', x-qory-fill: pushed-head}", send, ""},
+		{"head: {$ref: '" + reference + "', type: object, x-qory-fill: pushed-head}", send, ""},
 		{"note: {type: string}", send, ""},
 		// A value twice, below the top level, and a mark on a type with no deliver.
 		{"a: {type: string, x-qory-fill: pushed-branch}, b: {type: string, x-qory-fill: pushed-branch}", send, "Remove the second x-qory-fill pushed-branch from the json_schema.\n  Properties a and b in json_schema of artifact type a-type have it."},
@@ -1617,6 +1625,11 @@ left_out: {type: integer, x-qory-fill: pushed-commits-left-out}`
 		// Another shape than the value needs.
 		{"a: {type: string, x-qory-fill: pushed-commits}", send, shapeFix + "pushed-commits on property a" + inType + "a list of primitive references."},
 		{"a: {type: array, items: {type: string}, x-qory-fill: pushed-commits}", send, shapeFix + "pushed-commits on property a" + inType + "a list of primitive references."},
+		{"a: {$ref: '#/$defs/reference', type: string, x-qory-fill: pushed-head}", send, shapeFix + "pushed-head on property a" + inType + "a primitive reference."},
+		{"a: {$ref: '" + reference + "', type: [object], x-qory-fill: pushed-base}", send, shapeFix + "pushed-base on property a" + inType + "a primitive reference."},
+		{"a: {type: array, items: {$ref: '#/$defs/reference', type: integer}, x-qory-fill: pushed-commits}", send, shapeFix + "pushed-commits on property a" + inType + "a list of primitive references."},
+		{"a: {type: [string], x-qory-fill: pushed-branch}", send, shapeFix + "pushed-branch on property a" + inType + "a string."},
+		{"a: {type: number, x-qory-fill: pushed-commits-left-out}", send, shapeFix + "pushed-commits-left-out on property a" + inType + "an integer."},
 		{"a: {type: string, x-qory-fill: pushed-head}", send, shapeFix + "pushed-head on property a" + inType + "a primitive reference."},
 		{"a: {type: array, items: {$ref: '#/$defs/reference'}, x-qory-fill: pushed-base}", send, shapeFix + "pushed-base on property a" + inType + "a primitive reference."},
 		{"a: {type: integer, x-qory-fill: pushed-branch}", send, shapeFix + "pushed-branch on property a" + inType + "a string."},
@@ -1643,7 +1656,7 @@ left_out: {type: integer, x-qory-fill: pushed-commits-left-out}`
 		}
 	}
 	// A mark on target fails, whatever its value.
-	onTarget := custom("structured", "size_limit: 1, max_files: 1, json_schema: {required: [target], properties: {target: {$ref: '"+reference+"', x-qory-fill: pushed-head}}}"+send)
+	onTarget := custom("structured", "size_limit: 1, max_files: 1, json_schema: {type: object, required: [target], properties: {target: {$ref: '"+reference+"', x-qory-fill: pushed-head}}}"+send)
 	e := factory(t, withTypes(onTarget))
 	targetFix := "Remove x-qory-fill from target. target is the destination; qory fills only other members.\n  json_schema of artifact type a-type has x-qory-fill on target.\n  The type is in " + filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName) + "."
 	if err := e.Verify(); err == nil || err.Error() != targetFix {
@@ -1675,7 +1688,7 @@ left_out: {type: integer, x-qory-fill: pushed-commits-left-out}`
 		t.Errorf("a written-out copy with a mark: %v", err)
 	}
 	// A mark on the root of the schema is below the top level too.
-	root := custom("structured", "size_limit: 1, max_files: 1, json_schema: {x-qory-fill: pushed-branch, required: [target], properties: {target: {$ref: '"+reference+"'}}}"+send)
+	root := custom("structured", "size_limit: 1, max_files: 1, json_schema: {type: object, x-qory-fill: pushed-branch, required: [target], properties: {target: {$ref: '"+reference+"'}}}"+send)
 	if err := factory(t, withTypes(root)).Verify(); err == nil || !strings.HasPrefix(err.Error(), belowFix) {
 		t.Errorf("a mark on the root: %v", err)
 	}
@@ -1687,7 +1700,7 @@ left_out: {type: integer, x-qory-fill: pushed-commits-left-out}`
 func TestVerifyDeliverEndsOnALoopOfDefinitions(t *testing.T) {
 	const n = 200
 	loop := "{$ref: '#/$defs/a'}" + strings.Repeat(", {$ref: '#/$defs/a'}", n-1)
-	schema := "{$defs: {a: {allOf: [" + loop + "]}}, properties: {target: {$ref: '#/$defs/a'}}}"
+	schema := "{type: object, $defs: {a: {allOf: [" + loop + "]}}, properties: {target: {$ref: '#/$defs/a'}}}"
 	e := factory(t, withTypes(custom("structured", "size_limit: 1, max_files: 1, json_schema: "+schema+", deliver: {send: end_of_run}")))
 	done := make(chan error, 1)
 	go func() { done <- e.Verify() }()

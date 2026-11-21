@@ -27,20 +27,30 @@ var fillShapes = []struct{ value, needs string }{
 // fillHasShape reports whether member, a property of root, a decoded JSON Schema, has the
 // shape that the value of [fillKey] needs: a list is "type": "array" with items that
 // [isPrimitiveReference] passes, a reference is what that function passes, and a string
-// or an integer is the "type" of that name written on the property.
+// or an integer is the "type" of that name written on the property. A reference has no
+// "type" beside it but "object", so that some value can match it.
 // shortcut: the "type" and the "items" are read on the property, not through a $ref or an
-// allOf, and a reference with a mark is a $ref, not a written-out copy, which the mark
-// makes unequal to the primitives' definition; replace it when a type needs either.
+// allOf, a "type" in a local definition that a reference goes through is not read, and a
+// reference with a mark is a $ref, not a written-out copy, which the mark makes unequal
+// to the primitives' definition; replace it when a type needs any of these.
 func fillHasShape(root, member map[string]any, value string) bool {
 	switch value {
 	case "pushed-commits":
-		return member["type"] == "array" && isPrimitiveReference(root, member["items"], map[string]bool{})
+		return member["type"] == "array" && isReferenceMember(root, member["items"])
 	case "pushed-head", "pushed-base":
-		return isPrimitiveReference(root, member, map[string]bool{})
+		return isReferenceMember(root, member)
 	case "pushed-branch", "pushed-base-branch":
 		return member["type"] == "string"
 	}
 	return member["type"] == "integer"
+}
+
+// isReferenceMember reports whether node is the primitive reference by
+// [isPrimitiveReference] and has no "type" beside it but "object".
+func isReferenceMember(root map[string]any, node any) bool {
+	member, _ := node.(map[string]any)
+	kind, has := member["type"]
+	return isPrimitiveReference(root, node, map[string]bool{}) && (!has || kind == "object")
 }
 
 // checkFillMarks checks the [fillKey] of the json_schema root of the artifact type label,
@@ -48,9 +58,7 @@ func fillHasShape(root, member map[string]any, value string) bool {
 // only, its value is one of [fillShapes], no value is on two properties, and the
 // property has the shape of its value. It returns the fix for a message with [FilePlace]
 // for the file, "" for a schema that passes.
-// shortcut: a nested property or a definition named x-qory-fill counts as a mark and
-// fails the type, as does a property of that name in a type with no deliver; replace it
-// when a type needs such a name.
+// A nested property or a definition named x-qory-fill counts as a mark: see [hasKey].
 func checkFillMarks(label string, root map[string]any) string {
 	where := "json_schema of " + label
 	// A key on the root, or in any value of the root but the properties, is below the top
