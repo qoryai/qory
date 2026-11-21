@@ -62,12 +62,12 @@ const (
 )
 
 // The words of [Destinations], which qory run agent-env prints after its name. Each is
-// one format string, with the fix first.
+// one format string: the fix on line 1, the cause on line 2.
 const (
-	textClonesExists     = "remove %s from the image: qory makes the folder of a run's clones only where nothing is, so a read run does not start"
-	textClonesNotEmpty   = "leave no program of the image running that writes into %s: the folder of a run's clones contained something once qory made it, so a read run does not start"
-	textClonesParentLink = "replace the symbolic link %s with a folder in the image: the folder of a run's clones, %s, is made only where no link leads"
-	textClonesNotMade    = "let the agent's user make %s, then run again: the folder of a run's clones could not be made: %s"
+	textClonesExists     = "remove %s from the image\n  qory makes the folder of a run's clones only where nothing is, so a read run does not start"
+	textClonesNotEmpty   = "leave no program of the image running that writes into %s\n  The folder of a run's clones contained something once qory made it, so a read run does not start"
+	textClonesParentLink = "replace the symbolic link %s with a folder in the image\n  The folder of a run's clones, %s, is made only where no link leads"
+	textClonesNotMade    = "let the agent's user make %s, then run again\n  The folder of a run's clones could not be made: %s"
 )
 
 // freshWords are the lines of [freshFolder] for one folder.
@@ -89,8 +89,8 @@ var (
 // repository's files leave in place, not against a repository that acts against them:
 // the image's programs and the repository's commands run as the agent's user in the
 // agent's container, so a program they leave running can write in the home after
-// FreshHome returns; against that, the boundary is the wall. Every error's text is one
-// line, ready for stderr. With store, for a run that cannot write its checkout, it also
+// FreshHome returns; against that, the boundary is the wall. Every error's text is ready
+// for stderr: one line, or for [Destinations] the fix and the cause on two. With store, for a run that cannot write its checkout, it also
 // makes [TempStore] and then [Destinations] new and empty with mode 0700, under the same
 // rules: Claude Code reads permissions.additionalDirectories when it starts, and leaves
 // out a folder that does not exist then.
@@ -98,11 +98,17 @@ func FreshHome(getenv func(string) string, store bool) error {
 	if getenv(EnvAgentHome) != AgentHome {
 		return nil
 	}
-	if err := agentHome(AgentHome); err != nil {
+	return freshHomeAt(AgentHome, store, TempStore, Destinations)
+}
+
+// freshHomeAt is [FreshHome] with the agent's home at home, and with store, the folders of
+// a read run at storeDir and clones.
+func freshHomeAt(home string, store bool, storeDir, clones string) error {
+	if err := agentHome(home); err != nil {
 		return err
 	}
 	if store {
-		return readFolders(TempStore, Destinations)
+		return readFolders(storeDir, clones)
 	}
 	return nil
 }

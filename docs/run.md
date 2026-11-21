@@ -4132,8 +4132,9 @@ artifact index with `qory artifact pull` before you push again.
 
 ### Clone a destination
 
-A run whose inputs list `destinations`, such as an Explore run, starts with nothing
-fetched. Each destination has an `id` and a `target`. The agent reads the list in
+A read run whose documents contain a harness document and whose inputs list
+`destinations`, such as an Explore run, starts with nothing fetched. Each destination has
+an `id` and a `target`. The agent reads the list in
 `$QORY_HARNESS_HOME/inputs.json` and clones the destinations it needs, inside the run's
 session:
 
@@ -4144,8 +4145,12 @@ session:
 qory clones each one at depth 1 into `/tmp/qory-destinations/<system>/<path>`, and prints
 one line per id, in the order given: the id and the folder. A destination that this
 session cloned before is not cloned again, and its line is the same. The clone goes
-through the wall's proxy, which reads with the run's read credential. A run that builds or
-verifies has no `destinations`, and qory fetches its target before the session.
+through the wall's proxy, which reads with the run's read credential.
+
+qory fetches the target before the session, as for a run with no `destinations`, when the
+run's access is `write` or `write-no-push`, or when its documents contain no harness
+document, since qory then composes the harness of the target's repository. A run that may
+write also reads its branch and runs its push step.
 
 These calls exit 2 and clone nothing, with the fix on line 1:
 
@@ -4158,14 +4163,17 @@ These calls exit 2 and clone nothing, with the fix on line 1:
 | `Run qory destination clone inside a run's session: <variable> is not set.` | `QORY_RUN_API` or `QORY_HARNESS_HOME` is not set. |
 | `Run qory destination clone only in a run whose inputs list destinations.` | `inputs.json` is missing or has no `destinations`. |
 
-These exit 1:
+These exit 1. Line 1 of each is the gap that a member reads in Qory Apiary, so it contains
+the id and no path of the machine:
 
 | Line 1 | When |
 | ------ | ---- |
-| `Check the connection of <id> in Qory Apiary: the host returned <status> to the clone.` | The host returned 401, 403 or 404. |
-| `Run qory destination clone again: the clone of <id> failed: <cause>.` | Any other failed clone. The cause contains no URL. |
-| `Report this run to the instance admin of Qory Apiary: inputs.json has malformed destinations.` | The destinations do not have the shape of the explore inputs. |
-| `Check /tmp/qory-destinations, then run qory destination clone again.` | The folder is a link or a file, or qory cannot make it or read its record. |
+| `Give the integration access to <id> in Qory Apiary, then click Run Explore again.` | The host returned 401, 403 or 404. Line 2 is `The host returned <status> to the clone.` |
+| `Ask the instance admin of Qory Apiary to let the proxy reach the host of <id>.` | The wall's proxy returned 403 or 407. |
+| `Run Explore again later: the clone of <id> failed: <cause>.` | Any other failed clone. The cause contains no URL. |
+| `Ask the instance admin of Qory Apiary to check the machine: it cannot store <id>.` | A folder of the clone is a link or a file, or qory cannot make it. Line 2 has the path and the cause. For `/tmp/qory-destinations` itself or its record, `the clones` stands in place of the id. |
+| `Ask the instance admin of Qory Apiary to fix the destinations of this run: they are malformed.` | The destinations do not have the shape of the explore inputs. Line 2 has the cause. |
+| `Ask the instance admin of Qory Apiary to separate destination <id> from another.` | The path of `<id>` lies inside the path of another destination on the same system, or contains it. Line 2 has both ids. qory clones neither, so no clone lands in another one's folder. |
 
 The count of 100 is per session: the record of the clones is in the session's container.
 A `git clone` that the agent runs itself reaches only what the run's read credential

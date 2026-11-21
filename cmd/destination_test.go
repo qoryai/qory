@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"unicode/utf8"
 
@@ -88,11 +89,9 @@ func (c *clones) line(id, path string) string {
 	return id + " " + filepath.Join(c.root, proxygittest.Host, path) + "\n"
 }
 
-// testClonesFolder matches the path of the folder of the clones of a test.
-var testClonesFolder = regexp.MustCompile(`\S*/qory-destinations`)
-
 // wantLine fails unless err exits with status and its text is want, with a first line of
-// at most 98 characters, 100 with the mark that qory prints before it, and no URL.
+// at most 98 characters, 100 with the mark that qory prints before it, and no path of the
+// machine, since a member reads it in Qory Apiary, and no URL.
 func wantLine(t *testing.T, err error, status int, want string) {
 	t.Helper()
 	if err == nil {
@@ -105,12 +104,13 @@ func wantLine(t *testing.T, err error, status int, want string) {
 		t.Errorf("error %q, want %q", err, want)
 	}
 	first, _, _ := strings.Cut(err.Error(), "\n")
-	// The folder of the clones is at a test's path here, and at /tmp/qory-destinations in a run.
-	first = testClonesFolder.ReplaceAllString(first, "/tmp/qory-destinations")
 	if n := utf8.RuneCountInString("✗ " + first); n > 100 {
 		t.Errorf("line 1 has %d characters with its mark: %q", n, first)
 	}
-	for _, part := range []string{"https://", proxygittest.Host + "/", proxygittest.Password} {
+	if strings.Contains(first, "/") {
+		t.Errorf("line 1 contains a path: %q", first)
+	}
+	for _, part := range []string{"://", proxygittest.Password} {
 		if strings.Contains(err.Error(), part) {
 			t.Errorf("error %q contains %s", err, part)
 		}
@@ -215,16 +215,26 @@ func TestDestinationCloneStopsBeforeAnyClone(t *testing.T) {
 }
 
 // TestDestinationCloneStopsOnMalformedDestinations is inputs whose destinations break
-// the shape of the explore inputs: exit 1, with the cause on line 2.
+// the shape of the explore inputs: exit 1, with the cause on line 2. An empty or null
+// list, and a member whose name differs only in case, list no destinations: exit 2.
 func TestDestinationCloneStopsOnMalformedDestinations(t *testing.T) {
 	c := destinationSession(t)
-	const fix = "Report this run to the instance admin of Qory Apiary: inputs.json has malformed destinations.\n  "
+	const none = "Run qory destination clone only in a run whose inputs list destinations."
+	for _, destinations := range []any{[]any{}, json.RawMessage("null")} {
+		c.inputs(t, destinations)
+		_, err := run(t, "destination", "clone", webID)
+		wantLine(t, err, cmd.ExitInput, none)
+	}
+	writeFile(t, filepath.Join(c.home, "inputs.json"), `{"Destinations": [{"id": "`+webID+`", "target": {"collection": "c"}}]}`)
+	_, err := run(t, "destination", "clone", webID)
+	wantLine(t, err, cmd.ExitInput, none)
+
+	const fix = "Ask the instance admin of Qory Apiary to fix the destinations of this run: they are malformed.\n  "
 	for _, k := range []struct {
 		destinations any
 		cause        string
 	}{
 		{"acme/web", "destinations is not an array of objects"},
-		{[]any{}, "destinations has 0 entries, not 1 to 250"},
 		{[]any{destinationOf("tg_web000000000000i", "acme/web")}, "entry 1 has no id of the form tg_ and 16 characters"},
 		{[]any{destinationOf(webID, "acme/web"), destinationOf(webID, "acme/back")}, "entry 2 has the id of an entry before it"},
 		{[]any{map[string]any{"id": webID, "target": map[string]any{}}}, "entry 1 has no collection of 1 to 200 characters"},
@@ -268,12 +278,14 @@ func TestDestinationCloneCountsAtMost100(t *testing.T) {
 }
 
 // TestDestinationCloneStopsOnAFailedClone is a clone that fails, exit 1, with no URL in
-// the line: a 401, a 403 or a 404 of the host has the line of the connection, and a 407
-// of the proxy the line to run again. Nothing is left in the folder of the clones.
+// the line: a 401, a 403 or a 404 of the host has the line of the integration's access, and
+// a 403 or a 407 of the proxy the line of the proxy. Nothing is left in the folder of the
+// clones.
 func TestDestinationCloneStopsOnAFailedClone(t *testing.T) {
 	connection := func(id, status string) string {
-		return "Check the connection of " + id + " in Qory Apiary: the host returned " + status + " to the clone."
+		return "Give the integration access to " + id + " in Qory Apiary, then click Run Explore again.\n  The host returned " + status + " to the clone."
 	}
+	blocks := "Ask the instance admin of Qory Apiary to let the proxy reach the host of " + webID + "."
 	t.Run("403", func(t *testing.T) {
 		c := destinationSession(t)
 		c.s.Refuse("/acme/web.git/info/refs")
@@ -302,9 +314,84 @@ func TestDestinationCloneStopsOnAFailedClone(t *testing.T) {
 			t.Setenv(name, wrong)
 		}
 		_, err := run(t, "destination", "clone", webID)
-		wantLine(t, err, 1, "Run qory destination clone again: the clone of "+webID+" failed: the proxy returned 407.")
+		wantLine(t, err, 1, blocks)
 		wantNoClone(t, c)
 	})
+	t.Run("proxy 403", func(t *testing.T) {
+		c := destinationSession(t)
+		d := destinationOf(webID, "acme/web")
+		d["target"].(map[string]any)["address"].(map[string]any)["system"] = "other.test"
+		c.inputs(t, []any{d})
+		_, err := run(t, "destination", "clone", webID)
+		wantLine(t, err, 1, blocks)
+		if c.s.Denied() == 0 {
+			t.Error("the proxy denied no request")
+		}
+		wantNoClone(t, c)
+	})
+}
+
+// TestDestinationCloneRetriesAFailedClone is a clone that failed with a 403 and a call
+// for the same id once the host serves it: the second call clones and records the id.
+func TestDestinationCloneRetriesAFailedClone(t *testing.T) {
+	c := destinationSession(t)
+	c.s.Refuse("/acme/web.git/info/refs")
+	if _, err := run(t, "destination", "clone", webID); cmd.ExitCode(err) != 1 {
+		t.Fatalf("%v (exit %d), want exit 1", err, cmd.ExitCode(err))
+	}
+	c.s.Refuse("")
+	out, err := run(t, "destination", "clone", webID)
+	if err != nil || out != c.line(webID, "acme/web") {
+		t.Fatalf("the second call: %q, %v", out, err)
+	}
+	wantFile(t, filepath.Join(c.root, proxygittest.Host, "acme", "web", "README.md"), "web\n")
+	wantFile(t, filepath.Join(c.root, "_cloned"), webID+"\n")
+}
+
+// TestDestinationCloneTakesAnIDTwice is a call with one id twice: one clone, one entry in
+// the record, and the same line twice.
+func TestDestinationCloneTakesAnIDTwice(t *testing.T) {
+	c := destinationSession(t)
+	out, err := run(t, "destination", "clone", webID, webID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := c.line(webID, "acme/web") + c.line(webID, "acme/web"); out != want {
+		t.Errorf("printed %q, want %q", out, want)
+	}
+	wantFile(t, filepath.Join(c.root, "_cloned"), webID+"\n")
+}
+
+// TestDestinationCloneCallsInParallel is two calls for the same id at once: the record's
+// lock lets one clone, the other finds the clone, both print the same line, and the record
+// has the id once.
+func TestDestinationCloneCallsInParallel(t *testing.T) {
+	c := destinationSession(t)
+	var wg sync.WaitGroup
+	outs, errs := make([]string, 2), make([]error, 2)
+	for i := range outs {
+		wg.Go(func() { outs[i], errs[i] = run(t, "destination", "clone", webID) })
+	}
+	wg.Wait()
+	for i := range outs {
+		if errs[i] != nil || outs[i] != c.line(webID, "acme/web") {
+			t.Errorf("call %d: %q, %v", i+1, outs[i], errs[i])
+		}
+	}
+	wantFile(t, filepath.Join(c.root, "_cloned"), webID+"\n")
+	entries, _ := os.ReadDir(c.root)
+	if names := entryNames(entries); !slices.Equal(names, []string{"_cloned", proxygittest.Host}) {
+		t.Errorf("the folder of the clones has %v", names)
+	}
+}
+
+// entryNames is the names of entries.
+func entryNames(entries []os.DirEntry) []string {
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
 }
 
 // wantNoClone fails when the folder of the clones has an entry other than the record,
@@ -332,8 +419,71 @@ func TestDestinationCloneClonesIntoAFolderOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := run(t, "destination", "clone", webID)
-	wantLine(t, err, 1, "Check "+c.root+", then run qory destination clone again.\n  it is a link or a file, and qory clones only into a folder")
+	wantLine(t, err, 1, "Ask the instance admin of Qory Apiary to check the machine: it cannot store the clones.\n  "+c.root+": lstat: a link or a file, and qory clones only into folders")
 	if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
 		t.Errorf("the link's folder has %d entries", len(entries))
+	}
+}
+
+// TestDestinationCloneFollowsNoLinkBelowTheFolder is a link that something put at
+// git.test/acme in the folder of the clones, to a folder outside that has acme/web with a
+// .git folder: the call does not take it for a clone, stops, exit 1, with the id on line 1
+// and the link's path on line 2, and writes nothing through the link.
+func TestDestinationCloneFollowsNoLinkBelowTheFolder(t *testing.T) {
+	c := destinationSession(t)
+	elsewhere := tempDir(t)
+	if err := os.MkdirAll(filepath.Join(elsewhere, "web", ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(c.root, proxygittest.Host, "acme")
+	if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, link); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "destination", "clone", webID)
+	wantLine(t, err, 1, "Ask the instance admin of Qory Apiary to check the machine: it cannot store "+webID+".\n  "+link+": lstat: a link or a file, and qory clones only into folders")
+	if out != "" {
+		t.Errorf("printed %q", out)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(elsewhere, "web")); len(entries) != 1 {
+		t.Errorf("the folder behind the link has %d entries, want .git alone", len(entries))
+	}
+	wantFile(t, filepath.Join(c.root, "_cloned"), "")
+}
+
+// TestDestinationCloneStopsAtNestedDestinations is acme/deep, which commits a link sub to
+// a folder outside, and the destination acme/deep/sub inside it: a call for either, in
+// each order, stops before any clone, exit 1, with the two ids, and nothing reaches the
+// folder that the link leads to. acme/deep2 does not nest with acme/deep.
+func TestDestinationCloneStopsAtNestedDestinations(t *testing.T) {
+	const outerID, subID, deep2ID = "tg_deep000000000000", "tg_deepsb0000000000", "tg_deep200000000000"
+	nested := func(id, other string) string {
+		return "Ask the instance admin of Qory Apiary to separate destination " + id + " from another.\n  " + id + " and " + other + " nest: one path lies inside the other."
+	}
+	for name, order := range map[string][]string{"outer first": {outerID, subID}, "inner first": {subID, outerID}} {
+		t.Run(name, func(t *testing.T) {
+			c := destinationSession(t)
+			elsewhere := tempDir(t)
+			c.s.RepositoryWithLinks(t, "acme/deep", "main", map[string]string{"README.md": "deep\n"}, map[string]string{"sub": elsewhere})
+			c.s.Repository(t, "acme/deep2", "main", map[string]string{"README.md": "deep2\n"})
+			c.inputs(t, []any{destinationOf(outerID, "acme/deep"), destinationOf(subID, "acme/deep/sub"), destinationOf(deep2ID, "acme/deep2")})
+			for _, id := range order {
+				other := map[string]string{outerID: subID, subID: outerID}[id]
+				_, err := run(t, "destination", "clone", id)
+				wantLine(t, err, 1, nested(id, other))
+			}
+			if n := c.s.Tunnels(); n != 0 {
+				t.Errorf("the calls opened %d tunnels", n)
+			}
+			if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
+				t.Errorf("the link's folder has %d entries", len(entries))
+			}
+			out, err := run(t, "destination", "clone", deep2ID)
+			if err != nil || out != c.line(deep2ID, "acme/deep2") {
+				t.Errorf("acme/deep2: %q, %v", out, err)
+			}
+		})
 	}
 }

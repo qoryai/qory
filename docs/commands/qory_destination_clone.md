@@ -9,7 +9,7 @@ one into /tmp/qory-destinations/<system>/<path>, and print one line per id, in t
 given: the id and the folder. A destination cloned before in this session is not cloned
 again, and its line is the same. A session clones at most 100 destinations.
 
-The clone goes through the run's proxy, which reads with the run's credential.
+The clone goes through the wall's proxy, which reads with the run's credential.
 
 --verbose adds nothing here.
 

@@ -208,9 +208,36 @@ func TestReadFoldersMakesTheStoreAndTheClones(t *testing.T) {
 	if err := os.Mkdir(taken, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	want := "remove " + taken + " from the image: qory makes the folder of a run's clones only where nothing is, so a read run does not start"
+	want := "remove " + taken + " from the image\n  qory makes the folder of a run's clones only where nothing is, so a read run does not start"
 	if err := readFolders(filepath.Join(other, "qory-artifacts"), taken); err == nil || err.Error() != want {
 		t.Errorf("a folder at the clones' path: %v, want %q", err, want)
+	}
+}
+
+// TestFreshHomeMakesTheReadFoldersWithStore is the preparation of an agent's home with
+// store set, for a read run, and without: with it, the home, the folder of the artifact
+// files and the folder of the clones are each new, empty and of mode 0700; without it,
+// only the home is made.
+func TestFreshHomeMakesTheReadFoldersWithStore(t *testing.T) {
+	before := managedSettings
+	managedSettings = filepath.Join(realTemp(t), "claude-code")
+	t.Cleanup(func() { managedSettings = before })
+	for _, store := range []bool{true, false} {
+		t.Run(fmt.Sprint("store ", store), func(t *testing.T) {
+			dir := realTemp(t)
+			home, artifacts, clones := filepath.Join(dir, "home"), filepath.Join(dir, "qory-artifacts"), filepath.Join(dir, "qory-destinations")
+			if err := freshHomeAt(home, store, artifacts, clones); err != nil {
+				t.Fatal(err)
+			}
+			wantFreshHome(t, home)
+			for _, path := range []string{artifacts, clones} {
+				if store {
+					wantFreshHome(t, path)
+				} else if _, err := os.Lstat(path); !os.IsNotExist(err) {
+					t.Errorf("%s was made without store: %v", path, err)
+				}
+			}
+		})
 	}
 }
 

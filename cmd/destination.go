@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
@@ -23,9 +24,10 @@ import (
 
 // qory destination clone clones the destinations of a run's inputs, the places that the
 // run's workspace works on, into [destinationsDir], each once, when the agent needs them.
-// A run whose inputs list destinations fetches nothing before its session, see
-// [codeRun.listsDestinations]. The clone goes through the wall's proxy, which sets the
-// run's read credential outside the container, so the command reads no token.
+// A read run whose documents contain a harness document and whose inputs list
+// destinations fetches nothing before its session, see [codeRun.clonesDestinations]. The
+// clone goes through the wall's proxy, which sets the run's read credential outside the
+// container, so the command reads no token.
 
 // destinationsDir is the folder the clones are in, each at <system>/<path>. A variable for
 // the tests.
@@ -47,7 +49,8 @@ const clonePrefix = "_clone-"
 
 // The lines of qory destination clone, each with the fix first. [textNotDestination],
 // [textTooManyClones], [textNoAddress], [textNotInSession], [textNoDestinations] and
-// [textNotRepository] exit 2, the others 1.
+// [textNotRepository] exit 2, the others 1. A failure's first line is the gap of the run
+// that a member reads in Qory Apiary, so it contains an id and no path of the machine.
 const (
 	textNotDestination  = "Use an id from destinations in the run's inputs: %s is not one of them."
 	textTooManyClones   = "Clone at most 100 destinations in one session: this call would make clone 101."
@@ -55,11 +58,17 @@ const (
 	textNotInSession    = "Run qory destination clone inside a run's session: %s is not set."
 	textNoDestinations  = "Run qory destination clone only in a run whose inputs list destinations."
 	textNotRepository   = "Clone only a repository: the address of %s is not a repository path."
-	textConnection      = "Check the connection of %s in Qory Apiary: the host returned %s to the clone."
-	textCloneAgain      = "Run qory destination clone again: the clone of %s failed: %s."
-	textBadDestinations = "Report this run to the instance admin of Qory Apiary: inputs.json has malformed destinations.\n  %s"
-	textClonesFolder    = "Check %s, then run qory destination clone again.\n  %s"
+	textConnection      = "Give the integration access to %s in Qory Apiary, then click Run Explore again.\n  The host returned %s to the clone."
+	textCloneAgain      = "Run Explore again later: the clone of %s failed: %s."
+	textClonesFolder    = "Ask the instance admin of Qory Apiary to check the machine: it cannot store %s.\n  %s: %s"
+	textBadDestinations = "Ask the instance admin of Qory Apiary to fix the destinations of this run: they are malformed.\n  %s"
+	textNest            = "Ask the instance admin of Qory Apiary to separate destination %s from another.\n  %s and %s nest: one path lies inside the other."
+	textProxyBlocks     = "Ask the instance admin of Qory Apiary to let the proxy reach the host of %s."
 )
+
+// allClones is the word of [textClonesFolder] for a failure of [destinationsDir] or of its
+// record, which concerns no one id.
+const allClones = "the clones"
 
 // envHarnessHome is the variable that a run sets to the composed home, which contains
 // the run's inputs.json.
@@ -91,27 +100,37 @@ type destination struct {
 	} `json:"target"`
 }
 
-// inputDestinations is the member of a run's inputs that lists its destinations.
-type inputDestinations struct {
-	Destinations []json.RawMessage `json:"destinations"`
+// errNotObject is the error of inputs that are not a JSON object.
+var errNotObject = errors.New("inputs.json is not a JSON object")
+
+// destinationsMember is the member destinations of inputs, a JSON object, by its exact
+// name, as it came; nil when inputs have none. It is [errNotObject] for inputs that are
+// not an object.
+func destinationsMember(inputs []byte) (json.RawMessage, error) {
+	var in map[string]json.RawMessage
+	if err := json.Unmarshal(inputs, &in); err != nil || in == nil {
+		return nil, errNotObject
+	}
+	return in["destinations"], nil
 }
 
 // listedDestinations is the destinations member of inputs, a JSON object, with each
 // entry as it came; none when inputs are not an object or have no such array.
 func listedDestinations(inputs []byte) []json.RawMessage {
-	var in inputDestinations
-	if json.Unmarshal(inputs, &in) != nil {
+	raw, err := destinationsMember(inputs)
+	var list []json.RawMessage
+	if err != nil || raw == nil || json.Unmarshal(raw, &list) != nil {
 		return nil
 	}
-	return in.Destinations
+	return list
 }
 
 // readDestinations reads the destinations of the inputs at path, $QORY_HARNESS_HOME's
 // inputs.json, and checks each as the explore inputs' schema has it: 1 to 250 entries,
 // each with an id of [destinationID], no id twice, a collection of 1 to 200 characters,
 // and an address, when it has one, with a system of [systemName] and a path of 1 to 200
-// characters with no control character. A missing file and inputs with no destinations
-// are [errNoDestinations].
+// characters with no control character. A missing file, inputs with no destinations
+// and an empty or null list are [errNoDestinations], as [listedDestinations] has them.
 //
 // shortcut: reads destinations with a local reader, until qory pins integrations at T-30's merge, then use the contract's reader
 func readDestinations(path string) ([]destination, error) {
@@ -122,19 +141,21 @@ func readDestinations(path string) ([]destination, error) {
 	if err != nil {
 		return nil, err
 	}
-	var in map[string]json.RawMessage
-	if err := json.Unmarshal(data, &in); err != nil || in == nil {
-		return nil, errors.New("inputs.json is not a JSON object")
+	raw, err := destinationsMember(data)
+	if err != nil {
+		return nil, err
 	}
-	raw, ok := in["destinations"]
-	if !ok {
+	if raw == nil {
 		return nil, errNoDestinations
 	}
 	var entries []destination
 	if err := json.Unmarshal(raw, &entries); err != nil {
 		return nil, errors.New("destinations is not an array of objects")
 	}
-	if len(entries) < 1 || len(entries) > 250 {
+	if len(entries) == 0 {
+		return nil, errNoDestinations
+	}
+	if len(entries) > 250 {
 		return nil, fmt.Errorf("destinations has %d entries, not 1 to 250", len(entries))
 	}
 	for i, d := range entries {
@@ -167,11 +188,15 @@ func shownID(arg string) string {
 	return shown
 }
 
-// clone is one destination a call clones: its id, its system and path, and its folder.
-type clone struct{ id, system, path, dir string }
+// clone is one destination a call clones: its id, its system and path, its folder, and
+// that folder relative to [destinationsDir].
+type clone struct{ id, system, path, dir, rel string }
 
 // cloneOf is the clone of arg among list: the destination with that id, with an address
-// that [preparation.Check] passes as one repository path, in a folder under root.
+// that [preparation.Check] passes as one repository path, in a folder under root. A
+// destination whose path lies inside the path of another one on the same system, or
+// contains it, stops with [textNest]: its clone would put one repository's folder inside
+// another's, where a link that the outer repository commits could lead out of root.
 func cloneOf(arg string, list []destination, root string) (clone, error) {
 	i := slices.IndexFunc(list, func(d destination) bool { return d.ID == arg })
 	if i < 0 {
@@ -187,17 +212,38 @@ func cloneOf(arg string, list []destination, root string) (clone, error) {
 	if err != nil || len(paths) != 1 || paths[0] != path {
 		return clone{}, input(fmt.Errorf(textNotRepository, d.ID))
 	}
-	dir := filepath.Join(root, system, filepath.FromSlash(path))
+	rel := filepath.Join(system, filepath.FromSlash(path))
 	// Check's system and path have no . or .. part and no NUL; the folder stays under root.
-	if rel, err := filepath.Rel(root, dir); err != nil || !filepath.IsLocal(rel) || system == "." || system == ".." {
+	if !filepath.IsLocal(rel) || system == "." || system == ".." {
 		return clone{}, input(fmt.Errorf(textNotRepository, d.ID))
 	}
-	return clone{id: d.ID, system: system, path: path, dir: dir}, nil
+	for _, o := range list {
+		if o.Target.Address != nil && o.Target.Address.System == system && nest(path, o.Target.Address.Path) {
+			return clone{}, fmt.Errorf(textNest, d.ID, d.ID, o.ID)
+		}
+	}
+	return clone{id: d.ID, system: system, path: path, dir: filepath.Join(root, rel), rel: rel}, nil
 }
 
-// clonesFolder is the line of a failure of the folder root or of its record, with cause.
-func clonesFolder(root string, cause error) error {
-	return fmt.Errorf(textClonesFolder, integration.Printable(root), integration.Printable(cause.Error()))
+// nest reports whether one of the paths a and b lies inside the other, at a / between
+// two parts. The same path does not nest: both ids share one clone.
+func nest(a, b string) bool {
+	return strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+}
+
+// clonesFolder is the line of a failure to store what, an id or [allClones], in the folder
+// root, with cause. The path and the cause go on the second line, from a path error when
+// cause is one.
+func clonesFolder(what, root string, cause error) error {
+	path, why := root, cause.Error()
+	var pe *fs.PathError
+	if errors.As(cause, &pe) {
+		path, why = pe.Path, pe.Op+": "+pe.Err.Error()
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(root, path)
+		}
+	}
+	return fmt.Errorf(textClonesFolder, what, integration.Printable(path), integration.Printable(why))
 }
 
 // clonedIDs reads the record f, one id of [destinationID] per line.
@@ -213,46 +259,83 @@ func clonedIDs(f *os.File) ([]string, error) {
 	return ids, sc.Err()
 }
 
-// openRecord makes root, mode 0700, where nothing is, refuses a root that is a link or no
-// folder, and opens its record with [lockedRecord], so one call at a time reads and
-// writes it.
-func openRecord(root string) (*os.File, error) {
+// errLinkOrFile is the error of a part of a clone's folder that is a link or a file.
+var errLinkOrFile = errors.New("a link or a file, and qory clones only into folders")
+
+// openRecord makes root, mode 0700, where nothing is, stops at a root that is a link or
+// no folder, and opens its record with [lockedRecord], so one call at a time reads and
+// writes it. It opens root as an [os.Root], through which each clone's folder is made.
+func openRecord(root string) (*os.File, *os.Root, error) {
 	if err := os.Mkdir(root, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-		return nil, err
+		return nil, nil, err
 	}
 	info, err := os.Lstat(root)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !info.IsDir() {
-		return nil, errors.New("it is a link or a file, and qory clones only into a folder")
+		return nil, nil, &fs.PathError{Op: "lstat", Path: root, Err: errLinkOrFile}
 	}
-	return lockedRecord(filepath.Join(root, clonedFile))
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	f, err := lockedRecord(filepath.Join(root, clonedFile))
+	if err != nil {
+		r.Close()
+		return nil, nil, err
+	}
+	return f, r, nil
 }
 
-// cloned reports whether dir is a clone: a folder with a .git folder.
-func cloned(dir string) bool {
-	info, err := os.Lstat(filepath.Join(dir, ".git"))
-	return err == nil && info.IsDir()
+// folders checks each part of rel under r, from the first, with Lstat: each must be a
+// folder, never a link, so no path through them leads elsewhere. With mk, it makes each
+// missing part, mode 0700; without, a missing part is [fs.ErrNotExist].
+func folders(r *os.Root, rel string, mk bool) error {
+	parts := strings.Split(rel, string(filepath.Separator))
+	for i := range parts {
+		p := filepath.Join(parts[:i+1]...)
+		info, err := r.Lstat(p)
+		if errors.Is(err, fs.ErrNotExist) && mk {
+			if err = r.Mkdir(p, 0o700); err == nil {
+				continue
+			}
+		}
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			return &fs.PathError{Op: "lstat", Path: p, Err: errLinkOrFile}
+		}
+	}
+	return nil
 }
 
-// cloneInto clones d into a new folder under root and moves it to d.dir.
+// cloned reports whether d's folder under r is a clone: a folder with a .git folder,
+// with no link on the way.
+func cloned(r *os.Root, d clone) bool {
+	return folders(r, filepath.Join(d.rel, ".git"), false) == nil
+}
+
+// cloneInto clones d into a new folder under r and moves it to d's folder, whose parts
+// [folders] makes.
 //
 // shortcut: a raw git clone in the session skips the id check and the count but stays inside the run's read credential; accepted under 910
-func cloneInto(c *cobra.Command, root string, d clone) error {
+func cloneInto(c *cobra.Command, r *os.Root, d clone) error {
+	root := r.Name()
 	tmp, err := os.MkdirTemp(root, clonePrefix)
 	if err != nil {
-		return clonesFolder(root, err)
+		return clonesFolder(d.id, root, err)
 	}
 	defer os.RemoveAll(tmp)
 	repo := filepath.Join(tmp, "repository")
 	if err := preparation.Clone(c.Context(), d.system, d.path, repo); err != nil {
 		return cloneFailed(d.id, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(d.dir), 0o700); err != nil {
-		return clonesFolder(root, err)
+	if err := folders(r, filepath.Dir(d.rel), true); err != nil {
+		return clonesFolder(d.id, root, err)
 	}
-	if err := os.Rename(repo, d.dir); err != nil {
+	if err := r.Rename(filepath.Join(filepath.Base(tmp), "repository"), d.rel); err != nil {
 		return fmt.Errorf(textCloneAgain, d.id, "its folder is in use")
 	}
 	return nil
@@ -266,15 +349,19 @@ var (
 )
 
 // cloneFailed is the line of the clone of id that failed with err, with a cause in words
-// that contain no part of git's output, which contains the URL: [textConnection] for a
-// host that returned 401, 403 or 404, and [textCloneAgain] with the status of the proxy
-// or the host, git's exit status, or what stopped git.
+// that contain no part of git's output, which contains the URL: [textProxyBlocks] for a
+// proxy that returned 403 or 407, [textConnection] for a host that returned 401, 403 or
+// 404, and [textCloneAgain] with the status of the proxy or the host, git's exit status,
+// or what stopped git.
 func cloneFailed(id string, err error) error {
 	var ce *preparation.CloneError
 	if !errors.As(err, &ce) {
 		return fmt.Errorf(textCloneAgain, id, "git did not start")
 	}
 	if m := connectStatus.FindStringSubmatch(ce.Output); m != nil {
+		if m[1] == "403" || m[1] == "407" {
+			return fmt.Errorf(textProxyBlocks, id)
+		}
 		return fmt.Errorf(textCloneAgain, id, "the proxy returned "+m[1])
 	}
 	status := ""
@@ -322,7 +409,7 @@ one into /tmp/qory-destinations/<system>/<path>, and print one line per id, in t
 given: the id and the folder. A destination cloned before in this session is not cloned
 again, and its line is the same. A session clones at most ` + strconv.Itoa(maxClones) + ` destinations.
 
-The clone goes through the run's proxy, which reads with the run's credential.
+The clone goes through the wall's proxy, which reads with the run's credential.
 
 --verbose adds nothing here.
 
@@ -350,14 +437,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#clone-a-destination`,
 					return err
 				}
 			}
-			record, err := openRecord(root)
+			record, r, err := openRecord(root)
 			if err != nil {
-				return clonesFolder(root, err)
+				return clonesFolder(allClones, root, err)
 			}
+			defer r.Close()
 			defer record.Close()
 			recorded, err := clonedIDs(record)
 			if err != nil {
-				return clonesFolder(root, err)
+				return clonesFolder(allClones, root, err)
 			}
 			counted := slices.Clone(recorded)
 			for _, w := range wanted {
@@ -372,14 +460,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#clone-a-destination`,
 				// A clone the record has but whose folder is gone, such as one the agent
 				// removed, is cloned again, and counted once. A folder that is a clone
 				// already, such as that of another id with the same address, is kept.
-				if !cloned(w.dir) {
-					if err := cloneInto(c, root, w); err != nil {
+				if !cloned(r, w) {
+					if err := cloneInto(c, r, w); err != nil {
 						return err
 					}
 				}
 				if !slices.Contains(recorded, w.id) {
 					if _, err := fmt.Fprintln(record, w.id); err != nil {
-						return clonesFolder(root, err)
+						return clonesFolder(w.id, root, err)
 					}
 					recorded = append(recorded, w.id)
 				}
