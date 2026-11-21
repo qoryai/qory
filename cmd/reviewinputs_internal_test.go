@@ -9,8 +9,11 @@ import (
 	"testing"
 )
 
+// head is the fresh copy's pushed head in these tests.
+const head = "0123456789abcdef0123456789abcdef01234567"
+
 func TestNewReviewSessionInputsJSON(t *testing.T) {
-	in, err := newReviewSessionInputs("/r/reports", "/r/suite_result.json", "/r/start")
+	in, err := newReviewSessionInputs(head, "/r/change.diff", "/r/reports", "/r/suite_result.json", "/r/start")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -18,9 +21,12 @@ func TestNewReviewSessionInputsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"review_session":{"reports":"/r/reports","suite_result":"/r/suite_result.json"},"start_artifacts":"/r/start"}`
+	const want = `{"review_session":{"commit":"0123456789abcdef0123456789abcdef01234567","diff":"/r/change.diff","reports":"/r/reports","suite_result":"/r/suite_result.json"},"start_artifacts":"/r/start"}`
 	if string(data) != want {
 		t.Errorf("json = %s, want %s", data, want)
+	}
+	if in.ReviewSession.Commit != head {
+		t.Errorf("commit = %q, want the fresh copy's head %q", in.ReviewSession.Commit, head)
 	}
 	if !slices.Equal(reviewStartArtifactTypes, []string{"acceptance-criteria", "spec", "build-plan"}) {
 		t.Errorf("start artifact types = %q", reviewStartArtifactTypes)
@@ -54,18 +60,23 @@ func TestNewReviewSessionInputsRefuses(t *testing.T) {
 	const ok = "/r/reports"
 	for _, c := range []struct {
 		name   string
+		commit string
+		diff   string
 		report string
 		suite  string
 		start  string
 		want   string
 	}{
-		{"relative reports", "reports", "/s", "/t", "qory.review_session.reports"},
-		{"suite result with ..", ok, "/s/../x", "/t", "qory.review_session.suite_result"},
-		{"suite result below .git is fine to read", ok, "/w/.git/s", "/t", ""},
-		{"relative start", ok, "/s", "start", "qory.start_artifacts"},
-		{"reports in .claude", "/w/.claude/reports", "/s", "/t", "qory.review_session.reports"},
+		{"short commit", head[:7], "/d", ok, "/s", "/t", "qory.review_session.commit"},
+		{"upper-case commit", strings.ToUpper(head), "/d", ok, "/s", "/t", "qory.review_session.commit"},
+		{"relative diff", head, "change.diff", ok, "/s", "/t", "qory.review_session.diff"},
+		{"relative reports", head, "/d", "reports", "/s", "/t", "qory.review_session.reports"},
+		{"suite result with ..", head, "/d", ok, "/s/../x", "/t", "qory.review_session.suite_result"},
+		{"suite result below .git is fine to read", head, "/d", ok, "/w/.git/s", "/t", ""},
+		{"relative start", head, "/d", ok, "/s", "start", "qory.start_artifacts"},
+		{"reports in .claude", head, "/d", "/w/.claude/reports", "/s", "/t", "qory.review_session.reports"},
 	} {
-		_, err := newReviewSessionInputs(c.report, c.suite, c.start)
+		_, err := newReviewSessionInputs(c.commit, c.diff, c.report, c.suite, c.start)
 		if c.want == "" {
 			if err != nil {
 				t.Errorf("%s: error %v", c.name, err)

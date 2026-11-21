@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -19,8 +20,13 @@ const maxReviewPath = 4096
 // session with qory.review as one reviewer, and this session starts several.
 
 // reviewSession is qory.review_session, written into the inputs.json of the
-// review-changes session.
+// review-changes session. Its reviewer agents read the commit and the diff here, not in
+// the session's prompt, so the session cannot point them at another commit.
 type reviewSession struct {
+	// Commit is the full id of the pushed head of the fresh copy that the reviewers read.
+	Commit string `json:"commit"`
+	// Diff is the absolute path of the diff of the change, from the base to Commit.
+	Diff string `json:"diff"`
 	// Reports is the absolute path of the folder where each reviewer agent of the session
 	// writes its report, as <agent>.json.
 	Reports string `json:"reports"`
@@ -40,25 +46,33 @@ type reviewSessionInputs struct {
 	StartArtifacts string        `json:"start_artifacts"`
 }
 
+// commitForm is a full commit id: 40 hexadecimal digits for SHA-1, 64 for SHA-256.
+var commitForm = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+
 // newReviewSessionInputs are the members of qory for the review-changes session, with
+// commit, the full id of the fresh copy's pushed head, diff, the path of its diff,
 // reports, the folder where the reviewer agents write their reports, suiteResult, the
 // path of the suite result file, and startArtifacts, the path of the folder of
 // [reviewStartArtifactTypes]. It returns an error that starts with the fix for a reports
 // folder that the harness's tool guard does not accept as a place to write, and for a
-// path of a file or folder to read that is not absolute and clean.
+// path of a file or folder to read that is not absolute and clean, and for a commit that
+// is not a full commit id.
 //
 // shortcut: not called yet; wired in when cmd/run.go, cmd/rundocs.go and
 // cmd/pushstep.go can change (after Q-01, Q-36 and Q-73).
-func newReviewSessionInputs(reports, suiteResult, startArtifacts string) (reviewSessionInputs, error) {
+func newReviewSessionInputs(commit, diff, reports, suiteResult, startArtifacts string) (reviewSessionInputs, error) {
+	if !commitForm.MatchString(commit) {
+		return reviewSessionInputs{}, fmt.Errorf("Give the session the full id of the fresh copy's head in qory.review_session.commit.\nThe value is %s.", strconv.Quote(commit))
+	}
 	if why := reviewPathProblem(reports); why != "" {
 		return reviewSessionInputs{}, fmt.Errorf("Give the session an absolute path in qory.review_session.reports that the harness accepts.\nThe path %s %s.", strconv.Quote(reports), why)
 	}
-	for _, p := range []struct{ what, path string }{{"review_session.suite_result", suiteResult}, {"start_artifacts", startArtifacts}} {
+	for _, p := range []struct{ what, path string }{{"review_session.diff", diff}, {"review_session.suite_result", suiteResult}, {"start_artifacts", startArtifacts}} {
 		if !cleanAbs(p.path) {
 			return reviewSessionInputs{}, fmt.Errorf("Give the session an absolute, clean path in qory.%s.\nThe path is %s.", p.what, strconv.Quote(p.path))
 		}
 	}
-	return reviewSessionInputs{ReviewSession: reviewSession{Reports: reports, SuiteResult: suiteResult}, StartArtifacts: startArtifacts}, nil
+	return reviewSessionInputs{ReviewSession: reviewSession{Commit: commit, Diff: diff, Reports: reports, SuiteResult: suiteResult}, StartArtifacts: startArtifacts}, nil
 }
 
 // cleanAbs reports whether path is absolute and clean, and has no line break or NUL.
