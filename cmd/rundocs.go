@@ -562,8 +562,9 @@ func sessionDeadline(start time.Time, limit time.Duration) time.Time {
 // sessionMinute is a minute of the documents' time_limit_minutes; a test sets a shorter one.
 var sessionMinute = time.Minute
 
-// sessionLimit is the time limit of session 1 of the run r: the documents'
-// time_limit_minutes, and 0, no limit, when the documents set none. qory sets no
+// sessionLimit is the time limit of the current session of the run r: time_limit_minutes
+// of the documents for session 1, or of the next-session answer for a later session, see
+// [codeRun.next], and 0, no limit, when they set none. qory sets no
 // default: Qory Apiary writes a limit for each workflow, 180 minutes when the workspace
 // stores none. The limit counts from the agent's start, see [sessionDeadline].
 func (r *codeRun) sessionLimit() time.Duration {
