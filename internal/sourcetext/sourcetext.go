@@ -66,7 +66,7 @@ func Escape(s string) string {
 
 // EscapeJSON returns doc with [Escape] applied to each string value and each member name,
 // read after JSON decoding. A hidden character written as a JSON escape, such as
-// `‮`, or as a surrogate pair, such as `󠁁` (U+E0041), is caught.
+// `\u202e`, or as a surrogate pair, such as `\udb40\udc41` (U+E0041), is caught.
 //
 // A string that has no hidden rune keeps its bytes. A string that has one is written
 // again, with the minimal JSON escapes of RFC 8785 and no HTML escaping of `<`, `>` and
