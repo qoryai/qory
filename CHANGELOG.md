@@ -677,6 +677,15 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A run from a run code runs the step `workflow`, in place of `explore`: it starts the
+  workflow that the run documents set, whichever workflow of the process Qory Apiary
+  starts. The documents name what the run is for in `subject`, with a `kind`, such as
+  `work_item` or `ticket`, and an `id`, in place of `work_item`, and may set a
+  `trigger`, such as `take_in`, which qory reads and changes nothing for. qory checks
+  `inputs.domain` and `inputs.work_item.id` only for a subject of the kind `work_item`,
+  and only such a run works on the branch `qory/<work item id>`. Documents with the step
+  `explore` or the member `work_item` stop the run after the redemption, exit 1, with `it
+  breaks documents.schema.json`.
 - The `config.toml` of a Codex home, and of a walled Codex run, sets
   `features.unified_exec_tty = false`. A shell started with a terminal takes commands
   through `write_stdin`, for which Codex runs no `PreToolUse` hook. A Codex agent can no
@@ -701,10 +710,10 @@ release may change what an existing document does, and states it under Upgrading
   stopped on most of them at Forager's check, with Forager's lines, and passed a key under
   `hooks`. A walled run stopped on `hooks.state` and `hooks={…}`, and passed the other
   keys under `hooks`, such as `hooks.Stop`. Every run passed `--trust`.
-- A run from a run code whose explore documents contain no `run_settings` stops before
+- A run from a run code whose workflow documents contain no `run_settings` stops before
   anything is installed or fetched, with `The run settings set no runtime, so the run
   did not start; the code is used.` and `qory runs one of claude and codex.` Until now,
-  such a run started on `claude`. Explore documents start an agent session, so they
+  such a run started on `claude`. Workflow documents start an agent session, so they
   require `run_settings` with a `runtime`. Documents whose `run_settings` are null, or
   whose `runtime` is missing, empty or null, stop with the same line, where they stopped
   with `it breaks documents.schema.json`. A workflow runs on the runtime of the

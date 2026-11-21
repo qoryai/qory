@@ -611,7 +611,7 @@ func TestAWriteRunPushesWhatTheAgentLeft(t *testing.T) {
 func TestThePushStepPushesRefsHeadsQoryAndTheWorkItemId(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.change = func(d map[string]any) {
-		d["work_item"].(map[string]any)["id"] = "wi_01HZX"
+		d["subject"].(map[string]any)["id"] = "wi_01HZX"
 		if in, ok := d["inputs"].(map[string]any); ok && in["work_item"] != nil {
 			in["work_item"].(map[string]any)["id"] = "wi_01HZX"
 		}

@@ -31,10 +31,11 @@ var compiledDocuments = sync.OnceValues(func() (*jsonschema.Schema, error) {
 // that, so the value of such a member is never decoded or copied. Then the rules the
 // schema states and cannot check are checked: the inputs, compacted, are at most
 // contracts.MaxInputs bytes; run_settings is checked as [checkRunSettings] describes; and for
-// the step explore, inputs.domain must be the domain and inputs.work_item.id the work
-// item's id, as the explore inputs schema states. Inputs are the documents' bytes,
-// which the run reads unchanged. The error contains a member's name, the schema's name
-// or a byte count, never a value of documents.
+// a subject of the kind work_item, inputs.domain must be the domain and
+// inputs.work_item.id the subject's id, as documents.schema.json states. A subject of
+// another kind has no such rule. Inputs are the documents' bytes, which the run reads
+// unchanged. The error contains a member's name, the schema's name or a byte count,
+// never a value of documents.
 func ReadDocuments(documents json.RawMessage) (contracts.Documents, error) {
 	v := jsontext.Value(documents)
 	if !v.IsValid() {
@@ -63,7 +64,7 @@ func ReadDocuments(documents json.RawMessage) (contracts.Documents, error) {
 	if err := checkRunSettings(documentsSchema, doc.Step, doc.RunSettings); err != nil {
 		return contracts.Documents{}, err
 	}
-	if doc.Step == StepExplore {
+	if doc.Subject != nil && doc.Subject.Kind == SubjectWorkItem {
 		var in struct {
 			Domain   string `json:"domain"`
 			WorkItem *struct {
@@ -72,18 +73,18 @@ func ReadDocuments(documents json.RawMessage) (contracts.Documents, error) {
 		}
 		switch {
 		case json.Unmarshal(doc.Inputs, &in) != nil:
-			return contracts.Documents{}, errors.New("its inputs do not read as the explore step's inputs")
+			return contracts.Documents{}, errors.New("its inputs do not read as the inputs of a work item's run")
 		case in.Domain != doc.Domain:
 			return contracts.Documents{}, errors.New("its inputs.domain is not its domain")
-		case in.WorkItem == nil || doc.WorkItem == nil || in.WorkItem.ID != doc.WorkItem.ID:
-			return contracts.Documents{}, errors.New("its inputs.work_item.id is not its work item's id")
+		case in.WorkItem == nil || in.WorkItem.ID != doc.Subject.ID:
+			return contracts.Documents{}, errors.New("its inputs.work_item.id is not its subject's id")
 		}
 	}
 	return doc, nil
 }
 
 // checkRunSettings checks rs, the run_settings of documents of the schema name already
-// checked. It checks again that run_settings comes only for the step explore, which the
+// checked. It checks again that run_settings comes only for the step workflow, which the
 // schema checks too. It then checks the rules the schema states and cannot check: the
 // ids in provider_models are unique, effort is listed for model, each tier's model is
 // listed, and each tier's effort is listed for that tier's model. The schema checks each
@@ -94,7 +95,7 @@ func checkRunSettings(name, step string, rs *contracts.RunSettings) error {
 		return nil
 	}
 	broken := fmt.Errorf("it breaks %s", name)
-	if step != StepExplore {
+	if step != StepWorkflow {
 		return broken
 	}
 	efforts := make(map[string][]string, len(rs.ProviderModels))

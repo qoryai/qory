@@ -717,13 +717,14 @@ func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
 		documents string
 		lacks     bool
 	}{
-		{`{"step":"explore","run_settings":{}}`, true},
-		{`{"step":"explore","run_settings":{"runtime":""}}`, true},
-		{`{"step":"explore","run_settings":{"runtime":null}}`, true},
-		{`{"step":"explore","run_settings":{"runtime":"codex"}}`, false},
-		{`{"step":"explore"}`, true},
-		{`{"step":"explore","run_settings":null}`, true},
-		{`{"step":"explore","run_settings":"claude"}`, false},
+		{`{"step":"workflow","run_settings":{}}`, true},
+		{`{"step":"workflow","run_settings":{"runtime":""}}`, true},
+		{`{"step":"workflow","run_settings":{"runtime":null}}`, true},
+		{`{"step":"workflow","run_settings":{"runtime":"codex"}}`, false},
+		{`{"step":"workflow"}`, true},
+		{`{"step":"workflow","run_settings":null}`, true},
+		{`{"step":"workflow","run_settings":"claude"}`, false},
+		{`{"step":"explore"}`, false},
 		{`{"step":"prebuild","run_settings":{}}`, false},
 		{`{"step":"prebuild"}`, false},
 	} {
@@ -733,6 +734,32 @@ func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
 	}
 	if _, err := codeDocumentsOf(json.RawMessage(`{"step":"prebuild","run_settings":{}}`)); err == nil || !strings.Contains(err.Error(), "documents.schema.json") {
 		t.Errorf("a prebuild with run settings and no runtime: %v", err)
+	}
+}
+
+// TestARunCodesWorkItemIsASubjectOfThatKind is documents of the step workflow whose
+// subject is a work item, a ticket, or absent: the run's work item is the subject's id for
+// the kind work_item alone, so a run for another kind reads no work item and its branch.
+// Documents with no workflow, which the schema refuses, stop the run.
+func TestARunCodesWorkItemIsASubjectOfThatKind(t *testing.T) {
+	settings := &contracts.RunSettings{Runtime: "claude"}
+	for _, c := range []struct {
+		subject *contracts.Subject
+		want    string
+	}{
+		{&contracts.Subject{Kind: "work_item", ID: "wi_8Kx2mQ4vT9"}, "wi_8Kx2mQ4vT9"},
+		{&contracts.Subject{Kind: "ticket", ID: "TRK-1"}, ""},
+		{nil, ""},
+	} {
+		r, err := codeRunOf(contracts.Documents{Step: "workflow", Inputs: json.RawMessage(`{}`), Workflow: "example", Subject: c.subject, Trigger: "take_in", RunSettings: settings})
+		if err != nil {
+			t.Errorf("the subject %+v: %v", c.subject, err)
+		} else if r.workItem != c.want {
+			t.Errorf("the subject %+v: the work item %q, want %q", c.subject, r.workItem, c.want)
+		}
+	}
+	if _, err := codeRunOf(contracts.Documents{Step: "workflow", Inputs: json.RawMessage(`{}`), RunSettings: settings}); err == nil || !strings.HasSuffix(err.Error(), "has no workflow"+codeUsed) {
+		t.Errorf("no workflow: %v", err)
 	}
 }
 

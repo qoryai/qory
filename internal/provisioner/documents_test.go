@@ -50,8 +50,9 @@ func noValue(t *testing.T, name string, err error) {
 }
 
 // TestEveryDocumentsFixtureIsRead reads each of the contract's documents fixtures: each
-// is read with its step, its domain, its workflow and harness as written, its run
-// settings as sent, and its inputs as the documents' bytes.
+// is read with its step, its domain, its workflow and harness, its subject and trigger
+// as written, its run settings as sent, and its inputs as the documents' bytes. A
+// subject of a kind other than work_item, whose inputs have no work item, is read.
 func TestEveryDocumentsFixtureIsRead(t *testing.T) {
 	names, err := fs.Glob(contracts.RunFS, "fixtures/documents/*.json")
 	if err != nil || len(names) < 18 {
@@ -78,6 +79,7 @@ func TestEveryDocumentsFixtureIsRead(t *testing.T) {
 				t.Fatal(err)
 			}
 			if doc.Step != want.Step || doc.Domain != want.Domain || doc.Workflow != want.Workflow || !reflect.DeepEqual(doc.Harness, want.Harness) ||
+				!reflect.DeepEqual(doc.Subject, want.Subject) || doc.Trigger != want.Trigger ||
 				(doc.Target == nil) != (doc.Access == "") || doc.ImageDestination != want.ImageDestination {
 				t.Errorf("read %+v", doc)
 			}
@@ -139,7 +141,8 @@ func TestEveryInvalidDocumentsFixtureFails(t *testing.T) {
 }
 
 // TestBrokenDocumentsAreRefused refuses documents that break the schema, a rule it
-// states, or the explore inputs' rules: each error contains no value of the documents.
+// states, or the rules of the inputs of a work item's run: each error contains no value
+// of the documents.
 func TestBrokenDocumentsAreRefused(t *testing.T) {
 	const broken = "it breaks documents.schema.json"
 	inputs := func(doc map[string]any) map[string]any { return doc["inputs"].(map[string]any) }
@@ -167,8 +170,8 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 		{"another domain in inputs", documentsOf(t, "explore-workflow.json", func(d map[string]any) { inputs(d)["domain"] = "marketing" }), "its inputs.domain is not its domain"},
 		{"another work item in inputs", documentsOf(t, "explore-workflow.json", func(d map[string]any) {
 			inputs(d)["work_item"].(map[string]any)["id"] = "wi_0000000000"
-		}), "its inputs.work_item.id is not its work item's id"},
-		{"no work item in inputs", documentsOf(t, "explore-workflow.json", func(d map[string]any) { delete(inputs(d), "work_item") }), "its inputs.work_item.id is not its work item's id"},
+		}), "its inputs.work_item.id is not its subject's id"},
+		{"no work item in inputs", documentsOf(t, "explore-workflow.json", func(d map[string]any) { delete(inputs(d), "work_item") }), "its inputs.work_item.id is not its subject's id"},
 		{"inputs too large", documentsOf(t, "explore-without-target.json", func(d map[string]any) {
 			inputs(d)["x"] = strings.Repeat("a", contracts.MaxInputs)
 		}), "its inputs are larger than 786432 bytes"},
