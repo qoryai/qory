@@ -38,7 +38,7 @@ func TestReadSessionSpecRefusesNestedDockerAndOtherRuntimes(t *testing.T) {
 	_, err := readSessionSpec(session.SessionSpec{}, "claude", true)
 	var re *reasonError
 	if !errors.As(err, &re) || re.code != "review_needs_no_nested_docker" ||
-		err.Error() != "Remove the Docker daemon from the run's image. A read-only review session cannot run beside an inner Docker daemon." {
+		err.Error() != "Remove the Docker daemon from the run's image.\n  A read-only review session cannot run beside an inner Docker daemon." {
 		t.Errorf("nested Docker returned %v", err)
 	}
 	if _, err := readSessionSpec(session.SessionSpec{}, "codex", false); err == nil || !strings.HasPrefix(err.Error(), "Run the workflow on claude.") {

@@ -15,7 +15,7 @@ import (
 const reasonReviewNeedsNoNestedDocker = "review_needs_no_nested_docker"
 
 // textReviewNeedsNoNestedDocker is the error of that session.
-const textReviewNeedsNoNestedDocker = "Remove the Docker daemon from the run's image. A read-only review session cannot run beside an inner Docker daemon."
+const textReviewNeedsNoNestedDocker = "Remove the Docker daemon from the run's image.\n  A read-only review session cannot run beside an inner Docker daemon."
 
 // readSessionTools are the tools of a Claude Code session whose workflow has
 // access: read: Read, Grep and Glob read the checkout, Skill loads the workflow's skill,
