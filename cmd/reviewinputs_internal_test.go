@@ -67,9 +67,17 @@ func TestNewReviewerInputsRefuses(t *testing.T) {
 		{"role 0", "0", ok, "/s", "/t", "group role"},
 		{"relative report", "reviewers", reviewSessionSpec{Reviewer: "x", Report: "report.json"}, "/s", "/t", "qory.review.report"},
 		{"suite result with ..", "reviewers", ok, "/s/../x", "/t", "qory.review.suite_result"},
-		{"start in .git", "reviewers", ok, "/s", "/w/.git/start", "qory.start_artifacts"},
+		{"suite result below .git is fine to read", "reviewers", ok, "/w/.git/s", "/t", ""},
+		{"relative start", "reviewers", ok, "/s", "start", "qory.start_artifacts"},
+		{"report in .claude", "reviewers", reviewSessionSpec{Reviewer: "x", Report: "/w/.claude/r.json"}, "/s", "/t", "qory.review.report"},
 	} {
 		_, err := newReviewerInputs(c.role, c.spec, c.suite, c.start)
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("%s: error %v", c.name, err)
+			}
+			continue
+		}
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: error %v, want %q", c.name, err, c.want)
 			continue

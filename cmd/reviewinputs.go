@@ -67,8 +67,9 @@ func newStageInputs(role string) (stageInputs, error) {
 // newReviewerInputs are the members of qory for the reviewer session spec, in a stage
 // whose reviewers are the group role role, with suiteResult, the path of the suite result
 // file, and startArtifacts, the path of the folder of [reviewStartArtifactTypes]. It
-// returns an error that starts with the fix for a role, or a path that the harness's tool
-// guard does not accept.
+// returns an error that starts with the fix for a role, a report path that the harness's
+// tool guard does not accept, and a path of a file or folder to read that is not absolute
+// and clean.
 //
 // shortcut: not called yet; wired in when cmd/run.go, cmd/rundocs.go and
 // cmd/pushstep.go can change (after Q-01, Q-36 and Q-73).
@@ -77,9 +78,12 @@ func newReviewerInputs(role string, spec reviewSessionSpec, suiteResult, startAr
 	if err != nil {
 		return reviewerInputs{}, err
 	}
-	for _, p := range []struct{ what, path string }{{"review.report", spec.Report}, {"review.suite_result", suiteResult}, {"start_artifacts", startArtifacts}} {
-		if why := reviewPathProblem(p.path); why != "" {
-			return reviewerInputs{}, fmt.Errorf("Give the reviewer an absolute path in qory.%s that the harness accepts.\nFor %s, the path %s %s.", p.what, spec.Reviewer, strconv.Quote(p.path), why)
+	if why := reviewPathProblem(spec.Report); why != "" {
+		return reviewerInputs{}, fmt.Errorf("Give the reviewer an absolute path in qory.review.report that the harness accepts.\nFor %s, the path %s %s.", spec.Reviewer, strconv.Quote(spec.Report), why)
+	}
+	for _, p := range []struct{ what, path string }{{"review.suite_result", suiteResult}, {"start_artifacts", startArtifacts}} {
+		if !cleanAbs(p.path) {
+			return reviewerInputs{}, fmt.Errorf("Give the reviewer an absolute, clean path in qory.%s.\nFor %s, the path is %s.", p.what, spec.Reviewer, strconv.Quote(p.path))
 		}
 	}
 	return reviewerInputs{Stage: stage, Review: reviewInputs{Report: spec.Report, SuiteResult: suiteResult}, StartArtifacts: startArtifacts}, nil
