@@ -16,12 +16,12 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/qoryai/forager/event"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/submission"
 )
 
 // The limits of the file: its size, its lines, the time from an entry's start to its
@@ -105,8 +105,8 @@ func Write(start func(kind, name string) (Step, error), path string, said func(s
 // started and ended are times in RFC 3339; further members are allowed. Each line of the
 // step is "<name>  <seconds> s", such as "start Docker  3.2 s": the seconds from started
 // to ended, rounded to one decimal, half up, and the name without terminal escape
-// sequences, without the characters of Unicode categories Cc and Cf, U+2028 and U+2029,
-// then cut to 100 characters.
+// sequences, without the characters that [submission.TitleRune] does not pass (Unicode
+// categories Cc and Cf except U+200C and U+200D, U+2028 and U+2029), then cut to 100 characters.
 //
 // The error, whose text contains the path, is that of a bad file, which gets no step: a
 // file that is missing, cannot be read, is not a regular file, is larger than 64 KiB,
@@ -193,11 +193,11 @@ func jsonString(raw json.RawMessage) (string, bool) {
 }
 
 // cleanName is name as the machine step's line shows it: without terminal escape
-// sequences, then without the characters of Unicode categories Cc and Cf, U+2028 and
-// U+2029, then cut to [maxName] characters.
+// sequences, then without the characters that [submission.TitleRune] does not pass, then cut to
+// [maxName] characters.
 func cleanName(name string) string {
 	clean := strings.Map(func(r rune) rune {
-		if unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029' {
+		if !submission.TitleRune(r) {
 			return -1
 		}
 		return r

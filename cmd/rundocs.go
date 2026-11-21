@@ -811,15 +811,6 @@ func entryKeys(rep report.Report) []string {
 	return keys
 }
 
-// limitSubmit keeps r's submit only for a run whose level is
-// [stack.AccessWrite], the run's [accessOf] level: a run that the stack's workflow or the
-// documents lower to write-no-push or read has no submit settings.
-func (r *codeRun) limitSubmit(level string) {
-	if r != nil && level != stack.AccessWrite {
-		r.submit = nil
-	}
-}
-
 // submitLine is the line that shows the harness's submit, the first module's in stack
 // order, beside r's when they differ, or alone when r has none. It is "" for a run whose
 // level, its [accessOf] level, is not [stack.AccessWrite], and for r nil. Line 1 has at

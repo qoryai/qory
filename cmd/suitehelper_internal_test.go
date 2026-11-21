@@ -617,15 +617,15 @@ func TestAnAgentsVerdictStandsOverARedSuite(t *testing.T) {
 // TestAFailedPostDoesNotEndTheRunPassed: the run API refuses the verdict, or the agent's verdict
 // cannot be read: the run closes failed with exit status 1, and the line has the fix first.
 func TestAFailedPostDoesNotEndTheRunPassed(t *testing.T) {
-	was := branchWait
-	branchWait = func(context.Context, time.Duration) error { return nil }
-	t.Cleanup(func() { branchWait = was })
+	was := submissionWait
+	submissionWait = func(context.Context, time.Duration) error { return nil }
+	t.Cleanup(func() { submissionWait = was })
 	for _, c := range []struct {
 		name  string
 		setup func(h helperRun)
 		posts int
 	}{
-		{"the run API answers 503", func(h helperRun) { h.api.verdictStatus = http.StatusServiceUnavailable }, maxBranchTries},
+		{"the run API answers 503", func(h helperRun) { h.api.verdictStatus = http.StatusServiceUnavailable }, maxSubmissionTries},
 		{"the run API answers 409", func(h helperRun) { h.api.verdictStatus = http.StatusConflict }, 1},
 		{"the agent's verdict is no valid verdict", func(h helperRun) {
 			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: `{"verdict":"escalate","points":[{"text":"` + strings.Repeat("a", 600) + `","action":"run_again"}]}`})

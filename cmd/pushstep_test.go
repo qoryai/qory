@@ -29,18 +29,19 @@ import (
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
 
+	"github.com/qoryai/integrations/contracts"
 	"github.com/qoryai/qory/cmd"
-	"github.com/qoryai/qory/internal/branchformat"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/proxygit/proxygittest"
 	"github.com/qoryai/qory/internal/secretmask"
+	"github.com/qoryai/qory/internal/submission"
 )
 
 // deleteBranch is the fix of a branch pushed with no version stored, and noType the line of
-// a workspace with no artifact type branch.
+// a workspace with no artifact type submission.
 const (
 	deleteBranch = "delete branch qory/" + workItem + " of acme/site on " + proxygittest.Host
-	noType       = "Define the artifact type branch in the workspace's Artifact types, then " + deleteBranch + ", then run the round again"
+	noType       = "Define the artifact type submission in the workspace's Artifact types, then " + deleteBranch + ", then run the round again"
 )
 
 // pushRunNumber is the run's number in the work item of [pushAPI], and changesLeft the
@@ -50,7 +51,7 @@ const (
 	changesLeft   = "Changes left by run 57"
 )
 
-// pushAPI is a run API that stores the versions of the artifact branch that a run posts.
+// pushAPI is a run API that stores the versions of the artifact submission that a run posts.
 // post, when set, gets the number of each POST, from 1, and writes its response when it
 // returns true; store then says whether the POST stored its version. index does the same
 // for each GET of the artifacts. The counts are of the requests that arrived. number is
@@ -75,8 +76,13 @@ type pushAPI struct {
 	// and returns whether it did.
 	recorded []string
 	rows     []recordedRow
-	record   func(n int, w http.ResponseWriter) bool
-	index    func(n int, w http.ResponseWriter) bool
+	// pushedCommits is the work item's list of pushed commits, as JSON, "[]" with none, and
+	// verdict the newest verdict the work item has, "" for none: a verdict that this run
+	// wrote, as a version of the artifact verdict.
+	pushedCommits string
+	verdict       string
+	record        func(n int, w http.ResponseWriter) bool
+	index         func(n int, w http.ResponseWriter) bool
 }
 
 // newPushAPI serves a run API whose work item has the id [workItem] and the stage st_a.
@@ -100,7 +106,12 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 		if a.number != 0 {
 			run = fmt.Sprintf(`{"id":%q,"number":%d}`, a.runID, a.number)
 		}
-		fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"run":%s,"stage":{"id":"st_a"},"inputs":[],"outputs":[]}`, workItem, run)
+		verdict := "null"
+		if a.verdict != "" {
+			verdict = fmt.Sprintf(`{"verdict":%q,"version":{"id":"vd_1","number":1}}`, a.verdict)
+		}
+		pushed := cmp.Or(a.pushedCommits, "[]")
+		fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"run":%s,"stage":{"id":"st_a"},"inputs":[],"outputs":[],"verdict":%s,"pushed_commits":%s}`, workItem, run, verdict, pushed)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/r/artifacts":
 		a.reads++
 		if a.index == nil || !a.index(a.reads, w) {
@@ -108,7 +119,7 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/runs/r/artifacts/av_"):
 		var n int
-		fmt.Sscanf(r.URL.Path, "/v1/runs/r/artifacts/av_%d/files/branch.json", &n)
+		fmt.Sscanf(r.URL.Path, "/v1/runs/r/artifacts/av_%d/files/submission.json", &n)
 		w.Write(a.files[n-1])
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/runs/r/artifacts":
 		a.posted(w, r)
@@ -174,19 +185,25 @@ func (a *pushAPI) writeIndex(w http.ResponseWriter) {
 			"id": fmt.Sprintf("av_%d", i+1), "number": i + 1, "stage_id": "st_a", "at": "2026-11-02T09:00:00Z",
 			"writer": map[string]any{"kind": "run", "run_id": writer},
 			"files": []map[string]any{{
-				"filename": "branch.json", "content_type": "application/json", "size": len(file), "sha256": hex.EncodeToString(sum[:]),
+				"filename": "submission.json", "content_type": "application/json", "size": len(file), "sha256": hex.EncodeToString(sum[:]),
 			}},
 			"approvals": []any{},
 		}
 	}
 	artifacts := []map[string]any{}
+	if a.verdict != "" {
+		artifacts = append(artifacts, map[string]any{"type": "verdict", "name": "main", "newest_version": 1, "versions": []map[string]any{{
+			"id": "vd_1", "number": 1, "stage_id": "st_a", "at": "2026-11-02T09:00:00Z",
+			"writer": map[string]any{"kind": "run", "run_id": writer}, "files": []any{}, "approvals": []any{},
+		}}})
+	}
 	if len(versions) > 0 {
-		artifacts = append(artifacts, map[string]any{"type": "branch", "name": "main", "newest_version": len(versions), "versions": versions})
+		artifacts = append(artifacts, map[string]any{"type": "submission", "name": "main", "newest_version": len(versions), "versions": versions})
 	}
 	json.NewEncoder(w).Encode(map[string]any{"version": 1, "artifacts": artifacts})
 }
 
-// posted stores the file of a POST of the artifact branch, as the run API does.
+// posted stores the file of a POST of the artifact submission, as the run API does.
 func (a *pushAPI) posted(w http.ResponseWriter, r *http.Request) {
 	a.posts++
 	var body struct {
@@ -223,7 +240,7 @@ func (a *pushAPI) posted(w http.ResponseWriter, r *http.Request) {
 	}
 	a.files = append(a.files, content)
 	w.WriteHeader(http.StatusCreated)
-	fmt.Fprintf(w, `{"version":1,"artifact":{"type":"branch","name":"main","version":{"id":"av_%d","number":%d}}}`, len(a.files), len(a.files))
+	fmt.Fprintf(w, `{"version":1,"artifact":{"type":"submission","name":"main","version":{"id":"av_%d","number":%d}}}`, len(a.files), len(a.files))
 }
 
 // counts is how many POST and GET artifacts arrived, and how many versions are stored.
@@ -233,22 +250,31 @@ func (a *pushAPI) counts() (posts, reads, stored int) {
 	return a.posts, a.reads, len(a.files)
 }
 
-// document is the stored version number n, from 1, checked against the branch format.
-func (a *pushAPI) document(t *testing.T, n int) branchformat.Branch {
+// document is the stored version number n, from 1, checked against the submission format.
+func (a *pushAPI) document(t *testing.T, n int) submission.Submission {
 	t.Helper()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if len(a.files) < n {
 		t.Fatalf("%d versions are stored, want %d", len(a.files), n)
 	}
-	if err := branchformat.Check(a.files[n-1]); err != nil {
+	if err := submission.Check(a.files[n-1]); err != nil {
 		t.Fatalf("version %d: %v", n, err)
 	}
-	var doc branchformat.Branch
+	var doc submission.Submission
 	if err := json.Unmarshal(a.files[n-1], &doc); err != nil {
 		t.Fatal(err)
 	}
 	return doc
+}
+
+// placesOf is the system, the path and the commit of each repository, to compare.
+func placesOf(repositories []submission.Repository) [][3]string {
+	var out [][3]string
+	for _, r := range repositories {
+		out = append(out, [3]string{r.System, r.Path, r.Commit})
+	}
+	return out
 }
 
 // failing is a response of the run API with status and the error code, Retry-After set
@@ -530,7 +556,7 @@ func writesAndCommits(t *testing.T) func(string) {
 // TestAWriteRunPushesWhatTheAgentLeft is a write run whose agent made a commit and left a
 // new file and a change uncommitted, from a depth-1 fetch: the branch on the forge has
 // both, one more commit than the agent made with the run's id in its message, on the
-// target version, and the run posts one version in the branch format at that commit.
+// target version, and the run posts one version in the submission format at that commit.
 func TestAWriteRunPushesWhatTheAgentLeft(t *testing.T) {
 	p := newPushRepo(t, "write")
 	r := p.run(t, writesAndCommits(t), nil)
@@ -560,14 +586,14 @@ func TestAWriteRunPushesWhatTheAgentLeft(t *testing.T) {
 		t.Errorf("the merge base with the target version is %s", got)
 	}
 	doc := p.api.document(t, 1)
-	want := branchformat.Branch{Ref: "qory/" + workItem, Repositories: []branchformat.Repository{{System: proxygittest.Host, Path: "acme/site", Commit: head}}}
-	if doc.Ref != want.Ref || !slices.Equal(doc.Repositories, want.Repositories) {
-		t.Errorf("the version is %+v, want %+v", doc, want)
+	want := []submission.Repository{{System: proxygittest.Host, Path: "acme/site", Commit: head}}
+	if doc.Ref != "qory/"+workItem || !slices.Equal(placesOf(doc.Repositories), placesOf(want)) {
+		t.Errorf("the version is %+v, want the ref qory/%s and %+v", doc, workItem, want)
 	}
 	if posts, _, _ := p.api.counts(); posts != 1 {
 		t.Errorf("%d POST, want 1", posts)
 	}
-	if got := p.api.bodies[0]; got != "branch main branch.json application/json" {
+	if got := p.api.bodies[0]; got != "submission main submission.json application/json" {
 		t.Errorf("the POST is %q", got)
 	}
 	name, state := r.step()
@@ -647,6 +673,8 @@ func TestAReadRunPushesNothing(t *testing.T) {
 	}
 }
 
+const stepUnreviewedName = "unreviewed"
+
 // TestASessionThatDidNotSucceedPushes is a write run whose agent left a change and whose
 // session ended another way: the step pushes it, and the commit and the version show that
 // end. The run closes as the session ended.
@@ -682,6 +710,11 @@ func TestASessionThatDidNotSucceedPushes(t *testing.T) {
 			}
 			if len(p.api.notes) != 1 || p.api.notes[0] != c.end {
 				t.Errorf("the notes are %q, want %q", p.api.notes, c.end)
+			}
+			// The edits that the end left are one commit, and no step made it.
+			commits := p.api.document(t, 1).Repositories[0].Commits
+			if len(commits) != 2 || commits[0].Step != stepUnreviewedName || commits[1].Step != stepUnreviewedName {
+				t.Errorf("the commits are %+v, want the agent's commit and the edits it left, both unreviewed", commits)
 			}
 		})
 	}
@@ -822,7 +855,7 @@ func TestAFailedPushKeepsTheEndOfTheSession(t *testing.T) {
 	if _, state := r.step(); state != event.StateFailed {
 		t.Errorf("the step ended %q, want failed", state)
 	}
-	wants(t, r.out, "the version of the artifact branch was not stored")
+	wants(t, r.out, "the version of the artifact submission was not stored")
 }
 
 // TestARunTheGatewayClosedPushesNothing is a session that ended because Qory Apiary closed
@@ -1014,10 +1047,11 @@ func TestAFailedSafetyCheckFailsTheStep(t *testing.T) {
 	}
 }
 
-// TestARejectedPushFailsTheStep is a branch on the forge that moved since the run fetched
-// it: git rejects the push, which is a fast-forward with no force, the branch stays
-// where it is, no version is stored, and the run closes failed with the fix first.
-func TestARejectedPushFailsTheStep(t *testing.T) {
+// TestAMovedBranchEndsTheRunWithPushHeadChanged is a branch on the forge that another push
+// moved since the run's start commit: no commit of a cancelled run is on it, so qory does
+// not push, the branch stays, no version is stored, and the run closes failed with the code
+// push_head_changed and the text of the refusal.
+func TestAMovedBranchEndsTheRunWithPushHeadChanged(t *testing.T) {
 	p := newPushRepo(t, "write")
 	other := tempDir(t)
 	proxygittest.Git(t, other, "clone", "--quiet", p.bare, ".")
@@ -1025,15 +1059,19 @@ func TestARejectedPushFailsTheStep(t *testing.T) {
 	commitAll(t, other, "Move the branch")
 	proxygittest.Git(t, other, "push", "--quiet", "origin", "HEAD:refs/heads/qory/"+workItem)
 	moved := p.branchHead(t)
+	p.api.pushedCommits = `[]`
 
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
+	if got := r.closes[0].Reason; got != string(contracts.EndCodePushHeadChanged) {
+		t.Errorf("the run closed with the reason %q, want %q", got, contracts.EndCodePushHeadChanged)
+	}
 	if _, state := r.step(); state != event.StateFailed {
 		t.Errorf("the step ended %q, want failed", state)
 	}
-	wants(t, r.out, "qory run: delete branch qory/"+workItem+" of acme/site on "+proxygittest.Host+
-		", then take the work item in again: the branch moved since the run fetched it, and the push failed: ! [rejected]")
-	lacks(t, r.out, "add a new version")
+	wants(t, r.out, "qory run: Set the branch to the expected commit or delete it; its head is not that commit.\n"+
+		"  Branch qory/"+workItem+". Repository "+proxygittest.Host+"/acme/site. Head: "+moved+". Expected: "+p.first+", the start commit. qory did not push.\n"+
+		"  Setting the branch to that commit or deleting it loses the commits on it that no version has.")
 	lacks(t, r.out, proxygittest.Password)
 	if got := p.branchHead(t); got != moved {
 		t.Errorf("the branch moved to %s", got)
@@ -1041,6 +1079,297 @@ func TestARejectedPushFailsTheStep(t *testing.T) {
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST, want 0", posts)
 	}
+}
+
+// TestTheHandoffGivesTheTextAndTheSteps is a session that writes the hand-off file at the
+// path of its variable: the stored version has the text, the step of the commit the hand-off
+// lists, and unreviewed for the commit of the edits the agent left.
+func TestTheHandoffGivesTheTextAndTheSteps(t *testing.T) {
+	p := newPushRepo(t, "write")
+	var path string
+	t.Cleanup(cmd.SetBranchWait(func(time.Duration) {}))
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
+		commitAll(t, dir, "Add a file")
+		path = filepath.Join(dir, ".qory", "handoff", "submission.json")
+		writeFile(t, path, `{"text":{"title":"Add a file","description":"A file."},"steps":{"`+gitHead(t, dir)+`":"implement"}}`)
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	doc := p.api.document(t, 1)
+	if doc.Text == nil || doc.Text.Title != "Add a file" {
+		t.Errorf("the text is %+v", doc.Text)
+	}
+	var steps []string
+	for _, c := range doc.Repositories[0].Commits {
+		steps = append(steps, c.Step)
+	}
+	if !slices.Equal(steps, []string{"implement", "unreviewed"}) {
+		t.Errorf("the steps are %q, want implement then unreviewed", steps)
+	}
+	if base := doc.Repositories[0].Base; base == nil || base.Branch != "main" {
+		t.Errorf("the base is %+v, want the default branch main", base)
+	}
+	if doc.Verdict != submission.VerdictNone {
+		t.Errorf("the verdict is %q, want none", doc.Verdict)
+	}
+}
+
+// TestAHandoffOverTheFormatsLimitsIsDroppedAndTheRunStores is a hand-off with a title of 257
+// characters and a step of 129: the run stores a version that passes the format's check, with
+// no text and the commit unreviewed, prints one line that names no content of the file, and
+// succeeds.
+func TestAHandoffOverTheFormatsLimitsIsDroppedAndTheRunStores(t *testing.T) {
+	p := newPushRepo(t, "write")
+	var commit string
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
+		commitAll(t, dir, "Add a file")
+		commit = gitHead(t, dir)
+		writeFile(t, filepath.Join(dir, ".qory", "handoff", "submission.json"),
+			`{"text":{"title":"`+strings.Repeat("t", 257)+`","description":"A file."},"steps":{"`+gitHead(t, dir)+`":"`+strings.Repeat("s", 129)+`"}}`)
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	doc := p.api.document(t, 1)
+	if doc.Text != nil {
+		t.Errorf("the text is %+v, want none", doc.Text)
+	}
+	for _, c := range doc.Repositories[0].Commits {
+		if c.Step != stepUnreviewedName {
+			t.Errorf("the commit %s has the step %q, want unreviewed", c.Commit, c.Step)
+		}
+	}
+	head := "qory run: The hand-off file has a part the submission format does not allow, so qory dropped it.\n"
+	wants(t, r.log(), head+"  Title: 257 characters, over the limit of 256. qory dropped the text.\n"+
+		"  Step of commit "+commit+": 129 characters, over the limit of 128. qory dropped the step.\n")
+	lacks(t, r.log(), "ttttt", "sssss")
+}
+
+// TestALinkedHandoffFolderIsNotRead is a session that links .qory/handoff to a folder of this
+// machine that has a submission.json with a title: the run stores no text, prints that qory
+// ignored the file, and succeeds.
+func TestALinkedHandoffFolderIsNotRead(t *testing.T) {
+	p := newPushRepo(t, "write")
+	outside := tempDir(t)
+	writeFile(t, filepath.Join(outside, "submission.json"), `{"text":{"title":"From the host","description":"x"}}`)
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
+		commitAll(t, dir, "Add a file")
+		if err := os.MkdirAll(filepath.Join(dir, ".qory"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(dir, ".qory", "handoff")); err != nil {
+			t.Fatal(err)
+		}
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if doc := p.api.document(t, 1); doc.Text != nil {
+		t.Errorf("the text is %+v, want none", doc.Text)
+	}
+	wants(t, r.log(), "qory run: The hand-off file is not usable, so the submission has no text and no steps.\n"+
+		"  File: .qory/handoff/submission.json, from QORY_SUBMISSION_HANDOFF.\n  Cause: ")
+	lacks(t, r.log(), "From the host")
+}
+
+// TestTheHandoffFileIsNeverInAPushedCommit is a session that writes the hand-off file and
+// then commits everything: git add -A with git commit, and git commit -a, push no commit that
+// has a path under .qory/handoff, and the file still gives its text.
+func TestTheHandoffFileIsNeverInAPushedCommit(t *testing.T) {
+	commits := map[string]func(t *testing.T, dir string){
+		"git add -A and git commit": func(t *testing.T, dir string) { commitAll(t, dir, "Add everything") },
+		"git commit -a": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "README.md"), "changed\n")
+			proxygittest.Git(t, dir, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-a", "-m", "Change the readme")
+		},
+	}
+	for name, commit := range commits {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			r := p.run(t, func(dir string) {
+				writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
+				writeFile(t, filepath.Join(dir, ".qory", "handoff", "submission.json"), `{"text":{"title":"Add a file","description":"A file."}}`)
+				exclude, err := os.ReadFile(filepath.Join(dir, ".git", "info", "exclude"))
+				if err != nil || strings.Count("\n"+string(exclude), "\n/.qory/handoff/\n") != 1 {
+					t.Errorf("the exclude file has the line /.qory/handoff/ %d times, want once: %v", strings.Count("\n"+string(exclude), "\n/.qory/handoff/\n"), err)
+				}
+				commit(t, dir)
+				writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+			}, nil)
+			r.wantsClose(t, event.StateSucceeded, 0)
+			if got := proxygittest.Git(t, p.bare, "log", "--name-only", "--format=%H", "qory/"+workItem); strings.Contains(got, ".qory") {
+				t.Errorf("a pushed commit has a path under .qory:\n%s", got)
+			}
+			if doc := p.api.document(t, 1); doc.Text == nil || doc.Text.Title != "Add a file" {
+				t.Errorf("the text is %+v, want the hand-off's", doc.Text)
+			}
+		})
+	}
+}
+
+// TestAForcedAddOfTheHandoffFileStopsThePush is a session that stages the hand-off file with
+// git add -f and commits it: qory pushes nothing, stores no version, and the run closes
+// failed with a line that states the cause, then the repository, the commit and the path on
+// indented lines.
+func TestAForcedAddOfTheHandoffFileStopsThePush(t *testing.T) {
+	p := newPushRepo(t, "write")
+	var commit string
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
+		writeFile(t, filepath.Join(dir, ".qory", "handoff", "submission.json"), `{"text":{"title":"Add a file","description":"A file."}}`)
+		proxygittest.Git(t, dir, "add", "-f", ".qory/handoff/submission.json", "committed.txt")
+		proxygittest.Git(t, dir, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "Add the hand-off")
+		commit = gitHead(t, dir)
+	}, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	wants(t, r.out, "qory run: Keep .qory/handoff/ out of the commits of this run; qory pushed nothing.\n"+
+		"  A commit of this run has a path under .qory/handoff/.\n  Repository "+proxygittest.Host+"/acme/site.\n  Commit "+commit+".\n  Path .qory/handoff/submission.json.")
+	if got := p.branchHead(t); got != "" {
+		t.Errorf("the forge has the branch at %s, want none", got)
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST, want 0", posts)
+	}
+}
+
+// earlierPush pushes a commit on top of the commit that the run started at to the branch on
+// the forge, as an earlier run of the work item did, and returns it.
+func (p *pushRepo) earlierPush(t *testing.T) string {
+	t.Helper()
+	other := tempDir(t)
+	proxygittest.Git(t, other, "clone", "--quiet", p.bare, ".")
+	proxygittest.Git(t, other, "checkout", "--quiet", p.first)
+	writeFile(t, filepath.Join(other, "earlier.txt"), "earlier\n")
+	commitAll(t, other, "An earlier run")
+	proxygittest.Git(t, other, "push", "--quiet", "origin", "HEAD:refs/heads/qory/"+workItem)
+	return p.branchHead(t)
+}
+
+// TestACancelledRunsCommitIsReplacedWithALease is a branch whose only commit above the start
+// was pushed by a run that a person cancelled: the push replaces it, the branch is the run's
+// commit on the start commit, and the version's base is the start commit.
+func TestACancelledRunsCommitIsReplacedWithALease(t *testing.T) {
+	p := newPushRepo(t, "write")
+	old := p.earlierPush(t)
+	p.api.pushedCommits = fmt.Sprintf(`[{"system":%q,"path":"acme/site","commit":%q,"run_id":"run_old","cancelled":true,"at":"2026-11-16T09:00:00Z"}]`, proxygittest.Host, old)
+
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	head := p.branchHead(t)
+	if head == old {
+		t.Fatalf("the branch is still at the cancelled run's commit\n%s", r.out)
+	}
+	if got := proxygittest.Git(t, p.bare, "merge-base", p.first, head); got != p.first {
+		t.Errorf("the merge base is %s, want the start commit", got)
+	}
+	if got := proxygittest.Git(t, p.bare, "rev-list", "--count", old+"..."+head); got == "0" {
+		t.Errorf("the cancelled commit is on the branch")
+	}
+	doc := p.api.document(t, 1)
+	if doc.Repositories[0].Base == nil || doc.Repositories[0].Base.Commit != p.first {
+		t.Errorf("the base is %+v, want %s", doc.Repositories[0].Base, p.first)
+	}
+}
+
+// TestARunStartsAtAnEarlierRunsCommit is a branch whose commit an earlier run pushed and
+// nobody cancelled: the run starts there, its push is a fast-forward, and the version's base
+// is that commit.
+func TestARunStartsAtAnEarlierRunsCommit(t *testing.T) {
+	p := newPushRepo(t, "write")
+	old := p.earlierPush(t)
+	p.api.pushedCommits = fmt.Sprintf(`[{"system":%q,"path":"acme/site","commit":%q,"run_id":"run_old","cancelled":false,"at":"2026-11-16T09:00:00Z"}]`, proxygittest.Host, old)
+
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	head := p.branchHead(t)
+	if got := proxygittest.Git(t, p.bare, "merge-base", old, head); got != old {
+		t.Errorf("the merge base with the earlier commit is %s, want it", got)
+	}
+	doc := p.api.document(t, 1)
+	if doc.Repositories[0].Base == nil || doc.Repositories[0].Base.Commit != old {
+		t.Errorf("the base is %+v, want %s", doc.Repositories[0].Base, old)
+	}
+}
+
+// TestACommitOfNoCancelledRunStopsTheLease is a branch with a commit that no recorded run
+// pushed: it counts as not cancelled, so the run moves to start there and a head that the
+// list does not know is a commit above it only when it descends. The commit that the list
+// has as not cancelled is the start, and a second unrecorded commit above it stops the push.
+func TestACommitOfNoCancelledRunStopsTheLease(t *testing.T) {
+	p := newPushRepo(t, "write")
+	old := p.earlierPush(t)
+	p.api.pushedCommits = fmt.Sprintf(`[{"system":%q,"path":"acme/site","commit":%q,"run_id":"run_old","cancelled":false,"at":"2026-11-16T09:00:00Z"}]`, proxygittest.Host, old)
+	other := tempDir(t)
+	proxygittest.Git(t, other, "clone", "--quiet", p.bare, ".")
+	proxygittest.Git(t, other, "checkout", "--quiet", "qory/"+workItem)
+	writeFile(t, filepath.Join(other, "stray.txt"), "stray\n")
+	commitAll(t, other, "A stray commit")
+	proxygittest.Git(t, other, "push", "--quiet", "origin", "HEAD:refs/heads/qory/"+workItem)
+	stray := p.branchHead(t)
+
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if got := r.closes[0].Reason; got != string(contracts.EndCodePushHeadChanged) {
+		t.Errorf("the reason is %q", got)
+	}
+	if got := p.branchHead(t); got != stray {
+		t.Errorf("the branch moved to %s", got)
+	}
+}
+
+// TestTheVerdictIsTheOneThisRunWrote is a work item whose newest verdict this run wrote: the
+// stored version has it, and a verdict of another run is none.
+func TestTheVerdictIsTheOneThisRunWrote(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.api.verdict = "passed"
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if got := p.api.document(t, 1).Verdict; got != submission.VerdictPassed {
+		t.Errorf("the verdict is %q, want passed", got)
+	}
+
+}
+
+// TestAVerdictOfAnotherRunIsNone is a work item whose newest verdict another run wrote: the
+// stored version has the verdict none.
+func TestAVerdictOfAnotherRunIsNone(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.api.verdict = "passed"
+	p.api.writer = "run_other"
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if got := p.api.document(t, 1).Verdict; got != submission.VerdictNone {
+		t.Errorf("the verdict of another run is %q, want none", got)
+	}
+}
+
+// TestOnlyAWriteRunHasTheHandoffVariable is the variable QORY_SUBMISSION_HANDOFF in the
+// session of a run at write, with the path in the checkout's .qory, and its absence in a run
+// the workflow lowers to write-no-push: that run has no submit step.
+func TestOnlyAWriteRunHasTheHandoffVariable(t *testing.T) {
+	for access, want := range map[string]bool{"write": true, "write-no-push": false} {
+		t.Run(access, func(t *testing.T) {
+			p := newPushRepo(t, access)
+			var variables []string
+			p.mountsOf = func(spec session.SessionSpec) { variables = spec.Variables.Run }
+			r := p.run(t, writesAndCommits(t), nil)
+			r.wantsClose(t, event.StateSucceeded, 0)
+			found := ""
+			for _, v := range variables {
+				if strings.HasPrefix(v, "QORY_SUBMISSION_HANDOFF=") {
+					found = v
+				}
+			}
+			if (found != "") != want || want && !strings.HasSuffix(found, filepath.Join(".qory", "handoff", "submission.json")) {
+				t.Errorf("the variable is %q, want present: %v", found, want)
+			}
+		})
+	}
+}
+
+// gitHead is the commit of HEAD in dir.
+func gitHead(t *testing.T, dir string) string {
+	t.Helper()
+	return proxygittest.Git(t, dir, "rev-parse", "HEAD")
 }
 
 // TestAHookOfTheForgeFailsTheStep is a forge that stops the update, as a protected branch
@@ -1130,7 +1459,7 @@ func TestARateLimitIsBounded(t *testing.T) {
 	if len(p.waits) != 4 || p.waits[0] != time.Minute {
 		t.Errorf("the waits are %v, want 4 of a minute", p.waits)
 	}
-	wants(t, r.out, "qory run: "+deleteBranch+", then take the work item in again: qory pushed qory/"+workItem+", and the version of the artifact branch was not stored: ")
+	wants(t, r.out, "qory run: "+deleteBranch+", then take the work item in again: qory pushed qory/"+workItem+", and the version of the artifact submission was not stored: ")
 	lacks(t, r.out, "add a new version")
 }
 
@@ -1200,7 +1529,7 @@ func TestNoResponseThatTheIndexDoesNotSettleFails(t *testing.T) {
 	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 6 {
 		t.Errorf("%d POST, %d reads, want 1, and the read of the fetch and 5", posts, reads)
 	}
-	wants(t, r.out, "qory run: check the artifact branch of the work item in Qory Apiary; with no version of this run, "+deleteBranch+"; then take the work item in again: qory pushed qory/"+workItem+
+	wants(t, r.out, "qory run: check the artifact submission of the work item in Qory Apiary; with no version of this run, "+deleteBranch+"; then take the work item in again: qory pushed qory/"+workItem+
 		", and the request that stores its version ended with no response, so the version may or may not be stored: ")
 }
 
@@ -1309,11 +1638,11 @@ func TestAVersionKeepsAnUnchangedRepository(t *testing.T) {
 	}, nil)
 	second.wantsClose(t, event.StateSucceeded, 0)
 	next := p.api.document(t, 2)
-	want := []branchformat.Repository{
+	want := []submission.Repository{
 		{System: proxygittest.Host, Path: "acme/site", Commit: siteHead},
 		{System: proxygittest.Host, Path: "acme/lib", Commit: proxygittest.Git(t, libBare, "rev-parse", "refs/heads/qory/"+workItem)},
 	}
-	if !slices.Equal(next.Repositories, want) {
+	if !slices.Equal(placesOf(next.Repositories), placesOf(want)) {
 		t.Errorf("the second version has %+v, want %+v", next.Repositories, want)
 	}
 	if want[1].Commit == libHead {
@@ -1489,7 +1818,9 @@ func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 		}
 		sub := subcommand(args)
 		seen[sub] = true
-		if strings.Contains(proxy, "@") && sub != "push" {
+		// ls-remote and fetch read the head of the branch through the read proxy, push through
+		// the push proxy; every other git reaches no remote.
+		if strings.Contains(proxy, "@") && sub != "push" && sub != "ls-remote" && sub != "fetch" {
 			t.Errorf("git %s reaches no remote and has the password of the proxy %q", all, proxy)
 		}
 		keyList := sub == "config" && strings.Contains(all, "--name-only")
@@ -1765,7 +2096,7 @@ func TestTheMessageOfAnUnverifiedAnswerIsPrintedAsItIs(t *testing.T) {
 	}
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "the version of the artifact branch was not stored: "+message+"; the code is used")
+	wants(t, r.out, "the version of the artifact submission was not stored: "+message+"; the code is used")
 }
 
 // TestASecondRepositoryThatFailsGivesTheFix is a run of two repositories whose first push
@@ -1786,9 +2117,43 @@ func TestASecondRepositoryThatFailsGivesTheFix(t *testing.T) {
 		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
 	}, nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "qory run: "+deleteBranch+": qory pushed acme/site and stored no version, because the push of the next repository failed: change the rule on "+proxygittest.Host)
+	wants(t, r.out, "qory run: "+deleteBranch+"\n  qory pushed acme/site and stored no version, because the push of the next repository failed: change the rule on "+proxygittest.Host)
 	if p.branchHead(t) == "" {
 		t.Error("the first repository has no branch")
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST went out", posts)
+	}
+}
+
+// TestASecondRepositoryWhoseHeadMovedEndsTheRunWithPushHeadChanged is a run of two
+// repositories whose first push landed and whose second repository got its branch from
+// another push meanwhile: the second push is rejected as a moved head, no version is stored,
+// and the run closes failed with the code push_head_changed, not as a plain failure.
+func TestASecondRepositoryWhoseHeadMovedEndsTheRunWithPushHeadChanged(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
+	lib := filepath.Join(p.h.server.Root, "acme", "lib.git")
+	proxygittest.Git(t, lib, "config", "http.receivepack", "true")
+	tree := proxygittest.Git(t, lib, "rev-parse", "main^{tree}")
+	moved := proxygittest.Git(t, lib, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit-tree", tree, "-m", "Another push")
+	hook := filepath.Join(p.bare, "hooks", "post-receive")
+	writeFile(t, hook, "#!/bin/sh\ngit --git-dir="+lib+" update-ref refs/heads/qory/"+workItem+" "+moved+"\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p.repositories = "acme/site,acme/lib"
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
+	}, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if got := r.closes[0].Reason; got != string(contracts.EndCodePushHeadChanged) {
+		t.Errorf("the run closed with the reason %q, want %q", got, contracts.EndCodePushHeadChanged)
+	}
+	wants(t, r.out, "qory run: "+deleteBranch+"\n  qory pushed acme/site and stored no version, because the push of the next repository failed: Set the branch to the expected commit or delete it; its head is not that commit.")
+	if got := proxygittest.Git(t, lib, "rev-parse", "refs/heads/qory/"+workItem); got != moved {
+		t.Errorf("the second repository's branch is at %s, want %s", got, moved)
 	}
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST went out", posts)
@@ -1880,7 +2245,7 @@ func TestAStopAfterThePushShowsBothWaysOut(t *testing.T) {
 				t.Errorf("the forge has no branch\n%s", r.out)
 			}
 			wants(t, r.log(), "qory run: pushed qory/"+workItem+" to acme/site at ")
-			wants(t, r.out, "check the artifact branch of the work item in Qory Apiary; with no version of this run, "+deleteBranch+
+			wants(t, r.out, "check the artifact submission of the work item in Qory Apiary; with no version of this run, "+deleteBranch+
 				"; then take the work item in again: qory pushed acme/site, and "+c.cause+", so the version may or may not be stored; the code is used")
 			lacks(t, r.out, "may not have reached the branch")
 		})
@@ -2281,4 +2646,45 @@ func TestAWallThatStaysRunsNoGit(t *testing.T) {
 			t.Error("the run's file came back")
 		}
 	})
+}
+
+// TestAMovedBranchEndsTheRunWithPushHeadChangedAfterAnySession is a branch that another push
+// moved, after a session that passed, one that failed and one that the time limit stopped: each
+// run closes failed with the code push_head_changed and the exit code of the session (1 for
+// the passed one), the branch stays, and the printed refusal is the same.
+func TestAMovedBranchEndsTheRunWithPushHeadChangedAfterAnySession(t *testing.T) {
+	for name, c := range map[string]struct {
+		result      func() (*session.Result, error)
+		state, code string
+		exit        int
+	}{
+		"passed": {succeeded, event.StateFailed, string(contracts.EndCodePushHeadChanged), 1},
+		"failed": {func() (*session.Result, error) { return &session.Result{State: event.StateFailed, ExitCode: 7}, nil },
+			event.StateFailed, string(contracts.EndCodePushHeadChanged), 7},
+		"timed out": {timedOut, event.StateFailed, string(contracts.EndCodePushHeadChanged), 124},
+		"interrupted": {func() (*session.Result, error) {
+			return &session.Result{State: event.StateCancelled, Cancelled: true, ExitCode: 130}, nil
+		}, event.StateCancelled, string(event.ReasonInterrupted), 130},
+	} {
+		result := c.result
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			other := tempDir(t)
+			proxygittest.Git(t, other, "clone", "--quiet", p.bare, ".")
+			writeFile(t, filepath.Join(other, "moved.txt"), "moved\n")
+			commitAll(t, other, "Move the branch")
+			proxygittest.Git(t, other, "push", "--quiet", "origin", "HEAD:refs/heads/qory/"+workItem)
+			moved := p.branchHead(t)
+			p.api.pushedCommits = `[]`
+
+			r := p.run(t, writesAndCommits(t), result)
+			if len(r.closes) != 1 || r.closes[0].State != c.state || r.closes[0].Reason != c.code || r.closes[0].ExitCode != c.exit {
+				t.Errorf("the run closed with %+v, want %s with %q and exit code %d\n%s", r.closes, c.state, c.code, c.exit, r.out)
+			}
+			wants(t, r.out, "qory run: Set the branch to the expected commit or delete it; its head is not that commit.")
+			if got := p.branchHead(t); got != moved {
+				t.Errorf("the branch moved to %s", got)
+			}
+		})
+	}
 }

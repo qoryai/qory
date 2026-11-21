@@ -1,0 +1,2 @@
+Remove submit_program from module core or module web.
+  A composed harness has one submit program, and both modules declare one.

@@ -11,7 +11,7 @@ What `qory harness compose` reads and what it writes.
 | `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use and the submit step of a run. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | a role contract | optional; a file of a module that declares an agents role, at the path that `roles.agents.<role>.contract` in the module's `qory-module.yaml` is set to | the parts an agent needs to fill the role: level-2 headings, front-matter keys, tools, a tier, and the form of its report (§The role contract). The compose checks every agent that fills the role against it; the harness's checks read the report's form |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for, the modules it appends and the workflow hooks it adds, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
-| a branch document | the file of a version of a structured artifact type `branch` | a work item's branch and the commit in each repository (§The branch format). No compose reads it |
+| a submission document | the file of a version of the structured artifact type `submission` | what a run submits for a work item: its branch, the commits in each repository, the verdict and the draft pull request (§The submission format). No compose reads it |
 | an acceptance criteria document | the file of a version of a structured artifact type for a work item's acceptance criteria | a summary of what the work item must achieve and the criteria that say when it is achieved, each with its check (§The acceptance criteria format). No compose reads it |
 | a verification document | the file of a version of a structured artifact type for a work item's verification | the result of checking the criteria against one version of the work (§The verification format). No compose reads it |
 | a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
@@ -214,7 +214,7 @@ schema is [config.schema.json](config.schema.json).
 | `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it. A run from Qory Apiary, from a run code or a run key, writes the report's `extensions` into the run's `inputs.json` as `qory.harness_extensions` (docs/run.md, §The run key from a run code) |
 | `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most, so `workflow-<name>` has at most 64 characters. A run that Qory Apiary dispatches from a run code starts the first of these that the runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill `<name>`, the command `<name>` (docs/run.md, §The run key from a run code). A plain name works, and when a harness ships both names, the prefixed one runs. The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command under either name, after the modules' `exclude` and `only`: `Add skill or command workflow-<name> to a module of <stack>, or remove workflow <name>.`, then `The base stack <stack> declares the workflow <name> in its qory-stack.yaml.` and `No module of <stack> ships a skill or command workflow-<name> or <name>.` on the next two lines, or, for a stack that extends none, `Add skill or command workflow-<name> to a module of the stack in <file>, or remove workflow <name>.`, then `The stack in <file> declares the workflow <name>.` and `No module of the stack in <file> ships …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count, and neither does a checkout's exclude: the compose checks what the stack's modules ship before it applies that exclude. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.hook_points` | no | the points of the workflow where a checkout extending the stack may add workflow hooks, by the point's name: `{at: end, kinds: [check, review]}`. `at` is where the point sits in the workflow's session, `end`, `start` or `inside`; `kinds` is one or more of `check`, `review` and `enrich`, each once. A point's name has the form of a workflow's name, and is unique in the stack, since a hook selects a point by its name alone. Only a `qory-stack.yaml` declares points: a `qory.yaml` that defines a stack, which nothing extends, is refused with `Remove hook_points from the workflows in qory.yaml.` (§Workflow hooks) |
-| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on: `read`, `write-no-push`, or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access to a valid level.` with `The levels are read, write-no-push, and write.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. A run takes the lower of this access and `access` in the run's documents, in the order `read`, `write-no-push`, `write`; documents with no target have no `access`, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A `write-no-push` run has a writable checkout, no push step, no submit, and no version of the artifact `branch`. At `write` the checkout is writable and qory pushes what the agent left |
+| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on: `read`, `write-no-push`, or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access to a valid level.` with `The levels are read, write-no-push, and write.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. A run takes the lower of this access and `access` in the run's documents, in the order `read`, `write-no-push`, `write`; documents with no target have no `access`, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A `write-no-push` run has a writable checkout, no push step, no submit, and no version of the artifact `submission`. At `write` the checkout is writable and qory pushes what the agent left |
 | `workflows.<name>.tier` | no | the tier that names the main session's model and effort for a dispatched run of the workflow: `light`, `balanced`, or `thinking`; none when left out. qory stops with an error on any other value: `Set workflows.<name>.tier to a valid tier.` with `The tiers are light, balanced, and thinking.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. qory passes nothing new to the run: Qory Apiary resolves the session's model and effort from the tier, and sends them as it sends the session's model. `qory run` does not read it |
 | `workflows.<name>.plan` | no | the artifact type whose launch version sets what a dispatched run of the workflow may push, such as `build-plan`: lowercase letters and digits in groups joined by single hyphens, 64 bytes at most; none when left out. Only a workflow with `access: write` names one. qory stops with an error on a value that is no artifact type: `Set workflows.<name>.plan to an artifact type.` with `An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines; and on a `plan` in a workflow whose access is `read`, `write-no-push` or left out: `` Remove `plan` from <name>, or set its access to write. `` with `Only a workflow with access write has a plan, and the access of <name> is <access>.` and `workflows.<name> is in <file>.` on the next two lines. The compose stops when no module of the stack declares the scope check for the type in `scope_checks` (§The module manifest): `Add a scope check for <type> to a module's scope_checks.` with `` You can also remove `plan: <type>` from <name> in the stack. `` on the next line, or both on one line when the first line has at most 98 characters, then `No module of the stack declares a scope check for <type>.` and `workflows.<name> is in <file>.` on the next lines. `qory run` does not read `plan` |
 | `runtimes` | no | the version `qory run` installs of each runtime, by the runtime's name, `claude` or `codex`: `runtimes: {codex: {version: 0.167.2}}`. A runtime that no layer pins installs its latest version (docs/run.md, §The runtime's program). The harness section of a checkout's `qory.yaml` takes the same key, beside `extends` or in a stack it defines, and its pin of a runtime wins over the base's; a runtime only the base pins keeps the base's pin. qory stops with `Remove <name> from runtimes.` on another runtime's name, then `qory installs and pins only claude and codex.` and `runtimes is in <file>.` on the next two lines. qory stops with an error on `harness.runtimes` in the user's file, and in an ancestor's file that discovery or `-f` selects to compose; in another ancestor's file, qory leaves the pin unread (§The configuration) |
@@ -761,34 +761,49 @@ Remove the key "command" from submit.
   submit is in /src/acme-harness/harness/modules/support-desk/process.yaml.
 ```
 
-## The branch format
+## The submission format
 
-A branch document records a work item's branch and the commit in each repository. This
-is version 1 of the format ([branch.schema.json](branch.schema.json)):
+A submission document records what a run submits for a work item: the branch, the commits
+in each repository, the verdict, and the draft pull request. Only qory's submit step
+writes it, after the push. This is version 1 of the format
+([submission.schema.json](submission.schema.json)):
 
 ```json
 {"ref": "qory/wi_7k2m9pq4xt3a8b1c",
- "repositories": [{"system": "github.com", "path": "acme/web", "commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e"}]}
+ "verdict": "passed",
+ "text": {"title": "Add an orders page", "description": "The page lists open orders."},
+ "repositories": [{
+   "system": "github.com", "path": "acme/web",
+   "commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
+   "base": {"commit": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b", "branch": "main"},
+   "commits": [{"commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e", "step": "deliverable:d-1"}],
+   "draft": {"none": "no-program"}}]}
 ```
 
 | Member | Meaning |
 |---|---|
 | `ref` | the branch's name, the same in each repository: `qory/` followed by the work item's id |
+| `verdict` | the work item's newest verdict, when this run wrote it: `passed`, `changes-requested`, `escalate`, or `none` |
+| `text` | the title and the description of the draft pull request, from the session's hand-off file. The title has 1 to 256 characters and no control character: no tab, no line end. Absent when the session wrote none |
 | `repositories` | each repository with the commit of the branch in it, at least one |
 | `system` | the host the repository is on, a lower-case host name of at most 253 characters |
 | `path` | the repository's path on the host: at most 200 characters of segments joined by slashes, with no `.`, `..` or `.git` segment |
-| `commit` | a full commit id, 40 or 64 lower-case hexadecimal digits |
+| `commit` | the head of the branch: a full commit id, 40 or 64 lower-case hexadecimal digits. Each commit id of the format has this form |
+| `base` | the commit the run started at (`commit`), and the name of the repository's default branch when the run started (`branch`, optional, at most 255 characters, a name that git accepts after `refs/heads/`): the branch that a pull request of the run is based on |
+| `commits` | each commit from the base to the head, oldest first, with the ledger step that made it, at most 128 characters: the id of a ledger row, such as `deliverable:d-1`, `fix:f1`, `plan`, `checks`, `small-change` or `script:scenario-2#3`. A commit that a step made gets that step. Any commit with no step gets `unreviewed` |
+| `draft` | the draft pull request (`number`, `url`, `title`, `state`, `action`), or `{"none": <reason>}` with the reason `not-passed`, `no-text`, `escalated`, `no-program`, `program-failed` (with `exit`, 0, 1 or 2), `program-timeout` or `login-needed` (with `exit` 3). The `state` of a draft is `draft`, `open`, `closed` or `merged` |
+| `commit_url` | the forge's address of a commit, from the submit program of a run with no run code |
 
 A document has no other member. A software factory can use the format as the JSON Schema
 of a custom artifact type in its `process.yaml`:
 
 ```yaml
 artifact_types:
-  - name: branch
+  - name: submission
     base_view: structured
-    size_limit: 65536
+    size_limit: 262144
     max_files: 1
-    json_schema: {…}             # the content of branch.schema.json
+    json_schema: {…}             # the content of submission.schema.json
 ```
 
 ## The acceptance criteria format
@@ -1098,6 +1113,8 @@ push_checks:                     # optional: a check for the files of one artifa
   - type: spec
     command: [scripts/checks.js, push, spec]  # a program in the module, then its arguments
     reads: [questions]           # optional: the other artifact types the check reads
+submit_program:                  # optional: the program of the submit step, one per composed harness
+  command: [bin/open-draft]      # a program in the module, then its arguments
 scope_checks:                    # optional: the checks of the plan of one artifact type
   build-plan: [scripts/checks.js, scope, --plan]   # the type a workflow names in `plan`: one command, a program in the module, then its arguments
 ```
@@ -1204,6 +1221,24 @@ line 1 past 98 characters. The home contains
 `push-checks.json` with each check, sorted by type, with its `reads` and its program's
 absolute path in the home; a harness whose modules declare no check has no such file.
 
+`submit_program`, optional, declares the program of the submit step: a forge's module ships
+the program that opens or updates the draft pull request and prints the forge's address of
+each commit. `command` is the program, a file in the module and a relative path with no `..`
+part, then its arguments. A composed harness has at most one: two modules that declare
+one fail the compose, `Remove submit_program from module core or module web.` with `A
+composed harness has one submit program, and both modules declare one.` on the next line.
+An empty command, a word that is not a string, and a program that is not a file in the
+module, or is in an entry an `exclude` or an `only` of the module leaves out, fail the
+compose as they do for a push check, with `submit_program` in place of the push check.
+A run from a run code, or with a run key, runs no submit program: the forge's adapter opens the
+draft from the stored submission. A run with neither a run code nor a run key runs the program on
+the person's machine, outside the wall, once for each repository after the push, with the person's login of the forge's command
+line. The program gets the inputs `QORY_SUBMIT_*` and prints result lines on its standard output,
+as the submit program contract of the integrations repository lists them
+(`contracts/run/v1/submit-program/README.md`). qory reads the lines and checks each value,
+prints the draft's address as a `Draft: <address>` line, and stores nothing of them.
+Exit 0 is done, exit 1 a failed call to the forge, and exit 2 an input the program cannot use.
+See docs/run.md, §The submit program.
 `scope_checks`, optional, declares the checks of the plan of an artifact type, the type that a
 workflow of the stack names in `plan`. It is a map from the type to one command, a list:
 the program, a file in the module as for `push_checks`, then its arguments. The command is
@@ -2015,12 +2050,13 @@ Per runtime, the files written into its directory:
   text (§Launching); neither is linked into the checkout, whose
   `.claude/rules/qory-harness.md` and `.claude/agents` register the bare names.
 - **codex**: `config.toml` with the model, the servers as `[mcp_servers.<name>]` tables,
-  `features.unified_exec_tty = false`, a `hooks.state."<file>:<event>:<group>:<hook>"`
-  table with the `trusted_hash` of each `command` hook of `hooks.json` and `config.toml`
-  that has no U+2028 or U+2029 in its command, status message or matcher, `<file>` being
-  the file in the home's `codex` folder with links resolved and each name in the case on
-  disk, and any other `settings/codex/` file, without `shell_environment_policy.set`,
-  whose variables are the launch's, one `agents/<name>.toml` per agent with the body as
+  `features.unified_exec_tty = false`, `web_search = "disabled"`, a
+  `hooks.state."<file>:<event>:<group>:<hook>"` table with the `trusted_hash` of each
+  `command` hook of `hooks.json` and `config.toml` that has no U+2028 or U+2029 in its
+  command, status message or matcher, `<file>` being the file in the home's `codex`
+  folder with links resolved and each name in the case on disk, and any other
+  `settings/codex/` file, without `shell_environment_policy.set`, whose variables are
+  the launch's, one `agents/<name>.toml` per agent with the body as
   `developer_instructions`, with the tier as `model` and `model_reasoning_effort` in a
   home composed for codex alone, with `[features]` `shell_tool = false` when the agent's
   `tools` key lists no `Bash` or `PowerShell` (an agent with no `tools` key keeps the

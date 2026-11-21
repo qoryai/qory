@@ -1,0 +1,9 @@
+apiVersion: qory.dev/v1alpha1
+harness:
+  target:
+    runtime: claude
+  modules:
+    - name: forge
+      source: {path: modules/forge}
+      exclude:
+        skills: [a]

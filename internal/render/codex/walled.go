@@ -774,9 +774,10 @@ func writeCopy(in io.Reader, dst string, perm os.FileMode, limit int64) (int64, 
 // (codex-rs/ext/goal/src/runtime.rs); and features.memories = false. Codex 0.167.2 turns
 // the first three on by default (codex-rs/features/src/lib.rs). It also sets
 // features.unified_exec_tty = false, as Render does, so a shell with a terminal takes no
-// command through write_stdin, which runs no PreToolUse hook. A --config flag and a
-// trusted project's .codex can set them again; projects are untrusted here, and the bind
-// at [SystemInWall] has no config.toml or requirements.toml.
+// command through write_stdin, which runs no PreToolUse hook, and web_search =
+// "disabled", as Render does, whatever value config has for the key. A --config flag
+// and a trusted project's .codex can set them again; projects are untrusted here, and
+// the bind at [SystemInWall] has no config.toml or requirements.toml.
 func WalledConfig(config []byte, projects, disabled, disabledPaths []string) ([]byte, error) {
 	m := map[string]any{}
 	if _, err := toml.NewDecoder(bytes.NewReader(config)).Decode(&m); err != nil {
@@ -819,6 +820,7 @@ func WalledConfig(config []byte, projects, disabled, disabledPaths []string) ([]
 		features[f] = false
 	}
 	m["features"] = features
+	m["web_search"] = "disabled"
 	if len(projects) > 0 {
 		trust := map[string]any{}
 		for _, p := range projects {
