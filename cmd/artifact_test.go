@@ -1872,7 +1872,7 @@ func TestArtifactPullEscapesTheFilesOfAVersion(t *testing.T) {
 	dir := filepath.Join(root, ".qory", "artifacts", "brief", "main", "v1")
 	wantFile(t, filepath.Join(dir, "data.json"), "{\r\n\"a\": \"x<U+202E>y\",\r\n\"n\": 1.50\r\n}\r\n")
 	wantFile(t, filepath.Join(dir, "upper.JSON"), "[\"<U+E0041>\"]")
-	wantFile(t, filepath.Join(dir, "broken.json"), "{ x"+rlo)
+	wantFile(t, filepath.Join(dir, "broken.json"), "{ x<U+202E>")
 	wantFile(t, filepath.Join(dir, "notes.md"), "line<U+202E>\n\ttab \u200d")
 	wantFile(t, filepath.Join(dir, "clean.md"), "nothing hidden\n")
 	wantFile(t, filepath.Join(dir, "blob.bin"), "bin"+rlo+"\x00end")

@@ -24,8 +24,8 @@ import (
 )
 
 // TestAPushCheckReadsTheNewestVersionsInThePullLayout is the working folder of a push
-// check of spec that reads questions and design: index.json byte for byte as qory
-// artifact pull writes it, notes.json with [] for a work item whose snapshot has no
+// check of spec that reads questions and design: index.json byte for byte as the run API
+// returns it, notes.json with [] for a work item whose snapshot has no
 // notes, the newest version of each artifact of the three types under
 // <type>/<name>/v<N>/, no folder for design, which has no version, and nothing of the
 // artifact type notes, which the check does not read.
