@@ -161,7 +161,7 @@ func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
 	case err != nil:
 		return doc, fmt.Errorf("update qory, or ask Qory Apiary's instance admin: the response to the run code does not pass qory's checks: %v%s", err, codeUsed)
 	case doc.Step != provisioner.StepWorkflow && doc.Step != provisioner.StepPrebuild:
-		return doc, fmt.Errorf("update qory: the run code's response has a step qory does not run%s.\n  qory runs a run code's run for the steps workflow and prebuild only, and the step is %s.", codeUsed, doc.Step)
+		return doc, fmt.Errorf("update qory: the run code's response has a step qory does not run%s.\n  qory runs a run code's run for the steps workflow and prebuild only, and the step is %s.", codeUsed, integration.Printable(exports.Value(doc.Step, false)))
 	}
 	return doc, nil
 }
