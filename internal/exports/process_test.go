@@ -1446,6 +1446,7 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		{structured(send, "{properties: {target: {$ref: '"+reference+"', type: string}}}"), fix + other + place, true},
 		{structured(send, "{properties: {target: {allOf: [{$ref: '"+reference+"'}, {type: string}]}}}"), fix + other + place, true},
 		{structured(send, "{properties: {target: {$ref: '"+reference+"', type: object}}}"), "", true},
+		{structured(send, "{properties: {target: {allOf: [{$ref: '"+reference+"'}, {type: object}]}}}"), "", true},
 	} {
 		e := factory(t, withTypes(c.body))
 		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)

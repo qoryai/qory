@@ -317,8 +317,10 @@ func checkDeliverTarget(label string, schema *yaml.Node) string {
 	}
 	if has && isReferenceMember(root, target) {
 		// shortcut: only the root required list counts, so a type that states it through
-		// an allOf fails; only "type" is read on the target, so "enum", "const", "not"
-		// and bounds that nothing can satisfy pass; replace it when a type needs either.
+		// an allOf fails; only "type" is read on the target, so "enum", "const", "not",
+		// "anyOf", "oneOf", bounds, and a "type" in a local definition that the $ref goes
+		// through are not, and a target that nothing can satisfy passes; replace it when
+		// a type needs either.
 		if required, _ := root["required"].([]any); !slices.Contains(required, any("target")) {
 			return typeRefusal("Add target to required. Qory Apiary cannot deliver a document without its destination.", "json_schema of "+label+" has no required with target.")
 		}
