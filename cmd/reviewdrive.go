@@ -23,8 +23,8 @@ const openFindingsMode = 0o644
 // reviewJoin is one reviewer's join as [reviewRun.Join] starts it.
 type reviewJoin struct {
 	Spec reviewSessionSpec
-	// Number is the session number that Forager assigns to the join: the number of the session
-	// before it, plus 1. qory predicts it, and a join that gets another one ends the run.
+	// Number is the session number that Forager assigns to the join: the number of the
+	// session before it, plus 1. qory predicts it, and a join that gets another one ends the run.
 	Number int
 	// Round is the round's number, from 1.
 	Round int
@@ -33,8 +33,8 @@ type reviewJoin struct {
 	Previous *reviewround.OpenFindings
 }
 
-// reviewJoined is how a reviewer's join ended: the number Forager assigned to the session, and
-// how the session ended. A session that failed or reached its limit is not an error of
+// reviewJoined is how a reviewer's join ended: the number Forager assigned to the
+// session, and how the session ended. A session that failed or reached its limit is not an error of
 // the join: its [reviewround.Failed] or [reviewround.TimedOut] makes a finding.
 type reviewJoined struct {
 	Session int
