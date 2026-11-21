@@ -1399,7 +1399,10 @@ process.yaml                     a factory's process template, checked when expo
 root: `paths: ["**/*.py", pyproject.toml]`, or one glob as a string. A glob matches a path
 from the checkout root with forward slashes: `**` matches any number of directories, `*`
 and `?` match within one directory, every other character, `[`, `{` and `\` included, is
-literal, and a glob without a slash matches at any depth only through `**/`. An agent without `paths` reads every change. The home's `roles.json`
+literal, and a glob without a slash matches at any depth only through `**/`. A leading
+`/` is dropped, so `/src/a.go` is `src/a.go`. A trailing `/` means everything below,
+so `src/` is `src/**`. A last `**` needs at least one part, so `src/**` does not match
+the path `src`. `**` inside a part matches as `*`, so `**.py` is `*.py`. An agent without `paths` reads every change. The home's `roles.json`
 contains the `paths` of each member of a group role (§References), for a script that
 starts the members a change needs. qory leaves the key and its whole value out of every
 agent file it writes for a runtime, since not every runtime accepts a key it does not

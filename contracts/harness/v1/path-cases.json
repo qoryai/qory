@@ -45,8 +45,13 @@
   {"pattern": "{a,b}.go", "file": "a.go", "match": false, "why": "{ is literal, not an alternation"},
   {"pattern": "{a,b}.go", "file": "{a,b}.go", "match": true, "why": "{ and } match themselves"},
   {"pattern": "a\\b", "file": "a\\b", "match": true, "why": "a backslash is a literal character"},
-  {"pattern": "src/", "file": "src/a.go", "match": false, "why": "a trailing slash is a literal character that no path ends with"},
-  {"pattern": "/src/a.go", "file": "src/a.go", "match": false, "why": "a leading slash is a literal character that no path starts with"},
+  {"pattern": "src/", "file": "src/a.go", "match": true, "why": "a trailing slash stands for /**"},
+  {"pattern": "src/", "file": "src", "match": false, "why": "a trailing slash, as /**, needs one part below"},
+  {"pattern": "/src/a.go", "file": "src/a.go", "match": true, "why": "a leading slash is dropped"},
+  {"pattern": "/src/*.go", "file": "lib/src/a.go", "match": false, "why": "a leading slash is dropped, and the glob still matches from the top"},
+  {"pattern": "src/**", "file": "src", "match": false, "why": "a last ** needs one part or more"},
+  {"pattern": "**.py", "file": "a.py", "match": true, "why": "** inside a part matches as *"},
+  {"pattern": "**.py", "file": "src/a.py", "match": false, "why": "** inside a part matches as *, within one part"},
   {"pattern": "README.md", "file": "readme.md", "match": false, "why": "the match is case-sensitive"},
   {"pattern": "*.PY", "file": "a.py", "match": false, "why": "the match is case-sensitive"}
 ]}

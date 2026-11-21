@@ -27,13 +27,15 @@ type token struct {
 // Match reports whether pattern matches file, a path from the checkout root with
 // forward slashes. `**` as a whole part matches any number of directories, `*` and `?`
 // match within one part, and every other character is literal, case-sensitive. A glob
-// without a slash matches only at the top. The time is at most the product of the
-// lengths of pattern and file, since the match goes back to one point only.
-//
-// shortcut: a last ** part needs one part or more (src/** does not match src), and **
-// inside a part matches as *; the README is silent on both, and the harness matcher does
-// the same. Replace when the README decides.
+// without a slash matches only at the top. One leading / is dropped, a trailing / stands
+// for /**, a last ** part needs one part or more (src/** does not match src), and **
+// inside a part matches as *. The time is at most the product of the lengths of pattern
+// and file, since the match goes back to one point only.
 func Match(pattern, file string) bool {
+	pattern = strings.TrimPrefix(pattern, "/")
+	if strings.HasSuffix(pattern, "/") {
+		pattern += "**"
+	}
 	parts := strings.Split(pattern, "/")
 	var tokens []token
 	for i, part := range parts {
