@@ -14,22 +14,26 @@ import (
 // verdictPath is the path of a POST that records the run's verdict.
 const verdictPath = "/verdict"
 
-// ReviewStageVerdict is the check of a POST to the run API in a stage with reviewers:
-// nil for every request but a POST of /verdict and a POST of /artifacts of the type
-// verdict, and for a verdict of [runapi.VerdictChangesRequested]. In that stage qory
-// sends the other verdicts after the reviewers ran, so a session may record only
-// changes-requested. A verdict of any other value, and a body that is no verdict in the
-// run API's form or that can be read in more than one way, such as one with a member
-// twice, is an error. The first line of the error has the fix and is at most 100
-// characters. A push of the type verdict is checked in each of its files; a push that is
-// no push in the run API's form is left to the run API.
+// SessionVerdict is the check of a POST to the run API from a session whose workflow
+// entry has judges set to judges. For a workflow that judges it returns nil. Otherwise a
+// later workflow in the loop judges the work, and the session may record escalate or no
+// verdict: the result is nil for every request but a POST of /verdict and a POST of
+// /artifacts of the type verdict, and for a verdict of [runapi.VerdictEscalate]. A
+// verdict of any other value, and a body that is no verdict in the run API's form or that
+// can be read in more than one way, such as one with a member twice, is an error. The
+// first line of the error has the fix and is at most 100 characters. A push of the type
+// verdict is checked in each of its files; a push that is no push in the run API's form
+// is left to the run API.
 //
 // shortcut: not called yet; wired in when cmd/run.go, cmd/rundocs.go and
 // cmd/pushstep.go can change (after Q-01, Q-36 and Q-73).
 // shortcut: only a push of the type verdict is read as a verdict document. A session
 // that pushes a verdict document as another type is not checked; how the run API treats
 // that was not read, so check it before wiring.
-func ReviewStageVerdict(req session.RunAPIRequest) error {
+func SessionVerdict(judges bool, req session.RunAPIRequest) error {
+	if judges {
+		return nil
+	}
 	switch req.Path {
 	case verdictPath:
 		return checkVerdictDocument(req.Body)
@@ -50,9 +54,9 @@ func ReviewStageVerdict(req session.RunAPIRequest) error {
 // verdictType is the artifact type of a verdict document.
 const verdictType = "verdict"
 
-// checkVerdictDocument is the check of [ReviewStageVerdict] for one verdict document.
+// checkVerdictDocument is the check of [SessionVerdict] for one verdict document.
 func checkVerdictDocument(body []byte) error {
-	const fix = "Record only changes-requested: qory sends every other verdict after the review."
+	const fix = "Record escalate or no verdict: the next workflow in the loop judges this work."
 	top, err := members(body, []string{"verdict", "points", "track"})
 	if err != nil {
 		if errors.Is(err, errAmbiguous) {
@@ -64,7 +68,7 @@ func checkVerdictDocument(body []byte) error {
 	if json.Unmarshal(top["verdict"], &verdict) != nil {
 		return fmt.Errorf("%s\n  The verdict is missing or not a string.", fix)
 	}
-	if verdict != runapi.VerdictChangesRequested {
+	if verdict != runapi.VerdictEscalate {
 		return fmt.Errorf("%s\n  The session sent the verdict %s.", fix, exports.Value(cut(cleanLine(verdict)), true))
 	}
 	return nil
