@@ -344,7 +344,8 @@ const textNotesNotList = "Contact support: the notes in the run API's response a
 // artifactsForCheck is the fetch of a push check through client: the work item's notes
 // as notes.json, the artifact index, and the newest version of each artifact of the
 // types that is neither cancelled nor a withdrawal, laid out as qory artifact pull writes
-// them into its store. For a withdrawn name that is the version before the withdrawal, so
+// them into its store, with raw bytes and names where the pull escapes hidden
+// characters. For a withdrawn name that is the version before the withdrawal, so
 // a later push of the name is checked against what it had before; qory artifact pull
 // leaves the name out.
 func artifactsForCheck(client *runapi.Client) pushcheck.Fetch {
