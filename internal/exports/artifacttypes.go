@@ -217,10 +217,18 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 		if why := checkTypeSchema(label, schema, patterns); why != "" || deliver == nil {
 			return name, why
 		}
+		var limit int64
+		if size.Decode(&limit) == nil && limit > maxDeliveredBytes {
+			return name, fmt.Sprintf("Set size_limit of %s to at most %d.\n  A type with deliver is sent in one version of at most %d bytes, and size_limit is %d.\n  The type is in %s.", label, maxDeliveredBytes, maxDeliveredBytes, limit, FilePlace)
+		}
 		return name, checkDeliverTarget(label, schema)
 	}
 	return name, ""
 }
+
+// maxDeliveredBytes is the most bytes of the size_limit of a type with deliver: the size
+// of the one version that qory sends.
+const maxDeliveredBytes = 786432
 
 // deliverSends is each value deliver.send may have, the values of submit.send: when the
 // type's versions are sent.

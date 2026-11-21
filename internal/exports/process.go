@@ -217,6 +217,9 @@ func (e *Exports) checkProcess(path string, data []byte) error {
 	if err := checkArtifactTypes(shown, &t.ArtifactTypes); err != nil {
 		return err
 	}
+	if err := checkOutputs(shown, stages, &t.ArtifactTypes); err != nil {
+		return err
+	}
 	return checkSubmit(shown, &t.Submit, &t.ArtifactTypes)
 }
 
@@ -292,6 +295,71 @@ func checkSubmitType(shown, name string, types *yaml.Node) error {
 		return nil
 	}
 	return submitRefusal(shown, fix, "No entry of artifact_types is named "+name+".")
+}
+
+// stageLabel is the stage at index i for a message: its name as a name is shown when it
+// has a text one, else its number from 1.
+func stageLabel(i int, stage *yaml.Node) string {
+	if n := value(stage, "name"); n != nil && n.Kind == yaml.ScalarNode && strings.TrimSpace(n.Value) != "" {
+		return accesskey.ShownName(n.Value, false)
+	}
+	return strconv.Itoa(i + 1)
+}
+
+// checkOutputs checks outputs of each stage of stages, which [checkProcess] has checked
+// is a list, in the process.yaml shown: a list of objects with type, the name of an entry
+// of types, the artifact_types that [checkArtifactTypes] passed or nothing, and required,
+// true or false, left out for false, and no other key. A stage without outputs passes.
+// Any other key of a stage is left unchecked.
+func checkOutputs(shown string, stages, types *yaml.Node) error {
+	listed := map[string]bool{}
+	for _, entry := range types.Content {
+		if n := value(entry, "name"); n != nil {
+			listed[n.Value] = true
+		}
+	}
+	for i, stage := range stages.Content {
+		outputs := value(stage, "outputs")
+		if stage.Kind != yaml.MappingNode || outputs == nil {
+			continue
+		}
+		label := stageLabel(i, stage)
+		if outputs.Kind != yaml.SequenceNode {
+			return processRefusal(shown, "Set outputs of the stage to a list, or remove it.", "outputs of stage "+label+" is "+nodeKind(outputs)+".")
+		}
+		for j, entry := range outputs.Content {
+			at := fmt.Sprintf("entry %d of outputs of stage %s", j+1, label)
+			if entry.Kind != yaml.MappingNode {
+				return processRefusal(shown, "Set the entry of outputs to an object with type and required.", capital(at)+" is "+nodeKind(entry)+".")
+			}
+			seen := map[string]bool{}
+			for k := 0; k+1 < len(entry.Content); k += 2 {
+				key := entry.Content[k]
+				if key.Kind != yaml.ScalarNode || key.Value != "type" && key.Value != "required" {
+					return processRefusal(shown, "Remove the key "+scalarText(key)+" from the entry of outputs.", capital(at)+" has the key, and an output has only type and required.")
+				}
+				if seen[key.Value] {
+					return processRefusal(shown, "Remove the second "+key.Value+" from the entry of outputs.", capital(at)+" has the key "+key.Value+" twice.")
+				}
+				seen[key.Value] = true
+			}
+			typ := value(entry, "type")
+			switch {
+			case typ == nil:
+				return processRefusal(shown, "Add type to the entry of outputs, the name of an entry of artifact_types.", capital(at)+" has no type.")
+			case typ.Kind != yaml.ScalarNode || typ.Tag != "!!str":
+				return processRefusal(shown, "Set type of the entry of outputs to a quoted string, a name from artifact_types.", "type of "+at+" is "+nodeKind(typ)+".")
+			case !runapi.ArtifactName(typ.Value):
+				return processRefusal(shown, fmt.Sprintf("Set type of the entry of outputs to a name such as reply-draft, at most %d bytes.", runapi.MaxArtifactName), "type of "+at+" is "+scalarText(typ)+".")
+			case !listed[typ.Value]:
+				return processRefusal(shown, "Add "+typ.Value+" to artifact_types.", "Stage "+label+" has the output "+typ.Value+", and no entry of artifact_types is called "+typ.Value+".")
+			}
+			if req := value(entry, "required"); req != nil && !isBool(req) {
+				return processRefusal(shown, "Set required of the entry of outputs to true or false.", "required of "+at+" is "+nodeKind(req)+".")
+			}
+		}
+	}
+	return nil
 }
 
 // processRefusal is a refusal of the process.yaml shown, fix first: the fix, the cause,

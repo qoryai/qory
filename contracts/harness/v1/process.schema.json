@@ -24,6 +24,19 @@
           "items": {
             "properties": {
               "name": {"description": "A stage name is one line of text, as $defs line defines it.", "$ref": "#/$defs/line"},
+              "outputs": {
+                "description": "The artifact types the stage produces. Optional. Each type is listed in artifact_types of the same file, which qory checks and this schema cannot state.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["type"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "type": {"description": "The name of an entry of artifact_types.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+                    "required": {"description": "Whether the stage must produce the type. Optional, and false when the output has none.", "type": "boolean", "default": false}
+                  }
+                }
+              },
               "sequence": {
                 "items": {
                   "properties": {
@@ -109,9 +122,11 @@
       "properties": {"base_view": {"const": "file"}, "size_limit": {"maximum": 1073741824}, "json_schema": false, "deliver": false}
     },
     "custom_structured": {
-      "description": "A structured type has one file, and the one base view with a json_schema.",
+      "description": "A structured type has one file, and the one base view with a json_schema. A type with deliver has a size_limit of at most 786432 bytes.",
       "required": ["base_view", "size_limit", "max_files", "json_schema"],
-      "properties": {"base_view": {"const": "structured"}, "size_limit": {"maximum": 1048576}, "max_files": {"maximum": 1}}
+      "properties": {"base_view": {"const": "structured"}, "size_limit": {"maximum": 1048576}, "max_files": {"maximum": 1}},
+      "if": {"required": ["deliver"]},
+      "then": {"properties": {"size_limit": {"maximum": 786432}}}
     },
     "workflow": {
       "description": "A workflow of a stage: a string of one line, not empty or white space alone, that the stack declares under workflows.",

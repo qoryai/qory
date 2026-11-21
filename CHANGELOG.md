@@ -694,10 +694,16 @@ release may change what an existing document does, and states it under Upgrading
   draft-07 ignores the keys next to a `$ref`. It fails when the `$ref` that leads to the
   `target` goes through a `$defs` name with a character other than a letter, a digit, `_`
   or `-`, because the compiler decodes `%`, `~0` and `~1` and splits a name at `/`. A
-  `deliver` that breaks a rule stops the command with the fix on the first line, at most
-  100 characters, and the type name on the second line, such as
+  type with `deliver` has a `size_limit` of at most 786432 bytes. A `deliver` that breaks
+  a rule stops the command with the fix on the first line, at most 100 characters, and
+  the type name on the second line, such as
   ``Add a top-level `target` of the primitive `reference` to the schema, or remove
   `deliver`.``
+- A stage of the `process` of a `process.yaml` can have `outputs`, a list of objects with
+  `type`, the name of an entry of `artifact_types`, and `required`, `true` or `false`,
+  `false` when left out. An output has no other key. qory stops the command with the fix
+  on the first line when a stage has an output type that `artifact_types` does not list;
+  the message has the stage and the type.
 
 ### Changed
 

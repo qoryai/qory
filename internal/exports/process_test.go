@@ -1392,6 +1392,10 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		{structured(send, "{$defs: {'a~0b': {$ref: '"+reference+"'}, 'a~b': {type: number}}, properties: {target: {$ref: '#/$defs/a~0b'}}}"), fix + other + place, true},
 		{structured(send, "{$defs: {'a/b': {$ref: '"+reference+"'}, a: {b: {type: number}}}, properties: {target: {$ref: '#/$defs/a/b'}}}"), fix + other + place, true},
 		{structured(send, "{$defs: {line: "+string(line)+", 're%66erence': "+string(written)+", reference: {type: number}}, properties: {target: {$ref: '#/$defs/re%66erence'}}}"), fix + other + place, true},
+		// The size of a type with deliver is at most 786432 bytes.
+		{custom("structured", "size_limit: 786432, max_files: 1, json_schema: "+withTarget+send), "", true},
+		{custom("structured", "size_limit: 786433, max_files: 1, json_schema: "+withTarget+send), "Set size_limit of artifact type a-type to at most 786432.\n  A type with deliver is sent in one version of at most 786432 bytes, and size_limit is 786433." + place, false},
+		{custom("structured", "size_limit: 1048576, max_files: 1, json_schema: "+withTarget), "", true},
 		{structured("", withTarget), "", true},
 		{structured(send, withTarget), "", true},
 		{structured(", deliver: {send: after_gate}", withTarget), "", true},
@@ -1449,6 +1453,78 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		}
 		if got := schema.Validate(doc) == nil; got != c.schemaOK {
 			t.Errorf("%q: process.schema.json passes it: %v", c.body, got)
+		}
+	}
+}
+
+// schemaPasses reports whether process.schema.json passes body, a process.yaml.
+func schemaPasses(t *testing.T, body string) bool {
+	t.Helper()
+	var doc any
+	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	j, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(j, &doc); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/process.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return schema.Validate(doc) == nil
+}
+
+// TestVerifyChecksOutputs is outputs of a stage: a list of objects with type, the name
+// of an entry of artifact_types, and required, true or false. Each refusal has the fix
+// first and names the stage. process.schema.json takes every shape here but a type that
+// artifact_types does not list, which a JSON Schema cannot state.
+func TestVerifyChecksOutputs(t *testing.T) {
+	const place = "\n  The file is {file}."
+	const types = "\n  - name: mockup\n  - name: spec"
+	withOutputs := func(outputs, types string) string {
+		body := strings.Replace(process, "    - name: Check\n", "    - name: Check\n      outputs: "+outputs+"\n", 1)
+		if types == "" {
+			return body
+		}
+		return body + "artifact_types:" + types + "\n"
+	}
+	for _, c := range []struct {
+		outputs, types, want string
+		schemaOK             bool
+	}{
+		{"[]", types, "", true},
+		{"[{type: mockup}]", types, "", true},
+		{"[{type: mockup, required: true}, {type: spec, required: false}]", types, "", true},
+		{"[{type: nope}]", types, "Add nope to artifact_types.\n  Stage Check has the output nope, and no entry of artifact_types is called nope." + place, true},
+		{"[{type: mockup}]", "", "Add mockup to artifact_types.\n  Stage Check has the output mockup, and no entry of artifact_types is called mockup." + place, true},
+		{"mockup", types, "Set outputs of the stage to a list, or remove it.\n  outputs of stage Check is a string." + place, false},
+		{"~", types, "Set outputs of the stage to a list, or remove it.\n  outputs of stage Check is null." + place, false},
+		{"[mockup]", types, "Set the entry of outputs to an object with type and required.\n  Entry 1 of outputs of stage Check is a string." + place, false},
+		{"[{type: mockup, extra: 1}]", types, "Remove the key \"extra\" from the entry of outputs.\n  Entry 1 of outputs of stage Check has the key, and an output has only type and required." + place, false},
+		{"[{required: true}]", types, "Add type to the entry of outputs, the name of an entry of artifact_types.\n  Entry 1 of outputs of stage Check has no type." + place, false},
+		{"[{type: 5}]", types, "Set type of the entry of outputs to a quoted string, a name from artifact_types.\n  type of entry 1 of outputs of stage Check is a number." + place, false},
+		{"[{type: Bad_Name}]", types, "Set type of the entry of outputs to a name such as reply-draft, at most 64 bytes.\n  type of entry 1 of outputs of stage Check is \"Bad_Name\"." + place, false},
+		{"[{type: mockup, required: maybe}]", types, "Set required of the entry of outputs to true or false.\n  required of entry 1 of outputs of stage Check is a string." + place, false},
+	} {
+		body := withOutputs(c.outputs, c.types)
+		e := factory(t, body)
+		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
+		err := e.Verify()
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("%q: %v", c.outputs, err)
+			}
+		} else if want := strings.ReplaceAll(c.want, "{file}", file); err == nil || err.Error() != want {
+			t.Errorf("%q:\n%v\nwant:\n%s", c.outputs, err, want)
+		} else if first, _, _ := strings.Cut(err.Error(), "\n"); len(first) > 100 {
+			t.Errorf("the first line has %d characters: %s", len(first), first)
+		}
+		if got := schemaPasses(t, body); got != c.schemaOK {
+			t.Errorf("%q: process.schema.json passes it: %v", c.outputs, got)
 		}
 	}
 }
