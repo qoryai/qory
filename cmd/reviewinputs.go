@@ -2,10 +2,16 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 )
+
+// maxReviewPath is the most characters of a path that the harness's tool guard accepts as
+// qory.review.report.
+const maxReviewPath = 4096
 
 // The members of the member qory of inputs.json that a stage with reviewers adds. They
 // are named as the members of qoryInputs are: lower-case words joined by underscores.
@@ -25,7 +31,7 @@ type stageInputs struct {
 // value is the absolute path of a file or folder that the reviewer reads, except Report,
 // the path where the reviewer writes its report.
 type reviewInputs struct {
-	// Report is the path of the report file, see [reviewSessionSpec.Report].
+	// Report is the path of the report file that the reviewer writes.
 	Report string `json:"report"`
 	// SuiteResult is the path of the suite result file, see suite.WriteResult.
 	SuiteResult string `json:"suite_result"`
@@ -64,7 +70,7 @@ func newStageInputs(role string) (stageInputs, error) {
 	return stageInputs{Reviewers: role}, nil
 }
 
-// newReviewerInputs are the members of qory for the reviewer session spec, in a stage
+// newReviewerInputs are the members of qory for a reviewer session, in a stage
 // whose reviewers are the group role role, with suiteResult, the path of the suite result
 // file, and startArtifacts, the path of the folder of [reviewStartArtifactTypes]. It
 // returns an error that starts with the fix for a role, a report path that the harness's
@@ -73,18 +79,50 @@ func newStageInputs(role string) (stageInputs, error) {
 //
 // shortcut: not called yet; wired in when cmd/run.go, cmd/rundocs.go and
 // cmd/pushstep.go can change (after Q-01, Q-36 and Q-73).
-func newReviewerInputs(role string, spec reviewSessionSpec, suiteResult, startArtifacts string) (reviewerInputs, error) {
+func newReviewerInputs(role, report, suiteResult, startArtifacts string) (reviewerInputs, error) {
 	stage, err := newStageInputs(role)
 	if err != nil {
 		return reviewerInputs{}, err
 	}
-	if why := reviewPathProblem(spec.Report); why != "" {
-		return reviewerInputs{}, fmt.Errorf("Give the reviewer an absolute path in qory.review.report that the harness accepts.\nFor %s, the path %s %s.", spec.Reviewer, strconv.Quote(spec.Report), why)
+	if why := reviewPathProblem(report); why != "" {
+		return reviewerInputs{}, fmt.Errorf("Give the reviewer an absolute path in qory.review.report that the harness accepts.\nThe path %s %s.", strconv.Quote(report), why)
 	}
 	for _, p := range []struct{ what, path string }{{"review.suite_result", suiteResult}, {"start_artifacts", startArtifacts}} {
 		if !cleanAbs(p.path) {
-			return reviewerInputs{}, fmt.Errorf("Give the reviewer an absolute, clean path in qory.%s.\nFor %s, the path is %s.", p.what, spec.Reviewer, strconv.Quote(p.path))
+			return reviewerInputs{}, fmt.Errorf("Give the reviewer an absolute, clean path in qory.%s.\nThe path is %s.", p.what, strconv.Quote(p.path))
 		}
 	}
-	return reviewerInputs{Stage: stage, Review: reviewInputs{Report: spec.Report, SuiteResult: suiteResult}, StartArtifacts: startArtifacts}, nil
+	return reviewerInputs{Stage: stage, Review: reviewInputs{Report: report, SuiteResult: suiteResult}, StartArtifacts: startArtifacts}, nil
+}
+
+// cleanAbs reports whether path is absolute and clean, and has no line break or NUL.
+func cleanAbs(path string) bool {
+	return filepath.IsAbs(path) && filepath.Clean(path) == path && !strings.ContainsAny(path, "\n\r\x00")
+}
+
+// reviewPathProblem is why the harness's tool guard does not accept path as
+// qory.review.report or as another path of qory.review, as the end of a sentence about the
+// path ("is not absolute"), and "" for a path it accepts: an absolute path with no . or ..
+// part, no double or trailing slash, no NUL, of at most 4096 characters, and no .git or
+// .claude part. Whether links lie on the path is for the folder's maker.
+func reviewPathProblem(path string) string {
+	switch {
+	case !strings.HasPrefix(path, "/"):
+		return "is not absolute"
+	case strings.ContainsRune(path, 0):
+		return "has a NUL"
+	case len(path) > maxReviewPath:
+		return "has more than " + strconv.Itoa(maxReviewPath) + " characters"
+	case strings.Contains(path, "//") || strings.HasSuffix(path, "/"):
+		return "has a double or trailing slash"
+	}
+	for _, part := range strings.Split(path[1:], "/") {
+		switch part {
+		case ".", "..":
+			return "has a " + part + " part"
+		case ".git", ".claude":
+			return "has a " + part + " part, where the harness's tool guard denies a write"
+		}
+	}
+	return ""
 }

@@ -10,8 +10,7 @@ import (
 )
 
 func TestNewReviewerInputsJSON(t *testing.T) {
-	spec := reviewSessionSpec{Reviewer: "acceptance-reviewer", Report: "/r/a/report.json"}
-	in, err := newReviewerInputs("reviewers", spec, "/r/suite_result.json", "/r/start")
+	in, err := newReviewerInputs("reviewers", "/r/a/report.json", "/r/suite_result.json", "/r/start")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,11 +51,11 @@ func TestReviewerInputsNamingMatchesQoryInputs(t *testing.T) {
 }
 
 func TestNewReviewerInputsRefuses(t *testing.T) {
-	ok := reviewSessionSpec{Reviewer: "code-reviewer", Report: "/r/a/report.json"}
+	const ok = "/r/a/report.json"
 	for _, c := range []struct {
 		name  string
 		role  string
-		spec  reviewSessionSpec
+		spec  string
 		suite string
 		start string
 		want  string
@@ -65,11 +64,11 @@ func TestNewReviewerInputsRefuses(t *testing.T) {
 		{"upper-case role", "Reviewers", ok, "/s", "/t", "group role"},
 		{"role the harness reads as no", "none", ok, "/s", "/t", "reads false, no, null, off, none and 0 as no role"},
 		{"role 0", "0", ok, "/s", "/t", "group role"},
-		{"relative report", "reviewers", reviewSessionSpec{Reviewer: "x", Report: "report.json"}, "/s", "/t", "qory.review.report"},
+		{"relative report", "reviewers", "report.json", "/s", "/t", "qory.review.report"},
 		{"suite result with ..", "reviewers", ok, "/s/../x", "/t", "qory.review.suite_result"},
 		{"suite result below .git is fine to read", "reviewers", ok, "/w/.git/s", "/t", ""},
 		{"relative start", "reviewers", ok, "/s", "start", "qory.start_artifacts"},
-		{"report in .claude", "reviewers", reviewSessionSpec{Reviewer: "x", Report: "/w/.claude/r.json"}, "/s", "/t", "qory.review.report"},
+		{"report in .claude", "reviewers", "/w/.claude/r.json", "/s", "/t", "qory.review.report"},
 	} {
 		_, err := newReviewerInputs(c.role, c.spec, c.suite, c.start)
 		if c.want == "" {
@@ -84,6 +83,24 @@ func TestNewReviewerInputsRefuses(t *testing.T) {
 		}
 		if first, _, _ := strings.Cut(err.Error(), "\n"); len(first) > 100 {
 			t.Errorf("%s: first line has %d characters", c.name, len(first))
+		}
+	}
+}
+
+func TestReviewPathProblem(t *testing.T) {
+	for path, want := range map[string]string{
+		"/r/report.json":      "",
+		"r/report.json":       "is not absolute",
+		"/r/./report.json":    "has a . part",
+		"/r/../report.json":   "has a .. part",
+		"/r//report.json":     "has a double or trailing slash",
+		"/r/report.json/":     "has a double or trailing slash",
+		"/r/a\x00b":           "has a NUL",
+		"/r/.claude/rep.json": "has a .claude part, where the harness's tool guard denies a write",
+		"/r/.gitignore/x":     "",
+	} {
+		if got := reviewPathProblem(path); got != want {
+			t.Errorf("reviewPathProblem(%q) = %q, want %q", path, got, want)
 		}
 	}
 }
