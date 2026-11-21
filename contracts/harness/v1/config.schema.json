@@ -144,6 +144,10 @@
                 "description": "The access level the workflow declares for what a dispatched run of it works on: read, write-no-push, or write. Left out, it is read. A run takes the lower of this access and access in the run's documents, in the order read, write-no-push, write; documents with no target have no access, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is read, and on Claude Code its settings deny Edit, Write and NotebookEdit; such a run with no wall, with wall.setup: inside, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A write-no-push run has a writable checkout, no push step, no submit, and no version of the artifact submission. At write the checkout is writable and qory pushes what the agent left.",
                 "enum": ["read", "write-no-push", "write"]
               },
+              "judges": {
+                "description": "The boolean that says whether a session of the workflow judges the work. false: a later workflow in the loop judges it, and the session may record the verdict escalate or no verdict. true, or left out: the session may record any verdict. qory reads only true and false, and refuses any other value, a quoted \"no\" included.",
+                "type": "boolean"
+              },
               "tier": {
                 "description": "The tier that names the main session's model and effort for a dispatched run of the workflow: light, balanced, or thinking. Left out, the workflow names none. qory passes nothing new to the run: Qory Apiary resolves the model and effort from the tier.",
                 "enum": ["light", "balanced", "thinking"]

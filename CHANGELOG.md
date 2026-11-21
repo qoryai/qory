@@ -18,6 +18,10 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A workflow entry of a stack takes `judges`, a boolean: `workflows: {implement-changes:
+  {judges: false}}`. `false` says that a later workflow in the loop judges the work of
+  the workflow's session; a value other than `true` or `false`, a quoted `"no"` included,
+  stops the compose with exit 2.
 - In a home composed for codex alone, a Codex agent with a tier gets the tier's model as
   `model` and its effort as `model_reasoning_effort` in `agents/<name>.toml`. An effort
   outside `none`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra` stops the compose

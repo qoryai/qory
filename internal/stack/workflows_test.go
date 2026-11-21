@@ -90,6 +90,38 @@ func TestLowerAccessTakesTheLowerOfTwoLevels(t *testing.T) {
 	}
 }
 
+// TestLoadReadsJudges reads judges as written: false, true, and nil for a workflow that
+// leaves it out; a value that is no boolean is refused, and a key that is not read is
+// still refused.
+func TestLoadReadsJudges(t *testing.T) {
+	isolate(t)
+	p, err := Load(write(t, withWorkflows("  a:\n    judges: false\n  b:\n    judges: true\n  c: {}\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j := p.Workflows["a"].Judges; j == nil || *j {
+		t.Errorf("a: judges %v, want false", j)
+	}
+	if j := p.Workflows["b"].Judges; j == nil || !*j {
+		t.Errorf("b: judges %v, want true", j)
+	}
+	if j := p.Workflows["c"].Judges; j != nil {
+		t.Errorf("c: judges %v, want nil", *j)
+	}
+	for _, body := range []string{"  a:\n    judges: \"no\"\n", "  a:\n    judges: 0\n", "  a:\n    judges: []\n", "  a:\n    judges:\n"} {
+		if _, err := Load(write(t, withWorkflows(body))); err == nil {
+			t.Errorf("%q: no error", body)
+		}
+	}
+	if _, err := Load(write(t, withWorkflows("  a:\n    judge: false\n"))); err == nil || !strings.Contains(err.Error(), `Key "judge" is not one qory-stack.yaml reads.`) {
+		t.Errorf("unknown key: %v", err)
+	}
+	_, err = Load(write(t, withWorkflows("  a:\n    judges: \"no\"\n")))
+	if err == nil || !strings.Contains(err.Error(), "cannot unmarshal !!str into bool") {
+		t.Errorf("a quoted no: %v", err)
+	}
+}
+
 // TestLoadReadsTheTier reads each workflow's tier as written, and a workflow with no
 // tier, or none listed, as none.
 func TestLoadReadsTheTier(t *testing.T) {
