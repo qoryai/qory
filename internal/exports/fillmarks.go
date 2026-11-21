@@ -59,7 +59,8 @@ func isReferenceMember(root map[string]any, node any) bool {
 	}
 	all, _ := member["allOf"].([]any)
 	return !slices.ContainsFunc(all, func(entry any) bool {
-		entryType, has := entry.(map[string]any)["type"]
+		entryMap, _ := entry.(map[string]any)
+		entryType, has := entryMap["type"]
 		return has && entryType != "object"
 	})
 }

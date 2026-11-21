@@ -374,8 +374,9 @@ const defsPrefix = "#/$defs/"
 // and whether ref has one. A name has letters, digits, "_" and "-" only: the compiler
 // decodes "%", "~" and "/" in a JSON Pointer, so a name with one could reach another
 // definition than the name spells.
-// shortcut: a definition name outside letters, digits, "_" and "-" on the chain of the
-// target fails; replace it when a type needs such a name.
+// shortcut: a definition name outside letters, digits, "_" and "-" on the $ref chain of
+// the target, or of a marked pushed-head, pushed-base or pushed-commits member, fails;
+// replace it when a type needs such a name.
 func localName(ref string) (string, bool) {
 	name, local := strings.CutPrefix(ref, defsPrefix)
 	if !local || name == "" {

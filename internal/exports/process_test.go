@@ -1447,6 +1447,10 @@ func TestVerifyChecksDeliver(t *testing.T) {
 		{structured(send, "{properties: {target: {allOf: [{$ref: '"+reference+"'}, {type: string}]}}}"), fix + other + place, true},
 		{structured(send, "{properties: {target: {$ref: '"+reference+"', type: object}}}"), "", true},
 		{structured(send, "{properties: {target: {allOf: [{$ref: '"+reference+"'}, {type: object}]}}}"), "", true},
+		// A boolean entry of an allOf is a schema with no type: no panic, and the entry
+		// is not read, so false passes too.
+		{structured(send, "{properties: {target: {allOf: [true, {$ref: '"+reference+"'}]}}}"), "", true},
+		{structured(send, "{properties: {target: {allOf: [false, {$ref: '"+reference+"'}]}}}"), "", true},
 	} {
 		e := factory(t, withTypes(c.body))
 		file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
@@ -1618,6 +1622,11 @@ left_out: {type: integer, x-qory-fill: pushed-commits-left-out}`
 		{"commits: {type: array, items: {$ref: '" + reference + "'}, x-qory-fill: pushed-commits}", send, ""},
 		{"head: {$ref: '" + reference + "', x-qory-fill: pushed-head}", send, ""},
 		{"head: {$ref: '" + reference + "', type: object, x-qory-fill: pushed-head}", send, ""},
+		// A boolean entry of an allOf has no type: no panic, and false is not read.
+		{"head: {allOf: [true, {$ref: '" + reference + "'}], x-qory-fill: pushed-head}", send, ""},
+		{"head: {allOf: [false, {$ref: '" + reference + "'}], x-qory-fill: pushed-head}", send, ""},
+		{"commits: {type: array, items: {allOf: [true, {$ref: '" + reference + "'}]}, x-qory-fill: pushed-commits}", send, ""},
+		{"commits: {type: array, items: {allOf: [false, {$ref: '" + reference + "'}]}, x-qory-fill: pushed-commits}", send, ""},
 		{"note: {type: string}", send, ""},
 		// A value twice, below the top level, and a mark on a type with no deliver.
 		{"a: {type: string, x-qory-fill: pushed-branch}, b: {type: string, x-qory-fill: pushed-branch}", send, "Remove the second x-qory-fill pushed-branch from the json_schema.\n  Properties a and b in json_schema of artifact type a-type have it."},
