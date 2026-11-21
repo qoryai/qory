@@ -254,7 +254,7 @@ func TestDestinationCloneCountsAtMost100(t *testing.T) {
 	tunnels := c.s.Tunnels()
 
 	_, err := run(t, "destination", "clone", backID)
-	wantLine(t, err, cmd.ExitInput, "Clone at most 100 destinations in one run: this call would make clone 101.")
+	wantLine(t, err, cmd.ExitInput, "Clone at most 100 destinations in one session: this call would make clone 101.")
 	if got := c.s.Tunnels(); got != tunnels {
 		t.Errorf("the call opened %d tunnels", got-tunnels)
 	}

@@ -50,7 +50,7 @@ const clonePrefix = "_clone-"
 // [textNotRepository] exit 2, the others 1.
 const (
 	textNotDestination  = "Use an id from destinations in the run's inputs: %s is not one of them."
-	textTooManyClones   = "Clone at most 100 destinations in one run: this call would make clone 101."
+	textTooManyClones   = "Clone at most 100 destinations in one session: this call would make clone 101."
 	textNoAddress       = "Clone only a destination with an address: %s has none, so it has no repository."
 	textNotInSession    = "Run qory destination clone inside a run's session: %s is not set."
 	textNoDestinations  = "Run qory destination clone only in a run whose inputs list destinations."
