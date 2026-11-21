@@ -75,9 +75,12 @@ func homeReport(home string) report.Report {
 // spec of session n as it joins. extends, when true, makes the harness document extend the
 // stack of the folder examples/hello in place of defining one. files are more files of the
 // checkout, by path, beside the module hello's. stack, when set, changes the base's
-// qory-stack.yaml of a harness document that extends it.
+// qory-stack.yaml of a harness document that extends it. perRun, when true, starts the run
+// with no --home, so it composes into a home that it makes for itself, and the joins'
+// reports are empty.
 type loopSetup struct {
 	extends bool
+	perRun  bool
 	stack   func(string) string
 	files   map[string]string
 	answers []string
@@ -143,7 +146,13 @@ func runLoop(t *testing.T, s loopSetup) loopRun {
 				s.change(d)
 			}
 		},
-		before: func() []string { return []string{"--home", r.home} },
+		perRunHome: s.perRun,
+		before: func() []string {
+			if s.perRun {
+				return nil
+			}
+			return []string{"--home", r.home}
+		},
 		nowhere: func(n *cmd.Nowhere) {
 			open := n.OnOpen
 			n.OnOpen = func(o session.OpenSpec) {
@@ -726,11 +735,12 @@ func TestALaterSessionComposesWithTheTiersOfItsAnswer(t *testing.T) {
 	}
 }
 
-// TestALaterCodexSessionAfterClaudeGetsItsTiers is a run of claude whose answer starts
-// session 2 on codex with the tier balanced mapped to example-other at the effort high,
-// with a module agent whose model is ${qory:balanced}: session 2's home is composed for
-// codex alone, so its Codex agent mid has the tier's model and effort, and no row says
-// that the tier was skipped.
+// TestALaterCodexSessionAfterClaudeGetsItsTiers is a run of claude, in a home that the run
+// makes for itself, whose answer starts session 2 on codex with the tier balanced mapped to
+// example-other at the effort high, with a module agent whose model is ${qory:balanced}:
+// session 2's home is composed for codex alone, so its Codex agent mid has the tier's model
+// and effort, claude's tree is gone from the home, and no row says that the tier was
+// skipped.
 func TestALaterCodexSessionAfterClaudeGetsItsTiers(t *testing.T) {
 	models := []any{map[string]any{"id": "example-large"}, map[string]any{"id": "example-other", "effort": []any{"high"}}}
 	var second map[string]any
@@ -742,8 +752,9 @@ func TestALaterCodexSessionAfterClaudeGetsItsTiers(t *testing.T) {
 		"tiers": map[string]any{"light": "example-large", "balanced": map[string]any{"model": "example-other", "effort": "high"}, "thinking": "example-large"},
 	}
 	answer, _ := json.Marshal(second)
-	var agent string
+	var agent, home string
 	r := runLoop(t, loopSetup{
+		perRun:  true,
 		answers: []string{string(answer)},
 		files: map[string]string{
 			"examples/hello/modules/hello/agents/mid.md": "---\nname: mid\ndescription: Works in the middle tier.\nmodel: ${qory:balanced}\n---\n\nWorks.\n",
@@ -757,7 +768,7 @@ func TestALaterCodexSessionAfterClaudeGetsItsTiers(t *testing.T) {
 		joined: func(n int, spec session.SessionSpec) {
 			if n == 2 {
 				data, _ := os.ReadFile(filepath.Join(spec.HarnessHome, "codex", "agents", "mid.toml"))
-				agent = string(data)
+				agent, home = string(data), spec.HarnessHome
 			}
 		},
 	})
@@ -767,7 +778,65 @@ func TestALaterCodexSessionAfterClaudeGetsItsTiers(t *testing.T) {
 	if !strings.Contains(agent, "model = \"example-other\"\n") || !strings.Contains(agent, "model_reasoning_effort = \"high\"\n") {
 		t.Errorf("session 2's Codex agent mid is %q, want the model example-other at the effort high", agent)
 	}
+	if home == "" || strings.HasPrefix(home, r.home) {
+		t.Errorf("session 2 joined with the home %q, want one the run made, outside %s", home, r.home)
+	}
+	if _, err := os.Stat(filepath.Join(home, "claude")); err == nil {
+		t.Errorf("claude's tree is in session 2's home %s", home)
+	}
 	lacks(t, r.out, "skipped", "only in a home composed for codex alone")
+}
+
+// TestALaterSessionKeepsEveryRuntimeOfAHomeFromTheHomeFlag is a run of claude with --home,
+// whose answer starts session 2 on codex with a tier map: the home keeps claude's tree
+// beside codex's when session 2 joins, so the checkout's links into it still resolve, and
+// session 2's Codex agent mid has no model, as in any home of several runtimes.
+func TestALaterSessionKeepsEveryRuntimeOfAHomeFromTheHomeFlag(t *testing.T) {
+	models := []any{map[string]any{"id": "example-large"}}
+	tiers := map[string]any{"light": "example-large", "balanced": "example-large", "thinking": "example-large"}
+	var second map[string]any
+	if err := json.Unmarshal([]byte(laterAnswer(2, "codex", "example-provider-2", 30)), &second); err != nil {
+		t.Fatal(err)
+	}
+	second["model_choice"] = map[string]any{"runtime": "codex", "model": "example-large", "provider_models": models, "tiers": tiers}
+	answer, _ := json.Marshal(second)
+	var home, agent string
+	trees := map[string]bool{}
+	r := runLoop(t, loopSetup{
+		answers: []string{string(answer)},
+		files: map[string]string{
+			"examples/hello/modules/hello/agents/mid.md": "---\nname: mid\ndescription: Works in the middle tier.\nmodel: ${qory:balanced}\n---\n\nWorks.\n",
+		},
+		change: func(d map[string]any) {
+			d["run_settings"] = map[string]any{"runtime": "claude", "model": "example-large", "provider_models": models, "tiers": tiers}
+		},
+		joined: func(n int, spec session.SessionSpec) {
+			if n != 2 {
+				return
+			}
+			home = spec.HarnessHome
+			data, _ := os.ReadFile(filepath.Join(home, "codex", "agents", "mid.toml"))
+			agent = string(data)
+			for _, runtime := range []string{"claude", "codex"} {
+				info, err := os.Stat(filepath.Join(home, runtime))
+				trees[runtime] = err == nil && info.IsDir()
+			}
+		},
+	})
+	if r.err != nil || len(r.joins) != 2 {
+		t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if !strings.HasPrefix(home, r.home+string(filepath.Separator)) {
+		t.Fatalf("session 2 joined with the home %q, want one in %s", home, r.home)
+	}
+	for _, runtime := range []string{"claude", "codex"} {
+		if !trees[runtime] {
+			t.Errorf("session 2's home %s has no tree of %s", home, runtime)
+		}
+	}
+	if !strings.Contains(agent, "name = \"mid\"") || strings.Contains(agent, "model") {
+		t.Errorf("session 2's Codex agent mid is %q, want one with no model", agent)
+	}
 }
 
 // TestASessionWithoutAKeyAfterOneWithAKeyJoinsWithNone is a run whose answers start session

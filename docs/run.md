@@ -2833,7 +2833,10 @@ session ended. For a session, qory prints
 
 1. composes the workspace's harness for the session's runtime and model settings in a
    compose step, from the run's sources at the commits of session 1's compose: qory fetches
-   nothing, and opens no stack proxy;
+   nothing, and opens no stack proxy. qory composes the home that the run made for itself
+   for the session's runtime alone. A home from `--home` or `harness.home` keeps every
+   runtime's tree, so a later Codex session there gets no tier models (see
+   [Tiers](harness.md#tiers));
 2. installs the session's runtime, if no session of the run ran it yet, as session 1's
    install does: at the version that the stack pins (see [A pinned
    version](#a-pinned-version)), else the newest, with [npm's
@@ -2886,7 +2889,7 @@ doubles. Then:
   <n>: <error>`.
 
 Each push step that pushes commits stores a version of the artifact `submission`, from
-the hand-off file as it is after that session (see [The submit step](#the-submit-step)).
+the hand-off file as it is after the session before that step (see [The submit step](#the-submit-step)).
 qory does not empty the file between sessions: after a session that does not write it,
 qory reads the text and steps that the session before wrote. Each version lists every
 commit of the run, since the run's start commit is set once, at session 1. The commits that

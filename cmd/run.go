@@ -793,7 +793,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			prepareLaunch := func(stepCtx context.Context, w io.Writer, n int) (freshHome bool, err error) {
 				// later is a session after the run's first.
 				later := n > 1
-				composing.writable, composing.ctx, composing.alone = nil, stepCtx, later
+				// A later session composes the home that the run made for itself for its runtime
+				// alone; a home from --home or harness.home keeps every runtime's tree, so the
+				// checkout's links into it still resolve after the run.
+				composing.writable, composing.ctx, composing.alone = nil, stepCtx, later && runHome != ""
 				// The report of a run of several sessions has each session's runtime and tier
 				// map, which the compose writes with the rest of its report.
 				composing.sessions = nil

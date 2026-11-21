@@ -537,8 +537,9 @@ type composeOptions struct {
 	// compose's lock: qory run adds the rows of a run of several sessions, see
 	// [report.Report.Sessions].
 	sessions func(*report.Report)
-	// alone is set for the compose of a later session of a qory run: the home holds the
-	// session's runtime alone, see [composeOptions.homeRuntimes].
+	// alone is set for the compose of a later session of a qory run in the home that the
+	// run made for itself: the home holds the session's runtime alone, see
+	// [composeOptions.homeRuntimes].
 	alone bool
 }
 
