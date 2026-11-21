@@ -717,9 +717,11 @@ when a stage has an input or output that is neither in the list nor one of those
 
 A `json_schema` is an object that compiles as a JSON Schema. It is draft 2020-12 unless its
 `$schema` sets draft-07, the only other draft. A reference to a file or URL outside the
-schema fails when the schema reaches it, and qory reads no file or URL for one. The JSON
-Schema metaschemas are built in, so a reference to one passes. A `pattern` is a Go
-regular expression (RE2). A
+schema fails when the schema reaches it, and qory reads no file or URL for one. Two kinds
+of reference pass: a reference to a JSON Schema metaschema, which is built in, and a
+reference into `primitives.schema.json`, such as
+`https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/title` (§The
+primitives). A `pattern` is a Go regular expression (RE2). A
 `json_schema` has at most 65,536 bytes as compact JSON, 4096 values in all,
 1024 entries in a list, 1024 members in an object, 16,384 bytes in a string or a member
 name, and 64 lists and objects nested in one another. The patterns of all custom types in
@@ -760,6 +762,35 @@ Remove the key "command" from submit.
   submit has only type and send.
   submit is in /src/acme-harness/harness/modules/support-desk/process.yaml.
 ```
+
+## The primitives
+
+[primitives.schema.json](primitives.schema.json) defines the strings that the schemas of
+artifact types have in common. It is not the schema of a document. Each definition is under
+`$defs`:
+
+| Definition | A string that |
+|---|---|
+| `line` | has no control character (U+0000 to U+001F and U+007F to U+009F), no U+2028 or U+2029, and no Cf character except U+200C and U+200D, the joiners that emoji sequences and some scripts need |
+| `text` | is Markdown: of the control characters it has only tab, line feed and carriage return, and it has the same other stops as a `line`; at most 20,000 characters, with no line that is `<!-- qory:start -->` or `<!-- qory:end -->` |
+| `title` | is a `line` of 1 to 256 characters with at least one character that is not a space (U+0020, U+00A0, U+1680, U+2000 to U+200A, U+202F, U+205F, U+3000), U+200C or U+200D |
+| `reference` | is an object with a `collection` (a `line` of 1 to 200 characters) and, optionally, an `address` with a `system` (a host name of at most 253 characters) and a `path` (a `line` of 1 to 200 characters); an `address` has both |
+| `link` | is an `https` URL of at most 2048 characters, with a host, with no user information |
+
+The Cf characters include the bidirectional controls, the soft hyphen, the zero width
+space and the tag characters such as U+E0041. The patterns of `line` and `text` list the
+characters of Unicode 17.0.0 that Go's and Node's tables have as Cc and Cf. The characters
+above U+FFFF are written as surrogate pairs, because the checks of the harness read a
+pattern as JavaScript with the `u` flag.
+
+A schema of an artifact type in a `process.yaml` refers to a definition by the address of
+the file, such as
+`{"$ref": "https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/title"}`.
+qory resolves that address from its built-in copy and reads no file or URL. The schemas of
+the formats in this document do not refer to the file: each has a `$defs` `line` and, where
+it has Markdown, a `$defs` `text` with the same pattern as here, so that each one passes the
+check as the schema of a custom type without a loader. A test compares each pattern with
+the one in the primitives file.
 
 ## The branch format
 

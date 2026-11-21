@@ -1237,3 +1237,34 @@ func TestContractSchemasPassAsCustomTypes(t *testing.T) {
 		}
 	}
 }
+
+// TestVerifyResolvesTheReferencesToThePrimitives is a json_schema whose members refer to
+// the primitives schema by its $id: each definition resolves with nothing read from
+// outside qory, a reference to another file of the contracts or to a definition that the
+// primitives lack fails with the compiler's text, and several types that refer to the
+// same primitives stay inside the limit of the patterns.
+func TestVerifyResolvesTheReferencesToThePrimitives(t *testing.T) {
+	const url = "https://qory.dev/contracts/harness/v1/primitives.schema.json"
+	schema := func(ref string) string {
+		return `{type: object, properties: {a: {$ref: '` + ref + `'}}}`
+	}
+	var types strings.Builder
+	for _, def := range []string{"line", "title", "text", "reference", "link"} {
+		types.WriteString(strings.Replace(custom("structured", "size_limit: 1, max_files: 1, json_schema: "+schema(url+"#/$defs/"+def)), "a-type", "uses-"+def, 1))
+		types.WriteString(strings.Replace(custom("structured", "size_limit: 1, max_files: 1, json_schema: "+schema(url)), "a-type", "all-"+def, 1))
+	}
+	if err := factory(t, withTypes(types.String())).Verify(); err != nil {
+		t.Errorf("references to the primitives: %v", err)
+	}
+	const fix = "Fix json_schema of artifact type a-type so that it compiles as a JSON Schema.\n  The schema does not compile: "
+	for _, c := range []struct{ ref, want string }{
+		{url + "#/$defs/gone", `json-pointer in "` + url + `#/$defs/gone" not found`},
+		{"https://qory.dev/contracts/harness/v1/questions.schema.json", `no URLLoader registered for "https://qory.dev/contracts/harness/v1/questions.schema.json"`},
+	} {
+		e := factory(t, withTypes(custom("structured", "size_limit: 1, max_files: 1, json_schema: "+schema(c.ref))))
+		err := e.Verify()
+		if err == nil || !strings.Contains(err.Error(), fix) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v", c.ref, err)
+		}
+	}
+}

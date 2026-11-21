@@ -16,6 +16,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 	"gopkg.in/yaml.v3"
 
+	"github.com/qoryai/qory/internal/primitives"
 	"github.com/qoryai/qory/internal/runapi"
 )
 
@@ -64,7 +65,7 @@ const (
 )
 
 // typeSchemaURL is what a custom type's JSON Schema is compiled under: a name no loader
-// resolves, since the schema refers to nothing outside itself.
+// resolves, since the schema refers to nothing outside itself but the primitives.
 const typeSchemaURL = "https://qory.dev/contracts/harness/v1/artifact-type"
 
 // maxSchemaError is the most characters of the JSON Schema library's text that a message
@@ -385,8 +386,10 @@ func overSchemaLimit(v any, depth int, values *int) string {
 // compileTypeSchema compiles a JSON Schema, draft 2020-12 unless $schema sets another,
 // with its patterns parsed through patterns, and drops the result: nothing is validated
 // against it. The compiler has no loader, so a reference to a file or a URL outside the
-// schema fails when the schema reaches it, and no file or URL is read. The JSON Schema
-// metaschemas are built into the compiler, so a reference to one passes.
+// schema fails when the schema reaches it, and no file or URL is read. Two kinds of
+// reference pass: one to a JSON Schema metaschema, which the compiler has built in, and
+// one into the primitives schema, which this function adds as a resource under
+// [primitives.URL], such as primitives.URL + "#/$defs/title".
 func compileTypeSchema(schema []byte, patterns *patternBudget) error {
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(schema))
 	if err != nil {
@@ -397,6 +400,13 @@ func compileTypeSchema(schema []byte, patterns *patternBudget) error {
 	c.UseLoader(jsonschema.SchemeURLLoader{})
 	c.UseRegexpEngine(patterns.parse)
 	patterns.over = 0
+	known, err := jsonschema.UnmarshalJSON(bytes.NewReader(primitives.Schema))
+	if err != nil {
+		return err
+	}
+	if err := c.AddResource(primitives.URL, known); err != nil {
+		return err
+	}
 	if err := c.AddResource(typeSchemaURL, doc); err != nil {
 		return err
 	}
