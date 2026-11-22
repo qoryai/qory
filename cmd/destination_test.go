@@ -497,6 +497,22 @@ func TestDestinationCloneStopsAtAFolderThatIsNoClone(t *testing.T) {
 	wantFile(t, filepath.Join(c.root, "_cloned"), "")
 }
 
+// TestDestinationCloneClonesIntoAnEmptyFolder is an empty folder at the clone's place: the
+// clone takes its place, and the call prints the id's line.
+func TestDestinationCloneClonesIntoAnEmptyFolder(t *testing.T) {
+	c := destinationSession(t)
+	dir := filepath.Join(c.root, proxygittest.Host, "acme", "web")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "destination", "clone", webID)
+	if err != nil || out != c.line(webID, "acme/web") {
+		t.Fatalf("%q, %v", out, err)
+	}
+	wantFile(t, filepath.Join(dir, "README.md"), "web\n")
+	wantFile(t, filepath.Join(c.root, "_cloned"), webID+"\n")
+}
+
 // TestDestinationCloneNeedsGitOnPath is a session whose PATH has no git: the call stops,
 // exit 1, with the line for the instance admin and the cause on line 2, opens no tunnel,
 // and leaves nothing in the folder of the clones but the record.

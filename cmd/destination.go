@@ -336,20 +336,24 @@ func placeFree(r *os.Root, d clone) error {
 	if err != nil {
 		return err
 	}
-	for _, p := range []string{d.rel, filepath.Join(d.rel, ".git")} {
-		info, err := r.Lstat(p)
-		if errors.Is(err, fs.ErrNotExist) && p == d.rel {
-			return nil
-		}
-		if errors.Is(err, fs.ErrNotExist) {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			return &fs.PathError{Op: "lstat", Path: p, Err: errLinkOrFile}
-		}
+	info, err := r.Lstat(d.rel)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		return err
+	case !info.IsDir():
+		return &fs.PathError{Op: "lstat", Path: d.rel, Err: errLinkOrFile}
+	}
+	git := filepath.Join(d.rel, ".git")
+	info, err = r.Lstat(git)
+	switch {
+	case err == nil && info.IsDir():
+		return nil
+	case err == nil:
+		return &fs.PathError{Op: "lstat", Path: git, Err: errLinkOrFile}
+	case !errors.Is(err, fs.ErrNotExist):
+		return err
 	}
 	f, err := r.Open(d.rel)
 	if err != nil {
@@ -385,7 +389,11 @@ func cloneInto(c *cobra.Command, r *os.Root, d clone) error {
 	if err := folders(r, filepath.Dir(d.rel), true); err != nil {
 		return clonesFolder(d.id, root, err)
 	}
-	// A folder at d's place that is not a clone and has files stops the rename.
+	// An empty folder at d's place, which [placeFree] passes, goes first, since the rename
+	// does not replace a folder. A folder that got files since stops the Remove.
+	if err := r.Remove(d.rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return clonesFolder(d.id, root, err)
+	}
 	if err := r.Rename(filepath.Join(filepath.Base(tmp), "repository"), d.rel); err != nil {
 		return clonesFolder(d.id, root, err)
 	}
