@@ -709,7 +709,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return withRecord(streams.errOut, err, record)
 			}
 			// A walled run whose composed home has push checks, and a walled run of several
-			// sessions with a control plane, checks each POST of its run API from behind the
+			// sessions with a run API, checks each POST of its run API from behind the
 			// wall, see [runPushChecks].
 			checks := &runPushChecks{report: said, fromCode: code != nil}
 			run, err := openRun(ctx, spec.OpenSpec)
