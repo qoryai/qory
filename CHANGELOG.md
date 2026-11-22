@@ -690,9 +690,8 @@ release may change what an existing document does, and states it under Upgrading
 - qory reads the run documents, the pool's answers from Qory Apiary, an integration's
   description and Forager's `runtimes.json` without a member that their contract does not
   define, and matches each member's name by exact case. Documents with such a member,
-  such as `run_id`, start the run; until this release they stop it with `it breaks
-  documents.schema.json`. A document whose `must_understand` lists a member that qory does
-  not read stops as one that breaks its schema.
+  such as `run_id`, start the run. A document whose `must_understand` lists a member that
+  qory does not read stops as one that breaks its schema.
 - The verdict format takes a verdict kind and a point action that a later version adds:
   a kind of lower-case letters, digits and hyphens, and an action of lower-case letters,
   digits and underscores, each starting with a letter and at most 64 characters. The
@@ -702,9 +701,8 @@ release may change what an existing document does, and states it under Upgrading
   suite's point. `qory run verdict` takes only `passed`, `changes-requested` and
   `escalate`, and only the actions `answer` and `run_again`.
 - `qory run pool` acts on a signed 403 or 409 from Qory Apiary whose body it cannot read
-  by its status alone: it keeps the dispatch and sends the release or `dispatched` again.
-  Until this release, such an answer to `dispatched` releases the dispatch, and such a 403
-  to a release ends it. A machine end stops on a signed 400, 403 or 404, as before.
+  by its status alone: it keeps the dispatch and sends the release again, or `dispatched`
+  again while the lease lasts. A machine end stops on a signed 400, 403 or 404.
 - A run from a run code runs the step `workflow`, in place of `explore`: it starts the
   workflow that the run documents set, whichever workflow of the process Qory Apiary
   starts. The documents name what the run is for in `subject`, with a `kind`, such as
@@ -1384,11 +1382,12 @@ release may change what an existing document does, and states it under Upgrading
   `claimed`, and no run starts for it.
   While the pool runs, the release is sent again after the same waits as `gone`, until
   Qory Apiary releases the dispatch or returns 410 `gone`, 409 `lease_expired`, 409
-  `machine_exists`, which `gone` follows, or a signed 400, 403 or 404. A release left
-  when the pool stops is sent at its next start. A restart of the pool stops a run left
-  from a crash of the pool, removes the containers and networks of its wall, and
-  reports its machine as gone. It sends SIGTERM to each process of the run's session,
-  then SIGKILL to each one still there 30 s later while the run still holds its lock.
+  `machine_exists`, which `gone` follows, a signed 400 or 404, or a 403 that reads as
+  `forbidden`. A release left when the pool stops is sent at its next start. A restart
+  of the pool stops a run left from a crash of the pool, removes the containers and
+  networks of its wall, and reports its machine as gone. It sends SIGTERM to each
+  process of the run's session, then SIGKILL to each one still there 30 s later while
+  the run still holds its lock.
   It signals a session only when it can prove that the session belongs to the run;
   otherwise it keeps the run and prints why. The pool section of `forager.yaml` takes
   `runs` (how many runs this host runs at once; 1 when not set), `registry` and
