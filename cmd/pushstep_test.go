@@ -2531,6 +2531,35 @@ func TestASecondRepositoryWhoseHeadMovedEndsTheRunWithPushHeadChanged(t *testing
 	}
 }
 
+// TestASecondRepositoryThatGets403EndsTheRunWithPushRefused is a run of two repositories
+// whose first push landed and whose second push got 403 from the push proxy: no version is
+// stored, and the run closes failed with the code push_refused, which the error of the
+// second push has under the line of the pushed repository.
+func TestASecondRepositoryThatGets403EndsTheRunWithPushRefused(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
+	lib := filepath.Join(p.h.server.Root, "acme", "lib.git")
+	proxygittest.Git(t, lib, "config", "http.receivepack", "true")
+	p.h.server.Refuse("/acme/lib.git/git-receive-pack")
+	p.repositories = "acme/site,acme/lib"
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
+	}, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	r.wantsReason(t, string(contracts.EndCodePushRefused))
+	wants(t, r.out, "qory run: "+deleteBranch+"\n  qory pushed acme/site and stored no version, because the push of the next repository failed: The push was refused (403).")
+	if p.branchHead(t) == "" {
+		t.Error("the first repository has no branch")
+	}
+	if got := proxygittest.Git(t, lib, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("the second repository has the branch: %s", got)
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST went out", posts)
+	}
+}
+
 // hangingPost makes each POST of a version stay open with no response, as a run API that
 // stopped does, and calls then, which sends the signals of the test.
 func hangingPost(t *testing.T, p *pushRepo, then func()) {
