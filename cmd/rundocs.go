@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/session"
@@ -25,6 +24,7 @@ import (
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
+	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/runtimeinstall"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
@@ -135,13 +135,18 @@ type codeRun struct {
 	// the documents have no target.
 	access   string
 	workItem string
-	// submit is the documents' submit, the run's submit settings, type and send: the one
-	// place qory takes them from, never the composed harness's process.yaml, see
-	// [codeRun.submitLine]. nil when the documents have no submit.
-	submit *contracts.Submit
+	// deliver is the documents' deliver, the type and the send of each artifact the run
+	// delivers: the one place qory takes them from, never the composed harness's
+	// process.yaml, see [codeRun.deliverLines]. nil when the documents have none.
+	deliver []contracts.Deliver
 
-	// runNumber is the run's number on the server, set by [codeRun.readBranch].
+	// runNumber is the run's number on the server, and snapshot the work item snapshot
+	// that the run read at its start, nil for none: [codeRun.readWorkItem] sets both.
 	runNumber int
+	snapshot  *runapi.Snapshot
+	// types are the artifact types of the composed harness's process.yaml, as
+	// [harnessTypes] reads them, which the compose of each session sets.
+	types []exports.ProcessType
 }
 
 // The harness of a run from a run code as a text shows it: the documents' harness
@@ -159,6 +164,10 @@ const inSettings = "of the harness in the workspace's settings in Qory Apiary"
 // document to, mode 0600, and composes as -f does.
 const harnessFile = "harness.yaml"
 
+// textDocumentsBroken is the line of documents that do not pass qory's checks, with the
+// cause and [codeUsed]; a [*provisioner.BrokenRule] adds its detail on line 2.
+const textDocumentsBroken = "update qory, or ask Qory Apiary's instance admin: the response to the run code does not pass qory's checks: %v%s"
+
 // codeDocumentsOf reads documents, the documents of the answer to a run code, for a
 // step qory runs: workflow, which [codeRunOf] reads further, or prebuild, which
 // [runCodePrebuild] runs. The schema allows these two steps alone, so the check of the
@@ -172,9 +181,12 @@ func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
 		return contracts.Documents{}, noRuntime()
 	}
 	doc, err := provisioner.ReadDocuments(documents)
+	var broken *provisioner.BrokenRule
 	switch {
+	case errors.As(err, &broken):
+		return doc, fmt.Errorf(textDocumentsBroken+"\n  %s", err, codeUsed, broken.Detail)
 	case err != nil:
-		return doc, fmt.Errorf("update qory, or ask Qory Apiary's instance admin: the response to the run code does not pass qory's checks: %v%s", err, codeUsed)
+		return doc, fmt.Errorf(textDocumentsBroken, err, codeUsed)
 	case doc.Step != provisioner.StepWorkflow && doc.Step != provisioner.StepPrebuild:
 		return doc, fmt.Errorf("update qory: the run code's response has a step qory does not run%s.\n  qory runs a run code's run for the steps workflow and prebuild only, and the step is %s.", codeUsed, integration.Printable(exports.Value(doc.Step, false)))
 	}
@@ -226,7 +238,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if hidden {
 		r.named = source.NewNamed(r.phrase())
 	}
-	r.submit = doc.Submit
+	r.deliver = doc.Deliver
 	return r, nil
 }
 
@@ -613,6 +625,52 @@ const inputsMember = "qory"
 type qoryInputs struct {
 	// HarnessExtensions is the harness report's extensions, {} for none.
 	HarnessExtensions map[string]any `json:"harness_extensions"`
+	// Outputs is the outputs of the run's stage, in the stage's order, [] for none, as
+	// [codeRun.outputs] has them.
+	Outputs []inputOutput `json:"outputs"`
+}
+
+// inputOutput is one output of the run's stage in [qoryInputs]: its type, whether the
+// stage requires it, and the type's JSON Schema from the composed harness's process.yaml
+// with the primitives written out, null for a type with none there.
+type inputOutput struct {
+	Type     string          `json:"type"`
+	Required bool            `json:"required"`
+	Schema   json.RawMessage `json:"schema"`
+}
+
+// outputs is the outputs of the stage of r's work item, from the work item snapshot of
+// [codeRun.readWorkItem], each with the schema of its type in types, the artifact types of
+// the composed harness: nil for a run with no snapshot.
+// shortcut: a type that the composed process.yaml does not define, such as a standard
+// type, has the schema null, as qory has no copy of a standard type's schema; replace it
+// when the run API gives each output's schema.
+func (r *codeRun) outputs(types []exports.ProcessType) []inputOutput {
+	if r == nil || r.snapshot == nil {
+		return nil
+	}
+	var out []inputOutput
+	for _, o := range r.snapshot.Outputs {
+		entry := inputOutput{Type: o.Type, Required: o.Required, Schema: json.RawMessage("null")}
+		for _, t := range types {
+			if t.Name == o.Type && t.Schema != nil {
+				entry.Schema = t.Schema
+			}
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// harnessTypes is the artifact types of the composed harness rep: those of the process.yaml
+// of the first module in stack order that has one, and found false when no module has one.
+func harnessTypes(rep report.Report) (types []exports.ProcessType, found bool) {
+	for _, m := range rep.Modules {
+		if types, found = exports.ProcessTypes(filepath.Join(rep.Home, "modules", m.Name)); found {
+			return types, true
+		}
+	}
+	return nil, false
 }
 
 // writeInputs writes inputs.json, mode 0600, into in, the folder of [codeRun.inputsDir]:
@@ -681,10 +739,13 @@ func fillCopy(f *os.File, data []byte) error {
 
 // withQoryMember is inputs, a JSON object, with the member [inputsMember] set to q added
 // after its last member. The bytes of inputs from its opening brace to its last member
-// stay as they came, and a nil map of q is written as {}.
+// stay as they came, a nil map of q is written as {}, and nil outputs as [].
 func withQoryMember(inputs []byte, q qoryInputs) ([]byte, error) {
 	if q.HarnessExtensions == nil {
 		q.HarnessExtensions = map[string]any{}
+	}
+	if q.Outputs == nil {
+		q.Outputs = []inputOutput{}
 	}
 	value, err := json.Marshal(q)
 	if err != nil {
@@ -882,71 +943,51 @@ func entryKeys(rep report.Report) []string {
 	return keys
 }
 
-// submitLine is the line that shows the harness's submit, the first module's in stack
-// order, beside r's when they differ, or alone when r has none. It is "" for a run whose
-// level, its [accessOf] level, is not [stack.AccessWrite], and for r nil. Line 1 has at
-// most [submitLineMax] characters with the "qory run: " that the caller adds, so a type
-// name that does not fit is shortened there, and a second line has the full name.
-func (r *codeRun) submitLine(rep report.Report, level string) string {
-	if r == nil {
-		return ""
+// The lines of [codeRun.deliverLines], one for each type whose send differs between the
+// documents' deliver and the harness's process.yaml. The run uses the documents' send.
+const (
+	textDeliverDiffers   = "deliver: %s at %s from the documents; harness has %s"
+	textDeliverNoHarness = "deliver: %s at %s from the documents; harness has none"
+	textDeliverNoDocs    = "deliver: no %s from the documents; harness has %s"
+)
+
+// deliverLines are the lines that show where the harness's deliver, of the first module in
+// stack order that has a process.yaml, differs from r's deliver, which the run uses: one for
+// each type, in the documents' order and then the harness's, with the type cut as
+// [provisioner.ShownType] cuts it. They are nil for a run whose level, its [accessOf] level,
+// is not [stack.AccessWrite], for a harness with no process.yaml, and for r nil.
+func (r *codeRun) deliverLines(rep report.Report, level string) []string {
+	if r == nil || level != stack.AccessWrite {
+		return nil
 	}
-	var typ, send string
-	found := false
-	for _, m := range rep.Modules {
-		if typ, send, found = exports.ProcessSubmit(filepath.Join(rep.Home, "modules", m.Name)); found {
-			break
+	types, found := harnessTypes(rep)
+	if !found {
+		return nil
+	}
+	harness := map[string]string{}
+	var order []string
+	for _, t := range types {
+		if t.Send != "" {
+			harness[t.Name] = t.Send
+			order = append(order, t.Name)
 		}
 	}
-	switch {
-	case !found, level != stack.AccessWrite:
-		return ""
-	case r.submit == nil:
-		line := func(typ, _ string) string {
-			return fmt.Sprintf("submit: documents have no submit, so harness's %s at %s is unused", typ, send)
+	var lines []string
+	listed := map[string]bool{}
+	for _, d := range r.deliver {
+		listed[d.Type] = true
+		send, has := harness[d.Type]
+		switch {
+		case !has:
+			lines = append(lines, fmt.Sprintf(textDeliverNoHarness, provisioner.ShownType(d.Type), d.Send))
+		case send != d.Send:
+			lines = append(lines, fmt.Sprintf(textDeliverDiffers, provisioner.ShownType(d.Type), d.Send, send))
 		}
-		return fitSubmit(line, typ, "", "The full type is "+typ+".")
-	case r.submit.Type == typ && r.submit.Send == send:
-		return ""
 	}
-	line := func(docs, harness string) string {
-		return fmt.Sprintf("submit: documents' %s at %s replaces harness's %s at %s", docs, r.submit.Send, harness, send)
+	for _, name := range order {
+		if !listed[name] {
+			lines = append(lines, fmt.Sprintf(textDeliverNoDocs, provisioner.ShownType(name), harness[name]))
+		}
 	}
-	return fitSubmit(line, r.submit.Type, typ, "The full types are "+r.submit.Type+" in the documents and "+typ+" in the harness.")
-}
-
-// submitLineMax is the most characters of line 1 of the text of [codeRun.submitLine],
-// with the "qory run: " in front of it, as for a refusal.
-const submitLineMax = 100
-
-// fitSubmit is line of a and b, whole when line 1 has at most [submitLineMax] characters
-// after "qory run: ". Otherwise it is line of a and b shortened to share what the rest
-// of line 1 leaves, each as [shortSubmitName] has it, then full on a second line. b is ""
-// for a line of one name. [exports.Fit] cannot do this: it keeps 20 characters of a
-// name, and the rest of this line has 77 or more.
-func fitSubmit(line func(a, b string) string, a, b, full string) string {
-	const prefix = "qory run: "
-	if text := line(a, b); utf8.RuneCountInString(prefix+text) <= submitLineMax {
-		return text
-	}
-	left := submitLineMax - utf8.RuneCountInString(prefix+line("", ""))
-	na, nb := utf8.RuneCountInString(a), utf8.RuneCountInString(b)
-	first := left / 2
-	if na <= first {
-		first = na
-	} else if nb <= left/2 {
-		first = left - nb
-	}
-	return line(shortSubmitName(a, first), shortSubmitName(b, left-first)) + "\n  " + full
-}
-
-// shortSubmitName is name with its middle replaced by "…" so that it has n characters,
-// and name as it is when it has at most n.
-func shortSubmitName(name string, n int) string {
-	r := []rune(name)
-	if len(r) <= n || n < 3 {
-		return name
-	}
-	head := n / 2
-	return string(r[:head]) + "…" + string(r[len(r)-(n-1-head):])
+	return lines
 }

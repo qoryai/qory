@@ -22,48 +22,67 @@ const (
 	maxSubmissionFile = 256 << 10
 )
 
-// readBranch reads the branch of the work item that r's run is for, on this machine and
-// before the fetch: where the run starts, per repository, and which pushed commits are a
-// cancelled run's. It is nil with no branch step, for a run that is not from a run code, has
-// no work item, or has no target version on the system of its repositories, and for a
-// server with the feature workflow_model off. Each error ends with [codeUsed]. It sets
-// r.runNumber from the work item snapshot. The reads end at deadline, the end of the
-// run's setup, and have no such end when deadline is zero.
-func (r *codeRun) readBranch(ctx context.Context, run openedRun, deadline time.Time) (*preparation.WorkBranch, error) {
-	if r == nil || r.workItem == "" || r.target.Version == "" || r.target.System != run.System() {
-		return nil, nil
+// readWorkItem reads the work item that r's run is for, at the start of the run, with or
+// without a repository: it sets r.snapshot and r.runNumber from the work item snapshot of
+// GET /work-item. It reads nothing for a run that is not from a run code or has no work
+// item, and for a server with the feature workflow_model off. Each error ends with
+// [codeUsed]. The read ends at deadline, the end of the run's setup, and has no such end
+// when deadline is zero.
+func (r *codeRun) readWorkItem(ctx context.Context, run openedRun, deadline time.Time) error {
+	if r == nil || r.workItem == "" {
+		return nil
 	}
-
-	httpClient, base, err := run.RunAPI()
+	client, ctx, cancel, err := setupClient(ctx, run, deadline)
 	if err != nil {
-		return nil, fmt.Errorf("%w%s", err, codeUsed)
+		return err
 	}
-
-	client, err := runapi.New(base, httpClient)
-	if err != nil {
-		return nil, fmt.Errorf("%w%s", err, codeUsed)
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, runAPITimeout)
 	defer cancel()
-
-	if !deadline.IsZero() {
-		var stop context.CancelFunc
-
-		ctx, stop = context.WithDeadline(ctx, deadline)
-		defer stop()
-	}
-
 	snapshot, err := client.WorkItem(ctx)
 	if featureOff(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("%w%s", err, codeUsed)
+	}
+	r.snapshot, r.runNumber = snapshot, snapshot.Run.Number
+	return nil
+}
+
+// setupClient is the run API client of run, with ctx bounded by [runAPITimeout] and by
+// deadline when it is not zero, and what ends that ctx. Each error ends with [codeUsed].
+func setupClient(ctx context.Context, run openedRun, deadline time.Time) (*runapi.Client, context.Context, context.CancelFunc, error) {
+	httpClient, base, err := run.RunAPI()
+	if err != nil {
+		return nil, ctx, func() {}, fmt.Errorf("%w%s", err, codeUsed)
+	}
+	client, err := runapi.New(base, httpClient)
+	if err != nil {
+		return nil, ctx, func() {}, fmt.Errorf("%w%s", err, codeUsed)
+	}
+	ctx, cancel := context.WithTimeout(ctx, runAPITimeout)
+	if deadline.IsZero() {
+		return client, ctx, cancel, nil
+	}
+	ctx, stop := context.WithDeadline(ctx, deadline)
+	return client, ctx, func() { stop(); cancel() }, nil
+}
+
+// readBranch reads the branch of the work item that r's run is for, on this machine and
+// before the fetch: where the run starts, per repository, and which pushed commits are a
+// cancelled run's. It is nil with no branch step, for a run that [codeRun.readWorkItem]
+// read no work item for, or that has no target version on the system of its repositories.
+// Each error ends with [codeUsed]. The reads end at deadline, the end of the run's setup,
+// and have no such end when deadline is zero.
+func (r *codeRun) readBranch(ctx context.Context, run openedRun, deadline time.Time) (*preparation.WorkBranch, error) {
+	if r == nil || r.snapshot == nil || r.target.Version == "" || r.target.System != run.System() {
 		return nil, nil
 	}
-
+	client, ctx, cancel, err := setupClient(ctx, run, deadline)
 	if err != nil {
-		return nil, fmt.Errorf("%w%s", err, codeUsed)
+		return nil, err
 	}
-
-	r.runNumber = snapshot.Run.Number
+	defer cancel()
+	snapshot := r.snapshot
 
 	index, err := client.Artifacts(ctx)
 	if err != nil {

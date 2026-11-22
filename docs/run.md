@@ -3456,10 +3456,9 @@ repository's `system`, with a path, at most 2048 characters, of the ASCII charac
 `Line <n>: <reason>.` on a second line, for at most 5 lines: a line with a key that is not
 listed, no value, a control character or no final line feed, a repeated draft key or address, an
 address of a commit that qory did not give the program, any draft line when `QORY_SUBMIT_DRAFT`
-is `none`, each `draft_title` line with a character that a title does not have, such as U+200B or
-the tag character U+E0041, or with no character that is not a space, U+200C or U+200D (the cause
-is `the title has the character U+200B, which a title does not have, at character 2` or `the
-title has no character that is not a space, U+200C or U+200D`), and each draft line of a draft
+is `none`, each `draft_title` line with a control or format character other than U+200C and
+U+200D, or with only spaces, U+200C and U+200D (the cause is `the title has a control or format
+character, or only spaces, U+200C and U+200D`), and each draft line of a draft
 that lacks one of the five, which includes the draft lines of a draft whose title qory left
 out. When the program ends, qory
 prints one of these, each with line 1 as the cause, then lines indented by two spaces:

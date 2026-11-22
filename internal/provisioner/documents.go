@@ -36,8 +36,10 @@ var compiledDocuments = sync.OnceValues(func() (*jsonschema.Schema, error) {
 // a subject of the kind work_item, inputs.domain must be the domain and
 // inputs.work_item.id the subject's id, as documents.schema.json states. A subject of
 // another kind has no such rule. Inputs are the documents' bytes, which the run reads
-// unchanged. The error contains a member's name, the schema's name or a byte count,
-// never a value of documents.
+// unchanged. The rules of [contracts.Documents.Check] are checked after the schema, and
+// documents that break one get a [*BrokenRule]. The error contains a member's name, the
+// schema's name or a byte count, and a [*BrokenRule] a deliver type, never another value
+// of documents.
 func ReadDocuments(documents json.RawMessage) (contracts.Documents, error) {
 	v := jsontext.Value(documents)
 	if !v.IsValid() {
@@ -58,6 +60,9 @@ func ReadDocuments(documents json.RawMessage) (contracts.Documents, error) {
 	var doc contracts.Documents
 	if err := readChecked(s, documentsSchema, documents, &doc); err != nil {
 		return contracts.Documents{}, err
+	}
+	if doc.Check() != nil {
+		return contracts.Documents{}, &BrokenRule{Detail: brokenRuleDetail(doc)}
 	}
 	var inputs bytes.Buffer
 	if json.Compact(&inputs, doc.Inputs) != nil || inputs.Len() > contracts.MaxInputs {
@@ -124,4 +129,45 @@ func checkRunSettings(name string, rs *contracts.RunSettings) error {
 		}
 	}
 	return nil
+}
+
+// BrokenRule is the error of documents that pass the schema and break a rule of
+// [contracts.Documents.Check]: its text is that of documents that break the schema, and
+// Detail is the rule, for a line under it.
+type BrokenRule struct {
+	Detail string
+}
+
+func (e *BrokenRule) Error() string { return "it breaks " + documentsSchema }
+
+// The details of a [BrokenRule]. textDeliverTwice has the type, which the schema's
+// pattern keeps to lower-case letters, digits and hyphens, cut to [maxShownType]
+// characters.
+const (
+	textDeliverTwice = "deliver lists %s twice"
+	textEntryTwice   = "read_targets or the destinations list one entry twice"
+	maxShownType     = 19
+)
+
+// brokenRuleDetail is the detail of doc, documents that [contracts.Documents.Check]
+// stops: [textDeliverTwice] for the first type that deliver repeats, else
+// [textEntryTwice]. It reads no message of Check.
+func brokenRuleDetail(doc contracts.Documents) string {
+	seen := make(map[string]bool, len(doc.Deliver))
+	for _, d := range doc.Deliver {
+		if seen[d.Type] {
+			return fmt.Sprintf(textDeliverTwice, ShownType(d.Type))
+		}
+		seen[d.Type] = true
+	}
+	return textEntryTwice
+}
+
+// ShownType is the artifact type name typ as a text shows it: its first [maxShownType]
+// characters.
+func ShownType(typ string) string {
+	if r := []rune(typ); len(r) > maxShownType {
+		return string(r[:maxShownType])
+	}
+	return typ
 }

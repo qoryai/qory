@@ -8,7 +8,7 @@ What `qory harness compose` reads and what it writes.
 |---|---|---|
 | `qory-stack.yaml` | a directory that `extends` or `-f` selects; an ancestor directory covering several repositories; the root of the harness repository that delivers it | a stack delivered to be extended: the ordered modules, the excludes, what a checkout extending it may add and the runtimes and models it is written for |
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
-| `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use, the schema of a run's type settings and the submit step of a run. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
+| `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use and the schema of a run's type settings. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | a role contract | optional; a file of a module that declares an agents role, at the path that `roles.agents.<role>.contract` in the module's `qory-module.yaml` is set to | the parts an agent needs to fill the role: level-2 headings, front-matter keys, tools, a tier, and the form of its report (§The role contract). The compose checks every agent that fills the role against it; the harness's checks read the report's form |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for, the modules it appends and the workflow hooks it adds, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 | a submission document | the file of a version of the structured artifact type `submission` | what a run submits for a work item: its branch, the commits in each repository, the verdict and the draft pull request (§The submission format). No compose reads it |
@@ -604,8 +604,7 @@ A module that `exports.modules` lists and that has a `process.yaml` at its folde
 a factory. The file is a process template: the texts, the workspace type, the stack and
 the process that a workspace made from it starts with
 ([process.schema.json](process.schema.json)). It may also list the artifact types its
-workspaces use, register the schema of a run's type settings, and declare the submit step
-of a run. Every command that reads the
+workspaces use and register the schema of a run's type settings. Every command that reads the
 configuration checks the file, once it finds each export. A module without the file is
 not checked for it.
 
@@ -665,9 +664,8 @@ type_settings:                   # optional; the schema of a run's type settings
 | `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`; that each `workflow` of a stage's `sequence`, a loop's `body` included, is a non-empty string of one line of text that the stack's `qory-stack.yaml` declares under `workflows`; and that each stage `name` is one line of text. A stage may have `outputs`, a list of objects with `type`, the name of an entry of `artifact_types`, which qory checks with the stage and the type in the message, and that the stage lists each type once, and `required`, `true` or `false`, and `false` when left out; an output has no other key. qory checks nothing else in it |
 | `artifact_types` | optional; the list of the artifact types the workspaces use, as [Artifact types](#artifact-types) has it. A list with no entries is valid |
 | `type_settings` | optional; the JSON Schema of a run's type settings, as [Type settings](#type-settings) has it |
-| `submit` | optional; the submit step of a run, as [The submit step](#the-submit-step) has it |
 
-Every key but `artifact_types`, `type_settings` and `submit` is required, and the file has no other key. A key left out, a text over its
+Every key but `artifact_types` and `type_settings` is required, and the file has no other key. A key left out, a text over its
 limit, a `stack` that `exports.stacks` does not list, and a `process` that is not such an
 object are refused with the file and the fix in the message: the fix is the first line, and the file is on the
 last line, so a long path never pushes the fix past 98 characters. Each
@@ -777,32 +775,6 @@ the key's full name:
 Fix json_schema of type_settings so that it compiles as a JSON Schema.
   The schema does not compile: at '/type': value must be one of 'array', 'boolean', 'integer', 'null', 'number', 'object', 'string'; at '/type': got string, want array
   type_settings is in /src/acme-harness/harness/modules/support-desk/process.yaml.
-```
-
-#### The submit step
-
-`submit` declares the submit step of a run of a workspace made from the template. A
-`process.yaml` has at most one `submit`, an object with `type` and `send` and no other
-key. Without `submit`, the step stores no submission.
-
-```yaml
-submit:
-  type: customer-facts           # a structured entry of artifact_types
-  send: after_gate               # or end_of_run
-```
-
-`type` is the artifact type of the submission: the name of a custom entry of
-`artifact_types` in the same file with `base_view: structured`. qory refuses a name that no
-entry has, a standard type (a name alone) and a custom type of another base view. `send`
-is when the step sends the submission: `end_of_run` sends it at the end of the run;
-`after_gate` sends it after the gate of the run's stage passes, and until then the step
-stores it and sends nothing. A `submit` that breaks a rule stops the command with a
-refusal that starts with the fix, then gives the cause and the file:
-
-```text
-Remove the key "command" from submit.
-  submit has only type and send.
-  submit is in /src/acme-harness/harness/modules/support-desk/process.yaml.
 ```
 
 ## The primitives

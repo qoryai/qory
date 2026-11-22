@@ -824,6 +824,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				// The report on disk can be another run's by now, so the run reads what it composed.
 				rep, harness, workflows := c.rep, c.harness, c.workflows
+				// types are the artifact types of the composed process.yaml, which inputs.json
+				// and the submit step read.
+				types, _ := harnessTypes(rep)
+				if fromCode != nil {
+					fromCode.types = types
+				}
 				extensions, pins, pinFile = rep.Extensions, c.runtimes, c.pinFile
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
@@ -842,7 +848,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					// report has.
 					var file string
 					var data []byte
-					if file, data, err = fromCode.writeInputs(in, qoryInputs{HarnessExtensions: rep.Extensions}); err != nil {
+					if file, data, err = fromCode.writeInputs(in, qoryInputs{HarnessExtensions: rep.Extensions, Outputs: fromCode.outputs(types)}); err != nil {
 						return false, keyedError(fromCode, inputsNotWritten(err))
 					}
 					checks.inputs, checks.inputsData = file, data
@@ -861,7 +867,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return false, err
 					}
 				}
-				// The documents' submit is the run's at level write, and a different one in the
+				// The documents' deliver is the run's at level write, and a different one in the
 				// harness gets a line.
 				submitLevel := accessOf(fromCode, workflows)
 				// Only a run at level write submits: a run at write-no-push or read has no
@@ -888,7 +894,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if code == nil && key == nil && c.submitProgram != nil {
 					program = &submitProgram{command: c.submitProgram.Command, limit: submitLimit}
 				}
-				if line := fromCode.submitLine(rep, submitLevel); line != "" {
+				for _, line := range fromCode.deliverLines(rep, submitLevel) {
 					fmt.Fprintln(w, "qory run:", line)
 				}
 				// A later session binds the checkout as session 1 did, so its workflow has
@@ -1117,9 +1123,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// compose reads the target version, and the branch is checked out last, so no
 			// file of the branch reaches the harness.
 			hostWork := func() error {
+				// Every run of a work item reads it at its start, with or without a repository:
+				// the stage's outputs come from it.
+				enter(stepBranchRead)
+				if err := fromCode.readWorkItem(ctx, run, setupDeadline); err != nil {
+					return &runLineError{err}
+				}
 				if run.Repositories() != "" {
 					var err error
-					enter(stepBranchRead)
 					if branch, err = fromCode.readBranch(ctx, run, setupDeadline); err != nil {
 						return &runLineError{err}
 					}
