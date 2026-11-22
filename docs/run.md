@@ -3024,7 +3024,7 @@ checks, commits and pushes no read target, and the version it stores has no entr
 When the agent made commits in a read target, the step prints, once in the run and before
 the push of the target, which goes on:
 
-```
+```text
 qory run: The commits in a read-only repository were not kept: a run changes only its target.
   The repository is <path>.
 ```
