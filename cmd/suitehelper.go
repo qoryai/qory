@@ -18,16 +18,22 @@ import (
 
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/suite"
 	"github.com/qoryai/qory/internal/verdictformat"
 )
 
-// The type and the file of the build plan, and the most bytes of its file qory reads.
-const (
-	buildPlanType = "build-plan"
-	buildPlanFile = "build-plan.md"
-	maxBuildPlan  = 1 << 20
-)
+// maxPlan is the most bytes of the file of a plan that qory reads.
+const maxPlan = 1 << 20
+
+// planFile is the name of the file of a version of the plan type plan: the type and ".md".
+func planFile(plan string) string { return plan + ".md" }
+
+// noPlanCommand is the command of the after step of a session whose workflow has no plan
+// type. The step still checks whether HEAD moved, which the script of [suite.Command] decides: a
+// session that left HEAD where it started is skipped, and the command of any other is not a
+// suite, see [suiteRun.noPlan].
+const noPlanCommand = "true"
 
 // The lines of qory run about the full suite. A line with an instruction starts with the fix,
 // and has at most 100 characters in its first line.
@@ -80,12 +86,12 @@ const maxVerdictPoints = 20
 // errNoVerdictFile is the error of a version of the verdict of the run that has no file.
 var errNoVerdictFile = errors.New("the run's verdict has no file")
 
-// errNoBuildPlan is why a run has no suite command: the run started with no build plan, or qory
-// could not read it.
-var errNoBuildPlan = errors.New("the run started with no build plan")
+// errNoPlan is why a run has no suite command: the run started with no version of its plan
+// type, or qory could not read it.
+var errNoPlan = errors.New("the run started with no version of its plan type")
 
-// errBuildPlanTooBig is the error of a build plan whose file is over [maxBuildPlan] bytes.
-var errBuildPlanTooBig = errors.New("the build plan is too large")
+// errPlanTooBig is the error of a plan whose file is over [maxPlan] bytes.
+var errPlanTooBig = errors.New("the plan is too large")
 
 // suiteSetup is what [openSuites] needs from a run that has its session about to join.
 type suiteSetup struct {
@@ -98,6 +104,9 @@ type suiteSetup struct {
 	// fullSuite is full_suite of the run documents' type_settings: whether the session runs
 	// the full suite.
 	fullSuite bool
+	// workflow is the workflow of the run, and plan the plan type set in
+	// workflows.<name>.plan for it, "" for a workflow that sets none.
+	workflow, plan string
 	// extensions is the harness extensions of the report that the run composed.
 	extensions map[string]any
 	said       func(string)
@@ -114,6 +123,9 @@ type suiteRun struct {
 	minutes int
 	// fault is why no suite runs for this session, nil when the after step is set.
 	fault *suiteFault
+	// noPlan is set for a session whose workflow has no plan type: the fault that a session
+	// whose HEAD moved gets. A session whose HEAD did not move is skipped, as with a plan.
+	noPlan *suiteFault
 }
 
 // openSuites sets the after step of the full suite on the session's spec and returns the run that
@@ -123,20 +135,26 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 		return nil
 	}
 	r := &suiteRun{run: s.run, runID: s.runID, said: s.said, dir: s.spec.Dir, minutes: suite.LimitMinutes(s.extensions)}
-	// A cause that no After step can show is kept, and judged once the session ends.
-	if _, _, err := s.run.RunAPI(); err != nil {
-		r.fault = noRunAPIFault()
-		s.said(r.fault.line())
-		return r
-	}
-	planCtx, cancelPlan := context.WithTimeout(ctx, suitePlanWait)
-	var err error
-	r.full, err = launchFull(planCtx, s.run)
-	cancelPlan()
-	if err != nil {
-		r.fault = faultOf(err)
-		s.said(r.fault.line())
-		return r
+	if s.plan == "" {
+		// No version of a plan type sets a command, so the after step only checks whether HEAD
+		// moved.
+		r.full, r.noPlan = suite.Full{Command: noPlanCommand}, noPlanFault(s.workflow)
+	} else {
+		// A cause that no After step can show is kept, and judged once the session ends.
+		if _, _, err := s.run.RunAPI(); err != nil {
+			r.fault = noRunAPIFault()
+			s.said(r.fault.line())
+			return r
+		}
+		planCtx, cancelPlan := context.WithTimeout(ctx, suitePlanWait)
+		var err error
+		r.full, err = launchFull(planCtx, s.run, s.plan)
+		cancelPlan()
+		if err != nil {
+			r.fault = faultOf(err, s.plan)
+			s.said(r.fault.line())
+			return r
+		}
 	}
 	if info, err := os.Lstat(filepath.Join(s.spec.Dir, ".git")); err != nil || !info.IsDir() {
 		r.fault = noGitFault()
@@ -145,7 +163,7 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 	}
 	after, err := suite.Command(headCommit(ctx, s.spec.Dir), r.full)
 	if err != nil {
-		r.fault = faultOf(err)
+		r.fault = faultOf(err, s.plan)
 		s.said(r.fault.line())
 		return r
 	}
@@ -161,7 +179,45 @@ func afterLimit(minutes int) time.Duration { return time.Duration(minutes) * sui
 // of the run documents' type_settings, false for a run with no run code.
 var fullSuiteOf = func(c *codeRun) bool { return c != nil && c.fullSuite }
 
-// suitePlanWait is the longest the read of the build plan at the run's start may take.
+// planOf is the workflow of a run from Qory Apiary and the plan type set in
+// workflows.<name>.plan for it, "" for each when the run has no run code and "" for the type of a
+// workflow that sets none.
+var planOf = func(c *codeRun, workflows map[string]stack.Workflow) (workflow, plan string) {
+	if c == nil {
+		return "", ""
+	}
+	return c.workflow, workflows[c.workflow].Plan
+}
+
+// textFullSuiteNoPlan is the refusal of a session whose full_suite flag is set and whose workflow
+// has write-no-push access. The flag comes from the run documents for session 1 and from the
+// next-session answer for a later session. That access allows no plan, see [stack.Workflow], so
+// no plan type could give the suite its full command. Line 1 is the cause and has no fix, since
+// the reader cannot change full_suite. The first %s is "The run documents ask" for session 1 and
+// "The next-session answer asks" for a later session, the second is "run" for session 1 and
+// "session" for a later session, the third is the workflow.
+const textFullSuiteNoPlan = "%s for the full suite in a write-no-push workflow.\n  The %s did not start: %s has write-no-push access, so it has no plan to read the full suite from" + codeUsed
+
+// fullSuiteNoPlan is the error of a run from a run code whose full_suite flag is set and whose
+// workflow, in workflows, has write-no-push access, nil for any other run. The flag comes from the
+// run documents for session 1 and from the next-session answer for a later session (later is
+// true). A run that only reads the checkout runs no suite and is not refused. The error is exit 1
+// and closes the run failed before the join. Line 1 is the cause. For a later session line 1
+// starts "The next-session answer asks", not "The run documents ask", and line 2 says "The
+// session did not start", not "The run did not start".
+func fullSuiteNoPlan(c *codeRun, workflows map[string]stack.Workflow, later bool) error {
+	declared := (&stack.Stack{Workflows: workflows}).AccessOf(c.workflow)
+	if !fullSuiteOf(c) || declared != stack.AccessWriteNoPush || readsOnly(c, workflows) {
+		return nil
+	}
+	asks, started := "The run documents ask", "run"
+	if later {
+		asks, started = "The next-session answer asks", "session"
+	}
+	return fmt.Errorf(textFullSuiteNoPlan, asks, started, c.workflow)
+}
+
+// suitePlanWait is the longest the read of the plan at the run's start may take.
 const suitePlanWait = 15 * time.Second
 
 // headCommit is the commit that HEAD has in dir, read with git as qory runs it on this machine
@@ -178,34 +234,35 @@ func headCommit(ctx context.Context, dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// launchFull is the full row of the build plan that the run's work item has at the run's launch,
-// read through the run API, from the work item's artifacts. An error is [errNoBuildPlan] or an error of [suite.FullRow].
-func launchFull(ctx context.Context, run openedRun) (suite.Full, error) {
+// launchFull is the full row of the plan type plan, in the version that the run's work item has at
+// the run's launch, read through the run API, from the work item's artifacts. An error is
+// [errNoPlan] or an error of [suite.FullRow].
+func launchFull(ctx context.Context, run openedRun, plan string) (suite.Full, error) {
 	httpClient, base, err := run.RunAPI()
 	if err != nil {
-		return suite.Full{}, fmt.Errorf("%w: %s", errNoBuildPlan, shownError(err))
+		return suite.Full{}, fmt.Errorf("%w: %s", errNoPlan, shownError(err))
 	}
 	client, err := runapi.New(base, httpClient)
 	if err != nil {
-		return suite.Full{}, fmt.Errorf("%w: %s", errNoBuildPlan, shownError(err))
+		return suite.Full{}, fmt.Errorf("%w: %s", errNoPlan, shownError(err))
 	}
-	text, err := readBuildPlan(ctx, client)
+	text, err := readPlan(ctx, client, plan)
 	if err != nil {
 		return suite.Full{}, err
 	}
 	return suite.FullRow(text)
 }
 
-// readBuildPlan is the text of the newest version of the artifact build-plan, as the index
-// lists it: the name main, or the one name; a withdrawn name has none.
-func readBuildPlan(ctx context.Context, client *runapi.Client) (string, error) {
+// readPlan is the text of the newest version of the artifact of type plan, as the index lists it:
+// the name main, or the one name; a withdrawn name has none. The file is [planFile].
+func readPlan(ctx context.Context, client *runapi.Client, plan string) (string, error) {
 	index, err := client.Artifacts(ctx)
 	if err != nil {
-		return "", fmt.Errorf("%w: %s", errNoBuildPlan, shownError(err))
+		return "", fmt.Errorf("%w: %s", errNoPlan, shownError(err))
 	}
 	var plans []runapi.Artifact
 	for _, a := range index.Artifacts {
-		if a.Type == buildPlanType && !withdrawn(a) {
+		if a.Type == plan && !withdrawn(a) {
 			plans = append(plans, a)
 		}
 	}
@@ -217,26 +274,26 @@ func readBuildPlan(ctx context.Context, client *runapi.Client) (string, error) {
 		}
 	}
 	if chosen < 0 {
-		return "", errNoBuildPlan
+		return "", errNoPlan
 	}
 	version := newestBeforeWithdrawal(plans[chosen])
 	if version == nil {
-		return "", errNoBuildPlan
+		return "", errNoPlan
 	}
 	for _, file := range version.Files {
-		if file.Filename != buildPlanFile {
+		if file.Filename != planFile(plan) {
 			continue
 		}
-		if file.Size > maxBuildPlan {
-			return "", fmt.Errorf("%w: %s is over %d bytes", errBuildPlanTooBig, buildPlanFile, maxBuildPlan)
+		if file.Size > maxPlan {
+			return "", fmt.Errorf("%w: %s is over %d bytes", errPlanTooBig, planFile(plan), maxPlan)
 		}
 		var text bytes.Buffer
 		if err := client.Download(ctx, version.ID, file, &text); err != nil {
-			return "", fmt.Errorf("%w: %s", errNoBuildPlan, shownError(err))
+			return "", fmt.Errorf("%w: %s", errNoPlan, shownError(err))
 		}
 		return text.String(), nil
 	}
-	return "", errNoBuildPlan
+	return "", errNoPlan
 }
 
 // after judges the suite, writes its result, and posts the verdict of a suite that did not pass
@@ -257,9 +314,7 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 	var got suite.Outcome
 	var point *runapi.Point
 	kind := kindRed
-	if fault != nil {
-		point, kind = &fault.point, fault.kind()
-	} else {
+	if fault == nil {
 		a := res.After
 		got = suite.Judge(r.dir, r.full, suite.End{
 			Succeeded: a.State == event.StateSucceeded,
@@ -267,6 +322,17 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 			TimedOut:  a.Reason == event.ReasonTimeout,
 			ExitCode:  a.ExitCode,
 		})
+		// A workflow with no plan type has no suite: a session that moved HEAD gets the fault, and
+		// one that did not is skipped. A step that did not get as far as its command, or a stop
+		// that cut it, is judged as it is with a plan.
+		if r.noPlan != nil && got.Started && got.State != suite.Stopped {
+			fault = r.noPlan
+		}
+	}
+	if fault != nil {
+		point, kind = &fault.point, fault.kind()
+	} else {
+		a := res.After
 		if got.State.Red() {
 			refused := suite.Refused{Local: true}
 			if got.Started && got.State != suite.Stopped {

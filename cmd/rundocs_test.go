@@ -544,8 +544,8 @@ func TestARunCodeWithSharedRunAndFullSuiteStartsSession1(t *testing.T) {
 }
 
 // TestARunCodeWithFullSuiteSetsTheAfterStep: the session of a run from a run code behind a wall,
-// whose documents have full_suite true in type_settings and whose work item has a build plan
-// with a full row, has the after step with the suite's cap as its time limit. With full_suite
+// whose documents have full_suite true in type_settings and whose work item has a version of
+// the plan type with a full row, has the after step with the suite's cap as its time limit. With full_suite
 // false, with type_settings and no full_suite in it, with no type_settings, or with full_suite
 // outside type_settings, the session has none. No test seam sets the input.
 func TestARunCodeWithFullSuiteSetsTheAfterStep(t *testing.T) {
@@ -561,6 +561,7 @@ func TestARunCodeWithFullSuiteSetsTheAfterStep(t *testing.T) {
 		{"full_suite outside type_settings", func(d map[string]any) { d["full_suite"] = true }, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			t.Cleanup(cmd.SetPlan("fix", "build-plan"))
 			api := newSuiteAPI(t, http.StatusCreated)
 			codeRunAPI = api.srv.URL + "/v1/runs/r1"
 			t.Cleanup(func() { codeRunAPI = "" })
@@ -739,4 +740,91 @@ func TestARunCodeStartsTheWorkflowsPrefixedSkill(t *testing.T) {
 	}
 	wants(t, r.out, "starts the workflow deploy of ")
 	lacks(t, r.out, "the workflow workflow-deploy")
+}
+
+// TestARunCodeReadsThePlanTypeOfItsWorkflowFromTheComposedStack is the plan type read through the
+// real stack, with no [cmd.SetPlan]: the base stack's workflow hello has access write and the plan
+// type change-plan, and its module declares the scope check for it. The suite command is the full
+// row of the work item's change-plan. A workflow with access write and no plan gets the after step
+// that only checks whether HEAD moved, and a workflow that only reads gets no after step.
+func TestARunCodeReadsThePlanTypeOfItsWorkflowFromTheComposedStack(t *testing.T) {
+	const manifest = "apiVersion: qory.dev/v1alpha1\nname: hello\nscope_checks:\n  change-plan: [checks/check.js, scope, --plan]\n"
+	fullSuite := func(d map[string]any) { d["type_settings"] = map[string]any{"full_suite": true} }
+	for _, c := range []struct {
+		name      string
+		stackFile func(string) string
+		extra     map[string]string
+		after     bool
+		command   string
+	}{
+		{"a plan type", func(f string) string {
+			return f + "workflows:\n  hello:\n    access: write\n    plan: change-plan\n"
+		}, map[string]string{
+			"examples/hello/modules/hello/qory-module.yaml": manifest,
+			"examples/hello/modules/hello/checks/check.js":  "#!/usr/bin/env node\n",
+		}, true, "printf"},
+		{"write and no plan", writesHello, nil, true, "true"},
+		{"read and no plan", func(f string) string { return f + "workflows:\n  hello:\n    access: read\n" }, nil, false, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			api := newSuiteAPIOf(t, http.StatusCreated, "change-plan", suitePlan)
+			codeRunAPI = api.srv.URL + "/v1/runs/r1"
+			t.Cleanup(func() { codeRunAPI = "" })
+			r := runFromCodeLinks(t, behindAWall(t), nil, c.stackFile, fullSuite, c.extra, nil)
+			if !r.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			if got := len(r.spec.After) > 0; got != c.after {
+				t.Fatalf("After = %q, want it set: %v", r.spec.After, c.after)
+			}
+			if !c.after {
+				if r.spec.AfterTimeout != 0 {
+					t.Errorf("AfterTimeout = %v with no After", r.spec.AfterTimeout)
+				}
+				return
+			}
+			if !strings.HasPrefix(r.spec.After[4], c.command) || (c.command == "true") != (r.spec.After[4] == "true") {
+				t.Errorf("the command is %q, want one that starts %q", r.spec.After[4], c.command)
+			}
+		})
+	}
+}
+
+// TestARunWithFullSuiteAndAWorkflowThatCannotPlanStops: a run whose run documents set full_suite
+// true and whose workflow has write-no-push access stops after the compose, before the image's
+// fetch, the setup and the join, exit 1, with the cause as line 1 and the line that says the code
+// is used, and closes failed with no reason.
+// A workflow with write access, a run with full_suite false, a workflow that has write-no-push
+// access and a run that only reads the checkout are not refused.
+func TestARunWithFullSuiteAndAWorkflowThatCannotPlanStops(t *testing.T) {
+	const line = "The run documents ask for the full suite in a write-no-push workflow.\n  The run did not start: hello has write-no-push access, so it has no plan to read the full suite from; the code is used"
+	suite := func(on bool) func(map[string]any) {
+		return func(d map[string]any) { d["type_settings"] = map[string]any{"full_suite": on} }
+	}
+	for _, c := range []struct {
+		name     string
+		declared string
+		change   func(map[string]any)
+		stops    bool
+	}{
+		{"write-no-push, full_suite true", "write-no-push", suite(true), true},
+		{"write-no-push with documents write-no-push", "write-no-push", func(d map[string]any) { suite(true)(d); noPush(d) }, true},
+		{"write, full_suite true", "write", suite(true), false},
+		{"write, documents write-no-push", "write", func(d map[string]any) { suite(true)(d); noPush(d) }, false},
+		{"write-no-push, full_suite false", "write-no-push", suite(false), false},
+		{"read, full_suite true", "read", suite(true), false},
+		{"write-no-push, documents read", "write-no-push", func(d map[string]any) { suite(true)(d); lowered(d) }, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := runFromCodeWith(t, behindAWall(t), nil, declares(c.declared), c.change)
+			if c.stops {
+				checkStopped(t, r, "", "")
+				wants(t, r.out+r.err.Error(), line)
+				return
+			}
+			if strings.Contains(r.out, "full_suite") || r.err != nil && strings.Contains(r.err.Error(), "full_suite") {
+				t.Errorf("the run is refused: %v\n%s", r.err, r.out)
+			}
+		})
+	}
 }

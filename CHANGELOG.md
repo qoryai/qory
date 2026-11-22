@@ -104,7 +104,20 @@ release may change what an existing document does, and states it under Upgrading
   workflow is not an artifact type, when a workflow with a `plan` has an access other
   than `write`, and when no module of the base stack declares a scope check for the type
   of a `plan`. A module that a checkout adds to the base declares none that counts.
-  `qory run` does not read `plan` or `scope_checks`.
+  `qory run` does not read `scope_checks`.
+- The full suite of a session runs the `full` row of the plan type set in
+  `workflows.<name>.plan` for the run's workflow, from the file `<type>.md` of the launch
+  version, no longer the `build-plan` by name. A plan type with no `Commands` table or no `full`
+  row stops the suite with `The full suite did not start: <type> has no full command.` A write
+  workflow with no `plan` has no suite command: a session that left HEAD where it started is
+  skipped, and one that moved HEAD gets `Set workflows.<name>.plan in the stack: the workflow
+  has no plan.` and an `escalate` verdict. The other texts of a suite that did not start name
+  the plan type, such as `the work item has no usable <type>`, not the build plan. A run whose
+  run documents set `full_suite` and whose workflow has `write-no-push` access stops before the
+  join with `The run documents ask for the full suite in a write-no-push workflow.` and `The run
+  did not start: <name> has write-no-push access, so it has no plan to read the full suite from;
+  the code is used`. For a session after session 1, line 1 is `The next-session answer asks for the
+  full suite in a write-no-push workflow.` and line 2 starts with `The session did not start:`.
 - A skill with the frontmatter keys `notes_for` (a role or a list of roles) and `paths` (one
   glob or more from the checkout root) is a note. The compose exits 2, with the fix as
   line 1, for a note with any of these:
@@ -707,15 +720,16 @@ release may change what an existing document does, and states it under Upgrading
   `type_settings` has no `full_suite`, when the documents have no `type_settings`, and when
   `full_suite` is outside `type_settings`.
   Forager's after step runs it after the agent's container is removed: when HEAD moved,
-  the `full` command of the build plan that the work item had at the launch runs in a fresh
-  clone of HEAD, in a container of the run's image on the run's network, so the run's egress
-  policy applies. A session that left HEAD where it started runs no suite. The limit is
+  the `full` command of the plan type set in `workflows.<name>.plan` for the run's workflow, in the
+  version that the work item had at the launch, runs in a fresh clone of HEAD, in a container
+  of the run's image on the run's network, so the run's egress policy applies. A session that
+  left HEAD where it started runs no suite. The limit is
   `command_limits_minutes.full_suite`, 60 minutes by default, as the after step's time limit.
   A suite that ran and failed posts `changes-requested` with one point over a `passed` verdict
   or none, or adds the point to an `escalate`, and does not end the run `failed`; when the
   proxy refused a host while the suite ran, the point has the host. A suite that did not start
   posts `escalate` with the point `The full suite did not start: <cause>.`; for a cause in the
-  build plan that the agent wrote, such as no `full` row, it posts `changes-requested` with the
+  plan that the agent wrote, such as no `full` row, it posts `changes-requested` with the
   point and a fix, and over an agent's `changes-requested` it adds the point. A session
   whose after step did not run posts `escalate` with `The full suite did not run: ...`, and so does
   a run API that cannot be reached at the launch. A container that did not start posts `Contact

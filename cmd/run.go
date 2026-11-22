@@ -779,6 +779,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var level string
 			// extensions is the composed harness report's extensions, which the suite's time limit reads.
 			var extensions map[string]any
+			// planWorkflow is the run's workflow, and planType the plan type set in workflows.<name>.plan
+			// for it, "" for none.
+			var planWorkflow, planType string
 			// composedSessions are the rows of the report's sessions, see [report.Report.Sessions].
 			var composedSessions []report.Session
 			// pins are the composed stack's pins of the runtimes' versions, which the install
@@ -836,6 +839,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return false, err
 				}
 				extensions, pins, pinFile = rep.Extensions, c.runtimes, c.pinFile
+				planWorkflow, planType = planOf(fromCode, workflows)
+				if fromCode != nil {
+					if err := fullSuiteNoPlan(fromCode, workflows, later); err != nil {
+						return false, err
+					}
+				}
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
 					return false, err
@@ -1635,7 +1644,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					spec.ModelProviderCredentialName = fromCode.modelCredential
 				}
 				spec.After, spec.AfterTimeout = nil, 0
-				suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, fullSuite: fullSuiteOf(fromCode), extensions: extensions, said: said})
+				suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, fullSuite: fullSuiteOf(fromCode), workflow: planWorkflow, plan: planType, extensions: extensions, said: said})
 				closeRoute := route.open(number)
 				// The session's time limit counts from the agent's start, here, see [sessionDeadline].
 				deadline := sessionDeadline(time.Now(), timeout)
