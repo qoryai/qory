@@ -1826,8 +1826,8 @@ func TestARateLimitedPostWaitsAndSendsAgain(t *testing.T) {
 	}
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
-	if posts, reads, stored := p.api.counts(); posts != 3 || stored != 1 || reads != 1 {
-		t.Errorf("%d POST, %d reads, %d stored, want 3, the read of the fetch, 1", posts, reads, stored)
+	if posts, reads, stored := p.api.counts(); posts != 3 || stored != 1 || reads != 2 {
+		t.Errorf("%d POST, %d reads, %d stored, want 3, the reads of the fetch and the launch snapshot, 1", posts, reads, stored)
 	}
 	if want := []time.Duration{2 * time.Second, 2 * time.Second}; !slices.Equal(p.waits, want) {
 		t.Errorf("the waits are %v, want %v", p.waits, want)
@@ -1875,8 +1875,8 @@ func TestNoResponseToAStoredVersionSendsNothingAgain(t *testing.T) {
 			}
 			r := p.run(t, writesAndCommits(t), nil)
 			r.wantsClose(t, event.StateSucceeded, 0)
-			if posts, reads, stored := p.api.counts(); posts != 1 || stored != 1 || reads != 2 {
-				t.Errorf("%d POST, %d reads, %d stored, want 1, 2 and 1", posts, reads, stored)
+			if posts, reads, stored := p.api.counts(); posts != 1 || stored != 1 || reads != 3 {
+				t.Errorf("%d POST, %d reads, %d stored, want 1, 3 and 1", posts, reads, stored)
 			}
 		})
 	}
@@ -1895,8 +1895,8 @@ func TestNoResponseWithNoVersionSendsAgain(t *testing.T) {
 	}
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
-	if posts, reads, stored := p.api.counts(); posts != 2 || stored != 1 || reads != 2 {
-		t.Errorf("%d POST, %d reads, %d stored, want 2, 2 and 1", posts, reads, stored)
+	if posts, reads, stored := p.api.counts(); posts != 2 || stored != 1 || reads != 3 {
+		t.Errorf("%d POST, %d reads, %d stored, want 2, 3 and 1", posts, reads, stored)
 	}
 }
 
@@ -1909,7 +1909,7 @@ func TestNoResponseThatTheIndexDoesNotSettleFails(t *testing.T) {
 		return true, false
 	}
 	p.api.index = func(n int, w http.ResponseWriter) bool {
-		if n == 1 {
+		if n <= 2 {
 			return false
 		}
 		failing(w, http.StatusServiceUnavailable, "unavailable", "")
@@ -1917,8 +1917,8 @@ func TestNoResponseThatTheIndexDoesNotSettleFails(t *testing.T) {
 	}
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 6 {
-		t.Errorf("%d POST, %d reads, want 1, and the read of the fetch and 5", posts, reads)
+	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 7 {
+		t.Errorf("%d POST, %d reads, want 1, and the reads of the fetch, the launch snapshot and 5", posts, reads)
 	}
 	wants(t, r.out, "qory run: check the artifact pull-request of the work item in Qory Apiary; with no version of this run, "+deleteBranch+"; then take the work item in again: qory pushed qory/"+workItem+
 		", and the request that stores its version ended with no response, so the version may or may not be stored: ")
@@ -1942,7 +1942,7 @@ func TestAnOutputThatIsNotStoredStaysInTheOutbox(t *testing.T) {
 				return true, false
 			},
 			index: func(n int, w http.ResponseWriter) bool {
-				if n == 1 {
+				if n <= 2 {
 					return false
 				}
 				failing(w, http.StatusServiceUnavailable, "unavailable", "")
@@ -1982,8 +1982,8 @@ func TestAWorkspaceWithoutTheTypeFailsTheStep(t *testing.T) {
 	}
 	wants(t, r.out, "qory run: "+noType+"\n")
 	wants(t, r.log(), "qory run: "+noType+"\n")
-	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 1 {
-		t.Errorf("%d POST, %d reads, want 1 and the read of the fetch", posts, reads)
+	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 2 {
+		t.Errorf("%d POST, %d reads, want 1 and the reads of the fetch and the launch snapshot", posts, reads)
 	}
 	if p.branchHead(t) == "" {
 		t.Error("the forge has no branch: the push comes before the POST")

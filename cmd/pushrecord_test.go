@@ -160,7 +160,7 @@ func TestAReportThatMayNotHaveArrivedIsSentAgain(t *testing.T) {
 			}
 			return false
 		}, waits: []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}, atApiary: 4},
-		"429 after 1 s, whatever Retry-After says": {respond: func(n int, w http.ResponseWriter) bool {
+		"429 after 1 s whatever Retry-After says": {respond: func(n int, w http.ResponseWriter) bool {
 			if n == 1 {
 				failing(w, http.StatusTooManyRequests, "rate_limited", "3")
 				return true
