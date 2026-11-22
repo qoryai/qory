@@ -1295,7 +1295,7 @@ home, by type, with the program's absolute path in the home. Before the first pu
 `qory run`'s push step runs the check of the workflow's plan type on a fresh clone of the session's
 commits, in the push checks' container, with `--base <session start> --artifacts
 /qory-push-check/files`: the clone is the writable working folder, which qory removes after the
-check, and the session's launch snapshot is read-only at `/qory-push-check/files`. Exit 1 stops every push with the end code
+check, and the session's launch snapshot is read-only at `/qory-push-check/files`. Exit 1 stops the push with the end code
 `push_scope_refused`; exit 2 or 3 with `harness_invalid` (docs/run.md, §The scope check before the
 push). Only a module of the run's base stack
 counts: a module that the checkout's `qory.yaml` adds to the base declares none that counts, so the

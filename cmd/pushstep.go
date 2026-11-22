@@ -35,8 +35,6 @@ const (
 	textChangesLeft     = "Changes left by run %d"
 	textNoRunNumber     = "Check the run's gateway. The response to GET /work-item has no run number" + codeUsed
 	textPushStep        = "push %s to %s"
-	textPushStepOne     = "push %s to %s and 1 further repository"
-	textPushStepMany    = "push %s to %s and %d further repositories"
 	textStoreStep       = "store the outputs"
 	textPushNoProxy     = "take the work item in again in Qory Apiary: the run's push proxy, through which qory pushes the run's commits, did not open: %s" + codeUsed
 	textPushNoCred      = "This run has no push credential, so qory pushed nothing.\n  The run configuration has no credential with purpose push."
@@ -449,29 +447,14 @@ func shownError(err error) string {
 	return integration.Printable(exports.HideURLError(err).Error())
 }
 
-// pushStepName is the name of the push step of branch on system: the branch, the first
-// repository as <system>/<path>, and how many further repositories the push may move, a
-// read target not among them, see [preparation.WorkRepository.ReadOnly]; for a run with
-// no branch, [textStoreStep].
+// pushStepName is the name of the push step of branch on system: the branch and the target,
+// the one repository the push may move, as <system>/<path>; for a run with no branch,
+// [textStoreStep].
 func pushStepName(branch *preparation.WorkBranch, system string) string {
 	if branch == nil {
 		return textStoreStep
 	}
-	first := integration.Printable(exports.Value(system+"/"+branch.Repositories[0].Path, false))
-	n := 0
-	for _, r := range branch.Repositories[1:] {
-		if !r.ReadOnly {
-			n++
-		}
-	}
-	switch n {
-	case 0:
-		return fmt.Sprintf(textPushStep, branch.Ref, first)
-	case 1:
-		return fmt.Sprintf(textPushStepOne, branch.Ref, first)
-	default:
-		return fmt.Sprintf(textPushStepMany, branch.Ref, first, n)
-	}
+	return fmt.Sprintf(textPushStep, branch.Ref, integration.Printable(exports.Value(system+"/"+branch.Repositories[0].Path, false)))
 }
 
 // store stores a version of each output of the stage that the outbox under o.root has, as

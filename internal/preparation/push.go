@@ -126,12 +126,12 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 // recorded and that is as the setup left it stays out of the commit.
 //
 // An agent that was killed can leave .git/index.lock, which would stop the commit. After
-// the checks, [clearIndexLocks] removes that one file of each repository when
+// the checks, [clearIndexLocks] removes that one file of the target when
 // agentStopped is true, and stops the push when a lock is there and it is false.
 //
-// After the commits and before the head check, check, when not nil, gets the version that
-// the push leaves when every repository lands, [WorkBranch.Version] when none has new
-// commits. An error of check stops every push and is Push's error: the commits stay local.
+// After the commit and before the head check, check, when not nil, gets the version that
+// the push leaves when the target lands, [WorkBranch.Version] when it has no new commits.
+// An error of check stops the push and is Push's error: the commits stay local.
 func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message string, read, p proxygit.Proxy, agentStopped bool, check func(version []Repository) error, report io.Writer) ([]Repository, error) {
 	// A Push that stops before its first push leaves no repository of an earlier Push listed.
 	b.landed, b.pushed = nil, nil
@@ -182,8 +182,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			return nil, err
 		}
 	}
-	// The commits of each repository are listed before the first push, so a list that
-	// fails pushes nothing.
+	// The target's commits are listed before the push, so a list that fails pushes nothing.
 	commits := make([][]Commit, len(b.Repositories))
 	version := b.withoutReads(b.Version)
 	for i, r := range b.Repositories {
