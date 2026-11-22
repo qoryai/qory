@@ -318,10 +318,11 @@ func TestACoded503IsSentAgainUntilItPasses(t *testing.T) {
 	}
 }
 
-// TestAnAnswerOutsideItsSchemaEndsTheRun is an answer with a member the schema does not have:
-// one send, and an error whose first line is its fix and which has no value of the answer.
+// TestAnAnswerOutsideItsSchemaEndsTheRun is an answer of the end shape with a workflow, a
+// member of the session shape: one send, and an error whose first line is its fix and
+// which has no value of the answer.
 func TestAnAnswerOutsideItsSchemaEndsTheRun(t *testing.T) {
-	link := &nextLink{respond: func(int) ([]byte, error) { return []byte(`{"next":"end","branch":"secret-branch"}`), nil }}
+	link := &nextLink{respond: func(int) ([]byte, error) { return []byte(`{"next":"end","workflow":"secret-branch"}`), nil }}
 	_, ended, err := askNextSession(context.Background(), link.send, 1, succeededOut)
 	if ended != "" || err == nil {
 		t.Fatalf("askNextSession: %q, %v, want an error", ended, err)
