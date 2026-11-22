@@ -756,12 +756,13 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
-- qory reads the run documents, the pool's answers from Qory Apiary, an integration's
-  description and Forager's `runtimes.json` without a member that their contract does not
-  define, and matches each member's name by exact case. Documents with such a member,
-  such as `run_id`, start the run. A document whose `must_understand` lists a member that
-  qory does not read stops as one that breaks its schema. qory reads the agent's
-  `verdict.json` and the run API's answers by exact case too, and checks no
+- qory reads the run documents, the pool's answers from Qory Apiary, the answer to the
+  next-session request, an integration's description and Forager's `runtimes.json` without
+  a member that their contract does not define, and matches each member's name by exact
+  case. Documents with such a member, such as `run_id`, start the run. A document whose
+  `must_understand` lists a member that qory does not read stops as one that breaks its
+  schema; for the next-session answer, the run closes `failed`, exit 1. qory reads the
+  agent's `verdict.json` and the run API's answers by exact case too, and checks no
   `must_understand` in them.
 - The verdict format takes a verdict kind and a point action that a later version adds:
   a kind of lower-case letters, digits and hyphens, and an action of lower-case letters,

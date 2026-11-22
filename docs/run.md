@@ -2845,7 +2845,9 @@ push step failed or found the run ended; the run closes as that session ended.
 
 The next-session answer is the end of the run or the next session: its workflow, its
 runtime and model settings, its model key (`model_provider_credential_name`), its time
-limit, its `type_settings`, whose `full_suite` sets the full suite, and its inputs. For
+limit, its `type_settings`, whose `full_suite` sets the full suite, and its inputs. qory
+does not read a member of the answer that `next-session-answer.schema.json` does not
+define, and matches each member's name by exact case, so `Workflow` is not `workflow`. For
 the end, qory prints `qory run: Qory Apiary starts no session after session <n>, so the
 run ends` and closes the run as the last session ended. For a session, qory prints
 `qory run: session <n> starts the workflow <workflow> on <runtime>`, and then:
@@ -2892,10 +2894,15 @@ doubles. Then:
   line of the gateway's end (see [The push step of a write
   run](#the-push-step-of-a-write-run)), and closes the run as the session ended.
 - Every other refusal of Qory Apiary's, a status below 500 other than 429 with no refusal,
-  no answer after 10 minutes, or an answer outside `next-session-answer.schema.json`: the
-  run closes `failed`, exit 1, with a line that starts with its fix, such as `qory run:
-  Contact support: the next-session request after session <n> failed.`, then `Qory Apiary
-  returned <status>: <message or code>`.
+  no answer after 10 minutes, an answer outside `next-session-answer.schema.json`, or an
+  answer whose `must_understand` lists a member that qory does not read: the run closes
+  `failed`, exit 1, with a line that starts with its fix, such as `qory run: Contact
+  support: the next-session request after session <n> failed.`, then `Qory Apiary returned
+  <status>: <message or code>`. An answer with `"branch": "main"` and `"must_understand":
+  ["/branch"]` gets `qory run: Update qory.`, then `The answer to the next-session request
+  after session <n> does not pass qory's checks.` and `The answer does not pass them: its
+  must_understand lists a member of next-session-answer.schema.json that qory does not
+  read.`
 - A stop while qory waits to send the request again, or during the steps before the next
   session: the run closes `cancelled` with the reason `interrupted`, exit 1, with `✗ the
   run was cancelled: qory run got <signal> before session <n> started`.
