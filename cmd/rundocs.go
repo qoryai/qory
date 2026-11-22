@@ -552,6 +552,37 @@ func (r *codeRun) readExposed(root, cwd, report string) error {
 	return nil
 }
 
+// clonesDestinations reports whether the run from the run code r skips the fetch before
+// its session, and its agent clones what it needs with qory destination clone: the
+// documents' access is read, the documents contain a harness document, and the inputs list
+// destinations. A run whose documents contain no harness document fetches its target, whose
+// harness it composes; a run that may write fetches its target, works on its branch and
+// pushes. False for a run with no run code. It reads the documents' access, not the level
+// that the composed harness's workflow lowers it to, since the fetch comes before the
+// compose.
+func (r *codeRun) clonesDestinations() bool {
+	return r != nil && r.access == stack.AccessRead && r.harness != nil && hasDestinations(r.inputs)
+}
+
+// fetchesTargetAlone reports whether the run from the run code r fetches its target and no
+// further repository of the run configuration: a read run whose inputs list destinations
+// and whose documents contain no harness document, which fetches its target only for the
+// harness of the target's repository, see [codeRun.clonesDestinations]. The agent clones
+// any other destination with qory destination clone.
+func (r *codeRun) fetchesTargetAlone() bool {
+	return r != nil && r.access == stack.AccessRead && r.harness == nil && hasDestinations(r.inputs)
+}
+
+// fetchValues is [runValues] for the fetch of the run from the run code r: with
+// [codeRun.fetchesTargetAlone], [preparation.EnvRepositories] is cut to the target, as
+// [preparation.TargetAlone] cuts it.
+func (r *codeRun) fetchValues(run openedRun) func(string) string {
+	if !r.fetchesTargetAlone() {
+		return runValues(run)
+	}
+	return preparation.TargetAlone(runValues(run), r.fetchTarget())
+}
+
 // fetchTarget is the target the fetch of the run's repositories takes, as
 // [preparation.RunAt] uses it: r's target and target_version, and none for a nil r, a
 // run not from a run code.

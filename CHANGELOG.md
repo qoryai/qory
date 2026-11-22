@@ -18,6 +18,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- `qory destination clone <id>...` clones destinations of a run inside its session: each
+  id from `destinations` in `$QORY_HARNESS_HOME/inputs.json`, at depth 1, through the
+  wall's proxy, into `/tmp/qory-destinations/<system>/<path>`. It prints one line per id,
+  the id and the folder, and clones a destination once per session, at most 100 per
+  session. See [Clone a destination](docs/run.md#clone-a-destination).
 - A factory's `process.yaml` may register the JSON Schema of a run's type settings, the
   settings of the workspace type that Qory Apiary sends as `type_settings` in the run
   documents: `type_settings: {json_schema: {…}}`. qory checks the schema as it checks the
@@ -774,6 +779,17 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A read run whose documents contain a harness document and whose inputs list
+  `destinations`, such as an Explore run, fetches nothing before its session; the agent
+  clones the destinations it needs with `qory destination clone`. A run with no
+  `destinations`, such as Build or Verify, and a run that may write, which also reads its
+  branch and runs its push step, fetch as before. A read run with `destinations` whose
+  documents contain no harness document fetches its target alone, for the harness of the
+  target's repository.
+- On Claude Code, a read workflow's run allows `Bash(/qory/qory destination *)` and
+  `Read(//tmp/qory-destinations/**)`, adds `/tmp/qory-destinations` to
+  `permissions.additionalDirectories`, and gets that folder, new and empty with mode 700,
+  before the agent starts.
 - qory reads the run documents, the pool's answers from Qory Apiary, the answer to the
   next-session request, an integration's description and Forager's `runtimes.json` without
   a member that their contract does not define, and matches each member's name by exact

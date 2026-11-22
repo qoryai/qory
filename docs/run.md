@@ -4326,6 +4326,58 @@ With a home in the checkout, `qory harness remove` deletes the directory with th
 The client sends a POST once. If the response is lost, the version may be stored: read the
 artifact index with `qory artifact pull` before you push again.
 
+### Clone a destination
+
+A read run whose documents contain a harness document and whose inputs list
+`destinations`, such as an Explore run, starts with nothing fetched. Each destination has
+an `id` and a `target`. The agent reads the list in
+`$QORY_HARNESS_HOME/inputs.json` and clones the destinations it needs, inside the run's
+session:
+
+```text
+/qory/qory destination clone tg_0a1b2c3d4e5f6g7h tg_8j9k0m1n2p3q4r5s
+```
+
+qory clones each one at depth 1 into `/tmp/qory-destinations/<system>/<path>`, and prints
+one line per id, in the order given: the id and the folder. A destination that this
+session cloned before is not cloned again, and its line is the same. The clone goes
+through the wall's proxy, which reads with the run's read credential.
+
+qory fetches before the session, as for a run with no `destinations`, in two cases:
+
+- The run's access is `write` or `write-no-push`. qory fetches the target and each further
+  repository of the run configuration, reads the run's branch, and runs its push step.
+- The run's documents contain no harness document. qory fetches the target alone, the first
+  repository of the run configuration, since it composes the harness of the target's
+  repository. The setup gets that list too, in `QORY_RUN_REPOSITORIES`.
+
+These calls exit 2 and clone nothing, with the fix on line 1:
+
+| Line 1 | When |
+| ------ | ---- |
+| `Use an id from destinations in the run's inputs: <id> is not one of them.` | The inputs do not list the id. |
+| `Clone at most 100 destinations in one session: this call would make clone 101.` | The call would take the session past 100 clones. |
+| `Clone only a destination with an address: <id> has none, so it has no repository.` | The destination's target has no address. |
+| `Clone only a repository: the address of <id> is not a repository path.` | The address's path is not a path of a repository. |
+| `Run qory destination clone inside a run's session: <variable> is not set.` | `QORY_RUN_API` or `QORY_HARNESS_HOME` is not set. |
+| `Run qory destination clone only in a run whose inputs list destinations.` | `inputs.json` is missing, or has no `destinations` or an empty list. |
+
+These exit 1. Line 1 of each is the gap that a member reads in Qory Apiary, so it contains
+the id and no path of the machine:
+
+| Line 1 | When |
+| ------ | ---- |
+| `Give the integration access to <id> in Qory Apiary, then click Run Explore again.` | The host returned 401, 403 or 404. Line 2 is `The host returned <status> to the clone.` |
+| `Ask the instance admin of Qory Apiary to let the proxy reach the host of <id>.` | The wall's proxy returned 403 or 407. |
+| `Run Explore again later: the clone of <id> failed: <cause>.` | Any other failed clone. The cause contains no URL. |
+| `Ask the instance admin of Qory Apiary to check the machine: it cannot store <id>.` | A folder of the clone or its `.git` is a link or a file, the clone's folder has files and no clone, or qory cannot make a folder. Line 2 has the path and the cause. When `PATH` has no git, line 2 is `git is not on PATH`. The id is the call's first. For a record of the clones that is not a list of ids, `the clones` stands in place of the id. |
+| `Ask the instance admin of Qory Apiary to fix the destinations of this run: they are malformed.` | The destinations do not have the shape of the explore inputs. Line 2 has the cause. |
+| `Ask the instance admin of Qory Apiary to separate destination <id> from another.` | The path of `<id>` lies inside the path of another destination on the same system, or contains it. Line 2 has both ids. qory clones neither, so no clone lands in another one's folder. |
+
+The count of 100 is per session: the record of the clones is in the session's container.
+A `git clone` that the agent runs itself reaches only what the run's read credential
+covers, and qory does not count it.
+
 ## The route to qory
 
 Each run has a route from its session to `qory run`. A program in the session sends a plain
@@ -5976,17 +6028,20 @@ declared `read` with `access: write`. A read run sees the checkout read-only:
 - On Claude Code, the run's settings deny `NotebookEdit` and every edit under the
   checkout, with `Edit(//<checkout>/**)` and `Edit(//workspace/**)`. They allow
   `Bash(/qory/qory artifact *)`, `Bash(/qory/qory run verdict *)`,
-  `Bash(/qory/qory work-item *)`, `Read(//tmp/qory-artifacts/**)` and
-  `Edit(//tmp/qory-artifacts/**)`, add `/tmp/qory-artifacts` to
-  `permissions.additionalDirectories`, and set `permissions.defaultMode` to `dontAsk`,
-  beside what the composed settings contain. Inside the wall, `qory` is at `/qory/qory` and
-  not on `PATH`. On the other runtimes, the read-only mount is the only change.
+  `Bash(/qory/qory work-item *)`, `Bash(/qory/qory destination *)`,
+  `Read(//tmp/qory-artifacts/**)`, `Edit(//tmp/qory-artifacts/**)` and
+  `Read(//tmp/qory-destinations/**)`, add `/tmp/qory-artifacts` and
+  `/tmp/qory-destinations` to `permissions.additionalDirectories`, and set
+  `permissions.defaultMode` to `dontAsk`, beside what the composed settings contain.
+  Inside the wall, `qory` is at `/qory/qory` and not on `PATH`. On the other runtimes, the
+  read-only mount is the only change.
 
-  `permissions.additionalDirectories` keeps the store readable when the composed settings
-  set `permissions.blockReadsOutsideWorkingDirectories`. A folder on that list must exist
-  when Claude Code starts, so qory makes `/tmp/qory-artifacts` in the container before the
-  agent starts. If the image has something at that path, the run stops before the agent
-  starts, and the error line starts with the fix.
+  `permissions.additionalDirectories` keeps the store and the clones readable when the
+  composed settings set `permissions.blockReadsOutsideWorkingDirectories`. A folder on that
+  list must exist when Claude Code starts, so qory makes `/tmp/qory-artifacts` and
+  `/tmp/qory-destinations` in the container before the agent starts, each empty with mode
+  700. If the image has something at either path, the run stops before the agent starts,
+  and the error line starts with the fix.
 
   So the agent reads what it pulled and makes what it pushes in `/tmp/qory-artifacts`, with
   Claude Code's `Read` and `Write` tools:

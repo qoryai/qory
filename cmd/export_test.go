@@ -1170,6 +1170,14 @@ func SetTempStoreDir(dir string) func() {
 	return func() { tempStoreDir = before }
 }
 
+// SetDestinationsDir sets the folder qory destination clone clones into to dir, and
+// returns what restores it.
+func SetDestinationsDir(dir string) func() {
+	before := destinationsDir
+	destinationsDir = dir
+	return func() { destinationsDir = before }
+}
+
 // SetRunStartFolder sets the folder that a run in a wall started in, and returns a
 // function that restores the check.
 func SetRunStartFolder(dir string) func() {

@@ -402,6 +402,25 @@ func Unlisted(getenv func(string) string, at Target) error {
 	return fmt.Errorf(textTargetMissing, integration.Printable(exports.Value(at.Path, false)))
 }
 
+// TargetAlone is getenv with [EnvRepositories] cut to its first entry when that entry is
+// at's repository on [EnvSystem] and further entries follow: the list of a run that fetches
+// its target and no further repository. Any other list stays as it is, so [RunAt] stops
+// on it with the line it has for that list.
+func TargetAlone(getenv func(string) string, at Target) func(string) string {
+	return func(name string) string {
+		value := getenv(name)
+		system := getenv(EnvSystem)
+		if name != EnvRepositories || at.System != system {
+			return value
+		}
+		paths, err := Check(system, value)
+		if err != nil || len(paths) < 2 || targetIn(system, paths, at.Path) != 0 {
+			return value
+		}
+		return paths[0]
+	}
+}
+
 // targetIn is the index in paths, the entries of [EnvRepositories] on system, of path,
 // the target's path in a run's documents, and -1 when no entry is path. The entries and
 // the path compare as [sameRepository] compares them: on github.com in any case.
@@ -837,6 +856,42 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 		cmd.Env = gitEnv(os.Environ())
 		return cmd, nil
 	}, args[0])
+}
+
+// CloneError is a [Clone] that failed: the status git exited with, -1 when git did not
+// exit by itself, what git wrote on stderr, which contains the repository's address,
+// Stopped, true when the limit of the call or the caller stopped git, and NoGit, true when
+// PATH has no git, so git did not start.
+type CloneError struct {
+	Exit    int
+	Output  string
+	Stopped bool
+	NoGit   bool
+}
+
+func (e *CloneError) Error() string { return "git clone failed" }
+
+// Clone clones the repository at path on system, values [Check] passed, at depth one into
+// dest, a folder that does not exist, inside the wall: the image's git from PATH, over
+// https alone, with the [hardened] options and the environment [gitEnv] makes, so the
+// proxy and the certificate authority that the wall gives stay as given, and with
+// LC_ALL=C, which keeps git's lines in English. A failure is a [*CloneError].
+func Clone(ctx context.Context, system, path, dest string) error {
+	var noGit bool
+	_, err := runGit(ctx, nil, func(ctx context.Context) (*exec.Cmd, error) {
+		args := slices.Concat(hardened, protocols, []string{"clone", "--quiet", "--depth", "1", "--", repoURL(system, path), dest})
+		cmd := exec.CommandContext(ctx, "git", args...)
+		noGit = errors.Is(cmd.Err, exec.ErrNotFound)
+		cmd.Dir = filepath.Dir(dest)
+		cmd.Env = append(gitEnv(os.Environ()), "LC_ALL=C")
+		return cmd, nil
+	}, "clone")
+	var g *gitError
+	if !errors.As(err, &g) {
+		return err
+	}
+	stopped := g.exit < 0 && g.output == "" && strings.HasPrefix(g.line, "git clone ")
+	return &CloneError{Exit: g.exit, Output: g.output, Stopped: stopped, NoGit: noGit}
 }
 
 // hostRunner is the [gitRunner] of a fetch on this machine through the run's host proxy
