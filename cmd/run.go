@@ -896,7 +896,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err != nil {
 						return false, err
 					}
-					outputs = &runOutputs{root: at.root, stage: fromCode.snapshot.Outputs, types: delivered, target: fromCode.targetRef}
+					outputs = &runOutputs{root: at.root, stage: fromCode.snapshot.Outputs, types: delivered, target: fromCode.targetRef, noRepository: run.Repositories() == ""}
 					spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{outboxEnv: outboxPath(at.root)})
 				}
 				// The composed harness's submit program runs on a run with neither a run code nor a

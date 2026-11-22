@@ -339,12 +339,14 @@ func outputName(t exports.ProcessType, target *contracts.Target) string {
 
 // runOutputs is what the push step needs to store the outputs of a session: the folder that
 // has the outbox, the checkout or the working folder, the stage's outputs from the work item,
-// the artifact types of the composed process.yaml, and the documents' target, nil for none.
+// the artifact types of the composed process.yaml, the documents' target, nil for none, and
+// whether the run has no repository, which gets [textOutputNoPush] for each stored output.
 type runOutputs struct {
-	root   string
-	stage  []runapi.Output
-	types  []exports.ProcessType
-	target *contracts.Target
+	root         string
+	stage        []runapi.Output
+	types        []exports.ProcessType
+	target       *contracts.Target
+	noRepository bool
 }
 
 // readyOutput is an output of the outbox that passed its checks: the version to store, and the

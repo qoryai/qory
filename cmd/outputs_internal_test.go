@@ -3,6 +3,8 @@ package cmd
 import (
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -467,5 +469,34 @@ func TestRemoveStoredLeavesWhatTheVersionDoesNotHave(t *testing.T) {
 	}
 	if _, err := os.Stat(folder); !os.IsNotExist(err) {
 		t.Errorf("the empty folder stays: %v", err)
+	}
+}
+
+// TestOnlyARunWithNoRepositorySaysSo is a stored reply of a run with no repository, which
+// prints that the run has no repository to push, and of a run with repositories and no
+// branch, which prints nothing.
+func TestOnlyARunWithNoRepositorySaysSo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		io.WriteString(w, `{"version":1,"artifact":{"type":"reply","name":"main","version":{"id":"av_1","number":1}}}`)
+	}))
+	t.Cleanup(server.Close)
+	client, err := runapi.New(server.URL+"/v1/runs/r", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for noRepository, want := range map[bool]string{true: "qory run: stored the reply output; the run has no repository to push.\n", false: ""} {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, ".qory", "outbox", "reply"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, ".qory", "outbox", "reply", "reply.md"), []byte("Ships Monday."), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		o := &runOutputs{root: root, stage: []runapi.Output{{Type: "reply"}}, noRepository: noRepository}
+		var lines strings.Builder
+		if err := o.store(t.Context(), &lines, client, "run_1", "", nil, &runPushChecks{}); err != nil || lines.String() != want {
+			t.Errorf("no repository %v: %q, %v, want %q", noRepository, lines.String(), err, want)
+		}
 	}
 }

@@ -419,7 +419,7 @@ func (o *runOutputs) store(ctx context.Context, w io.Writer, client *runapi.Clie
 		if err := removeStored(o.root, r); err != nil {
 			return fmt.Errorf(textOutputKept, provisioner.ShownType(r.push.Type), shownError(err))
 		}
-		if branch == nil {
+		if o.noRepository {
 			fmt.Fprintf(w, textOutputNoPush+"\n", provisioner.ShownType(r.push.Type))
 		}
 	}
