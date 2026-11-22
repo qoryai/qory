@@ -17,7 +17,7 @@ import (
 func TestCloneFailedNamesEachCause(t *testing.T) {
 	const id = "tg_web0000000000000"
 	const (
-		proxy  = "Ask the instance admin of Qory Apiary to let the proxy reach the host of " + id + "."
+		proxy  = "qory destination clone: The proxy cannot reach " + id + "'s host, so nothing was cloned."
 		access = "Give the integration access to " + id + " in Qory Apiary, then click Run Explore again.\n  The host returned "
 		again  = "Run Explore again later: the clone of " + id + " failed: "
 	)
@@ -35,7 +35,7 @@ func TestCloneFailedNamesEachCause(t *testing.T) {
 		{&preparation.CloneError{Exit: -1, Stopped: true}, again + "git was stopped."},
 		{&preparation.CloneError{Exit: 128, Output: "fatal: the remote end hung up unexpectedly"}, again + "git exited with 128."},
 		{&preparation.CloneError{Exit: -1}, again + "git did not start."},
-		{&preparation.CloneError{Exit: -1, Output: "", NoGit: true}, "Ask the instance admin of Qory Apiary to check the machine: it cannot store " + id + ".\n  git is not on PATH"},
+		{&preparation.CloneError{Exit: -1, Output: "", NoGit: true}, "qory destination clone: The machine cannot store " + id + ", so nothing was cloned.\n  git is not on PATH"},
 		{errors.New("exec: \"git\": executable file not found in $PATH"), again + "git did not start."},
 	} {
 		if got := cloneFailed(id, c.err).Error(); got != c.want {

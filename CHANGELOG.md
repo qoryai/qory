@@ -18,12 +18,12 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
-- Before the first push after a session of a write run from a run code, `qory run` checks
-  the commits of each repository whose head is past the session's start, on a fresh clone
+- Before the push after a session of a write run from a run code, `qory run` checks the
+  target's commits when its head is past the session's start, on a fresh clone
   that has no ref or hook the agent wrote. For a workflow with a `plan`, the scope check
   that a module declares for the plan type runs in the push checks' container with
   `--base <session start> --artifacts <launch snapshot>`; a workflow with no `plan` may
-  commit no file outside `.qory/`. A failure in one repository stops every push: exit 1, a
+  commit no file outside `.qory/`. A failure stops the push: exit 1, a
   changed file with no plan, and a check past 30 seconds end `push_scope_refused`; exit 2
   or 3 and a home with no scope check for the type `harness_invalid`; a failed clone
   `repository_check_failed`; and a failed engine `machine_setup_invalid`. See docs/run.md,
@@ -33,8 +33,8 @@ release may change what an existing document does, and states it under Upgrading
   other type, in the run directory and in `start-artifacts/` of the read-only inputs
   folder. A fetch that fails stops the session with `run_api_failed`. `inputs.json` has
   the snapshot's folder in `qory.start_artifacts` and the start commit of each repository
-  in `qory.start_commits`. Session 1 writes `inputs.json` after the branch switch and the
-  setup.
+  the run may push, not a read target, in `qory.start_commits`. Session 1 writes
+  `inputs.json` after the branch switch and the setup.
 - A walled session whose `--mount` or `wall.mounts` is at or inside the read-only inputs
   folder stops before its setup: a run from a run code with `machine_setup_invalid`.
 - A run from a run code whose step fails closes `failed` with an end code as the reason,
@@ -589,17 +589,14 @@ release may change what an existing document does, and states it under Upgrading
   `qory run`, `qory run pool`, `qory run register` and `qory run end` stop with an error
   when the setting is there.
 - A run from a run code whose documents set `target_version` fetches the repository at
-  the target's `address`, its `system` and `path`, the first entry of
-  `QORY_RUN_REPOSITORIES`, at that commit, by its id, in place of the head of its default
-  branch, onto a local branch with the default branch's name and no upstream. When the
-  documents contain no harness document, the compose reads the checkout's `qory.yaml` or
-  `harness.yaml` as Qory Apiary checked it. Each of these
-  stops the run before the compose, exit 1: a target on the run's system that is a later
-  entry of `QORY_RUN_REPOSITORIES`, that the list does not contain, or with an empty
-  list; a version that is not a commit id; and a commit that the server does not have or
-  does not serve by its id. A target with no address, only an adapter's `collection`,
-  is not fetched and does not use `target_version`, nor does a target on another system
-  or a run with no `QORY_RUN_SYSTEM`.
+  the target's `address`, its `system` and `path`, at that commit, by its id, in place of
+  the head of its default branch, onto a local branch with the default branch's name and
+  no upstream. When the documents contain no harness document, the compose reads the
+  checkout's `qory.yaml` or `harness.yaml` as Qory Apiary checked it. Each of these stops
+  the run before the compose, exit 1: a version that is not a commit id, and a commit that
+  the server does not have or does not serve by its id. A target with no address, only an
+  adapter's `collection`, is not fetched and does not use `target_version`, nor does a
+  target on another system or a run with no `QORY_RUN_SYSTEM`.
 - The harness section of a `qory.yaml` that defines a stack, without `extends`, may list
   `workflows`, with the keys and checks of a `qory-stack.yaml`, such as `access`. A
   section that extends a stack takes the base's workflows, and one that also
@@ -852,6 +849,33 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A run from a run code takes its repositories from its documents, and no longer from
+  `QORY_RUN_REPOSITORIES`: the repository of `target` goes into the working folder, and
+  the repository of each entry of `read_targets` under `.qory/repositories`. The push step
+  checks, commits and pushes the target alone, and the version it stores has no entry of a
+  read target. For a read target with commits past its start, the step prints `qory run:
+  The commits in a read-only repository were not kept: a run changes only its target.`,
+  then `The repository is <path>.` indented by two spaces, once in the run. A read target
+  with no address is not fetched, and the run goes on. A repository listed twice is
+  fetched once. A read target on another host, of another owner on github.com, or inside
+  another, stops the run before any fetch. A run with no `QORY_RUN_SYSTEM` fetches no read
+  target. Documents with read targets and no target fetch each read target and push
+  nothing. A read target for which the version of the work item's branch lists a commit is
+  fetched at that commit. The fetch line and the fetch step say `and 1 read-only
+  repository` in place of `and 1 further repository`. The setup container's
+  `QORY_RUN_REPOSITORIES` is the target, then the read targets, and `qory run prepare`
+  takes such a list up to 4220 bytes, a target and 20 read targets of 200 characters; a
+  list that a run configuration sets stays at 256 bytes. A prebuild fetches the repository
+  of its documents' target alone. The stops for a target that `QORY_RUN_REPOSITORIES`
+  lists after another repository, or does not list, are gone.
+- `qory destination clone` checks `destinations` against the explore contract's schema,
+  `inputs.schema.json`, and reads each entry as the contract's destination. It also stops
+  on a `{` or `}` in a path and on U+0000 in a collection. Line 2 of the error has the
+  entry and the place in it that does not match the schema, such as `entry 1 does not
+  match the schema of a destination at /id`.
+- `qory destination clone` states the cause on line 1 of a failure that a member cannot fix
+  in the session, such as `qory destination clone: The machine cannot store <id>, so nothing
+  was cloned.`, in place of a line that starts with `Ask the instance admin of Qory Apiary`.
 - An artifact type and an artifact name start with a letter: the rule is
   `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most 64 bytes. A name that starts with a digit, such as `1abc`, fails each check of a type or a name: in `process.yaml`,
   in `push_checks` and `scope_checks` of a module, in `plan` of a workflow, in `qory

@@ -121,7 +121,7 @@ func runCodePrebuild(ctx context.Context, stderr, log io.Writer, r *config.Forag
 		Limits:   wall.Limits{CPUs: w.CPUs, Memory: w.Memory, PIDs: w.PIDs, ShmSize: w.ShmSize},
 		Registry: registry, Machine: r.Machine, MachineSteps: machineSteps, Masker: secretmask.Default().Masker(), Log: func(line string) { fmt.Fprintln(log, "qory run:", line) },
 	}, prebuild.Run{
-		RunID: runID, Key: &heldRunKey{b: []byte(key.value)}, Inputs: doc.Inputs,
+		RunID: runID, Key: &heldRunKey{b: []byte(key.value)}, Inputs: doc.Inputs, Target: doc.Target,
 		ImageDestination: doc.ImageDestination, EnvironmentDestination: doc.EnvironmentDestination, EnvironmentImage: doc.EnvironmentImage,
 		LargestImageBytes: largestPrebuiltImage(doc),
 	})

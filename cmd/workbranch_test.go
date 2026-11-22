@@ -98,7 +98,7 @@ func runOnBranch(t *testing.T, h *hostFetch, version, api string, flags ...strin
 	t.Setenv("QORY_RUN_KEY", "")
 	var steps []cmd.StepEvent
 	closes, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{
-		System: proxygittest.Host, Repositories: "acme/site", RunAPI: api,
+		System: proxygittest.Host, Repositories: decoyRepositories, RunAPI: api,
 		Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
 		OnStep: func(e cmd.StepEvent) { steps = append(steps, e) },
 	})

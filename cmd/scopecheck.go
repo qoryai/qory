@@ -100,6 +100,7 @@ func (p *runPushChecks) setSession(workflow, plan, snapshot string) {
 // clone, see [preparation.ScopeClone]: for a workflow with no plan, a commit may change no
 // path outside .qory/; otherwise the scope check that the home declares for the plan type
 // runs with --base at the session's start. The first failure is the error, a [*scopeStop].
+// A read target has no entry in version, see [preparation.Push], so it is never checked.
 func (p *runPushChecks) scopeCheck(ctx context.Context, branch *preparation.WorkBranch, dir string, version []preparation.Repository) error {
 	for _, r := range branch.Repositories {
 		head := headOf(version, r.Path)

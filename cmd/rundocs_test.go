@@ -260,10 +260,10 @@ var codeGatewayAllow []string
 // as [cmd.Nowhere] PolicyImage is; "" selects none. A test sets it.
 var codePolicyImage string
 
-// codeRepositories is the run configuration's repositories of each run
-// [runFromCodeGiven] opens, as [cmd.Nowhere] Repositories is; "" lists none. A test sets
-// it.
-var codeRepositories string
+// codeTarget is the path of the documents' target of each run [runFromCodeGiven]
+// opens, which the run fetches; "" sets no target. The run configuration lists
+// [decoyRepositories], which the run does not read. A test sets it.
+var codeTarget string
 
 // codeReal, when set, has each run [runFromCodeGiven] opens use a real wall for its
 // setup, the removal of its setup container and its join, as [cmd.Nowhere] Real does. A
@@ -316,6 +316,12 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 	g := newCodeRelay(t)
 	g.documents = codeDocuments(t, func(d map[string]any) {
 		d["harness"] = map[string]any{"harness": map[string]any{"extends": map[string]any{"git": url, "ref": commit, "path": "examples/hello"}}}
+		// A run from a run code fetches its documents' target, so a run that lists
+		// repositories has them as its target, at the commit of its default branch.
+		if codeTarget != "" {
+			target := map[string]any{"collection": "R_1001", "address": map[string]any{"system": proxygittest.Host, "path": codeTarget}}
+			d["target"], d["inputs"].(map[string]any)["target"], d["target_version"] = target, target, commit
+		}
 		if change != nil {
 			change(d)
 		}
@@ -339,7 +345,7 @@ func runFromCodeGiven(t *testing.T, before func(code string) []string, args []st
 		args = append(slices.Clip(args), before(g.code())...)
 	}
 	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
-		System: proxygittest.Host, Repositories: codeRepositories,
+		System: proxygittest.Host, Repositories: decoyRepositories,
 		Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
 		StackProxy: h.server.Proxy.URL, StackCABundle: h.server.Proxy.CABundle,
 		OnOpen:        func(s session.OpenSpec) { r.open = s },

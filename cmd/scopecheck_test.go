@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -141,10 +142,11 @@ func TestAWorkflowWithNoPlanPushesNoChangedFile(t *testing.T) {
 	}
 }
 
-// TestOneRepositoryOutsideTheScopeStopsEveryPush is a run of two repositories with no plan:
-// the target's commits change only .qory/ and pass, acme/lib's change lib.txt, so no
-// repository is pushed.
-func TestOneRepositoryOutsideTheScopeStopsEveryPush(t *testing.T) {
+// TestAReadTargetsCommitPassesTheScopeCheck is a run with no plan and the read target
+// acme/lib, in which the agent commits a change of lib.txt: the scope check skips acme/lib, so
+// the target's commit, which changes only .qory/, is pushed, and acme/lib gets no branch.
+// inputs.json lists the target alone in start_commits.
+func TestAReadTargetsCommitPassesTheScopeCheck(t *testing.T) {
 	docker, _ := scopeDocker(t, "exit 0", "")
 	p := scopedRepo(t, docker)
 	t.Cleanup(cmd.SetPlan("hello", ""))
@@ -152,14 +154,43 @@ func TestOneRepositoryOutsideTheScopeStopsEveryPush(t *testing.T) {
 	libBare := filepath.Join(p.h.server.Root, "acme", "lib.git")
 	proxygittest.Git(t, libBare, "config", "http.receivepack", "true")
 	p.repositories = "acme/site,acme/lib"
+	var starts []string
+	p.mountsOf = func(spec session.SessionSpec) {
+		for _, m := range spec.Mounts {
+			data, err := os.ReadFile(filepath.Join(m.Path, "inputs.json"))
+			if !m.ReadOnly || filepath.Base(m.Path) != "in" || err != nil {
+				continue
+			}
+			var inputs struct {
+				Qory struct {
+					StartCommits []struct{ Path string } `json:"start_commits"`
+				}
+			}
+			if err := json.Unmarshal(data, &inputs); err != nil {
+				t.Fatal(err)
+			}
+			for _, c := range inputs.Qory.StartCommits {
+				starts = append(starts, c.Path)
+			}
+		}
+	}
 	r := p.run(t, func(dir string) {
 		writeFile(t, filepath.Join(dir, ".qory", "build", "notes.md"), "notes\n")
 		commitAll(t, dir, "Add notes")
-		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "lib.txt"), "changed\n")
+		lib := filepath.Join(dir, ".qory", "repositories", "acme", "lib")
+		writeFile(t, filepath.Join(lib, "lib.txt"), "changed\n")
+		commitAll(t, lib, "Change lib")
 	}, nil)
-	p.wantsNoPush(t, r, contracts.EndCodePushScopeRefused, "Repository acme/lib. Commit ")
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if p.branchHead(t) == "" {
+		t.Errorf("the target's branch is missing on the forge\n%s", r.out)
+	}
+	lacks(t, r.out, "Repository acme/lib")
 	if got := proxygittest.Git(t, libBare, "for-each-ref", "refs/heads/qory/"); got != "" {
 		t.Errorf("acme/lib has %s", got)
+	}
+	if len(starts) != 1 || filepath.Base(starts[0]) != filepath.Base(p.h.dir) {
+		t.Errorf("start_commits has %q, want the working folder %s alone", starts, p.h.dir)
 	}
 }
 

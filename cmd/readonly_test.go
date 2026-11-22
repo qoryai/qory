@@ -536,12 +536,12 @@ func TestAReadWorkflowOnAnImageWithoutNestedDockerRuns(t *testing.T) {
 	}
 }
 
-// listsRepositories has the run configuration of the runs of test t list
-// example-org/hello, so each run has a setup, for the rest of the test.
+// listsRepositories has the documents of the runs of test t set the target
+// example-org/hello, so each run fetches it and has a setup, for the rest of the test.
 func listsRepositories(t *testing.T) {
 	t.Helper()
-	codeRepositories = "example-org/hello"
-	t.Cleanup(func() { codeRepositories = "" })
+	codeTarget = "example-org/hello"
+	t.Cleanup(func() { codeTarget = "" })
 }
 
 // removesSetupWith has each run of test t use remove as its RemoveSetup, for the rest of

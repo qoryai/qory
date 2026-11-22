@@ -47,7 +47,7 @@ type WorkBranch struct {
 	// checked each commit as a full commit id.
 	Pushed, Cancelled []Landed
 	// Repositories is every repository of the run, the target first, set by [RunAt] and
-	// [Switch].
+	// [Switch]. Each further one is a read target, [WorkRepository.ReadOnly].
 	Repositories []WorkRepository
 
 	// system is the host of the run's repositories.
@@ -58,6 +58,8 @@ type WorkBranch struct {
 	setupChanges map[string]map[string]string
 	// pushed is each repository the last [Push] pushed, as a line shows it.
 	pushed []string
+	// readsShown is, by [WorkRepository.Dir], each read target that [readsAhead] printed.
+	readsShown map[string]bool
 	// landed is each repository the last [Push] pushed, with the commit its branch is at.
 	landed []Landed
 }
@@ -99,6 +101,9 @@ type WorkRepository struct {
 	// DefaultBranch is the name of the repository's default branch that [RunAt] read when it
 	// fetched the repository, "" when it did not read one: a delivered output has it as pushed-base-branch.
 	DefaultBranch string
+	// ReadOnly is a read target of the run's documents, which the run only reads: [Push]
+	// commits and pushes nothing in it, and the version it returns has no entry of it.
+	ReadOnly bool
 }
 
 // CommitOf is the commit of the repository path on system in the branch's version, ""

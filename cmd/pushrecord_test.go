@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -78,9 +77,10 @@ func TestEachSessionThatPushesIsReported(t *testing.T) {
 	}
 }
 
-// TestOnePushOfTwoRepositoriesIsOneReport is a run whose agent commits in the target and in a
-// further repository: one report has both, the target first, with the heads on the branches.
-func TestOnePushOfTwoRepositoriesIsOneReport(t *testing.T) {
+// TestAPushWithAReadTargetReportsTheTargetAlone is a run whose agent changes the target and
+// the read target acme/lib: one report has the target alone, at the head on its branch, and
+// acme/lib has no branch.
+func TestAPushWithAReadTargetReportsTheTargetAlone(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
 	libBare := filepath.Join(p.h.server.Root, "acme", "lib.git")
@@ -92,12 +92,12 @@ func TestOnePushOfTwoRepositoriesIsOneReport(t *testing.T) {
 	}, nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
 	calls, rows := p.api.reports()
-	want := []recordedRow{
-		{proxygittest.Host, "acme/site", p.branchHead(t)},
-		{proxygittest.Host, "acme/lib", proxygittest.Git(t, libBare, "rev-parse", "refs/heads/"+recordBranch)},
-	}
+	want := []recordedRow{{proxygittest.Host, "acme/site", p.branchHead(t)}}
 	if calls != 1 || !slices.Equal(rows, want) {
 		t.Errorf("%d reports with the rows %+v, want 1 with %+v", calls, rows, want)
+	}
+	if refs := proxygittest.Git(t, libBare, "for-each-ref", "refs/heads/"+recordBranch); refs != "" {
+		t.Errorf("the read target has the branch: %s", refs)
 	}
 }
 
@@ -588,93 +588,5 @@ func TestAStepAfterTheRunEndedPushesAndReportsNothing(t *testing.T) {
 	}
 	if got := r.pushSteps(); len(got) != 1 {
 		t.Errorf("the push steps exited %v, want one", got)
-	}
-}
-
-// TestAPushThatLandedBeforeASecondRepositoryFailedIsReported is a run of two repositories whose
-// first push landed and whose second failed: the first repository's head is reported, and the
-// run's line is the second push's failure.
-func TestAPushThatLandedBeforeASecondRepositoryFailedIsReported(t *testing.T) {
-	p := newPushRepo(t, "write")
-	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
-	bare := filepath.Join(p.h.server.Root, "acme", "lib.git")
-	proxygittest.Git(t, bare, "config", "http.receivepack", "true")
-	writeFile(t, filepath.Join(bare, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n")
-	if err := os.Chmod(filepath.Join(bare, "hooks", "pre-receive"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	p.repositories = "acme/site,acme/lib"
-	r := p.run(t, func(dir string) {
-		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
-		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
-	}, nil)
-	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "the push of the next repository failed: change the rule on "+proxygittest.Host)
-	_, rows := p.api.reports()
-	if want := []recordedRow{{proxygittest.Host, "acme/site", p.branchHead(t)}}; !slices.Equal(rows, want) {
-		t.Errorf("the rows are %+v, want %+v", rows, want)
-	}
-}
-
-// TestAPartialPushWhoseReportFailsGivesBothLines is the run above with a report that gets
-// 403: the line of the second push's failure comes first, then the not-recorded line.
-func TestAPartialPushWhoseReportFailsGivesBothLines(t *testing.T) {
-	p := newPushRepo(t, "write")
-	failsRecord(p, 1, http.StatusForbidden, "", "")
-	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
-	bare := filepath.Join(p.h.server.Root, "acme", "lib.git")
-	proxygittest.Git(t, bare, "config", "http.receivepack", "true")
-	writeFile(t, filepath.Join(bare, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n")
-	if err := os.Chmod(filepath.Join(bare, "hooks", "pre-receive"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	p.repositories = "acme/site,acme/lib"
-	r := p.run(t, func(dir string) {
-		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
-		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
-	}, nil)
-	r.wantsClose(t, event.StateFailed, 1)
-	first := strings.Index(r.out, "the push of the next repository failed")
-	second := strings.Index(r.out, "qory run: Qory Apiary did not record the last push.\n  qory pushed "+p.branchHead(t))
-	if first < 0 || second < first {
-		t.Errorf("the lines are out of order or missing\n%s", r.out)
-	}
-}
-
-// TestAPartialPushWhoseReportGetsRunEndedEndsTheRun is a run of two repositories whose first
-// push landed and whose second failed, with a report that gets run_ended: the push's failure
-// is the run's line, the line of the ended run shows once, no version is stored and no session 2
-// starts.
-func TestAPartialPushWhoseReportGetsRunEndedEndsTheRun(t *testing.T) {
-	p := newPushRepo(t, "write")
-	failsRecord(p, 1, http.StatusConflict, "run_ended", "")
-	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
-	bare := filepath.Join(p.h.server.Root, "acme", "lib.git")
-	proxygittest.Git(t, bare, "config", "http.receivepack", "true")
-	writeFile(t, filepath.Join(bare, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n")
-	if err := os.Chmod(filepath.Join(bare, "hooks", "pre-receive"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	p.repositories = "acme/site,acme/lib"
-	secondRan := false
-	t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
-	r := p.run(t, func(dir string) {
-		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
-		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
-	}, nil)
-	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "the push of the next repository failed: change the rule on "+proxygittest.Host)
-	const ended = "qory run: Qory Apiary ended this run, so qory pushes nothing more and no later session starts.\n" + lastPushUnrecorded
-	if got := strings.Count(r.out, ended); got != 1 {
-		t.Errorf("the line of the ended run is in the output %d times, want 1\n%s", got, r.out)
-	}
-	if strings.Contains(r.out, "Qory Apiary did not record the last push.") {
-		t.Errorf("the output has the not-recorded line, but Qory Apiary ended the run\n%s", r.out)
-	}
-	if secondRan {
-		t.Error("session 2 started after run_ended")
-	}
-	if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
-		t.Errorf("%d POST and %d versions, want none", posts, stored)
 	}
 }

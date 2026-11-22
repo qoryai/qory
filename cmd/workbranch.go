@@ -374,8 +374,8 @@ func shownCommitID(commit string) string { return commit[:min(12, len(commit))] 
 
 // fetchStepNameOn is [fetchStepName] with the branch and the commit a run starts at, for
 // a run with branch set: the version's commit of the target, or the target version.
-func fetchStepNameOn(branch *preparation.WorkBranch, r *codeRun, getenv func(string) string) string {
-	name := fetchStepName(getenv)
+func fetchStepNameOn(branch *preparation.WorkBranch, r *codeRun, l runList) string {
+	name := fetchStepName(l)
 	if branch == nil {
 		return name
 	}
