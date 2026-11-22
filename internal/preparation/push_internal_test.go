@@ -1270,6 +1270,23 @@ func TestAPushThatStopsBeforeItsFirstPushListsNoEarlierPush(t *testing.T) {
 	}
 }
 
+// TestAListThatFailsInAPushHasTheRunCodeLine is a Push whose start commit the repository
+// lacks, so the list of the run's commits fails: the error is the line of a run from a run
+// code, and the forge has no branch.
+func TestAListThatFailsInAPushHasTheRunCodeLine(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop")
+	write(t, filepath.Join(dir, "left.txt"), "left\n")
+	b.Repositories[0].Start = strings.Repeat("1", 40)
+	_, _, err := pushOf(dir, b)
+	want := "qory run: Start the run again: the list of the run's commits failed.\n  Listing the commits of acme/shop from commit 111111111111 to "
+	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), ". qory pushed nothing. The run code is used up.") {
+		t.Fatalf("the error is %v, want the start %q and the end of a run from a run code", err, want)
+	}
+	if out := run(t, filepath.Join(base, "acme", "shop.git"), "branch", "--list", b.Ref); out != "" {
+		t.Errorf("the forge has the branch: %q", out)
+	}
+}
+
 // TestTheCheckGetsTheVersionThePushLeaves is a check of [Push] that passes: the version it
 // got is the one that Push returns after the push.
 func TestTheCheckGetsTheVersionThePushLeaves(t *testing.T) {
