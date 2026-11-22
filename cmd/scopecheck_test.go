@@ -2,6 +2,8 @@ package cmd_test
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/event"
+	"github.com/qoryai/forager/session"
 	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/cmd"
@@ -17,7 +20,7 @@ import (
 )
 
 // scopeDocker is the fake docker of [fakeDocker] whose scope check's container, the one
-// whose create has --base, runs as start: "exit N" prints out and exits N, "sleep" runs past
+// whose create has --base, copies index.json of its snapshot beside the log, and runs as start: "exit N" prints out and exits N, "sleep" runs past
 // any limit, and "engine" fails the create as an engine that is not reachable. The create
 // of each scope check goes to the log it returns.
 func scopeDocker(t *testing.T, start, out string) (string, string) {
@@ -35,6 +38,8 @@ func scopeDocker(t *testing.T, start, out string) (string, string) {
 case "$1 $*" in
 "create "*" --base "*)
 	echo "$*" >> `+log+`
+	files=$(echo "$*" | sed -n 's/.*src=\([^,]*\),dst=\/qory-push-check\/files,.*/\1/p')
+	cp "$files/index.json" `+dir+`/index.json
 	: > `+dir+`/scope-$3
 	if [ "`+start+`" = engine ]; then echo "Cannot connect to the Docker daemon" >&2; exit 1; fi
 	echo c0ffee; exit 0 ;;
@@ -214,5 +219,35 @@ func TestEachSessionsScopeCheckStartsAtItsStart(t *testing.T) {
 	}
 	if len(heads) != 2 || len(bases) != 2 || bases[0] != p.first || bases[1] != heads[0] {
 		t.Errorf("the scope checks' bases are %v, want %s and the head of session 1, %v\n%s", bases, p.first, heads, r.out)
+	}
+}
+
+// TestTheScopeCheckReadsTheLaunchSnapshot is a session whose agent writes a newer plan into
+// .qory/artifacts of the checkout, while the run API's index changes after the launch: the
+// scope check reads the index of the session's launch snapshot, as the agent read it in
+// the inputs folder.
+func TestTheScopeCheckReadsTheLaunchSnapshot(t *testing.T) {
+	docker, log := scopeDocker(t, "exit 0", "")
+	p := scopedRepo(t, docker)
+	p.api.index = func(n int, w http.ResponseWriter) bool {
+		fmt.Fprintf(w, `{"version":1,"read":%d,"artifacts":[]}`, n)
+		return true
+	}
+	var launched string
+	p.mountsOf = func(spec session.SessionSpec) {
+		for _, m := range spec.Mounts {
+			if data, err := os.ReadFile(filepath.Join(m.Path, "start-artifacts", "index.json")); err == nil {
+				launched = string(data)
+			}
+		}
+	}
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, ".qory", "artifacts", "index.json"), `{"version":1,"read":99,"artifacts":[]}`)
+		leavesApp(t)(dir)
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	checked := checkLog(t, filepath.Join(filepath.Dir(log), "index.json"))
+	if launched == "" || checked != launched {
+		t.Errorf("the scope check read %q, want the launch snapshot %q", checked, launched)
 	}
 }

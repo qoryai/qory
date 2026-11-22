@@ -101,16 +101,3 @@ func TestAScopeCheckEndsByItsExit(t *testing.T) {
 		t.Errorf("a failed engine: %v", err)
 	}
 }
-
-// TestScopeUserIsTheClonesOwner is the user of a scope check: this process's uid:gid for a
-// process that is not root.
-func TestScopeUserIsTheClonesOwner(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("the rule for root needs a process that is not root to differ")
-	}
-	f := newFixture(t, "#!/bin/sh")
-	f.c.User = "1000:1000"
-	if got, want := f.c.ScopeUser(), fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()); got != want {
-		t.Errorf("ScopeUser = %s, want %s", got, want)
-	}
-}

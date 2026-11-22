@@ -18,9 +18,10 @@ import (
 // TestARealScopeCheckReadsAReadOnlyClone runs a scope check in a container of this
 // machine's engine, from the image QORY_TEST_GIT_IMAGE names, which has git: on a fresh
 // clone of a commit past the start, mounted read-only, the program's git reads the commits
-// as the clone's owner, ScopeUser, and writes neither the clone nor the snapshot. As
-// another user, git stops on the clone's owner, which is why the check runs as its owner.
-// It runs only with QORY_TEST_DOCKER=1, docker on the PATH and the image present.
+// as the clone's owner, ScopeUser, and can write neither the clone nor the snapshot. It
+// runs as another user too: an engine that maps the owner of a bind, as a desktop VM does,
+// lets git read the clone, and it only logs that case. It runs only with
+// QORY_TEST_DOCKER=1, docker on the PATH and the image present.
 func TestARealScopeCheckReadsAReadOnlyClone(t *testing.T) {
 	image := os.Getenv("QORY_TEST_GIT_IMAGE")
 	switch {
@@ -76,18 +77,20 @@ func TestARealScopeCheckReadsAReadOnlyClone(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(program), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	script := "#!/bin/sh\nset -e\ntest \"$1 $3 $4\" = \"--base --artifacts " + pushcheck.FilesDir + "\"\n" +
-		"git rev-parse HEAD\ngit status --porcelain\ngit merge-base --is-ancestor \"$2\" HEAD\n" +
-		"git diff --name-only \"$2\" HEAD\ntest -f \"$4/index.json\"\n" +
-		"! touch \"$4/x\" 2>/dev/null\n! touch x 2>/dev/null\nid -u\n"
-	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	c := &pushcheck.Checker{
 		Home: home, Image: image, Label: "dev.qory.run=run-scope-check-test",
 		Limits: wall.Limits{CPUs: "1", Memory: "256m"},
 	}
 	user := c.ScopeUser()
+	uid, _, _ := strings.Cut(user, ":")
+	script := "#!/bin/sh\nset -e\ntest \"$1 $3 $4\" = \"--base --artifacts " + pushcheck.FilesDir + "\"\n" +
+		"git rev-parse HEAD\ngit status --porcelain\ngit merge-base --is-ancestor \"$2\" HEAD\n" +
+		"git diff --name-only \"$2\" HEAD\ntest -f \"$4/index.json\"\n" +
+		"if touch \"$4/x\" 2>/dev/null; then exit 9; fi\nif touch x 2>/dev/null; then exit 9; fi\n" +
+		"test \"$(id -u)\" = " + uid + "\n"
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	end, err := c.Scope(context.Background(), []string{program}, clone, snapshot, start, user)
 	if err != nil {
 		t.Fatal(err)

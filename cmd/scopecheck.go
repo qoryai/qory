@@ -187,13 +187,17 @@ func (s *runScope) check(ctx context.Context, folder string, r preparation.WorkR
 	case end.ExitCode == 0:
 		return nil
 	case end.ExitCode == 1:
+		// shortcut: a key that the check finds ends push_scope_refused, not push_key_found;
+		// replace it when the push step tells a key apart from a path outside the plan.
 		text := fmt.Sprintf(textScopeOutside, repo, exports.Value(s.plan, false), shortCommit(r.Commit), shortCommit(head))
 		for _, line := range end.Lines {
 			text += "\n  " + line
 		}
 		return &scopeStop{code: contracts.EndCodePushScopeRefused, text: text}
 	}
-	return stop(contracts.EndCodeHarnessInvalid, textScopeError, repo, end.Lines[0])
+	// A check that printed on stderr alone has a first line that says so; the cause keeps
+	// the next two lines with it.
+	return stop(contracts.EndCodeHarnessInvalid, textScopeError, repo, strings.Join(end.Lines[:min(3, len(end.Lines))], " "))
 }
 
 // command is the scope check that the home declares for the session's plan type; an error,

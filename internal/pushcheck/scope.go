@@ -89,15 +89,22 @@ func (c *Checker) Scope(ctx context.Context, command []string, clone, snapshot, 
 const nobody = "65534:65534"
 
 // ScopeUser is the uid:gid a scope check runs as, the owner of the clone it reads, since
-// git stops on a repository of another user: this process's uid:gid when it is not root;
-// for root, [Checker.User], the wall's user, when it is not uid 0, else 65534:65534, so the
-// check never reads the agent's commits as root.
+// git stops on a repository of another user: see [scopeUser].
+// shortcut: a rootless engine maps uids, so git's owner check there fails closed; replace
+// it when qory supports such an engine for scope checks.
 func (c *Checker) ScopeUser() string {
-	if os.Getuid() != 0 {
-		return fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	return scopeUser(os.Getuid(), os.Getgid(), c.User)
+}
+
+// scopeUser is the user of a scope check for a process of uid and gid and the wall's user
+// wall: uid:gid when uid is not 0; for root, wall when it is set and its uid is not 0, else
+// 65534:65534, so the check never reads the agent's commits as root.
+func scopeUser(uid, gid int, wall string) string {
+	if uid != 0 {
+		return fmt.Sprintf("%d:%d", uid, gid)
 	}
-	if uid, _, _ := strings.Cut(c.User, ":"); c.User != "" && uid != "0" {
-		return c.User
+	if id, _, _ := strings.Cut(wall, ":"); wall != "" && id != "0" {
+		return wall
 	}
 	return nobody
 }

@@ -155,3 +155,25 @@ func TestALaunchSnapshotWithNoRunAPIIsEmpty(t *testing.T) {
 		t.Errorf("index.json: %q, %v", data, err)
 	}
 }
+
+// TestALaterSessionGetsANewLaunchSnapshot is two launch snapshots of one run: the second
+// has none of the files that were in the folders before it, in the run folder and in the
+// inputs folder.
+func TestALaterSessionGetsANewLaunchSnapshot(t *testing.T) {
+	client := snapshotAPI(t)
+	runDir, in := t.TempDir(), t.TempDir()
+	for range 2 {
+		snapshot, err := startArtifacts(t.Context(), client, runDir, in, "build-plan")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, dir := range []string{snapshot, filepath.Join(in, startArtifactsDir)} {
+			if _, err := os.Stat(filepath.Join(dir, "stray.md")); err == nil {
+				t.Errorf("%s keeps a file of the session before", dir)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "stray.md"), []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
