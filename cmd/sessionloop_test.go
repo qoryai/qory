@@ -918,3 +918,31 @@ func TestEachSessionOfAWalledRunKeepsItsNumberThroughAgentEnv(t *testing.T) {
 		wants(t, agentEnvSees(t, kept[n], session.EnvSession+"="+number), "\n"+session.EnvSession+"="+number+"\n")
 	}
 }
+
+// TestALaterSessionWithFullSuiteAndAWorkflowThatCannotPlanStopsTheRun is a run whose session 1
+// runs the read workflow hello and whose next-session answer starts session 2 on the workflow
+// edit, which has write-no-push access and no plan, with full_suite true in its type_settings:
+// session 1 joins, session 2 is refused before its join, exit 1, with the fix as line 1 and
+// "The session did not start" in line 2, and the run closes failed.
+func TestALaterSessionWithFullSuiteAndAWorkflowThatCannotPlanStopsTheRun(t *testing.T) {
+	var second map[string]any
+	if err := json.Unmarshal([]byte(laterAnswer(2, "claude", "example-provider-2", 30)), &second); err != nil {
+		t.Fatal(err)
+	}
+	second["workflow"], second["type_settings"] = "edit", map[string]any{"full_suite": true}
+	answer, _ := json.Marshal(second)
+	r := runLoop(t, loopSetup{
+		answers: []string{string(answer)},
+		change: func(d map[string]any) {
+			d["access"] = "write"
+			d["harness"].(map[string]any)["harness"].(map[string]any)["workflows"].(map[string]any)["edit"] = map[string]any{"access": "write-no-push"}
+		},
+	})
+	if len(r.joins) != 1 || cmd.ExitCode(r.err) != 1 {
+		t.Fatalf("%d joins, %v (exit %d), want 1 join and exit 1\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out+r.err.Error(), "Remove full_suite from type_settings in the run documents.\n  The session did not start: edit has write-no-push access, so it has no plan to read the full suite from; the code is used")
+	if len(r.closes) != 1 || r.closes[0].State != event.StateFailed {
+		t.Errorf("the run closed with %+v, want failed", r.closes)
+	}
+}

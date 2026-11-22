@@ -835,7 +835,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				extensions, pins, pinFile = rep.Extensions, c.runtimes, c.pinFile
 				planWorkflow, planType = planOf(fromCode, workflows)
 				if fromCode != nil {
-					if err := fullSuiteNoPlan(fromCode, workflows); err != nil {
+					if err := fullSuiteNoPlan(fromCode, workflows, later); err != nil {
 						return false, err
 					}
 				}

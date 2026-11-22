@@ -344,23 +344,29 @@ func TestAnUnreadableStatusFileUnderTheCapIsNotStarted(t *testing.T) {
 
 // TestTheFullSuiteRefusalIsFixFirstAsPrinted: the refusal of full_suite on a write-no-push workflow,
 // as [ui.UI.Fail] prints it, has the fix as line 1 and the cause, which ends with the code used and
-// has the workflow's name, as line 2. Line 1 has no name, so with its mark it has 43 characters
-// for a workflow of 1, 24 and 64 characters.
+// has the workflow's name, as line 2. Line 1 has no name and is the same for session 1 and a later
+// session, so with its mark it has 60 characters for a workflow of 1, 24 and 64 characters. Line 2
+// says "The run did not start" for session 1 and "The session did not start" for a later session.
 func TestTheFullSuiteRefusalIsFixFirstAsPrinted(t *testing.T) {
 	for _, name := range []string{"a", strings.Repeat("w", 24), strings.Repeat("w", 64)} {
-		workflows := map[string]stack.Workflow{name: {Access: stack.AccessWriteNoPush}}
-		err := fullSuiteNoPlan(&codeRun{workflow: name, fullSuite: true}, workflows)
-		if err == nil {
-			t.Fatalf("the workflow %q is not refused", name)
-		}
-		var buf bytes.Buffer
-		ui.New(&buf).Fail(err)
-		line1, line2, _ := strings.Cut(strings.TrimSuffix(buf.String(), "\n"), "\n")
-		if want := "✗ Remove full_suite from the run documents."; line1 != want || utf8.RuneCountInString(line1) != 43 {
-			t.Errorf("line 1 as printed is %q with %d characters, want %q with 43", line1, utf8.RuneCountInString(line1), want)
-		}
-		if want := "    The run did not start: " + name + " has write-no-push access, so it has no plan to read the full suite from; the code is used"; line2 != want {
-			t.Errorf("line 2 as printed is %q, want %q", line2, want)
+		for _, c := range []struct {
+			later bool
+			start string
+		}{{false, "The run did not start: "}, {true, "The session did not start: "}} {
+			workflows := map[string]stack.Workflow{name: {Access: stack.AccessWriteNoPush}}
+			err := fullSuiteNoPlan(&codeRun{workflow: name, fullSuite: true}, workflows, c.later)
+			if err == nil {
+				t.Fatalf("the workflow %q is not refused", name)
+			}
+			var buf bytes.Buffer
+			ui.New(&buf).Fail(err)
+			line1, line2, _ := strings.Cut(strings.TrimSuffix(buf.String(), "\n"), "\n")
+			if want := "✗ Remove full_suite from type_settings in the run documents."; line1 != want || utf8.RuneCountInString(line1) != 60 {
+				t.Errorf("line 1 as printed is %q with %d characters, want %q with 60", line1, utf8.RuneCountInString(line1), want)
+			}
+			if want := "    " + c.start + name + " has write-no-push access, so it has no plan to read the full suite from; the code is used"; line2 != want {
+				t.Errorf("line 2 as printed is %q, want %q", line2, want)
+			}
 		}
 	}
 }

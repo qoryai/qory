@@ -191,19 +191,25 @@ var planOf = func(c *codeRun, workflows map[string]stack.Workflow) (workflow, pl
 
 // textFullSuiteNoPlan is the refusal of a run whose run documents set full_suite and whose workflow
 // has write-no-push access: that access allows no plan, see [stack.Workflow], so no plan type
-// could give the suite its full command.
-const textFullSuiteNoPlan = "Remove full_suite from the run documents.\n  The run did not start: %s has write-no-push access, so it has no plan to read the full suite from" + codeUsed
+// could give the suite its full command. The first %s is "run" for session 1 and "session" for a
+// later session, the second is the workflow.
+const textFullSuiteNoPlan = "Remove full_suite from type_settings in the run documents.\n  The %s did not start: %s has write-no-push access, so it has no plan to read the full suite from" + codeUsed
 
 // fullSuiteNoPlan is the error of a run from a run code whose run documents set full_suite and
 // whose workflow, in workflows, has write-no-push access, nil for any other run. A run that only
 // reads the checkout runs no suite and is not refused. The error is exit 1 and closes the run
-// failed before the join.
-func fullSuiteNoPlan(c *codeRun, workflows map[string]stack.Workflow) error {
+// failed before the join. later is whether the session is after the run's first: the cause then
+// says "The session did not start", not "The run did not start".
+func fullSuiteNoPlan(c *codeRun, workflows map[string]stack.Workflow, later bool) error {
 	declared := (&stack.Stack{Workflows: workflows}).AccessOf(c.workflow)
 	if !fullSuiteOf(c) || declared != stack.AccessWriteNoPush || readsOnly(c, workflows) {
 		return nil
 	}
-	return fmt.Errorf(textFullSuiteNoPlan, c.workflow)
+	started := "run"
+	if later {
+		started = "session"
+	}
+	return fmt.Errorf(textFullSuiteNoPlan, started, c.workflow)
 }
 
 // suitePlanWait is the longest the read of the plan at the run's start may take.
