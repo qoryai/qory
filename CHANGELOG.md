@@ -331,7 +331,9 @@ release may change what an existing document does, and states it under Upgrading
   delivered type goes to the artifact `t-` and the first 32 hexadecimal digits of the SHA-256 of the target's `collection`; any other
   type's to `main`. A required output that the session did not write, and that no version of
   the run has, fails the step: `Write <type> to the outbox: the stage requires it and the
-  session wrote none.` qory removes the outbox before each session, so an output that a
+  session wrote none.` qory reads, fills and checks the outputs, and checks the required
+  ones, before the push with the local head, so an output that fails pushes nothing, and
+  again after the push. qory removes the outbox before each session, so an output that a
   failed session or an earlier run left is never stored; a `.qory` that is a link stops the
   run with `Remove .qory/outbox, then take the work item in again: a session starts with no
   outbox.` A type of the outputs or of `deliver` whose `json_schema` does not convert
@@ -980,8 +982,7 @@ release may change what an existing document does, and states it under Upgrading
   list commits.`, and the next line is that qory ran no program for that repository. A second
   run does the work again on a new branch. See The submit program in `docs/run.md`.
 - A push that landed with no version stored has one way out in the line of `qory run`:
-  `delete branch qory/<work item id> of <path> on <system>`. The line also has this way out
-  when the list of the run's commits fails after the push landed. A branch whose head is not the
+  `delete branch qory/<work item id> of <path> on <system>`. A branch whose head is not the
   commit the run expected stops the step before any push, with the line `Set the branch to the
   expected commit or delete it` and the branch, the head and the expected commit on the next
   line. To go on, do one of the two, then take the work item in again. Moving the branch back

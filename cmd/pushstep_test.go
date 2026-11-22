@@ -1265,6 +1265,9 @@ func TestTheOutputIsStoredWithItsMarksFilled(t *testing.T) {
 	if _, err := os.Lstat(outbox); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the outbox file is still there: %v", err)
 	}
+	if got := gitOut(t, p.h.dir, "rev-parse", "HEAD"); got != head {
+		t.Errorf("the forge's branch is at %s, the working folder at %s", head, got)
+	}
 }
 
 // TestAFileBesideTheOutputStaysInTheOutbox is a session that writes notes.md beside its
@@ -1306,6 +1309,26 @@ func TestAnOutputWithAMemberThatQoryFillsStoresNothing(t *testing.T) {
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST, want 0", posts)
 	}
+	notPushed(t, p, r)
+}
+
+// TestAPushedHeadThatDiffersFailsTheStoreWithTheWayOut is an output whose schema allows one
+// commit, a session that leaves two, and a check before the push that takes the head one
+// commit back, as when the head that lands differs from the local head: the push lands, the
+// check after the push fails, and its line says to delete the branch.
+func TestAPushedHeadThatDiffersFailsTheStoreWithTheWayOut(t *testing.T) {
+	process := strings.Replace(pullRequestProcess, "commits: {type: array, x-qory-fill: pushed-commits}", "commits: {type: array, maxItems: 1, x-qory-fill: pushed-commits}", 1)
+	p := newPushRepoWith(t, "write", map[string]string{"modules/hello/process.yaml": process})
+	t.Cleanup(cmd.SetCheckedHeadOneBack())
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if p.branchHead(t) == "" {
+		t.Fatalf("the forge has no branch\n%s", r.out)
+	}
+	wants(t, r.out, "Fix the pull-request output: it breaks its schema at ", "\n  Before the round, delete branch qory/"+workItem+" of acme/site on "+proxygittest.Host+".")
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST, want 0", posts)
+	}
 }
 
 // TestAnOutputThatBreaksItsSchemaPostsNothing is a session whose output has no title, which
@@ -1323,6 +1346,7 @@ func TestAnOutputThatBreaksItsSchemaPostsNothing(t *testing.T) {
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST, want 0", posts)
 	}
+	notPushed(t, p, r)
 }
 
 // TestAMissingRequiredOutputFailsTheRun is a stage that requires the pull-request output and
@@ -1336,6 +1360,26 @@ func TestAMissingRequiredOutputFailsTheRun(t *testing.T) {
 	wants(t, r.out, "Write pull-request to the outbox: the stage requires it and the session wrote none.\n  .qory/outbox/pull-request/pull-request.json\n")
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST, want 0", posts)
+	}
+	notPushed(t, p, r)
+	if got := gitOut(t, p.h.dir, "log", "-1", "--format=%s"); got != changesLeft {
+		t.Errorf("the working folder's last commit is %q, want the commit of what the agent left", got)
+	}
+}
+
+// notPushed fails the test unless the forge has no branch of the work item, and the working
+// folder keeps the session's commits past the target version, which the next round starts
+// from.
+func notPushed(t *testing.T, p *pushRepo, r pushed) {
+	t.Helper()
+	if head := p.branchHead(t); head != "" {
+		t.Errorf("the forge has the branch at %s, want none", head)
+	}
+	if got := gitOut(t, p.h.dir, "rev-list", "--count", p.first+"..HEAD"); got == "0" {
+		t.Errorf("the working folder has no commit past %s", p.first)
+	}
+	if strings.Contains(r.out, "delete branch") {
+		t.Errorf("the run says to delete a branch that the forge does not have:\n%s", r.out)
 	}
 }
 

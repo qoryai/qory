@@ -61,8 +61,13 @@ func pushOf(dir string, b *WorkBranch) (*pushed, string, error) {
 
 // pushWith is [pushOf] with agentStopped set.
 func pushWith(dir string, b *WorkBranch, agentStopped bool) (*pushed, string, error) {
+	return pushChecked(dir, b, agentStopped, nil)
+}
+
+// pushChecked is [pushWith] with the check of [Push].
+func pushChecked(dir string, b *WorkBranch, agentStopped bool, check func([]Repository) error) (*pushed, string, error) {
 	var report strings.Builder
-	repositories, err := Push(context.Background(), dir, os.Environ(), b, "Changes left", testProxy, testProxy, agentStopped, &report)
+	repositories, err := Push(context.Background(), dir, os.Environ(), b, "Changes left", testProxy, testProxy, agentStopped, check, &report)
 	if repositories == nil {
 		return nil, report.String(), err
 	}
@@ -1186,22 +1191,50 @@ func TestDeleteBranchIsTheOnlyWayOut(t *testing.T) {
 	}
 }
 
-// TestAListThatFailsAfterThePushSaysThePushLanded is a listing of the run's commits that fails in
-// git after the push landed, a start commit that the repository lacks: line 1 is the fix, then the
-// text says the push landed and the listing failed, with git's line and no text of a check.
-func TestAListThatFailsAfterThePushSaysThePushLanded(t *testing.T) {
-	dir, b := onBranch(t, "acme/shop")
-	b.pushed = []string{"acme/shop"}
-	_, cause := runCommits(context.Background(), stepGit(noRemote, ""), dir, strings.Repeat("1", 40), "HEAD")
-	if cause == nil {
-		t.Fatal("the listing did not fail")
+// TestACheckThatFailsPushesNothing is a check of [Push] that fails: Push returns its error,
+// the branch is not at the forge, and the commit of what the agent left stays local, at the
+// head that the check got.
+func TestACheckThatFailsPushesNothing(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop")
+	write(t, filepath.Join(dir, "left.txt"), "left\n")
+	stop := errors.New("qory run: the check failed")
+	var got []Repository
+	doc, _, err := pushChecked(dir, b, true, func(version []Repository) error {
+		got = version
+		return stop
+	})
+	if !errors.Is(err, stop) || doc != nil {
+		t.Fatalf("Push returned %+v, %v", doc, err)
 	}
-	err := listFailed(b, cause)
-	want := "qory run: delete branch qory/wi_1 of acme/shop on " + b.system + "\n  qory pushed acme/shop and stored no version, because the list of the run's commits failed: "
-	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), "; the code is used") {
-		t.Errorf("the error is %v, want the start %q", err, want)
+	head := run(t, dir, "rev-parse", "HEAD")
+	if len(got) != 1 || got[0].Commit != head || len(got[0].Commits) != 1 || got[0].Commits[0].Commit != head {
+		t.Errorf("the check got %+v, want the commit %s", got, head)
 	}
-	if strings.Contains(err.Error(), "the check that HEAD") || !errors.Is(err, cause) {
-		t.Errorf("the error has the text of a check, or does not unwrap to the listing's error: %v", err)
+	if out := run(t, filepath.Join(base, "acme", "shop.git"), "branch", "--list", b.Ref); out != "" {
+		t.Errorf("the forge has the branch: %q", out)
+	}
+	if b.PushedPaths() != "" || b.Repositories[0].Commit == head {
+		t.Errorf("the branch records a push: %q, %s", b.PushedPaths(), b.Repositories[0].Commit)
+	}
+}
+
+// TestTheCheckGetsTheVersionThePushLeaves is a check of [Push] that passes: the version it
+// got is the one that Push returns after the push.
+func TestTheCheckGetsTheVersionThePushLeaves(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop")
+	write(t, filepath.Join(dir, "left.txt"), "left\n")
+	var got []Repository
+	doc, _, err := pushChecked(dir, b, true, func(version []Repository) error {
+		got = version
+		return nil
+	})
+	if err != nil || doc == nil {
+		t.Fatalf("Push returned %+v, %v", doc, err)
+	}
+	if !reflect.DeepEqual(got, doc.Repositories) {
+		t.Errorf("the check got %+v, and Push returned %+v", got, doc.Repositories)
+	}
+	if head := run(t, filepath.Join(base, "acme", "shop.git"), "rev-parse", b.Ref); head != got[0].Commit {
+		t.Errorf("the forge's branch is at %s, and the check got %s", head, got[0].Commit)
 	}
 }

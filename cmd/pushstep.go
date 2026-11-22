@@ -290,7 +290,14 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		}
 		end := failedEnd(out)
 		if branch != nil {
-			runEnded, err := pushWorkBranch(ctx, run, w, branch, dir, runNumber, end, agentStopped)
+			// A session that did not succeed stores nothing, so its push checks no output.
+			var check func([]preparation.Repository) error
+			if end == "" {
+				check = func(version []preparation.Repository) error {
+					return outputsBeforePush(outputs, ctx, client, runID, branch.Ref, version)
+				}
+			}
+			runEnded, err := pushWorkBranch(ctx, run, w, branch, dir, runNumber, end, agentStopped, check)
 			*ended = runEnded
 			if err != nil || runEnded != "" {
 				return err
@@ -307,8 +314,9 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 }
 
 // pushWorkBranch pushes what the agent left on branch, as [pushWork] has it, and reports what
-// the push moved. runEnded is the line of [runEndedLine] when the report found the run over.
-func pushWorkBranch(ctx context.Context, run openedRun, w io.Writer, branch *preparation.WorkBranch, dir string, runNumber int, end string, agentStopped bool) (runEnded string, err error) {
+// the push moved. check is the check of [preparation.Push] before the first push, nil for
+// none. runEnded is the line of [runEndedLine] when the report found the run over.
+func pushWorkBranch(ctx context.Context, run openedRun, w io.Writer, branch *preparation.WorkBranch, dir string, runNumber int, end string, agentStopped bool, check func([]preparation.Repository) error) (runEnded string, err error) {
 	h, err := run.PushProxy()
 	if err != nil {
 		return "", &runLineError{pushProxyError(err)}
@@ -328,7 +336,7 @@ func pushWorkBranch(ctx context.Context, run openedRun, w io.Writer, branch *pre
 	if end != "" {
 		message += "\n\n" + end
 	}
-	_, pushErr := preparation.Push(ctx, dir, os.Environ(), branch, message, read.proxy, h.proxy, agentStopped, w)
+	_, pushErr := preparation.Push(ctx, dir, os.Environ(), branch, message, read.proxy, h.proxy, agentStopped, check, w)
 	// The read proxy and the push proxy end with the push: the check and the store that
 	// follow reach no forge.
 	read.close()
@@ -401,13 +409,15 @@ func (o *runOutputs) store(ctx context.Context, w io.Writer, client *runapi.Clie
 	if o == nil {
 		return nil
 	}
-	ready, missing, err := o.ready(w, branch, note)
+	// The check before the push passed on the version the push leaves, so an error here is
+	// of a pushed head that differs from the local head: the branch has no version.
+	ready, missing, err := o.ready(w, recordOf(branch, o.target), note)
 	if err != nil {
-		return err
+		return withDeleteBranch(branch, err)
 	}
 	if len(missing) > 0 {
 		if err := missingOutput(ctx, client, runID, o.types, missing); err != nil {
-			return err
+			return withDeleteBranch(branch, err)
 		}
 	}
 	for _, r := range ready {
@@ -463,6 +473,36 @@ func hasRunVersion(index *runapi.Index, typ, runID string) bool {
 		}
 	}
 	return false
+}
+
+// outputsBeforePush is [runOutputs.beforePush]; a test replaces it.
+var outputsBeforePush = (*runOutputs).beforePush
+
+// beforePush reads, fills and checks each output of the stage, as [runOutputs.store] does
+// after the push, with what version moves, the version of the branch ref that the push
+// leaves, and stops on a required output that neither the outbox nor a version of the run
+// runID has. It prints nothing and stores nothing. A nil o checks nothing.
+func (o *runOutputs) beforePush(ctx context.Context, client *runapi.Client, runID, ref string, version []preparation.Repository) error {
+	if o == nil {
+		return nil
+	}
+	_, missing, err := o.ready(io.Discard, recordIn(version, ref, o.target), "")
+	if err != nil {
+		return err
+	}
+	if len(missing) > 0 {
+		return missingOutput(ctx, client, runID, o.types, missing)
+	}
+	return nil
+}
+
+// withDeleteBranch is err with the line of [preparation.WorkBranch.DeleteBranch] when the
+// run pushed branch, as [notStored] has it.
+func withDeleteBranch(branch *preparation.WorkBranch, err error) error {
+	if branch == nil || branch.PushedPaths() == "" {
+		return err
+	}
+	return fmt.Errorf("%w\n  Before the round, %s.", err, branch.DeleteBranch())
 }
 
 // notStored is the error of a version of the type typ that was not stored, with cause: with

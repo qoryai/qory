@@ -3185,9 +3185,6 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `delete branch qory/<work item id> of <path> on <system>`, then a line indented by two
   spaces: `qory pushed <path> and stored no version, because the push of the next
   repository failed: <line of that failure>`
-- `delete branch qory/<work item id> of <path> on <system>`, then a line indented by two
-  spaces: `qory pushed <path> and stored no version, because the list of the run's commits
-  failed: <line of git>; the code is used`
 
 #### The head check
 
@@ -3279,8 +3276,8 @@ Before each session starts, session 1 and each later session of a shared run, qo
 the outbox, `.qory/outbox` with all it has, and nothing else: an output that an earlier
 session or run left there is never stored. A `.qory` that is a link, or an outbox that qory
 cannot remove, stops the run before the session, exit 1: `qory run: Remove .qory/outbox,
-then take the work item in again: a session starts with no outbox.`, then `Emptying the
-outbox in <folder> failed: <cause>; the code is used` indented by two spaces.
+then start the run again: a session starts with no outbox.`, then `Emptying the outbox in
+<folder> failed: <cause>. The run code is used up.` indented by two spaces.
 
 A type has `deliver` when `deliver` of the run documents lists it, with the `send` from
 there. The composed `process.yaml` sets no `deliver` of a run from a run code: where it
@@ -3293,8 +3290,13 @@ The run code is used up.` indented by two spaces. A harness with no `process.yam
 no type, so a write run of a work item stops on any type that `deliver` lists.
 
 First, qory reads each output, and fills and checks each output of a type with a
-`json_schema`. An output that fails one of these stops the step before any version is
-stored:
+`json_schema`. For a run with a branch, qory does this, and the check of the required
+outputs, twice: after it commits what the agent left and before the push, with the local
+head, and again after the push, with the head that landed. An output that fails before the
+push stops the step before any push: the commits stay in the working folder, and the forge
+gets none of them. An output that fails after the push adds the line `Before the round,
+delete branch qory/<work item id> of <path> on <system>.`, indented by two spaces. An output
+that fails one of these stops the step before any version is stored:
 
 1. qory reads the files, at most the type's `size_limit` in all, or 10 MiB for a type with
    none. A type's folder of more than 100 entries stops the read before any file is read,

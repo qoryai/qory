@@ -44,7 +44,6 @@ const (
 	textNotFastForward   = "qory run: take the work item in again in Qory Apiary, and keep the run's commits on top of commit %[3]s: HEAD of %[1]s is at %[2]s, which does not descend from it, so a push would not be a fast-forward; the code is used"
 	textDeleteBranch     = "delete branch %[1]s of %[2]s on %[3]s"
 	textPushedNoVersion  = "qory run: %s\n  qory pushed %s and stored no version, because the push of the next repository failed: %s"
-	textPushedNoList     = "qory run: %s\n  qory pushed %s and stored no version, because the list of the run's commits failed: %s; the code is used"
 	textPushRefused      = "qory run: change the rule on %[3]s that stops a push to %[1]s of %[2]s, then take the work item in again: the push failed: %[4]s; the code is used"
 	textPushForbidden    = "qory run: Contact support: the push was refused (403).\n  One of these most likely stopped it:\n  1. The run's push proxy refuses a push that is not a plain push to the push_ref of the push credential (for example a signed push or a push with push options), and qory pushes to refs/heads/%[3]s (wall:push-ref).\n  2. The run's push credential has no item for /%[1]s.git/git-receive-pack on %[2]s, and the push proxy refuses every other host and path.\n  3. The forge stopped the push: its permission for the push credential, or a branch rule.\n  The push of %[1]s to %[2]s returned 403: %[4]s; the code is used"
 	textPushNoCredential = "qory run: give the run's credential for %[2]s write access to %[1]s, then take the work item in again: the push through the run's gateway failed: %[3]s; the code is used"
@@ -121,7 +120,11 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 // An agent that was killed can leave .git/index.lock, which would stop the commit. After
 // the checks, [clearIndexLocks] removes that one file of each repository when
 // agentStopped is true, and stops the push when a lock is there and it is false.
-func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message string, read, p proxygit.Proxy, agentStopped bool, report io.Writer) ([]Repository, error) {
+//
+// After the commits and before the head check, check, when not nil, gets the version that
+// the push leaves when every repository lands, [WorkBranch.Version] when none has new
+// commits. An error of check stops every push and is Push's error: the commits stay local.
+func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message string, read, p proxygit.Proxy, agentStopped bool, check func(version []Repository) error, report io.Writer) ([]Repository, error) {
 	b.landed = nil
 	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
 	dir, err := filepath.Abs(dir)
@@ -162,6 +165,24 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			return nil, err
 		}
 	}
+	// The commits of each repository are listed before the first push, so a list that
+	// fails pushes nothing.
+	commits := make([][]Commit, len(b.Repositories))
+	version := slices.Clone(b.Version)
+	for i, r := range b.Repositories {
+		if heads[i] == "" {
+			continue
+		}
+		if commits[i], err = runCommits(ctx, stepGit(noRemote, ""), folders[i], r.Start, heads[i]); err != nil {
+			return nil, fmt.Errorf(textNoHistory, shownPath(r.Path), shortCommit(r.Start), integration.Printable(exports.HideURLError(err).Error()))
+		}
+		version = withCommit(version, b.system, r.Path, heads[i], r.Start, baseBranch(r.DefaultBranch), commits[i])
+	}
+	if check != nil {
+		if err := check(slices.Clone(version)); err != nil {
+			return nil, err
+		}
+	}
 	b.pushed = nil
 	leases := make([]string, len(b.Repositories))
 	readGit := stepGit(&read, "")
@@ -190,11 +211,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 		fmt.Fprintf(report, textPushed+"\n", b.Ref, shownPath(r.Path), shortCommit(heads[i]))
 		// The branch is at heads[i] now, so a later Push of the run starts there.
 		b.Repositories[i].Commit = heads[i]
-		commits, err := runCommits(ctx, stepGit(noRemote, ""), folders[i], r.Start, heads[i])
-		if err != nil {
-			return nil, listFailed(b, err)
-		}
-		b.Version = withCommit(slices.Clone(b.Version), b.system, r.Path, heads[i], r.Start, baseBranch(r.DefaultBranch), commits)
+		b.Version = withCommit(slices.Clone(b.Version), b.system, r.Path, heads[i], r.Start, baseBranch(r.DefaultBranch), commits[i])
 	}
 	if len(b.pushed) == 0 {
 		fmt.Fprintln(report, textNoNewCommits)
@@ -214,13 +231,6 @@ type pushedNoVersion struct {
 func (e *pushedNoVersion) Error() string { return e.text }
 
 func (e *pushedNoVersion) Unwrap() error { return e.err }
-
-// listFailed is the error of a listing of a run's commits that failed after the push of
-// repository landed: the line has the fix for a branch with no version, as the push of a later
-// repository that failed has, and unwraps to the listing's error.
-func listFailed(b *WorkBranch, err error) error {
-	return &pushedNoVersion{text: fmt.Sprintf(textPushedNoList, b.DeleteBranch(), b.PushedPaths(), integration.Printable(exports.HideURLError(err).Error())), err: err}
-}
 
 // runCommits lists the commits from start, not included, to head, included, of the
 // repository at dir, oldest first: the commits that the run pushed.

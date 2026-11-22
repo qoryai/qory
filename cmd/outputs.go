@@ -397,16 +397,24 @@ func typeOf(types []exports.ProcessType, typ string) exports.ProcessType {
 // that this run pushed nothing to. The commits are those from the run's start to the head of
 // the branch, across all sessions.
 func recordOf(branch *preparation.WorkBranch, target *contracts.Target) *pushRecord {
-	if branch == nil || target == nil || target.Address == nil {
+	if branch == nil {
 		return nil
 	}
-	for _, r := range branch.Version {
+	return recordIn(branch.Version, branch.Ref, target)
+}
+
+// recordIn is [recordOf] from version, a version of the branch ref.
+func recordIn(version []preparation.Repository, ref string, target *contracts.Target) *pushRecord {
+	if target == nil || target.Address == nil {
+		return nil
+	}
+	for _, r := range version {
 		if r.Base == nil || r.System != target.Address.System || !preparation.SameRepository(r.System, r.Path, target.Address.Path) {
 			continue
 		}
 		rec := &pushRecord{
 			System: r.System, Path: r.Path, Collection: target.Collection,
-			Branch: branch.Ref, Head: r.Commit, Base: r.Base.Commit, BaseBranch: r.Base.Branch,
+			Branch: ref, Head: r.Commit, Base: r.Base.Commit, BaseBranch: r.Base.Branch,
 		}
 		for _, c := range r.Commits {
 			rec.Commits = append(rec.Commits, c.Commit)
@@ -417,12 +425,12 @@ func recordOf(branch *preparation.WorkBranch, target *contracts.Target) *pushRec
 }
 
 // ready reads, fills and checks each output of the stage that the outbox has, before any
-// version is stored, so an output that breaks its schema stores nothing. A type that marks
-// pushed-commits, or any member that qory fills from the push ([marksPushFill]), of a run that
-// pushed nothing to the target gets no version, and a line on w. missing is each required
-// output that the outbox does not have.
-func (o *runOutputs) ready(w io.Writer, branch *preparation.WorkBranch, note string) (out []readyOutput, missing []string, err error) {
-	rec := recordOf(branch, o.target)
+// version is stored, so an output that breaks its schema stores nothing. rec is what the
+// push moved in the target's repository, see [recordOf]. A type that marks pushed-commits,
+// or any member that qory fills from the push ([marksPushFill]), of a run that pushed nothing
+// to the target gets no version, and a line on w. missing is each required output that the
+// outbox does not have.
+func (o *runOutputs) ready(w io.Writer, rec *pushRecord, note string) (out []readyOutput, missing []string, err error) {
 	for _, stage := range o.stage {
 		t := typeOf(o.types, stage.Type)
 		shown := provisioner.ShownType(t.Name)
