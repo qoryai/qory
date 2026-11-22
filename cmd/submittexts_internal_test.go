@@ -34,6 +34,10 @@ func TestTheTextsOfTheSubmitStepHaveAShortLineOne(t *testing.T) {
 		"textOutputNotStored":   "take ",
 		"textOutputKept":        "take ",
 		"textOutputUnknown":     "check ",
+		"textOutboxNotEmpty":    "Remove ",
+		"textSchemaUnread":      "Report ",
+		"textDeliverNoType":     "Define ",
+		"textOutputTooBig":      "Cut ",
 	}
 	texts := map[string]string{
 		"textHandoffIgnored":     textHandoffIgnored,
@@ -68,6 +72,10 @@ func TestTheTextsOfTheSubmitStepHaveAShortLineOne(t *testing.T) {
 		"textOutputNoPush":       fmt.Sprintf(textOutputNoPush, "a-type-of-19-chars."),
 		"textOutputHasMemberMax": "qory run: " + fmt.Sprintf(textOutputHasMember, "a-member-of-19-char", "a-type-of-19-chars."),
 		"textOutputNoCommitsMax": fmt.Sprintf(textOutputNoCommits, "a-type-of-19-chars.", "git.example.com/acme/shop"),
+		"textOutboxNotEmpty":     "qory run: " + fmt.Sprintf(textOutboxNotEmpty, "/home/dev/acme/shop", "permission denied"),
+		"textSchemaUnread":       "qory run: " + fmt.Sprintf(textSchemaUnread, "a-type-of-19-chars.", "A JSON key is a string"),
+		"textDeliverNoType":      "qory run: " + fmt.Sprintf(textDeliverNoType, "a-type-of-19-chars.", "a-type-of-19-chars."),
+		"textOutputTooBig":       "qory run: " + fmt.Sprintf(textOutputTooBig, "a-type-of-19-chars.", maxStartFile, "pull-request.json", maxStartFile+1),
 	}
 	for name, text := range texts {
 		line, _, _ := strings.Cut(text, "\n")

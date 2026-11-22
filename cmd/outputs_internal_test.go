@@ -2,6 +2,10 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +17,7 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/primitives"
+	"github.com/qoryai/qory/internal/runapi"
 )
 
 // pullRequestSchemaType is a delivered structured type with a title and every mark, as the
@@ -272,5 +277,281 @@ func TestTheRecordMatchesARepositoryOnGitHubInAnyCase(t *testing.T) {
 		if got := recordOf(branch, target) != nil; got != want {
 			t.Errorf("%s: a record %v, want %v", system, got, want)
 		}
+	}
+}
+
+// TestClearOutboxRemovesTheOutboxAlone is a checkout whose outbox has a file and a link to a
+// folder outside, beside a file in .qory: the outbox goes, and the file beside it and the
+// folder outside stay. An outbox that is a link goes as the link. A checkout with no .qory
+// has nothing to clear, and a .qory that is a link is an error that removes nothing.
+func TestClearOutboxRemovesTheOutboxAlone(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "keep.txt"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mkdir := func(p string) {
+		t.Helper()
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(p string) {
+		t.Helper()
+		mkdir(filepath.Dir(p))
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := func(target, p string) {
+		t.Helper()
+		if err := os.Symlink(target, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exists := func(p string) bool { _, err := os.Lstat(p); return err == nil }
+
+	root := t.TempDir()
+	write(filepath.Join(root, ".qory", "outbox", "reply", "reply.json"))
+	link(outside, filepath.Join(root, ".qory", "outbox", "out"))
+	write(filepath.Join(root, ".qory", "kept.txt"))
+	if err := clearOutbox(root); err != nil || exists(filepath.Join(root, ".qory", "outbox")) {
+		t.Errorf("the outbox: %v, still there: %v", err, exists(filepath.Join(root, ".qory", "outbox")))
+	}
+	if !exists(filepath.Join(root, ".qory", "kept.txt")) || !exists(filepath.Join(outside, "keep.txt")) {
+		t.Error("a file beside the outbox or outside is gone")
+	}
+
+	linked := t.TempDir()
+	mkdir(filepath.Join(linked, ".qory"))
+	link(outside, filepath.Join(linked, ".qory", "outbox"))
+	if err := clearOutbox(linked); err != nil || exists(filepath.Join(linked, ".qory", "outbox")) || !exists(filepath.Join(outside, "keep.txt")) {
+		t.Errorf("an outbox that is a link: %v", err)
+	}
+
+	if err := clearOutbox(t.TempDir()); err != nil {
+		t.Errorf("no .qory: %v", err)
+	}
+
+	qoryLink := t.TempDir()
+	mkdir(filepath.Join(outside, "outbox"))
+	write(filepath.Join(outside, "outbox", "reply.json"))
+	link(outside, filepath.Join(qoryLink, ".qory"))
+	err := clearOutbox(qoryLink)
+	if err == nil || !strings.HasPrefix(err.Error(), "Remove .qory/outbox, then take the work item in again: ") || !exists(filepath.Join(outside, "outbox", "reply.json")) {
+		t.Errorf("a .qory that is a link: %v", err)
+	}
+}
+
+// TestATypeWhoseSchemaDoesNotConvertStopsTheRun is a composed harness whose type notes has a
+// json_schema that does not convert: a run whose stage's outputs or documents' deliver list
+// notes stops with the accepted text, and a run that lists only reply goes on, as does a run
+// with no run code.
+func TestATypeWhoseSchemaDoesNotConvertStopsTheRun(t *testing.T) {
+	types := []exports.ProcessType{
+		{Name: "reply", Schema: json.RawMessage(`{"type":"object"}`)},
+		{Name: "notes", Unread: "A JSON key is a string"},
+	}
+	want := "Report the run to the instance admin of Qory Apiary: an output's schema does not convert.\n" +
+		"  The json_schema of artifact type notes is not a JSON Schema that qory can read: A JSON key is a string. The run code is used up."
+	for name, r := range map[string]*codeRun{
+		"a stage output": {snapshot: &runapi.Snapshot{Outputs: []runapi.Output{{Type: "reply"}, {Type: "notes"}}}},
+		"a deliver":      {snapshot: &runapi.Snapshot{}, deliver: []contracts.Deliver{{Type: "notes", Send: "after_gate"}}},
+		"no snapshot":    {deliver: []contracts.Deliver{{Type: "notes", Send: "after_gate"}}},
+	} {
+		if err := r.checkOutputTypes(types); err == nil || err.Error() != want {
+			t.Errorf("%s: %v, want %q", name, err, want)
+		}
+	}
+	listsReply := &codeRun{snapshot: &runapi.Snapshot{Outputs: []runapi.Output{{Type: "reply"}}}}
+	if err := listsReply.checkOutputTypes(types); err != nil {
+		t.Errorf("a run that lists reply alone: %v", err)
+	}
+	if err := (*codeRun)(nil).checkOutputTypes(types); err != nil {
+		t.Errorf("a run with no run code: %v", err)
+	}
+}
+
+// TestDeliveredTypesTakeTheSendOfTheDocuments is a harness that defines pull-request, with a
+// send that the run ignores, and notes: with the documents' deliver of pull-request, the types
+// are the harness's with the documents' send; a deliver of a type that the harness does not
+// define, cut to 19 characters on the line, is the fix-first error.
+func TestDeliveredTypesTakeTheSendOfTheDocuments(t *testing.T) {
+	types := []exports.ProcessType{{Name: "pull-request", Send: "end_of_run"}, {Name: "notes", Send: "send"}}
+	r := &codeRun{deliver: []contracts.Deliver{{Type: "pull-request", Send: "after_gate"}}}
+	got, err := r.deliveredTypes(types)
+	if err != nil || len(got) != 2 || got[0].Send != "after_gate" || got[1].Send != "" || types[0].Send != "end_of_run" {
+		t.Errorf("the types are %+v, %v", got, err)
+	}
+	if got, err := (*codeRun)(nil).deliveredTypes(types); err != nil || len(got) != 2 || got[0].Send != "" {
+		t.Errorf("no run code: %+v, %v", got, err)
+	}
+	long := strings.Repeat("abcdefgh-", 7) + "x"
+	r.deliver = append(r.deliver, contracts.Deliver{Type: long, Send: "after_gate"})
+	want := "Define " + long[:19] + " in the harness's process.yaml: the run documents deliver it.\n" +
+		"  The composed harness defines no artifact type " + long[:19] + ", so qory cannot check or fill its output. The run code is used up."
+	if got, err := r.deliveredTypes(types); err == nil || err.Error() != want || got != nil {
+		t.Errorf("an undefined type: %+v, %v, want %q", got, err, want)
+	}
+}
+
+// TestADeliveredOutputOverTheStartLimitStops is a delivered reply whose file, once target is
+// filled, has 786432 bytes, which is stored, and one byte more, which stops with the fix. A
+// reply that is not delivered has no such limit.
+func TestADeliveredOutputOverTheStartLimitStops(t *testing.T) {
+	reply := exports.ProcessType{Name: "reply", Send: "after_gate", Schema: json.RawMessage(`{"type":"object"}`)}
+	file := func(n int) []byte { return []byte(`{"text":"` + strings.Repeat("a", n) + `"}`) }
+	filled, err := fillOutput(file(0), reply, shopTarget, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fits := maxStartFile - len(filled)
+	for name, c := range map[string]struct {
+		typ  exports.ProcessType
+		n    int
+		want string
+	}{
+		"at the limit":  {reply, fits, ""},
+		"one byte over": {reply, fits + 1, "Cut the reply output to at most 786432 bytes: the next run starts from it.\n  With target and the members that qory fills, reply.json has 786433 bytes."},
+		"not delivered": {exports.ProcessType{Name: "reply", Schema: reply.Schema}, maxStartFile, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			entry := filepath.Join(root, ".qory", "outbox", "reply")
+			if err := os.MkdirAll(entry, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(entry, "reply.json"), file(c.n), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			o := &runOutputs{root: root, stage: []runapi.Output{{Type: "reply"}}, types: []exports.ProcessType{c.typ}, target: shopTarget}
+			out, _, err := o.ready(io.Discard, nil, "")
+			switch {
+			case c.want == "" && (err != nil || len(out) != 1):
+				t.Errorf("%d ready, %v, want one", len(out), err)
+			case c.want != "" && (err == nil || err.Error() != c.want):
+				t.Errorf("%v, want %q", err, c.want)
+			}
+		})
+	}
+}
+
+// TestRemoveStoredLeavesWhatTheVersionDoesNotHave is the folder of pull-request with
+// pull-request.json, which the version has, and notes.md beside it: notes.md and the folder
+// stay. A folder whose files the version has goes.
+func TestRemoveStoredLeavesWhatTheVersionDoesNotHave(t *testing.T) {
+	root := t.TempDir()
+	folder := filepath.Join(root, ".qory", "outbox", "pull-request")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"pull-request.json", "notes.md"} {
+		if err := os.WriteFile(filepath.Join(folder, name), []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stored := readyOutput{push: runapi.Push{Type: "pull-request", Files: []runapi.PushFile{{Filename: "pull-request.json"}}}, folder: ".qory/outbox/pull-request"}
+	if err := removeStored(root, stored); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(folder, "pull-request.json")); !os.IsNotExist(err) {
+		t.Errorf("the stored file stays: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(folder, "notes.md")); err != nil {
+		t.Errorf("the file beside it is gone: %v", err)
+	}
+	if err := os.Remove(filepath.Join(folder, "notes.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "pull-request.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeStored(root, stored); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(folder); !os.IsNotExist(err) {
+		t.Errorf("the empty folder stays: %v", err)
+	}
+}
+
+// TestOnlyARunWithNoRepositorySaysSo is a stored reply of a run with no repository, which
+// prints that the run has no repository to push, and of a run with repositories and no
+// branch, which prints nothing.
+func TestOnlyARunWithNoRepositorySaysSo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		io.WriteString(w, `{"version":1,"artifact":{"type":"reply","name":"main","version":{"id":"av_1","number":1}}}`)
+	}))
+	t.Cleanup(server.Close)
+	client, err := runapi.New(server.URL+"/v1/runs/r", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for noRepository, want := range map[bool]string{true: "qory run: stored the reply output; the run has no repository to push.\n", false: ""} {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, ".qory", "outbox", "reply"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, ".qory", "outbox", "reply", "reply.md"), []byte("Ships Monday."), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		o := &runOutputs{root: root, stage: []runapi.Output{{Type: "reply"}}, noRepository: noRepository}
+		var lines strings.Builder
+		if err := o.store(t.Context(), &lines, client, "run_1", "", nil, &runPushChecks{}); err != nil || lines.String() != want {
+			t.Errorf("no repository %v: %q, %v, want %q", noRepository, lines.String(), err, want)
+		}
+	}
+}
+
+// TestATypeThatMarksNothingQoryFillsIsStoredWithNoPush is a run that pushed nothing to the
+// target: a type whose one mark is pushed-commits-left-out, which Qory Apiary sets, or a mark
+// that qory does not know, gets its version, with the member left out; a type that marks
+// pushed-head gets none, and the line.
+func TestATypeThatMarksNothingQoryFillsIsStoredWithNoPush(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","properties":{"earlier":{"type":"integer"}}}`)
+	for mark, stored := range map[string]bool{"pushed-commits-left-out": true, "pushed-elsewhere": true, "pushed-head": false} {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, ".qory", "outbox", "summary"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, ".qory", "outbox", "summary", "summary.json"), []byte(`{"title":"a"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		typ := exports.ProcessType{Name: "summary", Send: "after_gate", Schema: schema, Marks: map[string]string{"earlier": mark}}
+		o := &runOutputs{root: root, stage: []runapi.Output{{Type: "summary"}}, types: []exports.ProcessType{typ}, target: shopTarget}
+		var lines strings.Builder
+		out, _, err := o.ready(&lines, nil, "")
+		if err != nil || (len(out) == 1) != stored || (lines.Len() == 0) != stored {
+			t.Errorf("%s: %d ready, %v, lines %q; want stored %v", mark, len(out), err, lines.String(), stored)
+		}
+		if stored && strings.Contains(string(out[0].push.Files[0].Content), "earlier") {
+			t.Errorf("%s: the member is filled: %s", mark, out[0].push.Files[0].Content)
+		}
+	}
+}
+
+// TestAFolderOfTooManyFilesStopsBeforeTheRead is the folder of notes with 100 files and a
+// link: the count, 101, stops the read before any file is read, so the error is the count's
+// and not the link's.
+func TestAFolderOfTooManyFilesStopsBeforeTheRead(t *testing.T) {
+	root := t.TempDir()
+	folder := filepath.Join(root, ".qory", "outbox", "notes")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := range runapi.MaxFiles {
+		if err := os.WriteFile(filepath.Join(folder, fmt.Sprintf("n%03d.md", i)), []byte("#\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	notes := exports.ProcessType{Name: "notes"}
+	if files, _, err := readOutput(root, notes); err != nil || len(files) != runapi.MaxFiles {
+		t.Fatalf("100 files: %d, %v", len(files), err)
+	}
+	if err := os.Symlink(filepath.Join(folder, "n000.md"), filepath.Join(folder, "a-link.md")); err != nil {
+		t.Fatal(err)
+	}
+	_, found, err := readOutput(root, notes)
+	if want := "Push at most 100 files in one version of notes. This version has 101."; !found || err == nil || err.Error() != want {
+		t.Errorf("101 entries: found %v, %v, want %q", found, err, want)
 	}
 }

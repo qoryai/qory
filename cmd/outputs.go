@@ -56,6 +56,10 @@ const (
 	textOutputUnread    = "Fix the %s output so that qory can read it.\n  %s"
 	textOutputNoPush    = "qory run: stored the %s output; the run has no repository to push."
 	textOutputNoCommits = "qory run: stored no %s output: the run pushed no commits to the target.\n  Target: %s"
+	textSchemaUnread    = "Report the run to the instance admin of Qory Apiary: an output's schema does not convert.\n  The json_schema of artifact type %s is not a JSON Schema that qory can read: %s. The run code is used up."
+	textDeliverNoType   = "Define %s in the harness's process.yaml: the run documents deliver it.\n  The composed harness defines no artifact type %s, so qory cannot check or fill its output. The run code is used up."
+	textOutputTooBig    = "Cut the %s output to at most %d bytes: the next run starts from it.\n  With target and the members that qory fills, %s has %d bytes."
+	textOutboxNotEmpty  = "Remove .qory/outbox, then take the work item in again: a session starts with no outbox.\n  Emptying the outbox in %s failed: %s" + codeUsed
 )
 
 // maxShownPlace is the most characters of a place in a schema that a line shows: with a type
@@ -64,6 +68,33 @@ const maxShownPlace = 29
 
 // outboxPath is the outbox of the checkout, or working folder, at root.
 func outboxPath(root string) string { return filepath.Join(root, filepath.FromSlash(outboxRel)) }
+
+// clearOutbox removes the outbox under root, the checkout or working folder, before a
+// session starts, so that no output which an earlier session left is stored after this one.
+// It removes nothing else: the removal stays inside root, .qory has to be a folder and no
+// link, and an outbox that is a link is removed as the link. An error is [textOutboxNotEmpty].
+func clearOutbox(root string) error {
+	failed := func(err error) error { return fmt.Errorf(textOutboxNotEmpty, shownText(root), shownError(err)) }
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return failed(err)
+	}
+	defer dir.Close()
+	info, err := dir.Lstat(".qory")
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return failed(err)
+	}
+	if !info.IsDir() {
+		return failed(errors.New(".qory is not a folder"))
+	}
+	if err := dir.RemoveAll(outboxRel); err != nil {
+		return failed(err)
+	}
+	return nil
+}
 
 // outputPath is the outbox entry of the type typ, relative to the root that has the outbox: the
 // file <typ>/<typ>.json for a structured type, the folder <typ> for any other.
@@ -79,7 +110,8 @@ func outputPath(typ string, structured bool) string {
 // any other type each regular file in the folder <type>. found is false when the entry is not
 // there. The session wrote the entry, so the read stays inside root, whatever links it made: a
 // link at any part of the path, or as a file, is an error, and so are files over the type's
-// size_limit, or [maxOutputBytes] for a type with none.
+// size_limit, or [maxOutputBytes] for a type with none, and a folder of more than
+// [runapi.MaxFiles] entries, which is an error before any file is read.
 func readOutput(root string, t exports.ProcessType) (files []runapi.PushFile, found bool, err error) {
 	limit := t.SizeLimit
 	if limit <= 0 {
@@ -118,6 +150,10 @@ func readOutput(root string, t exports.ProcessType) (files []runapi.PushFile, fo
 	case info.IsDir():
 		entries, err := fs.ReadDir(dir.FS(), entry)
 		if err != nil {
+			return nil, true, err
+		}
+		// The count comes before any file is read: a version has at most [runapi.MaxFiles].
+		if err := runapi.CheckVersion(t.Name, make([]int64, len(entries))); err != nil {
 			return nil, true, err
 		}
 		for _, e := range entries {
@@ -194,7 +230,8 @@ func (rec *pushRecord) commitReference(commit string) map[string]any {
 // fillOutput is content, an outbox file of the type t, with target set to target when t is
 // delivered and each member that t marks filled from rec. A file that has target or a marked
 // member is an error that starts with its fix. rec is nil for a run that pushed nothing to
-// the target; a marked member then is an error, as there is nothing to fill it from.
+// the target; a member that qory fills from the push, see [pushFill], then is an error, as
+// there is nothing to fill it from. A member with another mark is left as it is.
 func fillOutput(content []byte, t exports.ProcessType, target *contracts.Target, rec *pushRecord) ([]byte, error) {
 	shown := provisioner.ShownType(t.Name)
 	var members map[string]json.RawMessage
@@ -230,7 +267,7 @@ func fillOutput(content []byte, t exports.ProcessType, target *contracts.Target,
 	}
 	for _, name := range marked {
 		mark := t.Marks[name]
-		if mark == fillCommitsLeft {
+		if !pushFill(mark) {
 			continue
 		}
 		if rec == nil {
@@ -252,8 +289,6 @@ func fillOutput(content []byte, t exports.ProcessType, target *contracts.Target,
 			v = rec.Branch
 		case fillBaseBranch:
 			v = rec.BaseBranch
-		default:
-			continue
 		}
 		if err := set(name, v); err != nil {
 			return nil, err
@@ -284,6 +319,26 @@ func checkOutput(content []byte, t exports.ProcessType) error {
 	return nil
 }
 
+// pushFill reports whether qory fills a member that has mark from the push: not for
+// [fillCommitsLeft], which Qory Apiary sets, nor for a mark that qory does not know.
+func pushFill(mark string) bool {
+	switch mark {
+	case fillCommits, fillHead, fillBase, fillBranch, fillBaseBranch:
+		return true
+	}
+	return false
+}
+
+// marksPushFill reports whether t marks a member that qory fills from the push, see [pushFill].
+func marksPushFill(t exports.ProcessType) bool {
+	for _, mark := range t.Marks {
+		if pushFill(mark) {
+			return true
+		}
+	}
+	return false
+}
+
 // marksCommits reports whether t marks a member with [fillCommits]: such a type gets a version
 // only when the run pushed commits to the target.
 func marksCommits(t exports.ProcessType) bool {
@@ -308,19 +363,22 @@ func outputName(t exports.ProcessType, target *contracts.Target) string {
 
 // runOutputs is what the push step needs to store the outputs of a session: the folder that
 // has the outbox, the checkout or the working folder, the stage's outputs from the work item,
-// the artifact types of the composed process.yaml, and the documents' target, nil for none.
+// the artifact types of the composed process.yaml, the documents' target, nil for none, and
+// whether the run has no repository, which gets [textOutputNoPush] for each stored output.
 type runOutputs struct {
-	root   string
-	stage  []runapi.Output
-	types  []exports.ProcessType
-	target *contracts.Target
+	root         string
+	stage        []runapi.Output
+	types        []exports.ProcessType
+	target       *contracts.Target
+	noRepository bool
 }
 
 // readyOutput is an output of the outbox that passed its checks: the version to store, and the
-// outbox entry that goes once the version is stored.
+// type's folder of the outbox, relative to the root that has the outbox, from which the
+// version's files go once the version is stored.
 type readyOutput struct {
-	push  runapi.Push
-	entry string
+	push   runapi.Push
+	folder string
 }
 
 // typeOf is the artifact type typ of types, or a type with only its name when the composed
@@ -360,8 +418,9 @@ func recordOf(branch *preparation.WorkBranch, target *contracts.Target) *pushRec
 
 // ready reads, fills and checks each output of the stage that the outbox has, before any
 // version is stored, so an output that breaks its schema stores nothing. A type that marks
-// pushed-commits, or any member, of a run that pushed nothing to the target gets no version,
-// and a line on w. missing is each required output that the outbox does not have.
+// pushed-commits, or any member that qory fills from the push ([marksPushFill]), of a run that
+// pushed nothing to the target gets no version, and a line on w. missing is each required
+// output that the outbox does not have.
 func (o *runOutputs) ready(w io.Writer, branch *preparation.WorkBranch, note string) (out []readyOutput, missing []string, err error) {
 	rec := recordOf(branch, o.target)
 	for _, stage := range o.stage {
@@ -378,7 +437,7 @@ func (o *runOutputs) ready(w io.Writer, branch *preparation.WorkBranch, note str
 			continue
 		}
 		if t.Schema != nil {
-			if len(t.Marks) > 0 && (rec == nil || marksCommits(t) && len(rec.Commits) == 0) {
+			if marksPushFill(t) && (rec == nil || marksCommits(t) && len(rec.Commits) == 0) {
 				fmt.Fprintf(w, textOutputNoCommits+"\n", shown, targetShown(o.target))
 				continue
 			}
@@ -391,6 +450,12 @@ func (o *runOutputs) ready(w io.Writer, branch *preparation.WorkBranch, note str
 			}
 			files[0].Content = content
 		}
+		// The next run reads a delivered output's file to find its start, see [references].
+		for _, f := range files {
+			if t.Send != "" && len(f.Content) > maxStartFile {
+				return nil, nil, fmt.Errorf(textOutputTooBig, shown, maxStartFile, shownText(f.Filename), len(f.Content))
+			}
+		}
 		sizes := make([]int64, len(files))
 		for i, f := range files {
 			sizes[i] = int64(len(f.Content))
@@ -399,7 +464,7 @@ func (o *runOutputs) ready(w io.Writer, branch *preparation.WorkBranch, note str
 			return nil, nil, fmt.Errorf(textOutputUnread, shown, shownError(err))
 		}
 		push := runapi.Push{Type: t.Name, Name: outputName(t, o.target), Note: note, Files: files}
-		out = append(out, readyOutput{push: push, entry: path.Join(outboxRel, t.Name)})
+		out = append(out, readyOutput{push: push, folder: path.Join(outboxRel, t.Name)})
 	}
 	return out, missing, nil
 }
@@ -416,12 +481,23 @@ func targetShown(target *contracts.Target) string {
 	return shownText(target.Collection)
 }
 
-// removeEntry removes the outbox entry entry, relative to root, once its version is stored.
-func removeEntry(root, entry string) error {
+// removeStored removes the files of r's version from r's folder of the outbox under root,
+// once the version is stored, and the folder when it is empty then. A file that the version
+// does not have stays, and so does its folder.
+func removeStored(root string, r readyOutput) error {
 	dir, err := os.OpenRoot(root)
 	if err != nil {
 		return err
 	}
 	defer dir.Close()
-	return dir.RemoveAll(entry)
+	for _, f := range r.push.Files {
+		if err := dir.Remove(path.Join(r.folder, f.Filename)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	left, err := fs.ReadDir(dir.FS(), r.folder)
+	if err != nil || len(left) > 0 {
+		return err
+	}
+	return dir.Remove(r.folder)
 }

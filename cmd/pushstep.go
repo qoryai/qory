@@ -392,10 +392,11 @@ func pushStepName(branch *preparation.WorkBranch, system string) string {
 }
 
 // store stores a version of each output of the stage that the outbox under o.root has, as
-// [runOutputs.ready] reads them, then removes each stored output's outbox entry. A required
-// output that the outbox does not have, and that no version of the run runID has, is an
-// error before any version is stored. note is the versions' note, w gets the step's lines,
-// and branch is the branch that the step pushed, nil for none. A nil o stores nothing.
+// [runOutputs.ready] reads them, then removes the files of each stored version from the
+// outbox. A required output that the outbox does not have, and that no version of the run
+// runID has, is an error before any version is stored. note is the versions' note, w gets the
+// step's lines, and branch is the branch that the step pushed, nil for none. A nil o stores
+// nothing.
 func (o *runOutputs) store(ctx context.Context, w io.Writer, client *runapi.Client, runID, note string, branch *preparation.WorkBranch, checks *runPushChecks) error {
 	if o == nil {
 		return nil
@@ -416,10 +417,10 @@ func (o *runOutputs) store(ctx context.Context, w io.Writer, client *runapi.Clie
 		if err := storeVersion(ctx, client, runID, branch, r.push); err != nil {
 			return err
 		}
-		if err := removeEntry(o.root, r.entry); err != nil {
+		if err := removeStored(o.root, r); err != nil {
 			return fmt.Errorf(textOutputKept, provisioner.ShownType(r.push.Type), shownError(err))
 		}
-		if branch == nil {
+		if o.noRepository {
 			fmt.Fprintf(w, textOutputNoPush+"\n", provisioner.ShownType(r.push.Type))
 		}
 	}

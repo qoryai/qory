@@ -2256,10 +2256,14 @@ When every version is cancelled, step 1 finds none. When artifacts of several ty
 that name, the version with the latest time wins.
 
 The start commit is the newest commit that the run which wrote the version pushed to the
-target's repository, from `pushed_commits` in the response to `GET /work-item`. qory
-confirms it with the version's file: the file has exactly one top-level `reference` whose
-`collection` is the target's and whose `address.path` is that commit. The further
-repositories start at the head of their default branches.
+target's repository, from `pushed_commits` in the response to `GET /work-item`, and that a
+version of that run confirms: the version's file, or the file of another version of the same
+run, has exactly one top-level `reference` whose `collection` is the target's and whose
+`address.path` is that commit. qory checks the run's commits newest first. A newer commit
+that no version confirms, such as one that a later session of a shared run pushed before it
+failed, counts as a cancelled run's commit: the run does not move to it, and the push
+replaces it with a lease. The further repositories start at the head of their default
+branches.
 
 Then the run moves to the newest commit of the repository that an earlier run pushed, when
 a person did not cancel that run and the commit descends from the start commit. qory reads
@@ -2289,8 +2293,8 @@ copy.
 A run stops before the agent starts when:
 
 - the run that wrote the version pushed no commit to the target, the version's file is
-  not one JSON object of at most 786432 bytes, or the file has no one top-level reference
-  to the commit;
+  not one JSON object of at most 786432 bytes, or no version of that run has one top-level
+  reference to any commit that the run pushed to the target;
 - the approved version is not in the artifact's index;
 - the work item's list of pushed commits has a value that is not a full commit id;
 - a commit is not on its repository;
@@ -2309,7 +2313,8 @@ Each of these lines stops the run, exit 1. `<c>` is a commit's first 12 characte
     <system>/<path>.`
   - `Version <n> of the artifact <type> has no one JSON file of at most 786432 bytes.`
   - `Version <n> of the artifact <type> has <count> top-level references to commit <c> of
-    <system>/<path>, not 1.`
+    <system>/<path>, not 1.`, where `<c>` is the newest commit that the run pushed to the
+    target
   - `The approved version of the artifact <type> is not in the artifact's index.`
 - `The version that the run starts from has commit <c>, which is not a commit on
   <path> on <system>, so the run did not start; the code is used`, then a line indented
@@ -3198,9 +3203,10 @@ credential alone. The result of each repository is one of these:
   pushed before) and has not pushed yet: qory pushes with no lease and creates the branch.
 - The head is past the start commit, the run has not pushed yet, and the head is one that a
   run which a person cancelled pushed, as the work item's record lists it (one head for each
-  push), and it descends from the start commit. qory fetches the history of the branch head
-  only when a cancelled run recorded that head, and then checks that it descends from the
-  start commit. A head below, above or beside a recorded head, or one that the record does
+  push), or one that the run which wrote the start's version pushed after the start, with no
+  version of that run to confirm it, and it descends from the start commit. qory fetches the
+  history of the branch head only when the record lists that head as one of these, and then
+  checks that it descends from the start commit. A head below, above or beside a recorded head, or one that the record does
   not list, is any other head, and the push stops with no fetch. qory pushes with
   `--force-with-lease=refs/heads/qory/<work item id>:<head>`, so the push replaces
   those commits only while the branch is still at the head qory read.
@@ -3254,6 +3260,12 @@ run before its session:
 then `The stage lists the output type <type>, not a name of a-z, 0-9 and single hyphens that
 starts with a letter and has at most 64 characters; the code is used` indented by two spaces.
 
+A type that the stage's outputs or `deliver` of the run documents list, and whose
+`json_schema` in the composed `process.yaml` is not a JSON value, stops a run from a run code
+before its session, exit 1: `qory run: Report the run to the instance admin of Qory Apiary: an
+output's schema does not convert.`, then `The json_schema of artifact type <type> is not a
+JSON Schema that qory can read: <cause>. The run code is used up.` indented by two spaces.
+
 | Type | The session writes |
 |---|---|
 | a type with a `json_schema` | one JSON object, `<type>/<type>.json`, such as `pull-request/pull-request.json` |
@@ -3261,19 +3273,32 @@ starts with a letter and has at most 64 characters; the code is used` indented b
 
 After a session that succeeded, after the push, qory stores one version of each output of
 the stage that the outbox has. A session that failed, timed out, was cancelled or paused
-stores nothing, and its outputs stay in the outbox.
+stores nothing.
+
+Before each session starts, session 1 and each later session of a shared run, qory removes
+the outbox, `.qory/outbox` with all it has, and nothing else: an output that an earlier
+session or run left there is never stored. A `.qory` that is a link, or an outbox that qory
+cannot remove, stops the run before the session, exit 1: `qory run: Remove .qory/outbox,
+then take the work item in again: a session starts with no outbox.`, then `Emptying the
+outbox in <folder> failed: <cause>; the code is used` indented by two spaces.
 
 A type has `deliver` when `deliver` of the run documents lists it, with the `send` from
 there. The composed `process.yaml` sets no `deliver` of a run from a run code: where it
 differs, the compose step prints a line (see [What the run takes from the
-response](#what-the-run-takes-from-the-response)).
+response](#what-the-run-takes-from-the-response)). A type that `deliver` lists and the
+composed `process.yaml` does not define stops the run before its session, exit 1: `qory run:
+Define <type> in the harness's process.yaml: the run documents deliver it.`, then `The
+composed harness defines no artifact type <type>, so qory cannot check or fill its output.
+The run code is used up.` indented by two spaces. A harness with no `process.yaml` defines
+no type, so a write run of a work item stops on any type that `deliver` lists.
 
 First, qory reads each output, and fills and checks each output of a type with a
 `json_schema`. An output that fails one of these stops the step before any version is
 stored:
 
 1. qory reads the files, at most the type's `size_limit` in all, or 10 MiB for a type with
-   none. The read stays inside the checkout: a link as a file or as the type's folder, and
+   none. A type's folder of more than 100 entries stops the read before any file is read,
+   with the cause `Push at most 100 files in one version of <type>. This version has <n>.` The read stays inside the checkout: a link as a file or as the type's folder, and
    a link that leads out of the checkout, end the read.
 2. For a type with `deliver`, qory sets `target` to the run documents' target. It fills
    each member that the type's schema marks with `x-qory-fill` from what the run pushed to
@@ -3284,12 +3309,16 @@ stored:
    `address.path`. The session writes neither `target`, for a type with `deliver`, nor a
    marked member.
 3. qory checks the filled file against the type's schema.
+4. For a type with `deliver`, qory checks that each file has at most 786432 bytes once
+   filled: the next run of the work item reads the file to find its start commit.
 
-A type that marks a member gets no version when the run pushed nothing to the target's
-repository, as a run with no repository does, and a type that marks `pushed-commits` gets
-none when the run pushed no commit to it. qory then prints `qory run: stored no <type>
+A type that marks a member that qory fills, with any mark but `pushed-commits-left-out`,
+gets no version when the run pushed nothing to the target's repository, as a run with no
+repository does, and a type that marks `pushed-commits` gets none when the run pushed no
+commit to it. A type whose only mark is `pushed-commits-left-out`, which Qory Apiary sets,
+gets its version either way. qory then prints `qory run: stored no <type>
 output: the run pushed no commits to the target.`, then `Target: <system>/<path>` indented
-by two spaces, and the output stays in the outbox.
+by two spaces, and the output stays in the outbox until the next session starts.
 
 Then qory checks that the outbox has each output that the stage requires. An output that the
 outbox does not have counts as written when the work item has a version of that type that
@@ -3302,7 +3331,9 @@ Then, for each output, qory:
    32 lower-case hexadecimal digits of the SHA-256 of the target's `collection`, such as
    `t-e047707709a59e682f6b3df0e394d0bb` for `R_kgDOExample1`, so each target has one
    artifact of the type, and in the artifact `main` for any other type.
-3. Removes the output from the outbox.
+3. Removes the version's files from the outbox, and the type's folder when it is empty
+   then. A file that the version does not have, such as a second file beside
+   `<type>/<type>.json`, stays.
 
 A run with no repository pushes nothing, and prints `qory run: stored the <type> output; the
 run has no repository to push.` for each output that it stores, such as `qory run: stored the
@@ -3319,6 +3350,8 @@ output's type:
 - `Fix the <type> output: it breaks its schema at <place>.`, where `<place>` is the first
   place in the file that the schema does not allow, cut to 29 characters
 - `Write the <type> output as one JSON object: the file is not one.`
+- `Cut the <type> output to at most 786432 bytes: the next run starts from it.`, then `With
+  target and the members that qory fills, <file> has <n> bytes.` indented by two spaces
 - `Fix the <type> output so that qory can read it.`, then the cause indented by two spaces,
   such as `the output has more than <n> bytes`
 - `take the work item in again: the outbox keeps <type>; the code is used`, then `qory stored

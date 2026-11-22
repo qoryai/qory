@@ -832,6 +832,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// types are the artifact types of the composed process.yaml, which inputs.json
 				// and the submit step read; the send of each comes from the documents' deliver.
 				types, _ := harnessTypes(rep)
+				if err := fromCode.checkOutputTypes(types); err != nil {
+					return false, err
+				}
 				extensions, pins, pinFile = rep.Extensions, c.runtimes, c.pinFile
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
@@ -884,7 +887,16 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 							return false, err
 						}
 					}
-					outputs = &runOutputs{root: at.root, stage: fromCode.snapshot.Outputs, types: fromCode.deliveredTypes(types), target: fromCode.targetRef}
+					// Each session starts with an empty outbox: an output that a session before
+					// left, such as one that failed, is never stored after this session.
+					if err := clearOutbox(at.root); err != nil {
+						return false, err
+					}
+					delivered, err := fromCode.deliveredTypes(types)
+					if err != nil {
+						return false, err
+					}
+					outputs = &runOutputs{root: at.root, stage: fromCode.snapshot.Outputs, types: delivered, target: fromCode.targetRef, noRepository: run.Repositories() == ""}
 					spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{outboxEnv: outboxPath(at.root)})
 				}
 				// The composed harness's submit program runs on a run with neither a run code nor a

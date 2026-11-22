@@ -271,8 +271,10 @@ release may change what an existing document does, and states it under Upgrading
   pushes each repository with new commits to `qory/<work item id>`, and stores a version of
   each output that the session wrote to the outbox. The next run in the same stage starts at
   that commit. A session that failed, timed out or was cancelled gets the same step, its
-  commit shows how it ended, and it stores no output. See The push step of a write run in
-  `docs/run.md`.
+  commit shows how it ended, and it stores no output. The next run starts at the newest
+  commit of the version's run that a version of that run confirms: a commit that a later
+  session pushed with no version is skipped, and the next push replaces it with a lease. See
+  The push step of a write run in `docs/run.md`.
 - A skill reads its work item and stores what it made with `qory work-item show`, `qory
   artifact pull`, `qory artifact push` and `qory run verdict`. In a run they use Qory
   Apiary through the gateway, at `QORY_RUN_API`. Outside a run they use the checkout's
@@ -303,7 +305,10 @@ release may change what an existing document does, and states it under Upgrading
   configuration checks `deliver` and the marks. See Artifact types in
   `contracts/harness/v1/README.md`.
 - A run from a run code takes `deliver` from the run documents alone: a type that they list
-  is delivered with their `send`, whatever the composed harness's `process.yaml` has. At the
+  is delivered with their `send`, whatever the composed harness's `process.yaml` has. A
+  write run of a work item whose documents deliver a type that the composed `process.yaml`
+  does not define stops before its session: `Define <type> in the harness's process.yaml:
+  the run documents deliver it.` At the
   level `write`, the compose step prints one line for each type whose `send` differs from
   `deliver` of the composed harness's `process.yaml`, such as `qory run: deliver:
   pull-request at end_of_run from the documents; harness has after_gate`. Documents that
@@ -320,12 +325,18 @@ release may change what an existing document does, and states it under Upgrading
   of the checkout, or of the working folder of a run with no repository. After a session
   that succeeded, the push step reads each output of the stage, sets `target` of a type
   that `deliver` of the run documents lists, fills the marked members from the push to the
-  target's repository, checks the file against the type's schema, runs the type's push
-  check, stores one version, and removes the output from the outbox. The version of a
+  target's repository, checks the file against the type's schema and, for a delivered
+  type, against 786432 bytes, the most that the next run reads, runs the type's push
+  check, stores one version, and removes the version's files from the outbox. The version of a
   delivered type goes to the artifact `t-` and the first 32 hexadecimal digits of the SHA-256 of the target's `collection`; any other
   type's to `main`. A required output that the session did not write, and that no version of
   the run has, fails the step: `Write <type> to the outbox: the stage requires it and the
-  session wrote none.` A run with no repository stores its outputs alone, in the step `store
+  session wrote none.` qory removes the outbox before each session, so an output that a
+  failed session or an earlier run left is never stored; a `.qory` that is a link stops the
+  run with `Remove .qory/outbox, then take the work item in again: a session starts with no
+  outbox.` A type of the outputs or of `deliver` whose `json_schema` does not convert
+  to JSON stops the run: `Report the run to the instance admin of Qory Apiary: an output's
+  schema does not convert.` A run with no repository stores its outputs alone, in the step `store
   the outputs`. See The outputs of a session in `docs/run.md`.
 - A module can declare checks for the files of an artifact type with `push_checks` in
   `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
@@ -901,10 +912,11 @@ release may change what an existing document does, and states it under Upgrading
   The step checks the head of the branch on the forge before it pushes. A head that is not
   the commit the run expected ends the run `failed` with the code `push_head_changed`, after a
   session that passed, failed or timed out. The push replaces the branch only when its head
-  is a head that the work item's record has for a cancelled run (one head for each push)
-  and that descends from the start commit, with a lease on that head. qory fetches
-  the history of the branch head only when a cancelled run recorded that head, and then
-  checks that it descends from the start commit. qory stops on a head below, above or
+  is a head that the work item's record has for a cancelled run (one head for each push),
+  or for the start's run after the start with no version to confirm it, and that descends
+  from the start commit, with a lease on that head. qory fetches the history of the branch
+  head only when the record lists that head as one of these, and then checks that it
+  descends from the start commit. qory stops on a head below, above or
   beside a recorded head, with no fetch. A run starts at the newest commit that an earlier run
   pushed and a person did not cancel.
 - A delivered output's member that `pushed-base-branch` marks has the name of the target

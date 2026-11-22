@@ -804,9 +804,11 @@ func TestAReadRunPushesNothing(t *testing.T) {
 // TestAWriteRunWhoseInputsListDestinationsPushes is a write run whose documents contain a
 // harness document and whose inputs list destinations: qory fetches its target at the
 // target version before the session, and the push step pushes what the agent left to the
-// work item's branch, as for a run whose inputs list none.
+// work item's branch, as for a run whose inputs list none. The harness defines pull-request,
+// which the documents deliver.
 func TestAWriteRunWhoseInputsListDestinationsPushes(t *testing.T) {
 	files := harnessFiles(t, "write")
+	files["examples/hello/modules/hello/process.yaml"] = pullRequestProcess
 	p := newPushRepo(t, "write")
 	harness := servedHarness(t, p.h, files)
 	p.change = func(d map[string]any) {
@@ -1265,6 +1267,29 @@ func TestTheOutputIsStoredWithItsMarksFilled(t *testing.T) {
 	}
 }
 
+// TestAFileBesideTheOutputStaysInTheOutbox is a session that writes notes.md beside its
+// pull-request output: the version is stored with pull-request.json alone, which leaves the
+// outbox, and notes.md stays.
+func TestAFileBesideTheOutputStaysInTheOutbox(t *testing.T) {
+	p := newPushRepo(t, "write")
+	var outbox string
+	p.mountsOf = func(spec session.SessionSpec) {
+		outbox = outboxOf(spec)
+		writeFile(t, filepath.Join(outbox, "pull-request", "notes.md"), "# Notes\n")
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if _, _, stored := p.api.counts(); stored != 1 {
+		t.Errorf("%d versions, want 1", stored)
+	}
+	if _, err := os.Stat(filepath.Join(outbox, "pull-request", "pull-request.json")); !os.IsNotExist(err) {
+		t.Errorf("the stored output stays: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outbox, "pull-request", "notes.md")); err != nil {
+		t.Errorf("notes.md is gone: %v", err)
+	}
+}
+
 // TestAnOutputWithAMemberThatQoryFillsStoresNothing is a session whose output sets branch,
 // a member that qory fills: qory stores no version, and the run fails with the line that says which
 // member to remove.
@@ -1484,6 +1509,122 @@ func TestACommitOfNoCancelledRunStopsTheLease(t *testing.T) {
 	}
 }
 
+// TestACommitThatNoVersionConfirmsIsReplacedWithALease is a run whose session 1 stored a
+// version with the head A and whose session 2 pushed B above A and stored no version: the next
+// run starts at A, not at B, its push replaces B with a lease, and its version's base is A.
+func TestACommitThatNoVersionConfirmsIsReplacedWithALease(t *testing.T) {
+	p := newPushRepo(t, "write")
+	first := p.run(t, writesAndCommits(t), nil)
+	first.wantsClose(t, event.StateSucceeded, 0)
+	a := p.branchHead(t)
+	other := tempDir(t)
+	proxygittest.Git(t, other, "clone", "--quiet", p.bare, ".")
+	proxygittest.Git(t, other, "checkout", "--quiet", "qory/"+workItem)
+	writeFile(t, filepath.Join(other, "session2.txt"), "session 2\n")
+	commitAll(t, other, "Session 2")
+	proxygittest.Git(t, other, "push", "--quiet", "origin", "HEAD:refs/heads/qory/"+workItem)
+	b := p.branchHead(t)
+	p.api.mu.Lock()
+	p.api.rows = append(p.api.rows, recordedRow{System: p.api.rows[0].System, Path: p.api.rows[0].Path, Commit: b})
+	p.api.rowRuns = append(p.api.rowRuns, first.runID)
+	p.api.mu.Unlock()
+
+	p.again(t)
+	p.api.number = 58
+	var startedAt string
+	second := p.run(t, func(dir string) {
+		startedAt = gitOut(t, dir, "rev-parse", "HEAD")
+		writeFile(t, filepath.Join(dir, "second.txt"), "second\n")
+	}, nil)
+	second.wantsClose(t, event.StateSucceeded, 0)
+	if startedAt != a {
+		t.Errorf("the run started at %s, want A %s, not B %s\n%s", startedAt, a, b, second.out)
+	}
+	head := p.branchHead(t)
+	if got := proxygittest.Git(t, p.bare, "merge-base", a, head); got != a || head == a {
+		t.Errorf("the branch is at %s, want a commit above A", head)
+	}
+	if got := proxygittest.Git(t, p.bare, "merge-base", b, head); got == b {
+		t.Errorf("B is still on the branch at %s", head)
+	}
+	if base := pathOf(p.api.document(t, 2)["base"]); base != a {
+		t.Errorf("the base is %s, want A %s", base, a)
+	}
+}
+
+// TestTheOutboxIsEmptiedBeforeTheSession is a run from a run code with no repository, in a
+// person's checkout whose outbox has a reply output and a folder that an earlier run left,
+// beside a file in .qory and one at the top. The session writes no reply: it starts with no
+// outbox, no version is stored, and the two other files stay.
+func TestTheOutboxIsEmptiedBeforeTheSession(t *testing.T) {
+	p, _ := replyRepo(t)
+	p.api.outputs = `[{"type":"reply","required":false,"version":null,"check":"missing"}]`
+	left := true
+	p.mountsOf = func(spec session.SessionSpec) {
+		_, err := os.Lstat(outboxOf(spec))
+		left = err == nil
+	}
+	writeFile(t, filepath.Join(p.h.dir, ".qory", "outbox", "reply", "reply.json"), `{"text":"Left by an earlier run."}`)
+	writeFile(t, filepath.Join(p.h.dir, ".qory", "outbox", "notes", "a.md"), "# A\n")
+	writeFile(t, filepath.Join(p.h.dir, ".qory", "kept.txt"), "kept\n")
+	writeFile(t, filepath.Join(p.h.dir, "kept.txt"), "kept\n")
+	r := p.run(t, nil, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if left {
+		t.Error("the session starts with the outbox of an earlier run")
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST, want 0", posts)
+	}
+	for _, kept := range []string{filepath.Join(".qory", "kept.txt"), "kept.txt"} {
+		if _, err := os.Stat(filepath.Join(p.h.dir, kept)); err != nil {
+			t.Errorf("%s is gone: %v", kept, err)
+		}
+	}
+}
+
+// TestAQoryLinkStopsTheRunBeforeTheSession is the run of [TestTheOutboxIsEmptiedBeforeTheSession]
+// whose .qory is a link to a folder outside with an outbox: the run stops before the session,
+// exit 1, with the fix, and the outbox outside stays.
+func TestAQoryLinkStopsTheRunBeforeTheSession(t *testing.T) {
+	p, outbox := replyRepo(t)
+	outside := tempDir(t)
+	writeFile(t, filepath.Join(outside, "outbox", "reply", "reply.json"), `{"text":"Outside."}`)
+	if err := os.Symlink(outside, filepath.Join(p.h.dir, ".qory")); err != nil {
+		t.Fatal(err)
+	}
+	r := p.run(t, nil, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if *outbox != "" || r.err == nil {
+		t.Fatalf("%v, the session's outbox %q, want the run to stop before the session", r.err, *outbox)
+	}
+	wants(t, r.err.Error(), "Remove .qory/outbox, then take the work item in again: a session starts with no outbox.\n  Emptying the outbox in ", " failed: .qory is not a folder; the code is used")
+	if _, err := os.Stat(filepath.Join(outside, "outbox", "reply", "reply.json")); err != nil {
+		t.Errorf("the outbox outside is gone: %v", err)
+	}
+}
+
+// TestADeliveredTypeThatTheHarnessDoesNotDefineStopsTheRun is documents that deliver notes,
+// which the composed process.yaml does not define, beside pull-request: the run stops before
+// the session, exit 1, with the fix, and nothing is pushed or stored.
+func TestADeliveredTypeThatTheHarnessDoesNotDefineStopsTheRun(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.change = func(d map[string]any) {
+		d["deliver"] = []any{map[string]any{"type": "pull-request", "send": "after_gate"}, map[string]any{"type": "notes", "send": "after_gate"}}
+	}
+	joined := false
+	p.mountsOf = func(session.SessionSpec) { joined = true }
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if joined || r.err == nil {
+		t.Fatalf("%v, joined %v, want the run to stop before the session\n%s", r.err, joined, r.out)
+	}
+	wants(t, r.err.Error(), "Define notes in the harness's process.yaml: the run documents deliver it.\n  The composed harness defines no artifact type notes, so qory cannot check or fill its output. The run code is used up.")
+	if posts, _, _ := p.api.counts(); posts != 0 || p.branchHead(t) != "" {
+		t.Errorf("%d POST and the branch at %q, want neither", posts, p.branchHead(t))
+	}
+}
+
 // TestOnlyAWriteRunHasTheOutboxVariable is the variable QORY_OUTBOX in the session of a run
 // at write, with the path of the checkout's .qory/outbox, and its absence in a run the
 // workflow lowers to write-no-push: that run stores no outputs.
@@ -1667,6 +1808,49 @@ func TestNoResponseThatTheIndexDoesNotSettleFails(t *testing.T) {
 	}
 	wants(t, r.out, "qory run: check the artifact pull-request of the work item in Qory Apiary; with no version of this run, "+deleteBranch+"; then take the work item in again: qory pushed qory/"+workItem+
 		", and the request that stores its version ended with no response, so the version may or may not be stored: ")
+}
+
+// TestAnOutputThatIsNotStoredStaysInTheOutbox is a POST that fails with run_ended, and a POST
+// with no response whose index read fails too, so the store is unknown: the step fails, and
+// the output's file stays in the outbox.
+func TestAnOutputThatIsNotStoredStaysInTheOutbox(t *testing.T) {
+	for name, c := range map[string]struct {
+		post  func(n int, w http.ResponseWriter) (bool, bool)
+		index func(n int, w http.ResponseWriter) bool
+	}{
+		"a failed store": {post: func(_ int, w http.ResponseWriter) (bool, bool) {
+			failing(w, http.StatusConflict, "run_ended", "")
+			return true, false
+		}},
+		"an unknown store": {
+			post: func(_ int, w http.ResponseWriter) (bool, bool) {
+				failing(w, http.StatusServiceUnavailable, "unavailable", "")
+				return true, false
+			},
+			index: func(n int, w http.ResponseWriter) bool {
+				if n == 1 {
+					return false
+				}
+				failing(w, http.StatusServiceUnavailable, "unavailable", "")
+				return true
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			p.api.post, p.api.index = c.post, c.index
+			var outbox string
+			p.mountsOf = func(spec session.SessionSpec) { outbox = outboxOf(spec) }
+			r := p.run(t, writesAndCommits(t), nil)
+			r.wantsClose(t, event.StateFailed, 1)
+			if posts, _, _ := p.api.counts(); posts != 1 {
+				t.Errorf("%d POST, want 1", posts)
+			}
+			if _, err := os.Stat(filepath.Join(outbox, "pull-request", "pull-request.json")); outbox == "" || err != nil {
+				t.Errorf("the output is not in the outbox %q: %v", outbox, err)
+			}
+		})
+	}
 }
 
 // TestAWorkspaceWithoutTheTypeFailsTheStep is unknown_type: the step fails after the push,
@@ -2891,6 +3075,27 @@ func TestAStageOutputTypeThatIsNoNameStopsTheRun(t *testing.T) {
 	wants(t, r.out, "qory run: Report the run to the instance admin of Qory Apiary: an output type is no name.\n  The stage lists the output type ../x, not a name")
 }
 
+// TestAnOutputSchemaThatDoesNotConvertStopsTheRun is the run of
+// [TestARunWithNoRepositoryStoresItsReply] whose process.yaml gives reply a json_schema with
+// the key 1, a number, which JSON does not have: the run stops before its session, exit 1,
+// with the accepted text, and stores nothing.
+func TestAnOutputSchemaThatDoesNotConvertStopsTheRun(t *testing.T) {
+	p, outbox := replyRepoWith(t, replyProcess+"        1: {type: string}\n")
+	r := p.run(t, nil, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if r.err == nil || *outbox != "" {
+		t.Fatalf("%v, the session's outbox %q, want the run to stop before the session\n%s", r.err, *outbox, r.out)
+	}
+	want := "Report the run to the instance admin of Qory Apiary: an output's schema does not convert.\n" +
+		"  The json_schema of artifact type reply is not a JSON Schema that qory can read: A JSON key is a string. The run code is used up."
+	if r.err.Error() != want {
+		t.Errorf("the error is %q, want %q", r.err, want)
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST, want 0", posts)
+	}
+}
+
 // replyRepo is a [pushRepo] of a run from a run code whose run configuration lists no
 // repository, whose target C_2002 has no address, whose documents deliver reply after the
 // gate, and whose stage requires reply. The harness is the stack examples/hello of the
@@ -2898,9 +3103,15 @@ func TestAStageOutputTypeThatIsNoNameStopsTheRun(t *testing.T) {
 // writes reply to its outbox, whose path the second result is set to.
 func replyRepo(t *testing.T) (*pushRepo, *string) {
 	t.Helper()
+	return replyRepoWith(t, replyProcess)
+}
+
+// replyRepoWith is [replyRepo] with process as the module's process.yaml.
+func replyRepoWith(t *testing.T, process string) (*pushRepo, *string) {
+	t.Helper()
 	stackFiles := helloFiles(t)
 	stackFiles["examples/hello/qory-stack.yaml"] = withExtendable(stackFiles["examples/hello/qory-stack.yaml"]) + "workflows:\n  hello:\n    access: write\n"
-	stackFiles["examples/hello/modules/hello/process.yaml"] = replyProcess
+	stackFiles["examples/hello/modules/hello/process.yaml"] = process
 	p := newPushRepoWith(t, "write", stackFiles)
 	p.repositories = ""
 	p.stackProxy = true
