@@ -346,8 +346,12 @@ again.`, and on the next line `Push checks cannot start from <value>. A referenc
 with a letter or a digit and has only letters, digits, and . _ / : @ -.` When Forager
 cannot turn on the check of the POSTs from behind the wall, the run stops there with
 exit 1: `Run again.`, and on the next line `Turning on the push checks for the POSTs from
-behind the wall failed, so the run stopped before the setup: <cause>.` A home without push checks, and a run with no control plane,
-start as before, with no check turned on.
+behind the wall failed, so the run stopped before the setup: <cause>.` A walled run from a
+run code whose documents set `shared_run`, through a gateway that sends the run API
+address, turns the check on before session 1 also when its home has no push checks: the
+check passes every POST until a later session's home has push checks (see [A run of
+several sessions](#a-run-of-several-sessions)). Any other run whose home has no push
+checks, and a run with no control plane, start with no check turned on.
 
 A run from a run code stops at the same points of the push-check load and set with the same
 exit status. The code is used by then, so the fix in each line is to take the work item in
@@ -875,7 +879,9 @@ recorded. The session's events are not.
 Every run of Claude Code, the runtime `claude`, and of Codex, the runtime `codex`,
 walled or not, installs the runtime's program on the machine before its session starts:
 after the compose, and before the image step. A run of another runtime installs nothing.
-The agent image contains no runtime.
+The agent image contains no runtime. A run of several sessions installs each runtime once,
+before the first session that runs it (see [A run of several
+sessions](#a-run-of-several-sessions)).
 
 The session starts the installed program, `<runtimes>/<runtime>/<version>/bin/<runtime>`,
 such as `<runtimes>/claude/2.1.320/bin/claude`. Behind a wall, Forager mounts the
@@ -1290,7 +1296,9 @@ its files take on disk, at most 60 minutes.
 `--timeout 0` lifts the limit `forager.yaml` sets.
 
 A run from a run code takes the time limit of its session only from `time_limit_minutes`
-in the run's documents, counted from the agent's start as for any run. Qory Apiary writes it
+in the run's documents, counted from the agent's start as for any run. A later session of
+a run of several sessions takes it from its next-session answer (see [A run of several
+sessions](#a-run-of-several-sessions)). Qory Apiary writes it
 from the Time limit of the run's workflow on the Workflows page, and writes 180 minutes for
 a workflow with no Time limit. Documents with no `time_limit_minutes` give the session no
 time limit: qory sets none, and a stack sets none. At the limit the session stops as
@@ -1350,9 +1358,9 @@ separate gateway gets that gateway's limits.
 
 `gateway.stack_hosts` in `forager.yaml` lists the hosts that each run's stack proxy
 reaches. The stack proxy is a proxy of each run on the gateway, apart from the run's
-proxy, and is open until the run's session starts. A run with a run key or a run code
+proxy, and is open until the run's first session starts. A run with a run key or a run code
 fetches every git source of its harness through it: the stack, its modules, and the
-modules of the checkout's file.
+modules of the checkout's file. A later session of the run fetches nothing.
 
 ```yaml
 # ~/.config/qory/forager.yaml
@@ -2085,7 +2093,8 @@ Qory Apiary has them, its `url` and `title`. The documents may also contain a `t
 what started the run, such as `take_in`; qory reads it and changes nothing for it.
 The documents of the step `workflow` can also contain `shared_run` and `full_suite`. With
 `full_suite` true, the session runs the full test suite when it ends, see [The full
-suite](#the-full-suite). qory reads `shared_run` and changes nothing for it.
+suite](#the-full-suite). With `shared_run` true, the run has more than one session, see [A
+run of several sessions](#a-run-of-several-sessions).
 qory checks the documents as the run contract's `documents.schema.json`, and, for a
 subject of the kind `work_item`, checks that `inputs.domain` and `inputs.work_item.id`
 match the domain and the subject's `id`. Only a run whose subject has the kind
@@ -2820,13 +2829,93 @@ limits. Each error starts with its fix:
   zero byte: `make the harness files at most 16777216 bytes in all: with <path> they
   have <size>`.
 
+#### A run of several sessions
+
+A run whose documents set `shared_run` to `true` runs one session after another on its
+checkout and its branch, until Qory Apiary ends it. After each session, once the suite's
+result is posted and the push step passed, qory sends the next-session request over the
+gateway's link: the session's number, the state the session ended in, and its reason. qory
+sends no request after a session that paused, that a stop ended, that did not join, or whose
+push step failed or found the run ended; the run closes as that session ended.
+
+The next-session answer is the end of the run or the next session: its workflow, its
+runtime and model settings, its model key (`model_provider_credential_name`), its time
+limit, `full_suite` and its inputs. For the end, qory prints `qory run: Qory Apiary
+starts no session after session <n>, so the run ends` and closes the run as the last
+session ended. For a session, qory prints
+`qory run: session <n> starts the workflow <workflow> on <runtime>`, and then:
+
+1. composes the workspace's harness for the session's runtime and model settings in a
+   compose step, from the run's sources at the commits of session 1's compose: qory fetches
+   nothing, and opens no stack proxy. qory composes the home that the run made for itself
+   for the session's runtime alone. A home from `--home` or `harness.home` keeps the tree
+   of every runtime composed in it, so a later Codex session there gets no tier models
+   when the home also has another runtime's tree (see [Tiers](harness.md#tiers));
+2. installs the session's runtime, if no session of the run ran it yet, as session 1's
+   install does: at the version that the stack pins (see [A pinned
+   version](#a-pinned-version)), else the newest, with [npm's
+   signature](#npms-signature) checked (see [The runtime's program](#the-runtimes-program));
+3. writes the session's inputs, and, for Codex, gives the session a new Codex home and
+   removes the home of the session before, with its files;
+4. joins the session with the answer's model key and time limit, counted from the agent's
+   start. The route to qory serves the session that runs (see [The route to
+   qory](#the-route-to-qory)). Each session's agent gets its number in `QORY_SESSION`,
+   starting at 1.
+
+The steps before a later session have the setup's limit of 30 minutes from their start. A
+later session's steps past that limit close the run `cancelled` with the reason `timeout`,
+exit 124, as session 1's setup does. The report beside the home, `<home>-report.json`,
+lists each session's number, runtime and tier map in `sessions`.
+
+qory composes, installs and runs git for the next session only with proof that the session's
+processes stopped: the run has a wall, and no container of the run is kept. Without that
+proof the run closes `failed` before the next session, a run without a push step too, with
+a line that ends `so session <n> does not start; the code is used`. A read run with no wall
+has no such proof, so it ends after session 1 when Qory Apiary starts a session 2. A push
+between two sessions needs the same proof; without it the push step fails with `qory run:
+Take the work item in again in Qory Apiary.`, then `A container of the session may still run
+and write the working folder, so qory pushed nothing`.
+
+qory sends the next-session request again after no response, a refusal of the gateway's, a
+status of 500 or above or 429 with no refusal, any refusal of Qory Apiary's with a status of
+500 or above, and Qory Apiary's `rate_limited` (429). The first wait is 1 s, and each wait
+doubles up to 1 minute, for 10 minutes in all. The link has no `Retry-After`, so every wait
+doubles. Then:
+
+- Qory Apiary's `run_ended`, or a run that is already closed: qory prints `qory run: Qory
+  Apiary ended this run, so qory pushes nothing more and no later session starts.`, or the
+  line of the gateway's end (see [The push step of a write
+  run](#the-push-step-of-a-write-run)), and closes the run as the session ended.
+- Every other refusal of Qory Apiary's, a status below 500 other than 429 with no refusal,
+  no answer after 10 minutes, or an answer outside `next-session-answer.schema.json`: the
+  run closes `failed`, exit 1, with a line that starts with its fix, such as `qory run:
+  Contact support: the next-session request after session <n> failed.`, then `Qory Apiary
+  returned <status>: <message or code>`.
+- A stop while qory waits to send the request again, or during the steps before the next
+  session: the run closes `cancelled` with the reason `interrupted`, exit 1, with `✗ the
+  run was cancelled: qory run got <signal> before session <n> started`.
+- A runtime qory does not run, a workflow whose access differs from session 1's, a harness
+  that is the checkout's file, which the branch may have changed, or a step before the
+  session that fails, such as the runtime's install: the run closes `failed`, exit 1, with
+  the step's line, and the session does not join. A Codex home of the session before that
+  qory cannot remove ends the run so, with `qory run: Remove the Codex home of session <n-1>
+  by hand, then take the work item in again.`, then `qory could not remove <folder> before
+  session <n>: <error>`.
+
+Each push step that pushes commits stores a version of the artifact `submission`, from
+the hand-off file as it is after the session before that step (see [The submit step](#the-submit-step)).
+qory does not empty the file between sessions: after a session that does not write it,
+qory reads the text and steps that the session before wrote. Each version lists every
+commit of the run, since the run's start commit is set once, at session 1. The commits that
+earlier sessions pushed stay on the branch.
+
 ### The push step of a write run
 
 A write run of a work item ends with a push step: qory commits what the agent left, pushes
 it to the branch `qory/<work item id>`, and stores a new version of the artifact `main` of
 the type `submission`. The next run of the work item starts at the newest commit that a run
-pushed and a person did not cancel, see [What the run takes from the response](#what-the-run-takes-from-the-response). The step runs after the run's session, once the agent exited, and before the
-run closes. A setup container is gone by then: qory removes it before the step, in the wall step `remove the setup
+pushed and a person did not cancel, see [What the run takes from the response](#what-the-run-takes-from-the-response). The step runs after each session of the run, once the agent exited, and before the
+next session or the run's close. A setup container is gone by then: qory removes it before the step, in the wall step `remove the setup
 container`, so no process in it writes the working folder after the check. Its kind is `push` and its name is `push qory/<work item
 id> to <system>/<path>`, followed by ` and 1 further repository` or ` and <n> further
 repositories` for a run with more repositories.
@@ -2924,7 +3013,7 @@ seconds. A first signal, before or during the step, cuts the step to at most 15 
 second signal ends the step at once. A step that one of these ended has the state
 `cancelled`, and the commits it made stay in the working folder.
 
-The run closes as its session ended, whatever the step did:
+The run closes as its last session ended, whatever the step did:
 
 - A session that timed out closes `cancelled` with the reason `timeout`, exit 124.
 - A session that paused because the model provider rejected its model key, while another
@@ -3181,12 +3270,12 @@ characters is dropped, so its commit is `unreviewed`. A `text` whose `title` has
 character (Unicode category Cc, such as a tab or a line end), a format character (category
 Cf, such as a bidirectional control, a zero-width space or a tag character) other than U+200C
 and U+200D, or U+2028 or U+2029, is dropped whole. U+200C and U+200D, as in an emoji
-sequence, stay in a title, but a `text` whose `title` has no character that is not a space, U+200C or U+200D is dropped whole. A step with one of these characters is dropped, and so is a step
+sequence, stay in a title, but a `text` whose `title` has no character that is not a space, U+200C or U+200D is dropped whole. A `text` whose `description` has a character that a text does not have is dropped whole too: a control character other than tab, line feed and carriage return, a format character other than U+200C and U+200D, U+2028 or U+2029. A step with one of these characters is dropped, and so is a step
 whose key is not a full commit id of 40 or 64 lower-case hexadecimal digits. qory prints `qory run: The hand-off
 file has a part the submission format does not allow, so qory dropped it.`, then one line
 indented by two spaces for each part: `Title: <n> characters, over the limit of 256. qory
 dropped the text.`, `Description: <n> characters, over the limit of 20000. qory dropped the
-text.`, `Title: has a control character at character <n>. qory dropped the text.`, `Description: has a NUL character at character <n>. qory dropped the text.`, `Description: line <n> is a marker line of the draft's block. qory dropped the text.`, `Step of commit <commit>: has a control, invisible, direction or separator character. qory dropped the step.`, `<n> further steps have a control, invisible, direction or separator character. qory dropped them.`, `Title: has no character that is not a space, U+200C or U+200D. qory dropped the text.`, `<n> step
+text.`, `Title: has a control character at character <n>. qory dropped the text.`, `Description: has a NUL character at character <n>. qory dropped the text.`, `Remove the character <U+code point> at character <n> of the description. qory dropped the text.`, `Description: line <n> is a marker line of the draft's block. qory dropped the text.`, `Step of commit <commit>: has a control, invisible, direction or separator character. qory dropped the step.`, `<n> further steps have a control, invisible, direction or separator character. qory dropped them.`, `Title: has no character that is not a space, U+200C or U+200D. qory dropped the text.`, `<n> step
 keys are not a full commit id of 40 or 64 lower-case hexadecimal digits. qory dropped them.`, and `Step of commit <commit>: <n> characters, over the limit of 128. qory dropped the
 step.`, for at most 5 steps, then `<n> further steps are over the limit of 128 characters.
 qory dropped them.` It prints no content of the file. A step for a commit that this run did not make is not used. The run
@@ -3354,7 +3443,12 @@ repository's `system`, with a path, at most 2048 characters, of the ASCII charac
 `Line <n>: <reason>.` on a second line, for at most 5 lines: a line with a key that is not
 listed, no value, a control character or no final line feed, a repeated draft key or address, an
 address of a commit that qory did not give the program, any draft line when `QORY_SUBMIT_DRAFT`
-is `none`, and each draft line of a draft that lacks one of the five. When the program ends, qory
+is `none`, each `draft_title` line with a character that a title does not have, such as U+200B or
+the tag character U+E0041, or with no character that is not a space, U+200C or U+200D (the cause
+is `the title has the character U+200B, which a title does not have, at character 2` or `the
+title has no character that is not a space, U+200C or U+200D`), and each draft line of a draft
+that lacks one of the five, which includes the draft lines of a draft whose title qory left
+out. When the program ends, qory
 prints one of these, each with line 1 as the cause, then lines indented by two spaces:
 
 - `qory run: The submit program failed, so a repository it did not finish has no draft.`,
@@ -4198,6 +4292,11 @@ qory serves no path on the route. Each answer is JSON, `{"error": <code>, "messa
 | `404` | `not_found` | a request of the session that runs |
 | `503` | `session_not_running` | a request of another session of the run, or one with no valid session number |
 
+In a run of several sessions, the route serves each session while it joins, by the number
+the gateway gives it: one more than the session before. A session that the gateway numbers
+otherwise ends the run `failed`, with `qory run: Update qory or Forager.`, then `The gateway
+numbered the session <n>, and qory served session <m> on its route`.
+
 The run's proxy answers some requests itself, in the same form, such as `503` for a request
 outside a session's launch, `413` for a body over 1 MiB, and `429` for more than 10 requests
 of the run in a second. Each request of the route is a `dev.qory.run.egress` event with the
@@ -4321,14 +4420,16 @@ judges it once the session succeeded. The point has the cause in `text` and what
 
 A session that did not succeed posts nothing for a cause found at the launch.
 
-A red suite does not end the run `failed` and does not change its exit status: the run closes
-as its session did, and the verdict starts the next round in Qory Apiary. If qory cannot post
-the verdict, it closes the run `failed` and exits 1, so a verdict of `passed` that the agent
-posted does not stand over a suite that did not pass. A stop of `qory run` that cuts the step
-posts the red verdict with the point `The full suite did not finish: the run was stopped.`, with
-one request that has 5 seconds, and closes the run `cancelled` with the reason `interrupted` and
-exit status 1, whether or not the post worked. qory checks each verdict against the verdict format
-before it posts it.
+A red suite does not end the run `failed` and does not change its exit status. In a run whose
+documents set `shared_run`, qory sends the next-session request once the verdict is posted and
+the push step passed (see [A run of several sessions](#a-run-of-several-sessions)); otherwise
+the run closes as its session did, and the verdict starts the next round in Qory Apiary. If
+qory cannot post the verdict, it closes the run `failed` and exits 1, so a verdict of `passed`
+that the agent posted does not stand over a suite that did not pass. A stop of `qory run` that
+cuts the step posts the red verdict with the point `The full suite did not finish: the run was
+stopped.`, with one request that has 5 seconds, and closes the run `cancelled` with the reason
+`interrupted` and exit status 1, whether or not the post worked. qory checks each verdict
+against the verdict format before it posts it.
 
 The point has a text and, for a red suite, sometimes a fix, each on one line. The text is, in this
 order of preference:

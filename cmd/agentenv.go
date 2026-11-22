@@ -119,9 +119,10 @@ func (l transcriptLink) args() []string {
 }
 
 // keptNames are the names Forager sets for a walled run before the run's variables are
-// resolved: always, the wall's proxy and socket names, QORY_RUN_ID, QORY_HARNESS_HOME
-// with a harness home, QORY_RUN_API for a run with a run API (runAPI true),
-// QORY_HOST_URL for a run with a route to qory (OpenSpec.QoryRoute), the runtime's
+// resolved: always, the wall's proxy and socket names, QORY_RUN_ID, QORY_SESSION, the
+// session's number in the run, QORY_HARNESS_HOME with a harness home, QORY_RUN_API for a
+// run with a run API (runAPI true), QORY_HOST_URL for a run with a route to qory
+// (OpenSpec.QoryRoute), the runtime's
 // declared and reserved variables and the variables it reads a model key
 // from, which Forager sets behind a wall to a placeholder or to a value passed for them,
 // or unsets them, the variable it reads its model endpoint from, which Forager sets to
@@ -139,7 +140,7 @@ func keptNames(spec *runSpec, d *wall.Docker, runAPI bool) (always, ca []string,
 			always = append(always, n)
 		}
 	}
-	always = append(always, session.EnvRunID)
+	always = append(always, session.EnvRunID, session.EnvSession)
 	if spec.HarnessHome != "" {
 		always = append(always, session.EnvHarnessHome)
 	}

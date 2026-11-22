@@ -111,6 +111,7 @@ type harnessRun struct {
 	joined    bool
 	events    []cmd.StepEvent
 	calls     []string
+	closes    []session.Outcome
 	commit    string
 	tools     string
 	server    *proxygittest.Server
@@ -243,10 +244,10 @@ func (c codeHarness) run(t *testing.T) harnessRun {
 	if !c.perRunHome && !slices.Contains(args, "--home") {
 		args = append(args, "--home", filepath.Join(tempDir(t), "home"))
 	}
-	_, calls, restore := cmd.OpenNowhereWith(nowhere)
+	closes, calls, restore := cmd.OpenNowhereWith(nowhere)
 	defer restore()
 	r.out, r.err = run(t, args...)
-	r.calls = calls()
+	r.calls, r.closes = calls(), closes()
 	return r
 }
 
