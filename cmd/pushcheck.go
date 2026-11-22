@@ -119,9 +119,10 @@ func (p *runPushChecks) current() *pushcheck.Checker {
 // set turns on the check of each POST of the run API from behind the wall of run, with
 // [runPushChecks.runAPICheck], when the load found push checks or always is true; with
 // neither, it sets no check. Forager sets no check once a join passed its checks, so a run
-// of several sessions with a control plane sets it with always, and a later session's
-// checks turn on in [runPushChecks.next]; until then the check passes every POST. Call it
-// after the load and before the run's setup and join.
+// of several sessions with a run API, see [hasRunAPI], sets it with always, and a later
+// session's checks turn on in [runPushChecks.next]; until then the check passes every
+// POST. Forager's SetRunAPICheck fails for a run with no run API, so such a run sets no
+// check without push checks. Call it after the load and before the run's setup and join.
 func (p *runPushChecks) set(run openedRun, always bool) error {
 	if p.current() == nil && !always {
 		return nil

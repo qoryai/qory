@@ -1206,7 +1206,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return &runLineError{input(err)}
 					}
 					cleanups = append(cleanups, done)
-					if err := checks.set(run, fromCode != nil && fromCode.shared && controlPlane); err != nil {
+					if err := checks.set(run, fromCode != nil && fromCode.shared && hasRunAPI(run)); err != nil {
 						return &runLineError{err}
 					}
 				}

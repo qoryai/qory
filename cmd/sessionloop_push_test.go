@@ -200,6 +200,35 @@ func TestALaterSessionTurnsOnPushChecksThatSession1DidNotHave(t *testing.T) {
 	}
 }
 
+// TestASharedRunWithNoRunAPISetsNoCheck is a walled read run of two sessions from a run
+// code whose gateway sends no run API address, and whose home has no push check. The fake
+// fails SetRunAPICheck as Forager does for a run with no run API: the run sets no check,
+// both sessions join, and the run closes succeeded.
+func TestASharedRunWithNoRunAPISetsNoCheck(t *testing.T) {
+	var mu sync.Mutex
+	sets := 0
+	r := runLoop(t, loopSetup{
+		answers: []string{laterAnswer(2, "claude", "example-provider-2", 30)},
+		nowhere: func(n *cmd.Nowhere) {
+			n.RunAPIErr = func() error {
+				return errors.New("Open the run through a gateway with a control plane to reach the run API: this run has none, so it has no QORY_RUN_API.")
+			}
+			n.SetRunAPICheck = func(func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error {
+				mu.Lock()
+				defer mu.Unlock()
+				sets++
+				return errors.New("Open the run at a gateway with a control plane to check its run API: the run has no run API.")
+			}
+		},
+	})
+	if r.err != nil || len(r.joins) != 2 || sets != 0 {
+		t.Fatalf("%d joins and %d sets of the check, %v (exit %d), want 2 joins and no set\n%s", len(r.joins), sets, r.err, cmd.ExitCode(r.err), r.out)
+	}
+	if len(r.closes) != 1 || r.closes[0].State != event.StateSucceeded {
+		t.Errorf("the run closed %+v, want once, succeeded\n%s", r.closes, r.out)
+	}
+}
+
 // TestAFailedPushStartsNoNextSession is a write run whose POST of session 1's version fails
 // with run_ended: the run closes failed, sends no next-session request, and session 2 does
 // not join.
