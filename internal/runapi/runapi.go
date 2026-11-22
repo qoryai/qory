@@ -567,16 +567,25 @@ func fullCommit(value string) bool {
 	return true
 }
 
+// storedAnswer is the answer to a push or a verdict: the version that it stored.
+type storedAnswer struct {
+	Artifact Pushed `json:"artifact,case:strict"`
+}
+
 func (c *Client) post(ctx context.Context, path string, body []byte) (*Pushed, error) {
-	var stored struct {
-		Artifact Pushed `json:"artifact,case:strict"`
-	}
+	var stored storedAnswer
 
 	if _, err := c.exchange(ctx, http.MethodPost, path, body, http.StatusCreated, &stored); err != nil {
 		return nil, err
 	}
 
 	return &stored.Artifact, nil
+}
+
+// answerHead is the member of every answer that qory reads first: the version of the run
+// API.
+type answerHead struct {
+	Version *int `json:"version,case:strict"`
 }
 
 // exchange sends a request and decodes a response with the status want into target. It
@@ -605,9 +614,7 @@ func (c *Client) exchange(
 		return nil, fmt.Errorf("Check the run's gateway. The response to %s is over %d bytes.", request, maxResponse)
 	}
 
-	var head struct {
-		Version *int `json:"version,case:strict"`
-	}
+	var head answerHead
 
 	if err := json.Unmarshal(raw, &head); err != nil {
 		return nil, fmt.Errorf("Check the run's gateway. The response to %s is not the run API's JSON: %w", request, err)
