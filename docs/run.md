@@ -4245,7 +4245,7 @@ A red suite, whose command ran (`failed` or `timeout`):
 | none, or `passed` | `changes-requested` with one point |
 | `changes-requested` | nothing: the verdict stands |
 | `escalate` with up to 19 points | the same `escalate` and `track`, with that point added |
-| `escalate` with 20 points | nothing: the verdict stands |
+| `escalate` with 20 points | nothing: the verdict stands, and qory prints `the verdict of the agent has 20 points already, so qory adds none for the full suite` |
 | another kind, which this qory does not know, with up to 19 points | `escalate` with the agent's points and `track`, and that point added |
 | another kind with 20 points | nothing: the verdict stands, and qory prints `the verdict of the agent has 20 points already, so qory adds none for the full suite` |
 
