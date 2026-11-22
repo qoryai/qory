@@ -3,6 +3,7 @@ package cmd_test
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -29,6 +30,9 @@ func newProgramRepo(t *testing.T, access string) (p *pushRepo, log string) {
 	files := programModule()
 	stack := "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n" +
 		"  - name: forge\n    source: {path: modules/forge}\nworkflows:\n  hello:\n    access: " + access + "\n"
+	if access == "write" {
+		stack += helloPlan
+	}
 	files["qory.yaml"] = ownStack(stack)
 	p = newPushRepoWith(t, access, files)
 	var docker string
@@ -52,13 +56,22 @@ func passedWithText(t *testing.T, p *pushRepo) func(string) {
 
 // wantsNoProgram checks that nothing of a submit program started in the run r: the log has no
 // line of the program's step, and the engine got no command to create or start a container for
-// it.
+// it. The commands of the push step's scope check, whose create has --base, do not count.
 func wantsNoProgram(t *testing.T, r pushed, log string) {
 	t.Helper()
 	if got := r.log(); strings.Contains(got, "submit program") || strings.Contains(got, "program-failed") {
 		t.Errorf("the log has a line of the submit program:\n%s", got)
 	}
-	if got := checkLog(t, log); strings.Contains(got, "create ") || strings.Contains(got, "start ") || strings.Contains(got, "qory-push-check") {
+	lines := strings.Split(checkLog(t, log), "\n")
+	for _, line := range lines {
+		if name, ok := strings.CutPrefix(line, "create --name "); ok && strings.Contains(line, " --base ") {
+			name, _, _ = strings.Cut(name, " ")
+			lines = slices.DeleteFunc(lines, func(l string) bool {
+				return strings.HasSuffix(l, " "+name) || strings.HasPrefix(l, "create --name "+name+" ")
+			})
+		}
+	}
+	if got := strings.Join(lines, "\n"); strings.Contains(got, "create ") || strings.Contains(got, "start ") || strings.Contains(got, "qory-push-check") {
 		t.Errorf("a container ran:\n%s", got)
 	}
 }

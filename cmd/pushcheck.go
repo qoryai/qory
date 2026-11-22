@@ -19,6 +19,7 @@ import (
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 
+	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
@@ -108,6 +109,8 @@ type runPushChecks struct {
 	// wrote there.
 	inputs     string
 	inputsData []byte
+	// scope is the push step's scope check, see [runPushChecks.scopeCheck].
+	scope runScope
 }
 
 // current is the checker, nil before the load or for a home with no push check.
@@ -218,6 +221,15 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 	if err != nil || len(checks) == 0 || !controlPlane {
 		return nil, err
 	}
+	return newChecker(ctx, run, home, runID, spec, fromCode, checks,
+		filepath.Join(run.Dir(), pushChecksDir))
+}
+
+// newChecker is a checker of the push checks checks of a walled run, as [pushChecker]
+// describes it, whose temporary folders go in dir, a new folder that it makes. The scope
+// check of the push step runs with it too, with no checks, see [runPushChecks.scopeCheck].
+func newChecker(ctx context.Context, run openedRun, home, runID string, spec *runSpec,
+	fromCode bool, checks []compose.PushCheck, dir string) (*pushcheck.Checker, error) {
 	d, ok := spec.Wall.(*wall.Docker)
 	if !ok {
 		return nil, checksStop(fromCode, textChecksNoWall, textChecksNoWallFromCode, exports.Value(home, false))
@@ -254,7 +266,7 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 		Home: home, Checks: checks, Image: image, Runtime: checkRuntime(run, spec), User: user,
 		Engine: engine,
 		Fetch:  artifactsForCheck(client),
-		Dir:    filepath.Join(run.Dir(), pushChecksDir),
+		Dir:    dir,
 		Limits: wall.Limits{CPUs: spec.Limits.CPUs, Memory: spec.Limits.Memory, PIDs: spec.Limits.PIDs},
 		Label:  runLabel + runID,
 		Mask:   secretmask.Default().Replace,

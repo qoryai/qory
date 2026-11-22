@@ -520,6 +520,34 @@ func (r *codeRun) reportExposed(home, report string, given []givenMount) error {
 	return nil
 }
 
+// The texts of a walled session that a configured mount is at or inside the read-only
+// inputs folder of: the cause alone for a run from a run code, the fix first for a
+// person's run with a run key and no run code.
+const (
+	textInputsMounted    = "A wall mount is at or inside the read-only inputs folder, so the session did not start.\n  Mount %s.\n  Inputs folder %s."
+	textInputsMountedFix = "Remove the mount at or inside the read-only inputs folder from wall.mounts or --mount.\n  Mount %s.\n  Inputs folder %s."
+)
+
+// inputsMounted stops a walled session of r when a mount of given is in, the run's inputs
+// folder, or lies inside it, as [session.Overlap] compares them: the agent's container
+// would see that mount in place of part of the read-only folder, such as the session's
+// start artifacts. A mount that contains in passes, as the read-only mount of in lies
+// over it. For a run from a run code the error closes the run machine_setup_invalid; a
+// run with a run key and no run code, r nil, gets the fix and no end code.
+func (r *codeRun) inputsMounted(in string, given []givenMount) error {
+	for _, m := range given {
+		if how := session.Overlap(m.path, in); how != "is" && how != "lies inside" {
+			continue
+		}
+		mount, folder := exports.Value(m.path, false), exports.Value(in, false)
+		if r == nil {
+			return &runLineError{fmt.Errorf(textInputsMountedFix, mount, folder)}
+		}
+		return &runLineError{&reasonError{code: string(contracts.EndCodeMachineSetupInvalid), text: fmt.Sprintf(textInputsMounted, mount, folder)}}
+	}
+	return nil
+}
+
 // readExposed stops a run from the run code r that only reads the checkout, when the
 // checkout at root or the working folder cwd, which the agent's container binds read-only,
 // overlaps qory's cache folder or the harness report of the run. A run that may write works
@@ -708,6 +736,31 @@ type qoryInputs struct {
 	// Outputs is the outputs of the run's stage, in the stage's order, [] for none, as
 	// [codeRun.outputs] has them.
 	Outputs []inputOutput `json:"outputs"`
+	// StartCommits is the commit each repository of the run is at when the session starts,
+	// [] for a run with no branch, and StartArtifacts the folder of the session's launch
+	// snapshot, see [startArtifacts]. The push step's scope check reads the same values.
+	StartCommits   []inputCommit `json:"start_commits"`
+	StartArtifacts string        `json:"start_artifacts"`
+}
+
+// inputCommit is one entry of [qoryInputs.StartCommits]: the repository's folder, as an
+// absolute path, and its [preparation.WorkRepository.Commit].
+type inputCommit struct {
+	Path   string `json:"path"`
+	Commit string `json:"commit"`
+}
+
+// startCommits is the [qoryInputs.StartCommits] of branch, whose repositories are in the
+// working folder cwd, an absolute path; nil for no branch.
+func startCommits(branch *preparation.WorkBranch, cwd string) []inputCommit {
+	if branch == nil {
+		return nil
+	}
+	out := make([]inputCommit, len(branch.Repositories))
+	for i, r := range branch.Repositories {
+		out[i] = inputCommit{Path: filepath.Join(cwd, filepath.FromSlash(r.Dir)), Commit: r.Commit}
+	}
+	return out
 }
 
 // inputOutput is one output of the run's stage in [qoryInputs]: its type, whether the
@@ -876,6 +929,9 @@ func withQoryMember(inputs []byte, q qoryInputs) ([]byte, error) {
 	}
 	if q.Outputs == nil {
 		q.Outputs = []inputOutput{}
+	}
+	if q.StartCommits == nil {
+		q.StartCommits = []inputCommit{}
 	}
 	value, err := json.Marshal(q)
 	if err != nil {

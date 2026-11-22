@@ -374,7 +374,13 @@ func (c *Checker) Check(ctx context.Context, artifactType string, files []File) 
 	if err := c.openTo(opened...); err != nil {
 		return nil, err
 	}
-	end, err := c.run(ctx, check.Command[0], args, pulled, pushed, inputs)
+	binds := []bind{{src: c.Home, dst: c.Home}, {src: pulled, dst: WorkDir},
+		{src: pushed, dst: FilesDir}}
+	if inputs != "" {
+		binds = append(binds, bind{src: inputs, dst: c.Inputs})
+	}
+	end, err := c.run(ctx, container{program: check.Command[0], args: args, binds: binds,
+		workdir: WorkDir})
 	if err != nil {
 		return nil, err
 	}
@@ -476,6 +482,25 @@ type ended struct {
 	exitCode int
 	stdout   []byte
 	stderr   []byte
+	// removeErr is the error of the container's removal, nil when it is gone.
+	removeErr error
+}
+
+// bind is one bind of a container: src on this machine at dst inside, read-only unless
+// writable.
+type bind struct {
+	src, dst string
+	writable bool
+}
+
+// container is what [Checker.run] starts: program with args, in workdir, with binds and
+// the variables env, NAME=value.
+type container struct {
+	program string
+	args    []string
+	binds   []bind
+	workdir string
+	env     []string
 }
 
 // state is what the engine reports of a container's end.
@@ -485,23 +510,18 @@ type state struct {
 	Error    string
 }
 
-// run runs program with args in a new container and returns how it ended. inputs, when
-// not "", is the copy of the run's inputs.json that the container mounts at
-// [Checker.Inputs]. The engine's failures, such as an engine that is not reachable or
-// that does not have the image, are errors; a program that does not start is an end
-// with startErr set.
-func (c *Checker) run(ctx context.Context, program string, args []string, pulled, pushed, inputs string) (ended, error) {
+// run runs the program of spec in a new container and returns how it ended, with the
+// error of the container's removal in removeErr. The engine's failures, such as an engine
+// that is not reachable or that does not have the image, are errors; a program that does
+// not start is an end with startErr set.
+func (c *Checker) run(ctx context.Context, spec container) (end ended, err error) {
 	name, err := containerName()
 	if err != nil {
 		return ended{}, err
 	}
-	binds := [][2]string{{c.Home, c.Home}, {pulled, WorkDir}, {pushed, FilesDir}}
-	if inputs != "" {
-		binds = append(binds, [2]string{inputs, c.Inputs})
-	}
-	mounts := make([]string, 0, len(binds))
-	for _, m := range binds {
-		mount, err := bindMount(m[0], m[1])
+	mounts := make([]string, 0, 2*len(spec.binds))
+	for _, m := range spec.binds {
+		mount, err := bindMount(m.src, m.dst, m.writable)
 		if err != nil {
 			return ended{}, err
 		}
@@ -509,19 +529,26 @@ func (c *Checker) run(ctx context.Context, program string, args []string, pulled
 	}
 	create := []string{"create", "--name", name, "--network", "none", "--user", c.User,
 		"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--init", "--pull", "never",
-		"--no-healthcheck", "--workdir", WorkDir}
+		"--no-healthcheck", "--workdir", spec.workdir}
 	if c.Label != "" {
 		create = append(create, "--label", c.Label)
+	}
+	for _, kv := range spec.env {
+		create = append(create, "--env", kv)
 	}
 	create = append(create, c.limits()...)
 	create = append(create, mounts...)
 	if c.Runtime != "" {
 		create = append(create, "--runtime", c.Runtime)
 	}
-	create = append(create, "--entrypoint", program, c.Image)
-	create = append(create, args...)
+	create = append(create, "--entrypoint", spec.program, c.Image)
+	create = append(create, spec.args...)
+	program := spec.program
 	// The container is removed whole in every case, also once ctx has ended.
-	defer c.engine(context.WithoutCancel(ctx), engineWait, nil, nil, "rm", "--force", "--volumes", name)
+	defer func() {
+		end.removeErr = c.engine(context.WithoutCancel(ctx), engineWait, nil, nil,
+			"rm", "--force", "--volumes", name)
+	}()
 	var errOut bytes.Buffer
 	if err := c.engine(ctx, engineWait, nil, &errOut, create...); err != nil {
 		if noSuchImage(errOut.String()) {
@@ -855,15 +882,20 @@ func containerName() (string, error) {
 	return containerPrefix + hex.EncodeToString(b), nil
 }
 
-// bindMount is one --mount value of a read-only bind. The value is comma-separated
-// fields, so a path that contains a comma or a quote is an error, as the wall has it.
-func bindMount(src, dst string) (string, error) {
+// bindMount is one --mount value of a bind, read-only unless writable. The value is
+// comma-separated fields, so a path that contains a comma or a quote is an error, as the
+// wall has it.
+func bindMount(src, dst string, writable bool) (string, error) {
 	for _, p := range []string{src, dst} {
 		if strings.ContainsAny(p, ",\"\n") {
 			return "", fmt.Errorf("the path %s contains a comma or a quote, and the check's container cannot mount it", exports.Value(p, true))
 		}
 	}
-	return "type=bind,src=" + src + ",dst=" + dst + ",readonly", nil
+	mount := "type=bind,src=" + src + ",dst=" + dst
+	if !writable {
+		mount += ",readonly"
+	}
+	return mount, nil
 }
 
 // capped keeps what is written to it up to limit bytes, and takes the rest without

@@ -407,7 +407,7 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 	if !slices.Contains(r.spec.Args, "--strict-mcp-config") {
 		t.Errorf("not a dispatched run's arguments: %q", r.spec.Args)
 	}
-	inputs := strings.TrimSuffix(string(doc.Inputs), "}") + `,"qory":{"harness_extensions":{},"outputs":[]}}` + "\n"
+	inputs := strings.TrimSuffix(string(doc.Inputs), "}") + `,"qory":{"harness_extensions":{},"outputs":[],"start_commits":[],"start_artifacts":"` + filepath.Join(r.inputDir, "start-artifacts") + `"}}` + "\n"
 	if r.inputs != inputs || r.modes != [2]fs.FileMode{0o700, 0o600} {
 		t.Errorf("inputs.json %q, modes %v", r.inputs, r.modes)
 	}

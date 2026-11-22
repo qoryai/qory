@@ -76,6 +76,9 @@ func composed(t *testing.T, root string) (report.Report, map[string]string) {
 	t.Helper()
 	home := runKeyRunHome(t, root)
 	tree := folderTree(t, home)
+	// inputs.json has the run's start commits and inputs folder, and a run that stops
+	// before its setup writes none, so it is no part of the compose.
+	delete(tree, "inputs.json")
 	for path, content := range tree {
 		tree[path] = strings.NewReplacer(home, "<home>", root, "<checkout>").Replace(content)
 	}
