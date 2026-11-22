@@ -1493,7 +1493,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// more.
 			var prepErr error
 			if ctx.Err() == nil && time.Now().Before(setupDeadline) {
-				prepErr = hostWork()
+				if walled && in != "" {
+					prepErr = fromCode.inputsMounted(in, spec.given)
+				}
+				if prepErr == nil {
+					prepErr = hostWork()
+				}
 				if prepErr == nil && walled && name == codex.Runtime {
 					prepErr = codexHomeWork()
 				}
