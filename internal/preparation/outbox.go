@@ -30,7 +30,7 @@ func OutboxCommitted(ctx context.Context, dir, system, path, start, head string)
 func outboxCommitted(ctx context.Context, git gitRunner, dir, system string, r WorkRepository, start, head string) error {
 	out, err := git(ctx, dir, "rev-list", "--reverse", start+".."+head)
 	if err != nil {
-		return fmt.Errorf(textNoHistory, shownPath(dir), shortCommit(start), shownText(err.Error()))
+		return listFailed(r, start, head, err)
 	}
 	for commit := range strings.FieldsSeq(out) {
 		paths, err := git(ctx, dir, "diff-tree", "-r", "-m", "--root", "--no-commit-id", "--name-only", "-z", "--no-renames", commit, "--", ":(top,literal,icase)"+outboxDir)

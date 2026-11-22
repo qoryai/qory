@@ -72,3 +72,24 @@ func TestACommitWithTheOutboxInAnotherCaseIsRefused(t *testing.T) {
 		t.Errorf("the refusal is %v, want the commit %s and the path .QORY/Outbox/x", err, added)
 	}
 }
+
+// TestAListOfCommitsThatFailsSaysTheListFailed is a start commit that the repository does not
+// have, so git rev-list fails: the error is the list's, with the fix on line 1, and not the
+// text of the check that HEAD descends from a commit.
+func TestAListOfCommitsThatFailsSaysTheListFailed(t *testing.T) {
+	needGit(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "--quiet", "-b", "main")
+	run(t, dir, "config", "user.name", "qory")
+	run(t, dir, "config", "user.email", "qory@localhost")
+	write(t, filepath.Join(dir, "a.txt"), "a\n")
+	head := commitHere(t, dir)
+	err := outboxCommitted(context.Background(), stepGit(noRemote, ""), dir, "git.test", WorkRepository{Path: "acme/site"}, strings.Repeat("1", 40), head)
+	want := "qory run: Take the work item in again in Qory Apiary: the list of the run's commits failed.\n  Listing the commits of acme/site from commit 111111111111 to " + head[:12] + " failed: "
+	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), ". qory pushed nothing. The run code is used up.") {
+		t.Fatalf("the error is %v, want the start %q", err, want)
+	}
+	if strings.Contains(err.Error(), "descends from") {
+		t.Errorf("the error has the text of the history check: %v", err)
+	}
+}
