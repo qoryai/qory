@@ -285,13 +285,18 @@ func TestTheRunsCap(t *testing.T) {
 
 // TestDispatchedFailures: a signed 429 is waited out up to three times; 409
 // lease_expired and 410 drop the dispatch with no release, and get gone, also after a
-// try whose response was lost and which the fake took; anything else releases it, and
+// try whose response was lost and which the fake took; a signed 409 or 403 whose body
+// is not read changes nothing, and dispatched is sent again, after waits of 1s, then 2s,
+// until the next wait would pass the lease, which releases the dispatch for the lease;
+// anything else releases it, and
 // a release that gets 204 from the fake gets no gone. While such a gone is held, the
 // journal entry is at ended and the dispatch's folder is gone. qory run starts after
 // dispatched alone, and a qory run that ran gets gone.
 func TestDispatchedFailures(t *testing.T) {
 	limited := provisionertest.Reply{Status: 429, Code: "rate_limited", RetryAfter: "2"}
 	lost := provisionertest.Reply{Drop: true}
+	unread409 := provisionertest.Reply{Status: 409, Body: `{}`}
+	unread403 := provisionertest.Reply{Status: 403, Body: `{"error":"forbidden","zz":1,"must_understand":["/zz"]}`}
 	for _, c := range []struct {
 		name    string
 		replies []provisionertest.Reply
@@ -299,6 +304,10 @@ func TestDispatchedFailures(t *testing.T) {
 		ran     bool
 		waits   int
 		gone    bool
+		// lease is the dispatch's lease, the fake's when 0; backoff, when set, is each
+		// wait of the pool, in order.
+		lease   time.Duration
+		backoff []time.Duration
 	}{
 		{name: "429 three times", replies: []provisionertest.Reply{limited, limited, limited}, ran: true, waits: 3},
 		{name: "429 four times", replies: []provisionertest.Reply{limited, limited, limited, limited}, reason: reasonNotStart, waits: 3},
@@ -310,6 +319,12 @@ func TestDispatchedFailures(t *testing.T) {
 		{name: "gone after a lost answer", replies: []provisionertest.Reply{lost, {Status: 410, Code: "gone"}}, gone: true},
 		{name: "lease_expired after a lost answer", replies: []provisionertest.Reply{lost, {Status: 409, Code: "lease_expired"}}, gone: true},
 		{name: "gone after a lost answer and a 429", replies: []provisionertest.Reply{lost, limited, {Status: 410, Code: "gone"}}, waits: 1, gone: true},
+		{name: "unreadable 409", replies: []provisionertest.Reply{{Status: 409, Body: `{}`}}, ran: true},
+		{name: "403 with an unmet must_understand", replies: []provisionertest.Reply{{Status: 403, Body: `{"error":"forbidden","zz":1,"must_understand":["/zz"]}`}}, ran: true},
+		{name: "unreadable 409 until the lease", replies: slices.Repeat([]provisionertest.Reply{unread409}, 3), reason: reasonLease, waits: 1,
+			lease: 5 * time.Second, backoff: []time.Duration{time.Second, 2 * time.Second}},
+		{name: "unreadable 403 until the lease", replies: slices.Repeat([]provisionertest.Reply{unread403}, 3), reason: reasonLease, waits: 1,
+			lease: 5 * time.Second, backoff: []time.Duration{time.Second, 2 * time.Second}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t, 1)
@@ -318,7 +333,7 @@ func TestDispatchedFailures(t *testing.T) {
 			if c.gone {
 				let = h.gate.holdNext("/machine-end")
 			}
-			h.srv.Offer(provisionertest.Run{})
+			h.srv.Offer(provisionertest.Run{Lease: c.lease})
 			h.start()
 			if c.gone {
 				<-h.gate.reached
@@ -349,6 +364,20 @@ func TestDispatchedFailures(t *testing.T) {
 			if n != c.waits {
 				t.Errorf("the pool waited %v, want %d waits of 2s", h.waitsOf(), c.waits)
 			}
+			if c.backoff != nil {
+				if waits := h.waitsOf(); !slices.Equal(waits, c.backoff) {
+					t.Errorf("the pool waited %v, want %v", waits, c.backoff)
+				}
+				sent := 0
+				for _, call := range h.srv.Calls() {
+					if call.Route == provisionertest.RouteDispatched {
+						sent++
+					}
+				}
+				if sent != len(c.backoff)+1 {
+					t.Errorf("dispatched was sent %d times, want %d", sent, len(c.backoff)+1)
+				}
+			}
 			var want []string
 			if c.gone || c.ran {
 				want = []string{"gone"}
@@ -364,9 +393,11 @@ func TestDispatchedFailures(t *testing.T) {
 // lease_expired as the dispatch over already, and logs a release that ended without
 // it, 409 machine_exists and a signed 400 among them, which it does not send again.
 // After 409 machine_exists alone the pool sends gone, with the journal entry at ended
-// and no folder of the dispatch while that gone is held. A fourth 429 and an unsigned
-// answer are sent again, after the 429's Retry-After or a second, with a line that has
-// the wait, and the fake then releases the dispatch.
+// and no folder of the dispatch while that gone is held. A fourth 429, an unsigned
+// answer, and a signed 409 or 403 whose body is not read are sent again, after the
+// 429's Retry-After or a second, with a line that has the wait, and the fake then
+// releases the dispatch. A 403 forbidden with a member the schema does not define is
+// read as forbidden.
 func TestTheRelease(t *testing.T) {
 	limited := provisionertest.Reply{Status: 429, Code: "rate_limited", RetryAfter: "3"}
 	for _, c := range []struct {
@@ -385,6 +416,9 @@ func TestTheRelease(t *testing.T) {
 		{name: "forbidden", replies: []provisionertest.Reply{{Status: 403, Code: "forbidden"}}, line: lineRelease403, releases: 1},
 		{name: "not_found", replies: []provisionertest.Reply{{Status: 404, Code: "not_found"}}, line: lineRelease404, releases: 1},
 		{name: "unsigned", replies: slices.Repeat([]provisionertest.Reply{{Status: 500, Unsigned: true}}, 5), line: releaseFailed(time.Second), releases: 6},
+		{name: "unreadable 409", replies: []provisionertest.Reply{{Status: 409, Body: `{}`}}, line: releaseFailed(time.Second), releases: 2},
+		{name: "403 with an unmet must_understand", replies: []provisionertest.Reply{{Status: 403, Body: `{"error":"forbidden","zz":1,"must_understand":["/zz"]}`}}, line: releaseFailed(time.Second), releases: 2},
+		{name: "403 forbidden with an undefined member", replies: []provisionertest.Reply{{Status: 403, Body: `{"error":"forbidden","zz":1}`}}, line: lineRelease403, releases: 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t, 1)

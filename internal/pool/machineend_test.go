@@ -183,20 +183,22 @@ func TestGoneIsSentAgain(t *testing.T) {
 }
 
 // TestGoneEndsAtASignedRefusal answers gone with a signed 400 invalid_request, 403
-// forbidden and 404 not_found: the pool sends it once, logs the status's line, which
-// starts with its fix, with the code in the error, and takes the dispatch out of the
-// journal and its folder away.
+// forbidden and 404 not_found, and a signed 403 whose body is not read: the pool sends it
+// once, logs the status's line, which starts with its fix, with the status and any code
+// in the error, and takes the dispatch out of the journal and its folder away.
 func TestGoneEndsAtASignedRefusal(t *testing.T) {
 	for _, c := range []struct {
+		name string
 		rep  provisionertest.Reply
 		line string
 	}{
-		{provisionertest.Reply{Status: 400, Code: "invalid_request"}, lineGone400},
-		{provisionertest.Reply{Status: 403, Code: "forbidden"}, lineGone403},
-		{provisionertest.Reply{Status: 404, Code: "not_found"}, lineGone404},
+		{"invalid_request", provisionertest.Reply{Status: 400, Code: "invalid_request"}, lineGone400},
+		{"forbidden", provisionertest.Reply{Status: 403, Code: "forbidden"}, lineGone403},
+		{"not_found", provisionertest.Reply{Status: 404, Code: "not_found"}, lineGone404},
+		{"unreadable 403", provisionertest.Reply{Status: 403, Body: `{"error":"forbidden","zz":1,"must_understand":["/zz"]}`}, lineGone403},
 	} {
 		rep := c.rep
-		t.Run(rep.Code, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t, 1)
 			h.srv.Script(provisionertest.RouteMachineEnd, rep)
 			h.srv.Offer(provisionertest.Run{})
@@ -207,7 +209,7 @@ func TestGoneEndsAtASignedRefusal(t *testing.T) {
 			if states, statuses := h.machineEnds(d.ID); len(states) != 1 || statuses[0] != rep.Status {
 				t.Errorf("the machine ends are %q, answered %v", states, statuses)
 			}
-			if m := h.log.with(c.line); len(m) != 1 || m[0]["dispatch_id"] != d.ID || !strings.Contains(m[0]["error"].(string), fmt.Sprintf("%d %s", rep.Status, rep.Code)) {
+			if m := h.log.with(c.line); len(m) != 1 || m[0]["dispatch_id"] != d.ID || !strings.Contains(m[0]["error"].(string), strings.TrimSpace(fmt.Sprintf("%d %s", rep.Status, rep.Code))) {
 				t.Errorf("the gone's lines are %v; the log:\n%s", m, h.log.text())
 			}
 			if len(h.log.with(lineGone)) != 0 || len(h.log.withPrefix(goneFailedPrefix)) != 0 {

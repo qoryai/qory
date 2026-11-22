@@ -499,25 +499,31 @@ func TestADescriptionIsHeldToTheContractsLimits(t *testing.T) {
 }
 
 // TestASourceRoleIsReadAsTheContractHasIt describes a program that plays the source
-// role as the contract defines it, which is read with the role and no credential, and
-// one whose source role misses a field or has one the contract does not define, which
-// is refused.
+// role as the contract defines it, and one whose source role has a member the contract
+// does not define, or a description member the contract does not define: each is read
+// with the role and no credential. One whose source role misses a field, or whose
+// must_understand lists a member the contract does not define, is refused.
 func TestASourceRoleIsReadAsTheContractHasIt(t *testing.T) {
 	source := `{"description": "Reads the open items of Acme Tracker projects.", "program": "qory-acme-tracker", "setup": {"command": "qory-acme-tracker setup", "help": "Asks for the address of the Acme Tracker site."}, "start": "qory-acme-tracker serve", "connect": "Acme Tracker asks you to sign in.", "access": "In Acme Tracker, open Settings to change the projects.", "disconnect": "In Acme Tracker, open Settings and remove the adapter."}`
-	doc := func(role string) string {
-		return `{"version": 1, "name": "acme-tracker", "title": "Acme tracker", "program_version": "0.1.0", "settings": {"type": "object"}, "roles": {"source": ` + role + `}}`
+	withButton := strings.Replace(source, `"program"`, `"button": "Connect", "program"`, 1)
+	docWith := func(role, more string) string {
+		return `{"version": 1, "name": "acme-tracker", "title": "Acme tracker", "program_version": "0.1.0", ` + more + `"settings": {"type": "object"}, "roles": {"source": ` + role + `}}`
 	}
-	d, err := integration.Describe(context.Background(), program(t, doc(source)))
-	if err != nil || strings.Join(d.Roles, " ") != "source" || d.Credential != nil {
-		t.Errorf("a source role: %+v, %v", d, err)
+	doc := func(role string) string { return docWith(role, "") }
+	for _, b := range []string{doc(source), doc(withButton), docWith(source, `"zz": 1, `), docWith(source, `"must_understand": ["/roles/source"], `)} {
+		d, err := integration.Describe(context.Background(), program(t, b))
+		if err != nil || strings.Join(d.Roles, " ") != "source" || d.Credential != nil {
+			t.Errorf("a source role in %s: %+v, %v", b, d, err)
+		}
 	}
-	for _, c := range []struct{ role, want string }{
-		{strings.Replace(source, `"start": "qory-acme-tracker serve", `, "", 1), "at '/roles/source': missing property 'start'"},
-		{strings.Replace(source, `"program"`, `"button": "Connect", "program"`, 1), "at '/roles/source': additional properties 'button' not allowed"},
+	for _, c := range []struct{ doc, want string }{
+		{doc(strings.Replace(source, `"start": "qory-acme-tracker serve", `, "", 1)), "at '/roles/source': missing property 'start'"},
+		{docWith(withButton, `"must_understand": ["/roles/source/button"], `), "at '/must_understand/0': '/roles/source/button' does not match pattern"},
+		{docWith(source, `"zz": 1, "must_understand": ["/zz"], `), "at '/must_understand/0': '/zz' does not match pattern"},
 	} {
-		_, err := integration.Describe(context.Background(), program(t, doc(c.role)))
-		if err == nil || !strings.HasSuffix(err.Error(), "a description the integration contract refuses: "+c.want) {
-			t.Errorf("%s: %v, want %q", c.role, err, c.want)
+		_, err := integration.Describe(context.Background(), program(t, c.doc))
+		if err == nil || !strings.Contains(err.Error(), "a description the integration contract refuses: "+c.want) {
+			t.Errorf("%s: %v, want %q", c.doc, err, c.want)
 		}
 	}
 }

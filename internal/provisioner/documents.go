@@ -27,7 +27,9 @@ var compiledDocuments = sync.OnceValues(func() (*jsonschema.Schema, error) {
 
 // ReadDocuments reads documents, the documents object of a run code's signed
 // redemption, run/v1 documents.schema.json. The schema checks the bytes before they are
-// decoded. A documents object with a run_key or a run_code member is refused before
+// decoded, and the documents are read as [readChecked] reads them: a member that the
+// contract does not define is not read, and a must_understand that lists one ends the
+// read. A documents object with a run_key or a run_code member is refused before
 // that, so the value of such a member is never decoded or copied. Then the rules the
 // schema states and cannot check are checked: the inputs, compacted, are at most
 // contracts.MaxInputs bytes; run_settings is checked as [checkRunSettings] describes; and for
@@ -69,11 +71,13 @@ func ReadDocuments(documents json.RawMessage) (contracts.Documents, error) {
 		return contracts.Documents{}, err
 	}
 	if doc.Subject != nil && doc.Subject.Kind == SubjectWorkItem {
+		// case:strict: inputs may contain members beside these, so a decode that ignores
+		// letter case would read a later DOMAIN in place of domain.
 		var in struct {
-			Domain   string `json:"domain"`
+			Domain   string `json:"domain,case:strict"`
 			WorkItem *struct {
-				ID string `json:"id"`
-			} `json:"work_item"`
+				ID string `json:"id,case:strict"`
+			} `json:"work_item,case:strict"`
 		}
 		switch {
 		case json.Unmarshal(doc.Inputs, &in) != nil:

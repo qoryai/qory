@@ -358,7 +358,7 @@ func suiteResults(t *testing.T, spec *session.SessionSpec) func() (*session.Resu
 	}
 }
 
-// fullSuiteAnswer is laterAnswer with full_suite true.
+// fullSuiteAnswer is laterAnswer with full_suite true in type_settings.
 func fullSuiteAnswer(n int, minutes int) string {
 	return strings.Replace(laterAnswer(n, "claude", "example-provider-2", minutes), `"full_suite":false`, `"full_suite":true`, 1)
 }

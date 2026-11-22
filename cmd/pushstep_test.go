@@ -1372,6 +1372,25 @@ func TestTheVerdictIsTheOneThisRunWrote(t *testing.T) {
 
 }
 
+// TestAVerdictOfAnUnknownKindIsSentUnchanged is a work item whose newest verdict this run wrote
+// with a kind that this qory does not know: the submission has the kind as it is, and the
+// repository has no draft, because the kind is not passed.
+func TestAVerdictOfAnUnknownKindIsSentUnchanged(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.api.verdict = "approve-spend"
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	doc := p.api.document(t, 1)
+	if doc.Verdict != "approve-spend" {
+		t.Errorf("the verdict is %q, want approve-spend", doc.Verdict)
+	}
+	for _, repo := range doc.Repositories {
+		if !bytes.Equal(repo.Draft, submission.None(submission.NoneNotPassed, 0)) {
+			t.Errorf("the draft is %s, want none not-passed", repo.Draft)
+		}
+	}
+}
+
 // TestAVerdictOfAnotherRunIsNone is a work item whose newest verdict another run wrote: the
 // stored version has the verdict none.
 func TestAVerdictOfAnotherRunIsNone(t *testing.T) {

@@ -8,7 +8,7 @@ What `qory harness compose` reads and what it writes.
 |---|---|---|
 | `qory-stack.yaml` | a directory that `extends` or `-f` selects; an ancestor directory covering several repositories; the root of the harness repository that delivers it | a stack delivered to be extended: the ordered modules, the excludes, what a checkout extending it may add and the runtimes and models it is written for |
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
-| `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use and the submit step of a run. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
+| `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use, the schema of a run's type settings and the submit step of a run. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | a role contract | optional; a file of a module that declares an agents role, at the path that `roles.agents.<role>.contract` in the module's `qory-module.yaml` is set to | the parts an agent needs to fill the role: level-2 headings, front-matter keys, tools, a tier, and the form of its report (§The role contract). The compose checks every agent that fills the role against it; the harness's checks read the report's form |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for, the modules it appends and the workflow hooks it adds, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
 | a submission document | the file of a version of the structured artifact type `submission` | what a run submits for a work item: its branch, the commits in each repository, the verdict and the draft pull request (§The submission format). No compose reads it |
@@ -604,7 +604,8 @@ A module that `exports.modules` lists and that has a `process.yaml` at its folde
 a factory. The file is a process template: the texts, the workspace type, the stack and
 the process that a workspace made from it starts with
 ([process.schema.json](process.schema.json)). It may also list the artifact types its
-workspaces use, and declare the submit step of a run. Every command that reads the
+workspaces use, register the schema of a run's type settings, and declare the submit step
+of a run. Every command that reads the
 configuration checks the file, once it finds each export. A module without the file is
 not checked for it.
 
@@ -646,6 +647,11 @@ artifact_types:                  # optional; the artifact types the workspaces u
       required: [customer]
       properties:
         customer: {type: string}
+type_settings:                   # optional; the schema of a run's type settings
+  json_schema:
+    type: object
+    properties:
+      tone: {enum: [formal, friendly]}
 ```
 
 | Key | Meaning |
@@ -658,9 +664,10 @@ artifact_types:                  # optional; the artifact types the workspaces u
 | `stack` | the stack the workspace's workflows run on, one that `exports.stacks` of the same repository lists |
 | `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`; that each `workflow` of a stage's `sequence`, a loop's `body` included, is a non-empty string of one line of text that the stack's `qory-stack.yaml` declares under `workflows`; and that each stage `name` is one line of text. A stage may have `outputs`, a list of objects with `type`, the name of an entry of `artifact_types`, which qory checks with the stage and the type in the message, and that the stage lists each type once, and `required`, `true` or `false`, and `false` when left out; an output has no other key. qory checks nothing else in it |
 | `artifact_types` | optional; the list of the artifact types the workspaces use, as [Artifact types](#artifact-types) has it. A list with no entries is valid |
+| `type_settings` | optional; the JSON Schema of a run's type settings, as [Type settings](#type-settings) has it |
 | `submit` | optional; the submit step of a run, as [The submit step](#the-submit-step) has it |
 
-Every key but `artifact_types` and `submit` is required, and the file has no other key. A key left out, a text over its
+Every key but `artifact_types`, `type_settings` and `submit` is required, and the file has no other key. A key left out, a text over its
 limit, a `stack` that `exports.stacks` does not list, and a `process` that is not such an
 object are refused with the file and the fix in the message: the fix is the first line, and the file is on the
 last line, so a long path never pushes the fix past 98 characters. Each
@@ -729,8 +736,8 @@ directory into a `process.yaml`, write each such pair as the escape `\UXXXXXXXX`
 character in a double-quoted string, such as `\U000E0041` for `\udb40\udc41`. A
 `json_schema` has at most 65,536 bytes as compact JSON, 4096 values in all,
 1024 entries in a list, 1024 members in an object, 16,384 bytes in a string or a member
-name, and 64 lists and objects nested in one another. The patterns of all custom types in
-one `process.yaml` are at most 16 MiB by qory's estimate from each pattern's parts: a
+name, and 64 lists and objects nested in one another. The patterns of all JSON Schemas in
+one `process.yaml`, those of the custom types and of `type_settings`, are at most 16 MiB by qory's estimate from each pattern's parts: a
 group repeated 1000 times counts 1000 times. qory parses each pattern and compiles none.
 
 An entry that breaks a rule stops the command with a refusal that has the file and the
@@ -740,6 +747,36 @@ fix, such as:
 Add size_limit and max_files to artifact type reply-draft, or leave only its name.
   A custom type has base_view, size_limit, and max_files.
   The type is in /src/acme-harness/harness/modules/support-desk/process.yaml.
+```
+
+#### Type settings
+
+`type_settings` registers the JSON Schema of the type settings of a run: the settings that
+belong to the workspace type, which Qory Apiary sends as `type_settings` in the run
+documents. `type_settings` is an object with `json_schema` and no other key. Without it,
+the template registers no schema for them. A software factory's schema requires
+`full_suite`, whether a session runs the full test suite:
+
+```yaml
+type_settings:
+  json_schema:
+    type: object
+    required: [full_suite]
+    properties:
+      full_suite: {type: boolean}
+```
+
+qory checks `json_schema` as it checks the `json_schema` of an artifact type, with the
+same drafts and limits, see [Artifact types](#artifact-types). qory checks no run's type
+settings against it: Qory Apiary checks them when it writes the run documents. A
+`type_settings` that breaks a rule stops the command with a refusal of three lines: the
+fix, the cause, and the file. When the fix line shortens a long key, a fourth line has
+the key's full name:
+
+```text
+Fix json_schema of type_settings so that it compiles as a JSON Schema.
+  The schema does not compile: at '/type': value must be one of 'array', 'boolean', 'integer', 'null', 'number', 'object', 'string'; at '/type': got string, want array
+  type_settings is in /src/acme-harness/harness/modules/support-desk/process.yaml.
 ```
 
 #### The submit step
@@ -823,7 +860,7 @@ writes it, after the push. This is version 1 of the format
 | Member | Meaning |
 |---|---|
 | `ref` | the branch's name, the same in each repository: `qory/` followed by the work item's id |
-| `verdict` | the work item's newest verdict, when this run wrote it: `passed`, `changes-requested`, `escalate`, or `none` |
+| `verdict` | the work item's newest verdict, when this run wrote it: `passed`, `changes-requested`, `escalate`, another kind in the form of the verdict format, or `none` |
 | `text` | the title and the description of the draft pull request, from the session's hand-off file. The title is a `title` of the primitives, 1 to 256 characters; the description is a `text` of the primitives, at most 20,000 characters. Absent when the session wrote none |
 | `repositories` | each repository with the commit of the branch in it, at least one |
 | `system` | the host the repository is on, a lower-case host name of at most 253 characters |
@@ -1022,10 +1059,10 @@ stores it as a version of the artifact type `verdict`. This is version 1 of the 
 
 | Member | Meaning |
 |---|---|
-| `verdict` | `passed`: the work meets the bar; `changes-requested`: the work needs another round; `escalate`: a person must act |
-| `points` | what is wrong or missing, 1 to 20 points: required with `escalate`, optional with `changes-requested`, where each point has the action `run_again`, and absent with `passed` |
+| `verdict` | `passed`: the work meets the bar; `changes-requested`: the work needs another round; `escalate`: a person must act. A later version of the format may add a kind in the same form: a lower-case letter, then lower-case letters, digits and hyphens, at most 64 characters. A reader passes a kind it does not know on unchanged |
+| `points` | what is wrong or missing, 1 to 20 points: required with `escalate`, optional with `changes-requested`, where each point has the action `run_again`, absent with `passed`, and optional with another kind |
 | `text` | what is wrong or missing, in one plain sentence for a person on one line, 1 to 500 characters, with no action and no question id, because Qory Apiary adds the action from `action`: it has no control character, so no tab, line feed or carriage return, and the schema's `$defs` `line`, the `line` of the primitives, stops the other characters a line cannot have |
-| `action` | `answer`: a person answers the question in `question`, only with `escalate`; `run_again`: another round runs, and with `escalate` a person runs it |
+| `action` | `answer`: a person answers the question in `question`, only with `escalate`; `run_again`: another round runs, and with `escalate` a person runs it. A later version of the format may add an action in the same form: a lower-case letter, then lower-case letters, digits and underscores, at most 64 characters. A reader passes an action it does not know on unchanged, and the format sets no rule for `question` and `fix` with it |
 | `question` | the id of an open question in the work item's newest `questions` version, in the id form of the questions format: required with `answer`, and absent with `run_again` |
 | `fix` | what a person does to fix the point, in one plain sentence on one line, with the rules of `text`: optional with `run_again`, and absent with `answer`. Qory Apiary shows it in place of the sentence of the action `run_again` |
 | `track` | the track the run proposes for the work item: optional with a verdict of any kind, an object with the members `id` and `reason` and no other. A verdict with no track proposes none. Qory Apiary returns 422 for a track that the gate of the run's stage does not offer |
@@ -1039,7 +1076,8 @@ A `changes-requested` verdict may list what the next round fixes:
  "points": [{"text": "The checks script failed on the spec's links.", "action": "run_again"}]}
 ```
 
-`qory run verdict` sends points only with `escalate`.
+`qory run verdict` sends points only with `escalate`. It takes only the kinds `passed`,
+`changes-requested` and `escalate`, and only the actions `answer` and `run_again`.
 
 A verdict of any kind may propose a track:
 

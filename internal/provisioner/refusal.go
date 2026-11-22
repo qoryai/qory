@@ -169,27 +169,49 @@ func (r *Refusal) Is(target error) bool {
 	return ok && r.Signed && r.Status == c.status && r.Code == c.code && slices.Contains(refusalsOf[r.kind], target)
 }
 
-// EndsAttempts reports whether err, the error of a machine end, ends the attempts to
-// send that machine end for the dispatch: a signed 400, 403 or 404, since the same call
-// sent again cannot succeed. After any other error, no answer, an unsigned answer, a 401
-// among them, a signed 429 or a signed 503 unavailable, the machine end gone is sent
-// again, built anew.
+// EndsAttempts reports whether err, the error of a machine end or a release, ends the
+// attempts to send that request for the dispatch: a signed 400, 403 or 404, since the
+// same call sent again cannot succeed. A machine end stops on such a status whether its
+// body is read or not. Any other request stops on a 403 only when it is [ErrForbidden]:
+// a 403 that is [Unread] changes nothing, and the request is sent again. After any other
+// error, no answer, an unsigned answer, a 401 among them, a signed 429 or a signed 503
+// unavailable, the request is sent again, built anew.
 func EndsAttempts(err error) bool {
 	r, ok := errors.AsType[*Refusal](err)
 	if !ok || !r.Signed || r.TooLarge {
 		return false
 	}
 	switch r.Status {
-	case http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound:
+	case http.StatusBadRequest, http.StatusNotFound:
 		return true
+	case http.StatusForbidden:
+		return r.kind == kindMachineEnd || r.Is(ErrForbidden)
 	}
 	return false
 }
 
+// Unread reports whether err is a signed 403 or 409 to a request other than a machine
+// end that is none of the refusals the request's schema gives: its body did not read as
+// refusal.schema.json, its must_understand lists a member that qory does not read, or
+// its code is not one the request gets with that status. The contract's rule for such an
+// answer is to act on its status alone: change nothing, and send the request again at
+// the next check.
+func Unread(err error) bool {
+	r, ok := errors.AsType[*Refusal](err)
+	if !ok || !r.Signed || r.TooLarge || r.kind == kindMachineEnd {
+		return false
+	}
+	if r.Status != http.StatusForbidden && r.Status != http.StatusConflict {
+		return false
+	}
+	return !slices.ContainsFunc(refusalsOf[r.kind], r.Is)
+}
+
 // refused is the [*Refusal] of a signed answer that is not the one wanted, or
 // [ErrAnswerUnusable] for a success status the request is not given. Its code is read
-// only from a body that is one JSON document refusal.schema.json accepts; any other
-// body, and a code that contains what looks like a secret, gives none. A 429's Retry-After
+// only from a body that is one JSON document refusal.schema.json accepts, whose
+// must_understand lists only /error; any other body, and a code that contains what looks
+// like a secret, gives none, and the pool acts on the status alone. A 429's Retry-After
 // is read from a second to an hour.
 func (c *Client) refused(what string, k kind, ans *answer) error {
 	if ans.status >= 200 && ans.status < 300 {
@@ -197,7 +219,7 @@ func (c *Client) refused(what string, k kind, ans *answer) error {
 	}
 	r := &Refusal{What: what, Status: ans.status, Signed: ans.signed, Resent: ans.resent, kind: k}
 	var doc struct {
-		Error string `json:"error"`
+		Error string `json:"error,case:strict"`
 	}
 	if readAnswer("refusal.schema.json", ans.body, &doc) == nil && !containsSecret(doc.Error) {
 		r.Code = doc.Error

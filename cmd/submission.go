@@ -19,6 +19,7 @@ import (
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/submission"
+	"github.com/qoryai/qory/internal/verdictformat"
 )
 
 // handoffEnv is the variable that gives a session the path of its hand-off file, and
@@ -270,8 +271,7 @@ func notTitleRune(r rune) bool { return !submission.TitleRune(r) }
 // The spaces are the ones that the contract's draft_title rule lists (U+0020, U+00A0, U+1680,
 // U+2000 to U+200A, U+202F, U+205F and U+3000), which are the characters that [unicode.IsSpace]
 // passes once controls and U+2028 and U+2029 are out. U+200C and U+200D pass [submission.TitleRune]
-// but show nothing alone. The pinned contract still accepts a title of only these, see
-// TestAHandoffTitleOfInvisibleCharactersIsTheKnownDifferenceFromThePinnedContract.
+// but show nothing alone, and the contract's draft_title rule stops a title of only these.
 func visibleTitle(title string) bool {
 	return strings.ContainsFunc(title, func(r rune) bool { return !unicode.IsSpace(r) && r != '\u200c' && r != '\u200d' })
 }
@@ -349,8 +349,9 @@ func (h *handoff) text() *submission.Text {
 }
 
 // newestVerdict is the verdict of the work item as the submission names it, from the run
-// API: the newest verdict, when this run wrote it, and none otherwise. A verdict that the
-// submission format does not name is none.
+// API: the newest verdict, when this run wrote it, and none otherwise. A kind that this
+// qory does not know is returned unchanged, and a caller takes any kind but passed as not
+// passed. A verdict that is not in the form of a kind is none.
 func newestVerdict(ctx context.Context, client *runapi.Client, runID string) (string, error) {
 	snapshot, err := client.WorkItem(ctx)
 	if err != nil {
@@ -366,7 +367,7 @@ func newestVerdict(ctx context.Context, client *runapi.Client, runID string) (st
 	for _, artifact := range index.Artifacts {
 		for _, v := range artifact.Versions {
 			if v.ID == snapshot.Verdict.Version.ID && v.Writer.Kind == "run" && v.Writer.RunID == runID {
-				if slices.Contains([]string{submission.VerdictPassed, submission.VerdictChangesRequested, submission.VerdictEscalate}, snapshot.Verdict.Verdict) {
+				if verdictformat.ValidKind(snapshot.Verdict.Verdict) {
 					return snapshot.Verdict.Verdict, nil
 				}
 			}

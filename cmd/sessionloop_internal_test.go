@@ -36,7 +36,7 @@ func sharedCodeRun(t *testing.T) *codeRun {
 		Modules: []contracts.HarnessModule{{Name: "tools", Source: contracts.HarnessSource{Git: "https://code.example.com/team/tools.git", Ref: "main"}}},
 		Workflows: map[string]contracts.HarnessWorkflow{
 			"example":                 {Access: "write"},
-			"write-acceptance-checks": {Access: "write", Tier: "thinking"},
+			"write-acceptance-checks": {Access: "write", Plan: "build-plan", Tier: "thinking"},
 		},
 	}}
 	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{"version":1}`), Harness: h, Workflow: "example", SharedRun: true, TimeLimitMinutes: 120, RunSettings: &contracts.RunSettings{Runtime: "claude", Model: "example-small"}})
@@ -50,8 +50,9 @@ func sharedCodeRun(t *testing.T) *codeRun {
 // next-session answer starts write-acceptance-checks on codex with the model
 // example-large, its tiers, the key example-provider-1, 60 minutes and no full suite: the
 // run's runtime, compose flags, harness, workflow, inputs, key, limit and suite are the
-// answer's, and the harness's target is codex, with the workflow's tier kept. The compose flags of an answer with no
-// model choice keep the documents' runtime and set no model.
+// answer's, and the harness's target is codex, with each workflow's plan and tier. The
+// compose flags of an answer with no model choice keep the documents' runtime and set no
+// model.
 func TestALaterSessionTakesItsAnswersRuntimeWorkflowAndKey(t *testing.T) {
 	r := sharedCodeRun(t)
 	if !r.shared || r.modelCredential != "" {
@@ -76,7 +77,7 @@ func TestALaterSessionTakesItsAnswersRuntimeWorkflowAndKey(t *testing.T) {
 	if err := json.Unmarshal(r.harness, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.Harness.Target.Runtime != "codex" || doc.Harness.Workflows["write-acceptance-checks"].Tier != "thinking" {
+	if w := doc.Harness.Workflows["write-acceptance-checks"]; doc.Harness.Target.Runtime != "codex" || w.Plan != "build-plan" || w.Tier != "thinking" {
 		t.Errorf("session 2's harness.yaml has:\n%s", r.harness)
 	}
 	var o composeOptions
@@ -95,6 +96,35 @@ func TestALaterSessionTakesItsAnswersRuntimeWorkflowAndKey(t *testing.T) {
 	r.applyTo(&o)
 	if o.model != "" || o.effort != "" || o.tiers != nil || o.tierEfforts != nil {
 		t.Errorf("session 3's compose flags: model %q, effort %q, tiers %q, tier efforts %q", o.model, o.effort, o.tiers, o.tierEfforts)
+	}
+}
+
+// TestALaterSessionKeepsAHarnessThatExtendsAStack is a run of claude whose harness
+// document extends a stack, and whose next-session answer starts a session on codex: the
+// harness.yaml of session 2 is the document as it came, with no target.runtime, as
+// session 1 has it.
+func TestALaterSessionKeepsAHarnessThatExtendsAStack(t *testing.T) {
+	h := &contracts.HarnessDocument{Harness: contracts.HarnessSection{
+		Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7", Path: "stacks/core"},
+		Modules: []contracts.HarnessModule{{Name: "tools", Source: contracts.HarnessSource{Git: "https://code.example.com/team/tools.git", Ref: "main"}}},
+	}}
+	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{"version":1}`), Harness: h, Workflow: "example", SharedRun: true, RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.MarshalIndent(h, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, '\n')
+	if string(r.harness) != string(want) {
+		t.Fatalf("session 1's harness.yaml has:\n%s\nwant:\n%s", r.harness, want)
+	}
+	if err := r.next(nextAnswerFixture(t, "session-runtime-with-model.json")); err != nil {
+		t.Fatal(err)
+	}
+	if r.runtime != "codex" || string(r.harness) != string(want) {
+		t.Errorf("session 2 on %q has the harness.yaml:\n%s\nwant:\n%s", r.runtime, r.harness, want)
 	}
 }
 

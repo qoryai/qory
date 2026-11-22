@@ -704,7 +704,7 @@ func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 // run from a run code runs on, claude and codex, exit 1. codeDocumentsOf refuses explore documents with no run
 // settings, null ones, or run settings whose runtime is missing, empty or null, before
 // the schema check, since explore starts an agent session, and leaves a prebuild's
-// documents to that check.
+// documents to that check. A step or run_settings member in another case is not read.
 func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
 	want := "The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of claude and codex."
 	for name, settings := range map[string]*contracts.RunSettings{"no run settings": nil, "no runtime": {Model: "opus"}} {
@@ -727,6 +727,9 @@ func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
 		{`{"step":"explore"}`, false},
 		{`{"step":"prebuild","run_settings":{}}`, false},
 		{`{"step":"prebuild"}`, false},
+		{`{"STEP":"workflow","step":"prebuild","run_settings":{}}`, false},
+		{`{"step":"workflow","RUN_SETTINGS":{"runtime":"codex"}}`, true},
+		{`{"step":"workflow","run_settings":{"runtime":"codex"},"RUN_SETTINGS":{}}`, false},
 	} {
 		if got := lacksRuntime(json.RawMessage(c.documents)); got != c.lacks {
 			t.Errorf("%s: lacksRuntime is %v", c.documents, got)
@@ -817,18 +820,25 @@ func TestARunWritesOnlyWithAccessWriteInItsDocuments(t *testing.T) {
 	}
 }
 
-// TestFullSuiteOfTheDocumentsIsTheRunsFullSuite: codeRunOf takes full_suite of the documents; a
-// document with false or none gives false.
+// TestFullSuiteOfTheDocumentsIsTheRunsFullSuite: codeRunOf takes full_suite of the documents'
+// type_settings. fullSuite is false for a document with false, with none, with one that is not
+// a boolean, with a member name in another case, or with no type_settings.
 func TestFullSuiteOfTheDocumentsIsTheRunsFullSuite(t *testing.T) {
-	yes, no := true, false
 	for _, c := range []struct {
-		name string
-		full *bool
-		want bool
-	}{{"true", &yes, true}, {"false", &no, false}, {"absent", nil, false}} {
+		name     string
+		settings string
+		want     bool
+	}{
+		{"true", `{"full_suite":true}`, true},
+		{"false", `{"full_suite":false}`, false},
+		{"absent", `{}`, false},
+		{"not a boolean", `{"full_suite":"true"}`, false},
+		{"another case", `{"Full_Suite":true}`, false},
+		{"no type_settings", "", false},
+	} {
 		doc := contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}}
-		if c.full != nil {
-			doc.FullSuite = *c.full
+		if c.settings != "" {
+			doc.TypeSettings = json.RawMessage(c.settings)
 		}
 		r, err := codeRunOf(doc)
 		if err != nil {
