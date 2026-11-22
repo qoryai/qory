@@ -955,7 +955,7 @@ func TestLaunchFetchErrors(t *testing.T) {
 	}{
 		{func(e *env) { e.script.Open, e.script.Record = "fail", false }, "check that this machine reaches the run's gateway: the run did not open there: the gateway refused the run request: run_not_found"},
 		{func(e *env) { e.script.HostProxy = "fail" }, "check that qory run can listen on a port of 127.0.0.1: the run's host proxy, through which qory run fetches the run's code, did not open: listen tcp 127.0.0.1:0: no port"},
-		{func(e *env) { e.script.Fetch = "none" }, "the run's target is not a repository on github.com; a prebuild builds a repository"},
+		{func(e *env) { e.script.Fetch = "none" }, "The run's target is not a repository on github.com; a prebuild builds a repository"},
 		{func(e *env) { e.script.Close = "fail" }, "update qory: the run could not be closed: the run is closed already"},
 		{func(e *env) { e.script.Close = "gateway" }, "check the run's record in Qory Apiary: the gateway closed the run as failed before qory run closed it"},
 	} {

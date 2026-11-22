@@ -235,17 +235,17 @@ func TestDestinationCloneStopsOnMalformedDestinations(t *testing.T) {
 		cause        string
 	}{
 		{"acme/web", "destinations is not an array of objects"},
-		{[]any{destinationOf("tg_web000000000000i", "acme/web")}, "entry 1 breaks the schema of a destination at /id"},
+		{[]any{destinationOf("tg_web000000000000i", "acme/web")}, "entry 1 does not match the schema of a destination at /id"},
 		{[]any{destinationOf(webID, "acme/web"), destinationOf(webID, "acme/back")}, "entry 2 has the id of an entry before it"},
-		{[]any{map[string]any{"id": webID, "target": map[string]any{}}}, "entry 1 breaks the schema of a destination at /target"},
-		{[]any{map[string]any{"id": webID, "target": map[string]any{"collection": "c", "address": map[string]any{"system": "Git.test", "path": "acme/web"}}}}, "entry 1 breaks the schema of a destination at /target/address/system"},
-		{[]any{destinationOf(webID, "acme/\x00web")}, "entry 1 breaks the schema of a destination at /target/address/path"},
+		{[]any{map[string]any{"id": webID, "target": map[string]any{}}}, "entry 1 does not match the schema of a destination at /target"},
+		{[]any{map[string]any{"id": webID, "target": map[string]any{"collection": "c", "address": map[string]any{"system": "Git.test", "path": "acme/web"}}}}, "entry 1 does not match the schema of a destination at /target/address/system"},
+		{[]any{destinationOf(webID, "acme/\x00web")}, "entry 1 does not match the schema of a destination at /target/address/path"},
 		// The schema stops what the earlier checks of qory let through: a { in a path,
 		// U+0000 in a collection, two equal entries, and more than 250 entries.
-		{[]any{destinationOf(backID, "acme/back"), destinationOf(webID, "acme/{web}")}, "entry 2 breaks the schema of a destination at /target/address/path"},
-		{[]any{map[string]any{"id": webID, "target": map[string]any{"collection": "c\x00"}}}, "entry 1 breaks the schema of a destination at /target/collection"},
-		{[]any{destinationOf(webID, "acme/web"), destinationOf(webID, "acme/web")}, "destinations breaks explore/v1 inputs.schema.json#/properties/destinations"},
-		{slices.Repeat([]any{destinationOf(webID, "acme/web")}, 251), "destinations breaks explore/v1 inputs.schema.json#/properties/destinations"},
+		{[]any{destinationOf(backID, "acme/back"), destinationOf(webID, "acme/{web}")}, "entry 2 does not match the schema of a destination at /target/address/path"},
+		{[]any{map[string]any{"id": webID, "target": map[string]any{"collection": "c\x00"}}}, "entry 1 does not match the schema of a destination at /target/collection"},
+		{[]any{destinationOf(webID, "acme/web"), destinationOf(webID, "acme/web")}, "destinations does not match explore/v1 inputs.schema.json#/properties/destinations"},
+		{slices.Repeat([]any{destinationOf(webID, "acme/web")}, 251), "destinations does not match explore/v1 inputs.schema.json#/properties/destinations"},
 	} {
 		c.inputs(t, k.destinations)
 		_, err := run(t, "destination", "clone", webID)

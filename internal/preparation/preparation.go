@@ -107,9 +107,13 @@ const (
 	textTooLong  = "qory run: shorten %s to %d bytes or fewer"
 	textNotEmpty = "qory run: start the run in an empty git working tree: the working folder contains files already, and the run's repository is fetched only into an empty one"
 	// textNotEmptyReads and textNotTreeReads are textNotEmpty and textNotTree of a run
-	// with read targets and no repository in the working folder.
-	textNotEmptyReads  = "qory run: start the run in an empty git working tree: the working folder contains files already\n  qory fetches the read-only repositories only into an empty one."
-	textNotTreeReads   = "qory run: start the run in an empty folder or an empty git working tree\n  The working folder is neither, and qory fetches the read-only repositories only into one of these."
+	// from a run code with read targets and no repository in the working folder: the
+	// cause alone, since the run is a dispatched one.
+	textNotEmptyReads = "qory run: The working folder contains files, so the run did not start; the code is used\n  qory fetches the read-only repositories only into an empty folder."
+	textNotTreeReads  = "qory run: The working folder has files and no .git, so the run did not start; the code is used\n  qory fetches the read-only repositories only into an empty folder or an empty git working tree."
+	// textSetupTooLong is the stop of [Prepare] on a list over its bound, which qory sets
+	// from the documents of a run code: the cause alone.
+	textSetupTooLong   = "qory run: The run's repository list is longer than %d bytes, so the setup did not start"
 	textNotFetched     = "qory run: add a credential for %s that reads %s to the run configuration, then run again. The fetch of %s through the run's gateway failed: %s"
 	textNotReached     = "qory run: check that the run's policy allows %[1]s and that %[1]s is reachable, then run again. The fetch of %[2]s through the run's gateway failed: %[3]s"
 	textNoBranch       = "qory run: give %s on %s a default branch with a commit, then run again. The fetch through the run's gateway failed: %s"
@@ -164,8 +168,8 @@ const (
 	textReadOtherSystem = "qory run: A read target is on another host, so the run did not start; the code is used\n  The read target %[1]s is on %[2]s, and the run's repositories are on %[3]s."
 	textReadOtherOwner  = "qory run: A read target is of another owner, so the run did not start; the code is used\n  The read target %[1]s is of owner %[2]s, and on github.com the repositories of a run are of one owner, %[3]s."
 	textReadNested      = "qory run: A read target is inside another, so the run did not start; the code is used\n  The read target %[1]s is inside the read target %[2]s, and qory clones no repository inside another."
-	textKeptNoTarget    = "qory run: The working folder has .qory/repositories, so the run did not start; the code is used\n  qory clones the read-only repositories there, and nothing is cloned over it."
-	textQoryNoTarget    = "qory run: The working folder's .qory is not a folder, so the run did not start; the code is used\n  qory clones the read-only repositories into a folder there, and nothing is cloned over a file or a link."
+	textKeptReads       = "qory run: The working folder has .qory/repositories, so the run did not start; the code is used\n  qory clones the read-only repositories there, and nothing is cloned over it."
+	textQoryReads       = "qory run: The working folder's .qory is not a folder, so the run did not start; the code is used\n  qory clones the read-only repositories into a folder there, and nothing is cloned over a file or a link."
 	// textNoDefault, textNoCommits, textNotBranch, textStopped and textCut stand for
 	// git's line in [textNotFetched] and [textGitFailed]: a remote with refs that names
 	// no default branch, a remote with no refs at all, a default branch that is no
@@ -383,7 +387,7 @@ func fetchRepositories(ctx context.Context, dir string, base []string, getenv fu
 		shown = shortCommit(strings.TrimSpace(head))
 	}
 	if len(further) > 0 {
-		if err := keepRepositories(dir, working); err != nil {
+		if err := keepRepositories(dir, working, at.FromCode); err != nil {
 			return false, err
 		}
 		if err := exclude(ctx, g, dir); err != nil {
@@ -837,20 +841,21 @@ func defaultBranch(out string) string {
 // keepRepositories stops on a run repository, path, that has a .qory that is not a
 // directory, a file or a link a clone would follow, and on one that has anything at
 // [Repositories], tracked or not. With path "", a list with no target's repository, see
-// [Target.Repositories], it stops on the same in the working folder.
-func keepRepositories(dir, path string) error {
+// [Target.Repositories], it stops on the same in the working folder. For a run from a run
+// code, code, the stops are [textQoryReads] and [textKeptReads], the cause alone.
+func keepRepositories(dir, path string, code bool) error {
 	shown := integration.Printable(exports.Value(path, false))
 	if fi, err := os.Lstat(filepath.Join(dir, checkout.Dir)); err == nil && !fi.IsDir() {
-		if path == "" {
-			return errors.New(textQoryNoTarget)
+		if code {
+			return errors.New(textQoryReads)
 		}
 		return fmt.Errorf(textQoryNotDir, shown)
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return local(err)
 	}
 	if _, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(Repositories))); err == nil {
-		if path == "" {
-			return errors.New(textKeptNoTarget)
+		if code {
+			return errors.New(textKeptReads)
 		}
 		return fmt.Errorf(textKept, shown)
 	} else if !errors.Is(err, os.ErrNotExist) {

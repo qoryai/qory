@@ -102,7 +102,7 @@ const (
 
 // The words of the fetch and of the close. Each is one format string.
 const (
-	textNoTarget     = "the run's target is not a repository on %s; a prebuild builds a repository"
+	textNoTarget     = "The run's target is not a repository on %s; a prebuild builds a repository"
 	textNoKey        = "give the prebuild its run key: it has none"
 	textNotOpened    = "check that this machine reaches the run's gateway: the run did not open there: %s"
 	textNoHostProxy  = "check that qory run can listen on a port of 127.0.0.1: the run's host proxy, through which qory run fetches the run's code, did not open: %s"

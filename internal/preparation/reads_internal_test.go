@@ -2,6 +2,7 @@ package preparation
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -372,7 +373,7 @@ func TestTheSetupTakesTheLongestListOfARunCode(t *testing.T) {
 		t.Errorf("Prepare returned %v, %v; want the list taken", listed, err)
 	}
 	_, err = Prepare(t.Context(), t.TempDir(), "", env("git.example.com", list+"x"), io.Discard)
-	if want := "qory run: shorten QORY_RUN_REPOSITORIES to 4220 bytes or fewer"; err == nil || err.Error() != want {
+	if want := "qory run: The run's repository list is longer than 4220 bytes, so the setup did not start"; err == nil || err.Error() != want {
 		t.Errorf("one byte more gave %v, want %q", err, want)
 	}
 	// A run configuration's list keeps the bound of 256 bytes at the fetch.
@@ -384,4 +385,36 @@ func TestTheSetupTakesTheLongestListOfARunCode(t *testing.T) {
 // longPath is acme/ and a name of c, a repository path of [maxPath] characters.
 func longPath(c rune) string {
 	return "acme/" + strings.Repeat(string(c), maxPath-len("acme/"))
+}
+
+// TestARunCodesKeptRepositoriesStopsNameTheReadOnlyRepositories is [keepRepositories] on a
+// working folder with a .qory file and on one with .qory/repositories: a run from a run
+// code, with a target or none, stops with the cause alone about the read-only repositories,
+// and any other run with the fix for its repository.
+func TestARunCodesKeptRepositoriesStopsNameTheReadOnlyRepositories(t *testing.T) {
+	qoryFile := func(dir string) { write(t, filepath.Join(dir, ".qory"), "a file\n") }
+	kept := func(dir string) {
+		if err := os.MkdirAll(filepath.Join(dir, ".qory", "repositories"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []struct {
+		name  string
+		setup func(string)
+		path  string
+		code  bool
+		want  string
+	}{
+		{".qory a file, a run code with a target", qoryFile, "acme/shop", true, textQoryReads},
+		{".qory a file, a run code with no target", qoryFile, "", true, textQoryReads},
+		{".qory a file, another run", qoryFile, "acme/shop", false, fmt.Sprintf(textQoryNotDir, "acme/shop")},
+		{"repositories kept, a run code with a target", kept, "acme/shop", true, textKeptReads},
+		{"repositories kept, another run", kept, "acme/shop", false, fmt.Sprintf(textKept, "acme/shop")},
+	} {
+		dir := t.TempDir()
+		c.setup(dir)
+		if err := keepRepositories(dir, c.path, c.code); err == nil || err.Error() != c.want {
+			t.Errorf("%s: %v, want %q", c.name, err, c.want)
+		}
+	}
 }

@@ -179,20 +179,20 @@ func brokenDestinations(e *jsonschema.ValidationError) error {
 		e = e.Causes[0]
 	}
 	if len(e.InstanceLocation) == 0 {
-		return fmt.Errorf("destinations breaks explore/v1 %s", destinationsSchemaName)
+		return fmt.Errorf("destinations does not match explore/v1 %s", destinationsSchemaName)
 	}
 	entry, err := strconv.Atoi(e.InstanceLocation[0])
 	if err != nil {
-		return fmt.Errorf("destinations breaks explore/v1 %s", destinationsSchemaName)
+		return fmt.Errorf("destinations does not match explore/v1 %s", destinationsSchemaName)
 	}
 	at := ""
 	for _, part := range e.InstanceLocation[1:] {
 		at += "/" + integration.Printable(part)
 	}
 	if at == "" {
-		return fmt.Errorf("entry %d breaks the schema of a destination", entry+1)
+		return fmt.Errorf("entry %d does not match the schema of a destination", entry+1)
 	}
-	return fmt.Errorf("entry %d breaks the schema of a destination at %s", entry+1, at)
+	return fmt.Errorf("entry %d does not match the schema of a destination at %s", entry+1, at)
 }
 
 // shownID is arg, an argument of qory destination clone, as a line shows it: printable,

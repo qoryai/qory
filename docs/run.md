@@ -2241,9 +2241,9 @@ run code. The read targets follow these rules:
 - With read targets and no target on `QORY_RUN_SYSTEM`, the working folder gets no
   repository: each read target goes under `.qory/repositories`, the working folder stays an
   empty repository, and the run pushes nothing. A working folder with files stops the run
-  with `start the run in an empty git working tree: the working folder contains files
-  already`, or `start the run in an empty folder or an empty git working tree` when it has
-  no `.git`.
+  with `The working folder contains files, so the run did not start; the code is used`, or
+  `The working folder has files and no .git, so the run did not start; the code is used`
+  when it has no `.git`.
 - A run with no `QORY_RUN_SYSTEM`, such as one of a workspace that is not a software
   factory, fetches no read target: its read targets are places in another system, and the
   run goes on.
