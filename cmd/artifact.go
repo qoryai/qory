@@ -179,7 +179,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 
 				shown, err := sourcetext.EscapeJSON(snapshot.Raw)
 				if err != nil {
-					return fmt.Errorf("Contact support: the run API sent a work item that is not valid JSON text.\n  %w", err)
+					return fmt.Errorf("The run API sent a work item that is not valid JSON text.\n  %w", err)
 				}
 
 				_, err = fmt.Fprintln(c.OutOrStdout(), string(shown))
@@ -350,7 +350,7 @@ func pullArtifacts(c *cobra.Command, client *runapi.Client, artifactType string,
 
 	shown, err := sourcetext.EscapeJSON(index.Raw)
 	if err != nil {
-		return fmt.Errorf("Contact support: the run API sent an artifact index that is not valid JSON text.\n  %w", err)
+		return fmt.Errorf("The run API sent an artifact index that is not valid JSON text.\n  %w", err)
 	}
 
 	if err := store.writeIndex(shown); err != nil {

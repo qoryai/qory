@@ -2921,9 +2921,10 @@ doubles. Then:
 - Every other refusal of Qory Apiary's, a status below 500 other than 429 with no refusal,
   no answer after 10 minutes, an answer outside `next-session-answer.schema.json`, or an
   answer whose `must_understand` lists a member that qory does not read: the run closes
-  `failed`, exit 1, with a line that starts with its fix, such as `qory run: Contact
-  support: the next-session request after session <n> failed.`, then `Qory Apiary returned
-  <status>: <message or code>`. An answer with `"branch": "main"` and `"must_understand":
+  `failed`, exit 1, with no end code as the reason. A refusal of Qory Apiary's prints the
+  cause alone, `qory run: The next-session request after session <n> failed.`, then `Qory
+  Apiary returned <status>: <message or code>`. Each other case prints a line that starts
+  with its fix. An answer with `"branch": "main"` and `"must_understand":
   ["/branch"]` gets `qory run: Update qory.`, then `The answer to the next-session request
   after session <n> does not pass qory's checks.` and `The answer does not pass them: its
   must_understand lists a member of next-session-answer.schema.json that qory does not

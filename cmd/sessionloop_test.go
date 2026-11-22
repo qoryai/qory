@@ -412,7 +412,7 @@ func TestARunOfSeveralSessionsEndsAsItsAnswersAndSessionsSay(t *testing.T) {
 			return &session.Result{State: event.StateSucceeded, Session: 2}, nil
 		}}, joins: 1, state: event.StateFailed, exit: 1, line: "qory run: Update qory or Forager.\n  The gateway numbered the session 2, and qory served session 1 on its route; the code is used\n"},
 		"not_found": {s: loopSetup{nowhere: refused(http.StatusNotFound, "not_found")}, joins: 1, state: event.StateFailed, exit: 1,
-			line: "qory run: Contact support: the next-session request after session 1 failed.\n  Qory Apiary returned 404: Example text.\n"},
+			line: "qory run: The next-session request after session 1 failed.\n  Qory Apiary returned 404: Example text.\n"},
 		"run_ended": {s: loopSetup{nowhere: refused(http.StatusConflict, "run_ended")}, joins: 1, state: event.StateSucceeded,
 			line: "qory run: Qory Apiary ended this run, so qory pushes nothing more and no later session starts.\n"},
 		"another runtime": {s: loopSetup{answers: []string{laterAnswer(2, "example-runtime", "example-provider-2", 30)}}, joins: 1, requests: 1, state: event.StateFailed, exit: 1,

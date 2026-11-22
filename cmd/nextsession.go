@@ -18,11 +18,11 @@ import (
 )
 
 // The lines of the next-session request, which qory sends after each session of a run whose
-// documents set shared_run, see [askNextSession]. Each starts with its fix; qory run prints
-// it after "qory run: ".
+// documents set shared_run, see [askNextSession]. Each starts with its fix, except
+// [textNextRefused], which has the cause alone; qory run prints it after "qory run: ".
 const (
 	textNextNoAnswer = "Check the gateway's connection to Qory Apiary, then take the work item in again.\n  The next-session request after session %d had no successful response within %s.\n  %s"
-	textNextRefused  = "Contact support: the next-session request after session %d failed.\n  %s"
+	textNextRefused  = "The next-session request after session %d failed.\n  %s"
 	textNextUnread   = "Update qory.\n  The answer to the next-session request after session %d does not pass qory's checks.\n  %s."
 	textNextNoBody   = "Update qory: qory could not write the next-session request after session %d.\n  %s"
 )
@@ -48,9 +48,8 @@ type nextSender func(ctx context.Context, body []byte) ([]byte, error)
 //   - the answer, a next session or the end of the run, with ended "" and a nil error;
 //   - ended, the line of [runEndedLine], when the run is over at Qory Apiary or at the
 //     gateway: one send, no retry, and the run closes as it was;
-//   - an error whose first line is its fix, when the run cannot go on: a refusal of Qory
-//     Apiary's, an answer outside its schema, or no answer after nextSessionLimit. The run
-//     then closes failed.
+//   - an error, when the run cannot go on: a refusal of Qory Apiary's, an answer outside its
+//     schema, or no answer after nextSessionLimit. The run then closes failed.
 //
 // A request with no response, a refusal of the gateway's, and a refusal of Qory Apiary's
 // with a status of 500 or above or the code rate_limited are sent again, see [retryNext].
@@ -124,7 +123,7 @@ func retryNext(err error) bool {
 }
 
 // nextRefused is the error of a response that ends the run and is not sent again, see
-// [retryNext]: the fix first, then the status and the text of Qory Apiary or the gateway.
+// [retryNext]: the cause alone, then the status and the text of Qory Apiary or the gateway.
 func nextRefused(session int, err error) error {
 	return fmt.Errorf(textNextRefused, session, nextDetail(err))
 }

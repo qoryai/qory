@@ -286,7 +286,7 @@ func TestEachRefusalCodeOfTheNextSessionRequest(t *testing.T) {
 				if errors.As(c.err, &r) {
 					detail = fmt.Sprintf("Qory Apiary returned %d: %s", r.Status, r.Code)
 				}
-				want := "Contact support: the next-session request after session 1 failed.\n  " + detail
+				want := "The next-session request after session 1 failed.\n  " + detail
 				if ended != "" || err == nil || err.Error() != want {
 					t.Errorf("askNextSession: %q, %v, want the error %q", ended, err, want)
 				}

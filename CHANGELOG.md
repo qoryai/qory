@@ -53,7 +53,8 @@ release may change what an existing document does, and states it under Upgrading
   request again for 10 minutes after no response, a refusal of the gateway's, Qory Apiary's
   refusals with a status of 500 or above, and `rate_limited`. Qory Apiary's `run_ended`
   closes the run as the session ended, and any other refusal of Qory Apiary's closes it
-  `failed`, exit 1. The steps before a later session need a wall and no container of the
+  `failed`, exit 1, with the cause alone: `qory run: The next-session request after session
+  <n> failed.`, then Qory Apiary's status and message. The steps before a later session need a wall and no container of the
   run kept, and past the setup's limit they close the run `cancelled` with `timeout`, exit
   124. In such a walled run with a run API, Forager's forwarder checks the POSTs from
   behind the wall to the run API from session 1 on, also before any session has push
@@ -850,7 +851,9 @@ release may change what an existing document does, and states it under Upgrading
   control or format character except newline, tab, the zero width joiner and non-joiner,
   or a line or paragraph separator. Qory Apiary keeps the stored text unchanged. `.json`
   files stay valid JSON, any other file that is not valid UTF-8 or has a NUL byte stays as
-  it is, and an escaped file is downloaded again on each pull.
+  it is, and an escaped file is downloaded again on each pull. A work item or an
+  `index.json` from the run API that is not valid JSON text stops the command with the
+  cause alone, such as `The run API sent a work item that is not valid JSON text.`
 - A run from a run code runs the step `workflow`, in place of `explore`: it starts the
   workflow that the run documents set, whichever workflow of the process Qory Apiary
   starts. The documents name what the run is for in `subject`, with a `kind`, such as
