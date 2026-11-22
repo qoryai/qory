@@ -99,6 +99,35 @@ func TestALaterSessionTakesItsAnswersRuntimeWorkflowAndKey(t *testing.T) {
 	}
 }
 
+// TestALaterSessionKeepsAHarnessThatExtendsAStack is a run of claude whose harness
+// document extends a stack, and whose next-session answer starts a session on codex: the
+// harness.yaml of session 2 is the document as it came, with no target.runtime, as
+// session 1 has it.
+func TestALaterSessionKeepsAHarnessThatExtendsAStack(t *testing.T) {
+	h := &contracts.HarnessDocument{Harness: contracts.HarnessSection{
+		Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7", Path: "stacks/core"},
+		Modules: []contracts.HarnessModule{{Name: "tools", Source: contracts.HarnessSource{Git: "https://code.example.com/team/tools.git", Ref: "main"}}},
+	}}
+	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{"version":1}`), Harness: h, Workflow: "example", SharedRun: true, RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.MarshalIndent(h, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, '\n')
+	if string(r.harness) != string(want) {
+		t.Fatalf("session 1's harness.yaml has:\n%s\nwant:\n%s", r.harness, want)
+	}
+	if err := r.next(nextAnswerFixture(t, "session-runtime-with-model.json")); err != nil {
+		t.Fatal(err)
+	}
+	if r.runtime != "codex" || string(r.harness) != string(want) {
+		t.Errorf("session 2 on %q has the harness.yaml:\n%s\nwant:\n%s", r.runtime, r.harness, want)
+	}
+}
+
 // TestALaterSessionOnARuntimeQoryDoesNotRunStops is a next-session answer of the runtime
 // example-runtime: the run's session stays as it was and the error contains the runtime.
 func TestALaterSessionOnARuntimeQoryDoesNotRunStops(t *testing.T) {

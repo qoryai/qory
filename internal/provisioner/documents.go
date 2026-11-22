@@ -69,11 +69,13 @@ func ReadDocuments(documents json.RawMessage) (contracts.Documents, error) {
 		return contracts.Documents{}, err
 	}
 	if doc.Subject != nil && doc.Subject.Kind == SubjectWorkItem {
+		// case:strict: inputs may contain members beside these, so a decode that ignores
+		// letter case would read a later DOMAIN in place of domain.
 		var in struct {
-			Domain   string `json:"domain"`
+			Domain   string `json:"domain,case:strict"`
 			WorkItem *struct {
-				ID string `json:"id"`
-			} `json:"work_item"`
+				ID string `json:"id,case:strict"`
+			} `json:"work_item,case:strict"`
 		}
 		switch {
 		case json.Unmarshal(doc.Inputs, &in) != nil:

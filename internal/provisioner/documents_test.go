@@ -141,8 +141,9 @@ func TestEveryInvalidDocumentsFixtureFails(t *testing.T) {
 }
 
 // TestBrokenDocumentsAreRefused refuses documents that break the schema, a rule it
-// states, or the rules of the inputs of a work item's run: each error contains no value
-// of the documents.
+// states, or the rules of the inputs of a work item's run, also when the inputs repeat
+// domain, work_item or id in capitals with the matching value: each error contains no
+// value of the documents.
 func TestBrokenDocumentsAreRefused(t *testing.T) {
 	const broken = "it breaks documents.schema.json"
 	inputs := func(doc map[string]any) map[string]any { return doc["inputs"].(map[string]any) }
@@ -150,13 +151,21 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 	withSettings := func(edit func(d map[string]any)) json.RawMessage {
 		return documentsOf(t, "explore-run-settings.json", edit)
 	}
+	// alsoAfter is raw with the member also after its one copy of member: the member in
+	// capitals, which a decode that ignores letter case reads last.
+	alsoAfter := func(raw json.RawMessage, member, also string) json.RawMessage {
+		if bytes.Count(raw, []byte(member)) != 1 {
+			t.Fatalf("%s is not once in %s", member, raw)
+		}
+		return bytes.Replace(raw, []byte(member), []byte(member+","+also), 1)
+	}
 	for _, c := range []struct {
 		name string
 		raw  json.RawMessage
 		want string
 	}{
 		{"not JSON", json.RawMessage(`{"step":`), ""},
-		{"a member twice", json.RawMessage(`{"step":"explore","step":"explore"}`), ""},
+		{"a member twice", json.RawMessage(`{"step":"workflow","step":"workflow"}`), ""},
 		{"an array", json.RawMessage(`[]`), "it is not a JSON object"},
 		{"a string", json.RawMessage(`"x"`), ""},
 		{"null", json.RawMessage(`null`), ""},
@@ -172,6 +181,14 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 			inputs(d)["work_item"].(map[string]any)["id"] = "wi_0000000000"
 		}), "its inputs.work_item.id is not its subject's id"},
 		{"no work item in inputs", documentsOf(t, "explore-workflow.json", func(d map[string]any) { delete(inputs(d), "work_item") }), "its inputs.work_item.id is not its subject's id"},
+		{"another domain in inputs, and the domain as DOMAIN", alsoAfter(documentsOf(t, "explore-workflow.json", func(d map[string]any) { inputs(d)["domain"] = "marketing" }),
+			`"domain":"marketing"`, `"DOMAIN":"software"`), "its inputs.domain is not its domain"},
+		{"another work item in inputs, and the work item as WORK_ITEM", alsoAfter(documentsOf(t, "explore-workflow.json", func(d map[string]any) {
+			inputs(d)["work_item"] = map[string]any{"id": "wi_0000000000"}
+		}), `"work_item":{"id":"wi_0000000000"}`, `"WORK_ITEM":{"id":"wi_8Kx2mQ4vT9"}`), "its inputs.work_item.id is not its subject's id"},
+		{"another work item id in inputs, and the id as ID", alsoAfter(documentsOf(t, "explore-workflow.json", func(d map[string]any) {
+			inputs(d)["work_item"].(map[string]any)["id"] = "wi_0000000000"
+		}), `"id":"wi_0000000000"`, `"ID":"wi_8Kx2mQ4vT9"`), "its inputs.work_item.id is not its subject's id"},
 		{"inputs too large", documentsOf(t, "explore-without-target.json", func(d map[string]any) {
 			inputs(d)["x"] = strings.Repeat("a", contracts.MaxInputs)
 		}), "its inputs are larger than 786432 bytes"},
