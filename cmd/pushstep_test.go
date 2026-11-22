@@ -83,6 +83,9 @@ type pushAPI struct {
 	verdict       string
 	record        func(n int, w http.ResponseWriter) bool
 	index         func(n int, w http.ResponseWriter) bool
+	// other, when set, responds to a request of no route above, and returns whether it did;
+	// a request it leaves gets 404.
+	other func(w http.ResponseWriter, r *http.Request) bool
 }
 
 // newPushAPI serves a run API whose work item has the id [workItem] and the stage st_a.
@@ -125,6 +128,7 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 		a.posted(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/runs/r/pushed-commits":
 		a.recordedPush(w, r)
+	case a.other != nil && a.other(w, r):
 	default:
 		http.NotFound(w, r)
 	}
@@ -334,6 +338,11 @@ type pushRepo struct {
 	linkMu     sync.Mutex
 	linkCalls  int
 	linkLimits []time.Duration
+	// nextSession, when set, is the run's next-session request, see [cmd.Nowhere], and
+	// stackProxy gives the run a stack proxy at the forge, for a harness document whose
+	// modules the compose fetches.
+	nextSession func(ctx context.Context, body []byte) ([]byte, error)
+	stackProxy  bool
 }
 
 // viaLink is each report of the run over the link of its gateway: [pushRepo.gateway] first,
@@ -441,7 +450,7 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	}
 	t.Setenv("QORY_RUN_KEY", "")
 	var got pushed
-	closes, calls, restore := cmd.OpenNowhereWith(cmd.Nowhere{
+	nowhere := cmd.Nowhere{
 		System: proxygittest.Host, Repositories: p.repositories, RunAPI: p.api.base(),
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
 		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, PushProxyErr: p.proxyErr, NoPushProxy: p.noPush, OnCall: p.onCall,
@@ -474,7 +483,12 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 			defer p.api.mu.Unlock()
 			p.api.runID = spec.RunID
 		},
-	})
+		NextSession: p.nextSession,
+	}
+	if p.stackProxy {
+		nowhere.StackProxy, nowhere.StackCABundle = p.h.server.Proxy.URL, p.h.server.Proxy.CABundle
+	}
+	closes, calls, restore := cmd.OpenNowhereWith(nowhere)
 	defer restore()
 	got.out, got.err = run(t, append([]string{"run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL}, p.flags...)...)
 	got.closes, got.calls = closes(), calls()

@@ -47,3 +47,23 @@ func Settings(rs *contracts.RunSettings) (runtime string, flags []Setting) {
 	}
 	return rs.Runtime, flags
 }
+
+// SettingsOf are the runtime and the compose flags of a session after session 1, whose
+// next-session answer has the model choice choice, nil for none, in a run whose
+// documents have the run settings rs. The runtime is choice's runtime, else rs's. The
+// flags come from choice alone, as [Settings] makes them: a nil choice, or one with only
+// a runtime, gives no flag, so the session runs on the runtime's default model and no
+// tier map of session 1 carries over.
+func SettingsOf(choice *contracts.ModelChoice, rs *contracts.RunSettings) (runtime string, flags []Setting) {
+	if rs != nil {
+		runtime = rs.Runtime
+	}
+	if choice == nil {
+		return runtime, nil
+	}
+	if choice.Runtime != "" {
+		runtime = choice.Runtime
+	}
+	_, flags = Settings(&contracts.RunSettings{Model: choice.Model, Effort: choice.Effort, ProviderModels: choice.ProviderModels, Tiers: choice.Tiers})
+	return runtime, flags
+}

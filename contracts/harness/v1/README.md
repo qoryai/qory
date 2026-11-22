@@ -2329,7 +2329,7 @@ members' order, each with `group: true`, and after them one row with `replaced: 
 each member the checkout's `bind` replaced, so a reader sees which member the checkout
 dropped. `qory harness inspect` and `qory harness compose --dry-run` print them in
 the Bind table, with `from` as the third column and `group` or `replaced by bind` as the
-fourth. An agent with a tier has `tier`. `tiers` lists each tier the agents use that has a map, with `model`, `effort` when set, and `from`: `--tier`, for an entry of `--tier` and `--tier-effort`, or the file that set it. `egress` is the union of the hosts the modules
+fourth. An agent with a tier has `tier`. `tiers` lists each tier the agents use that has a map, with `model`, `effort` when set, and `from`: `--tier`, for an entry of `--tier` and `--tier-effort`, or the file that set it. `sessions` is in the report of a `qory run` whose documents set `shared_run`, and absent from every other: one row per session composed so far, in order, each `{session, runtime, tiers}`, `tiers` as above for that session's compose, so the report shows the runtime and the tier map of each session. `egress` is the union of the hosts the modules
 declared (§The module manifest), sorted by host, each with the `modules` that declared it
 in stack order, and absent when no module declares; when one does, the target runtime's
 hosts, the model endpoint for `claude`, join under the runtime's name, so a stack

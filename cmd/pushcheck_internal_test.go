@@ -708,7 +708,7 @@ func TestACheckThatIsNotSetStopsWithItsLine(t *testing.T) {
 		true:  "Take the work item in again in Qory Apiary.\n  Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: Call SetRunAPICheck before Setup: the setup started; the code is used",
 	} {
 		p := &runPushChecks{checker: &pushcheck.Checker{}, fromCode: fromCode}
-		err := p.set(run)
+		err := p.set(run, false)
 		if err == nil || err.Error() != want {
 			t.Errorf("from a run code %v: %v, want %q", fromCode, err, want)
 		}
@@ -787,5 +787,42 @@ func TestThePushChecksGetTheRunsInputs(t *testing.T) {
 		if got := p.current(); got == nil || got.Inputs != inputs || !slices.Equal(got.InputsData, data) {
 			t.Errorf("with %q: the checker %+v", inputs, got)
 		}
+	}
+}
+
+// TestALaterSessionsPushChecksReplaceTheChecksOfTheSessionBefore is the checker of session 1
+// and a home composed again for session 2, with other push checks and other inputs: next
+// keeps the checker, with session 2's checks and inputs. A run from a run code whose home has
+// a push check qory cannot read gets the line of that run, and the checker stays. A run with
+// no checker, whose home has no push check, loads none.
+func TestALaterSessionsPushChecksReplaceTheChecksOfTheSessionBefore(t *testing.T) {
+	old := []compose.PushCheck{{Type: "build-plan", Module: "first"}}
+	later := []compose.PushCheck{{Type: "build-plan", Module: "second"}}
+	var got []compose.PushCheck
+	var err error
+	before := loadPushChecks
+	t.Cleanup(func() { loadPushChecks = before })
+	loadPushChecks = func(string) ([]compose.PushCheck, error) { return got, err }
+
+	c := &pushcheck.Checker{Checks: old, Inputs: "/runs/1/in/inputs.json", InputsData: []byte(`{"version":1}`)}
+	p := &runPushChecks{checker: c, fromCode: true, inputs: "/runs/1/in/inputs.json", inputsData: []byte(`{"version":1,"run":{"attempt":2}}`)}
+	got = later
+	if _, e := p.next(context.Background(), nil, "/homes/1", "run", &runSpec{}, true); e != nil {
+		t.Fatal(e)
+	}
+	if p.current() != c || len(c.Checks) != 1 || c.Checks[0].Module != "second" || string(c.InputsData) != `{"version":1,"run":{"attempt":2}}` {
+		t.Errorf("after next the checker is %+v", p.current())
+	}
+
+	got, err = nil, &pushcheck.UnreadError{File: "push-checks.json", Cause: "unexpected end of JSON input"}
+	_, e := p.next(context.Background(), nil, "/homes/1", "run", &runSpec{}, true)
+	if e == nil || !strings.Contains(e.Error(), "push-checks.json") || len(c.Checks) != 1 || c.Checks[0].Module != "second" {
+		t.Errorf("next with an unread file: %v, checks %+v", e, c.Checks)
+	}
+
+	empty := &runPushChecks{fromCode: true}
+	got, err = nil, nil
+	if _, e := empty.next(context.Background(), nil, "/homes/1", "run", &runSpec{}, true); e != nil || empty.current() != nil {
+		t.Errorf("next with no checks: %v, checker %+v", e, empty.current())
 	}
 }

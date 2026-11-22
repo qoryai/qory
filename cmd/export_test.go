@@ -477,6 +477,10 @@ type Nowhere struct {
 	// [session.Run.PushedCommits] sends the report over the link; nil sends it to RunAPI
 	// as [PushedThroughLink] does.
 	PushedCommits func(ctx context.Context, body []byte) ([]byte, error)
+	// NextSession, when not nil, is each NextSession of the run, as Forager's
+	// [session.Run.NextSession] sends the request over the link; nil returns Forager's
+	// error of a run with no control plane.
+	NextSession func(ctx context.Context, body []byte) ([]byte, error)
 }
 
 // StepEvent is one event of a host step of a run [OpenNowhereWith] opened: Type is
@@ -683,6 +687,19 @@ func (n *nowhere) PushedCommits(ctx context.Context, body []byte) ([]byte, error
 		return nil, errors.New("Open the run with a control plane to send the pushed-commits request: this run has none.")
 	}
 	return PushedThroughLink(ctx, n.values.RunAPI, body)
+}
+
+// NextSession is [session.Run.NextSession] of the run: Nowhere.NextSession, else Forager's
+// error of a run with no control plane. After Close it returns an error that wraps
+// [session.ErrRunClosed], as Forager's does.
+func (n *nowhere) NextSession(ctx context.Context, body []byte) ([]byte, error) {
+	if n.ended {
+		return nil, fmt.Errorf("Open another run to send the next-session request: %w.", session.ErrRunClosed)
+	}
+	if n.values.NextSession != nil {
+		return n.values.NextSession(ctx, body)
+	}
+	return nil, errors.New("Open the run with a control plane to send the next-session request: this run has none.")
 }
 
 // codeShape is the form of a code that the gateway passes on from Qory Apiary.
@@ -1061,8 +1078,8 @@ func SetSetupLimit(d time.Duration) func() {
 	return func() { setupBound = setupLimit }
 }
 
-// SetBeforeJoin makes qory run call f once the harness is composed, before the run's
-// session joins, and returns what restores the default.
+// SetBeforeJoin makes qory run call f once the harness is composed, before each session of
+// the run joins, and returns what restores the default.
 func SetBeforeJoin(f func()) func() {
 	beforeJoin = f
 	return func() { beforeJoin = nil }
