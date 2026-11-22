@@ -482,30 +482,33 @@ func TestDestinationCloneFollowsNoLinkBelowTheFolder(t *testing.T) {
 }
 
 // TestDestinationCloneStopsAtAFolderThatIsNoClone is a folder with a file and no .git at
-// the clone's place: the clone cannot move there, so the call stops, exit 1, with the id on
-// line 1 and the folder's path on line 2, and the folder keeps its file.
+// the clone's place: the call stops before it clones, exit 1, with the id on line 1 and the
+// folder's path on line 2, and the folder keeps its file.
 func TestDestinationCloneStopsAtAFolderThatIsNoClone(t *testing.T) {
 	c := destinationSession(t)
 	dir := filepath.Join(c.root, proxygittest.Host, "acme", "web")
 	writeFile(t, filepath.Join(dir, "notes.txt"), "notes\n")
 	_, err := run(t, "destination", "clone", webID)
-	if err == nil {
-		t.Fatal("no error")
+	wantLine(t, err, 1, "Ask the instance admin of Qory Apiary to check the machine: it cannot store "+webID+".\n  "+dir+": readdir: a folder with files and no clone")
+	if n := c.s.Tunnels(); n != 0 {
+		t.Errorf("the call opened %d tunnels", n)
 	}
-	// The rename's name and cause differ between systems: renameat, file exists, and
-	// directory not empty.
-	want := "Ask the instance admin of Qory Apiary to check the machine: it cannot store " + webID + ".\n  " + dir + ": rename"
-	if !strings.HasPrefix(err.Error(), want) {
-		t.Errorf("error %q, want it to start with %q", err, want)
-	}
-	wantLine(t, err, 1, err.Error())
 	wantFile(t, filepath.Join(dir, "notes.txt"), "notes\n")
 	wantFile(t, filepath.Join(c.root, "_cloned"), "")
-	for _, name := range entryNames(mustReadDir(t, c.root)) {
-		if strings.HasPrefix(name, "_clone-") {
-			t.Errorf("the clone's temporary folder %s is left", name)
-		}
+}
+
+// TestDestinationCloneNeedsGitOnPath is a session whose PATH has no git: the call stops,
+// exit 1, with the line for the instance admin and the cause on line 2, opens no tunnel,
+// and leaves nothing in the folder of the clones but the record.
+func TestDestinationCloneNeedsGitOnPath(t *testing.T) {
+	c := destinationSession(t)
+	t.Setenv("PATH", tempDir(t))
+	_, err := run(t, "destination", "clone", webID)
+	wantLine(t, err, 1, "Ask the instance admin of Qory Apiary to check the machine: it cannot store "+webID+".\n  git is not on PATH")
+	if n := c.s.Tunnels(); n != 0 {
+		t.Errorf("the call opened %d tunnels", n)
 	}
+	wantNoClone(t, c)
 }
 
 // TestDestinationCloneStopsAtNestedDestinations is acme/deep, which commits a link sub to

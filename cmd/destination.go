@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -60,13 +61,13 @@ const (
 	textNotRepository   = "Clone only a repository: the address of %s is not a repository path."
 	textConnection      = "Give the integration access to %s in Qory Apiary, then click Run Explore again.\n  The host returned %s to the clone."
 	textCloneAgain      = "Run Explore again later: the clone of %s failed: %s."
-	textClonesFolder    = "Ask the instance admin of Qory Apiary to check the machine: it cannot store %s.\n  %s: %s"
+	textMachine         = "Ask the instance admin of Qory Apiary to check the machine: it cannot store %s.\n  %s"
 	textBadDestinations = "Ask the instance admin of Qory Apiary to fix the destinations of this run: they are malformed.\n  %s"
 	textNest            = "Ask the instance admin of Qory Apiary to separate destination %s from another.\n  %s and %s nest: one path lies inside the other."
 	textProxyBlocks     = "Ask the instance admin of Qory Apiary to let the proxy reach the host of %s."
 )
 
-// allClones is the word of [textClonesFolder] for a record that is not a list of ids,
+// allClones is the word of [textMachine] for a record that is not a list of ids,
 // which concerns no one id. Every other failure of the folder has the call's first id.
 const allClones = "the clones"
 
@@ -247,7 +248,7 @@ func clonesFolder(what, root string, cause error) error {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(root, path)
 	}
-	return fmt.Errorf(textClonesFolder, what, integration.Printable(path), integration.Printable(why))
+	return fmt.Errorf(textMachine, what, integration.Printable(path)+": "+integration.Printable(why))
 }
 
 // clonedIDs reads the record f, one id of [destinationID] per line.
@@ -321,9 +322,12 @@ func cloned(r *os.Root, d clone) bool {
 	return folders(r, filepath.Join(d.rel, ".git"), false) == nil
 }
 
+// errNoClone is the error of a folder at a clone's place that has files and no .git.
+var errNoClone = errors.New("a folder with files and no clone")
+
 // placeFree checks the place of d's clone under r before the clone: a link or a file at a
-// folder above it, at its folder or at its folder's .git stops it, so no clone is made that
-// cannot be stored. A missing part is free.
+// folder above it, at its folder or at its folder's .git, and a folder there with files and
+// no .git, stop it, so no clone is made that cannot be stored. A missing part is free.
 func placeFree(r *os.Root, d clone) error {
 	err := folders(r, filepath.Dir(d.rel), false)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -334,8 +338,11 @@ func placeFree(r *os.Root, d clone) error {
 	}
 	for _, p := range []string{d.rel, filepath.Join(d.rel, ".git")} {
 		info, err := r.Lstat(p)
-		if errors.Is(err, fs.ErrNotExist) {
+		if errors.Is(err, fs.ErrNotExist) && p == d.rel {
 			return nil
+		}
+		if errors.Is(err, fs.ErrNotExist) {
+			break
 		}
 		if err != nil {
 			return err
@@ -343,6 +350,16 @@ func placeFree(r *os.Root, d clone) error {
 		if !info.IsDir() {
 			return &fs.PathError{Op: "lstat", Path: p, Err: errLinkOrFile}
 		}
+	}
+	f, err := r.Open(d.rel)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Readdirnames(1); err == nil {
+		return &fs.PathError{Op: "readdir", Path: d.rel, Err: errNoClone}
+	} else if !errors.Is(err, io.EOF) {
+		return err
 	}
 	return nil
 }
@@ -383,14 +400,17 @@ var (
 )
 
 // cloneFailed is the line of the clone of id that failed with err, with a cause in words
-// that contain no part of git's output, which contains the URL: [textProxyBlocks] for a
-// proxy that returned 403 or 407, [textConnection] for a host that returned 401, 403 or
-// 404, and [textCloneAgain] with the status of the proxy or the host, git's exit status,
-// or what stopped git.
+// that contain no part of git's output, which contains the URL: [textMachine] for a PATH
+// with no git, [textProxyBlocks] for a proxy that returned 403 or 407, [textConnection] for
+// a host that returned 401, 403 or 404, and [textCloneAgain] with the status of the proxy
+// or the host, git's exit status, or what stopped git.
 func cloneFailed(id string, err error) error {
 	var ce *preparation.CloneError
 	if !errors.As(err, &ce) {
 		return fmt.Errorf(textCloneAgain, id, "git did not start")
+	}
+	if ce.NoGit {
+		return fmt.Errorf(textMachine, id, "git is not on PATH")
 	}
 	if m := connectStatus.FindStringSubmatch(ce.Output); m != nil {
 		if m[1] == "403" || m[1] == "407" {

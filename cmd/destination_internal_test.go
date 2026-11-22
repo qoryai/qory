@@ -32,6 +32,7 @@ func TestCloneFailedNamesEachCause(t *testing.T) {
 		{&preparation.CloneError{Exit: -1, Stopped: true}, again + "git was stopped."},
 		{&preparation.CloneError{Exit: 128, Output: "fatal: the remote end hung up unexpectedly"}, again + "git exited with 128."},
 		{&preparation.CloneError{Exit: -1}, again + "git did not start."},
+		{&preparation.CloneError{Exit: -1, Output: "", NoGit: true}, "Ask the instance admin of Qory Apiary to check the machine: it cannot store " + id + ".\n  git is not on PATH"},
 		{errors.New("exec: \"git\": executable file not found in $PATH"), again + "git did not start."},
 	} {
 		if got := cloneFailed(id, c.err).Error(); got != c.want {

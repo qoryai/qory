@@ -4174,7 +4174,7 @@ the id and no path of the machine:
 | `Give the integration access to <id> in Qory Apiary, then click Run Explore again.` | The host returned 401, 403 or 404. Line 2 is `The host returned <status> to the clone.` |
 | `Ask the instance admin of Qory Apiary to let the proxy reach the host of <id>.` | The wall's proxy returned 403 or 407. |
 | `Run Explore again later: the clone of <id> failed: <cause>.` | Any other failed clone. The cause contains no URL. |
-| `Ask the instance admin of Qory Apiary to check the machine: it cannot store <id>.` | A folder of the clone or its `.git` is a link or a file, the clone's folder has files and no clone, or qory cannot make a folder. Line 2 has the path and the cause. The id is the call's first. For a record of the clones that is not a list of ids, `the clones` stands in place of the id. |
+| `Ask the instance admin of Qory Apiary to check the machine: it cannot store <id>.` | A folder of the clone or its `.git` is a link or a file, the clone's folder has files and no clone, or qory cannot make a folder. Line 2 has the path and the cause. When `PATH` has no git, line 2 is `git is not on PATH`. The id is the call's first. For a record of the clones that is not a list of ids, `the clones` stands in place of the id. |
 | `Ask the instance admin of Qory Apiary to fix the destinations of this run: they are malformed.` | The destinations do not have the shape of the explore inputs. Line 2 has the cause. |
 | `Ask the instance admin of Qory Apiary to separate destination <id> from another.` | The path of `<id>` lies inside the path of another destination on the same system, or contains it. Line 2 has both ids. qory clones neither, so no clone lands in another one's folder. |
 
