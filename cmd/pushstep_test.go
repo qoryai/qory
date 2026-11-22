@@ -1785,6 +1785,49 @@ func TestNoResponseThatTheIndexDoesNotSettleFails(t *testing.T) {
 		", and the request that stores its version ended with no response, so the version may or may not be stored: ")
 }
 
+// TestAnOutputThatIsNotStoredStaysInTheOutbox is a POST that fails with run_ended, and a POST
+// with no response whose index read fails too, so the store is unknown: the step fails, and
+// the output's file stays in the outbox.
+func TestAnOutputThatIsNotStoredStaysInTheOutbox(t *testing.T) {
+	for name, c := range map[string]struct {
+		post  func(n int, w http.ResponseWriter) (bool, bool)
+		index func(n int, w http.ResponseWriter) bool
+	}{
+		"a failed store": {post: func(_ int, w http.ResponseWriter) (bool, bool) {
+			failing(w, http.StatusConflict, "run_ended", "")
+			return true, false
+		}},
+		"an unknown store": {
+			post: func(_ int, w http.ResponseWriter) (bool, bool) {
+				failing(w, http.StatusServiceUnavailable, "unavailable", "")
+				return true, false
+			},
+			index: func(n int, w http.ResponseWriter) bool {
+				if n == 1 {
+					return false
+				}
+				failing(w, http.StatusServiceUnavailable, "unavailable", "")
+				return true
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			p.api.post, p.api.index = c.post, c.index
+			var outbox string
+			p.mountsOf = func(spec session.SessionSpec) { outbox = outboxOf(spec) }
+			r := p.run(t, writesAndCommits(t), nil)
+			r.wantsClose(t, event.StateFailed, 1)
+			if posts, _, _ := p.api.counts(); posts != 1 {
+				t.Errorf("%d POST, want 1", posts)
+			}
+			if _, err := os.Stat(filepath.Join(outbox, "pull-request", "pull-request.json")); outbox == "" || err != nil {
+				t.Errorf("the output is not in the outbox %q: %v", outbox, err)
+			}
+		})
+	}
+}
+
 // TestAWorkspaceWithoutTheTypeFailsTheStep is unknown_type: the step fails after the push,
 // with the line of the workflow model and the fix of a pushed branch.
 func TestAWorkspaceWithoutTheTypeFailsTheStep(t *testing.T) {
