@@ -3,6 +3,7 @@ package cmd_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -43,9 +44,9 @@ func TestARunCodesInputsHaveTheHarnessExtensions(t *testing.T) {
 			name:     "with extensions",
 			stack:    "extensions:\n  software-factory:\n    command_limits_minutes: {test: 10}\n  team:\n    name: base\n",
 			document: map[string]any{"team": map[string]any{"name": "web"}},
-			want:     `{"harness_extensions":{"software-factory":{"command_limits_minutes":{"test":10}},"team":{"name":"web"}},"outputs":[]}`,
+			want:     `{"harness_extensions":{"software-factory":{"command_limits_minutes":{"test":10}},"team":{"name":"web"}},"outputs":[],"start_commits":[],"start_artifacts":"%s"}`,
 		},
-		{name: "with none", want: `{"harness_extensions":{},"outputs":[]}`},
+		{name: "with none", want: `{"harness_extensions":{},"outputs":[],"start_commits":[],"start_artifacts":"%s"}`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := runFromCodeWith(t, func(string) []string {
@@ -60,8 +61,9 @@ func TestARunCodesInputsHaveTheHarnessExtensions(t *testing.T) {
 			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}
-			if got := qoryMember(t, r.inputs); got != c.want {
-				t.Errorf("the member qory is %s, want %s", got, c.want)
+			want := fmt.Sprintf(c.want, filepath.Join(r.inputDir, "start-artifacts"))
+			if got := qoryMember(t, r.inputs); got != want {
+				t.Errorf("the member qory is %s, want %s", got, want)
 			}
 			if !strings.Contains(r.inputs, `"version":1`) {
 				t.Errorf("inputs.json lacks the documents' inputs: %s", r.inputs)

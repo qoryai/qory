@@ -145,6 +145,56 @@ func TestTheNextSessionStartsAfterThePushOfTheSessionBefore(t *testing.T) {
 	}
 }
 
+// TestEachSessionsInputsHaveItsStartCommit is a write run of two sessions: session 1's
+// inputs.json has the commit the run starts at, written after the branch switch, and
+// session 2's has the commit that session 1 pushed. Each names its launch snapshot in the
+// inputs folder, which has an index.json.
+func TestEachSessionsInputsHaveItsStartCommit(t *testing.T) {
+	p, _ := sharedPushRepo(t, laterAnswer(2, "claude", "example-provider-2", 30))
+	p.noOutput = true
+	type start struct {
+		StartCommits []struct {
+			Path, Commit string
+		} `json:"start_commits"`
+		StartArtifacts string `json:"start_artifacts"`
+	}
+	var starts []start
+	p.mountsOf = func(spec session.SessionSpec) {
+		for _, m := range spec.Mounts {
+			data, err := os.ReadFile(filepath.Join(m.Path, "inputs.json"))
+			if !m.ReadOnly || filepath.Base(m.Path) != "in" || err != nil {
+				continue
+			}
+			var inputs struct{ Qory start }
+			if err := json.Unmarshal(data, &inputs); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(inputs.Qory.StartArtifacts, "index.json")); err != nil {
+				t.Errorf("session %d has no launch snapshot: %v", len(starts)+1, err)
+			}
+			starts = append(starts, inputs.Qory)
+		}
+	}
+	var first string
+	r := p.run(t, func(d string) {
+		if first == "" {
+			writeFile(t, filepath.Join(d, "first.txt"), "first\n")
+			commitAll(t, d, "Add a first file")
+			first = gitHead(t, d)
+		}
+	}, numbered())
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if len(starts) != 2 {
+		t.Fatalf("%d sessions read inputs.json, want 2\n%s", len(starts), r.out)
+	}
+	for i, want := range []string{p.first, first} {
+		got := starts[i]
+		if len(got.StartCommits) != 1 || got.StartCommits[0].Commit != want || !filepath.IsAbs(got.StartCommits[0].Path) {
+			t.Errorf("session %d starts at %+v, want %s", i+1, got.StartCommits, want)
+		}
+	}
+}
+
 // TestALaterSessionTurnsOnPushChecksThatSession1DidNotHave is a walled write run of two
 // sessions whose home has no push check for session 1 and a check of pull-request for session
 // 2. As Forager does, the run takes the check only before a join: the run sets it once,

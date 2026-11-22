@@ -782,6 +782,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// planWorkflow is the run's workflow, and planType the plan type set in workflows.<name>.plan
 			// for it, "" for none.
 			var planWorkflow, planType string
+			// startSnapshot is the session's launch snapshot in the run directory, see
+			// [startArtifacts], "" for a run with no inputs folder.
+			var startSnapshot string
 			// composedSessions are the rows of the report's sessions, see [report.Report.Sessions].
 			var composedSessions []report.Session
 			// pins are the composed stack's pins of the runtimes' versions, which the install
@@ -799,6 +802,31 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// codexFrom is what a walled Codex run writes its Codex home from, set by the
 			// compose, see [walledCodexHome].
 			var codexFrom codexParts
+			// inputsPending is what qory adds to the session's inputs.json, set by
+			// prepareLaunch, which writeSessionInputs writes with the session's start values.
+			var inputsPending qoryInputs
+			writeSessionInputs := func() error {
+				q := inputsPending
+				q.StartCommits = startCommits(branch, cwd)
+				if startSnapshot != "" {
+					q.StartArtifacts = filepath.Join(in, startArtifactsDir)
+				}
+				file, data, err := fromCode.writeInputs(in, q)
+				if err != nil {
+					return keyedError(fromCode, inputsNotWritten(err))
+				}
+				checks.setInputs(file, data)
+				if err := copyInputs(at.home, data); err != nil {
+					return keyedError(fromCode, inputsNotCopied(at.home, err))
+				}
+				// A home that is not this run's alone, from --home or harness.home, keeps
+				// no copy once the run is over.
+				if runHome == "" {
+					copied := filepath.Join(at.home, inputsFile)
+					cleanups = append(cleanups, func() { removeInputsCopy(copied, said) })
+				}
+				return nil
+			}
 			prepareLaunch := func(stepCtx context.Context, w io.Writer, n int) (freshHome bool, err error) {
 				// later is a session after the run's first.
 				later := n > 1
@@ -845,6 +873,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return false, err
 					}
 				}
+				// Each session reads the artifacts of its launch, never a version that its agent
+				// pushes later.
+				if dispatched && in != "" {
+					if startSnapshot, err = launchSnapshot(stepCtx, run, in, planType); err != nil {
+						return false, err
+					}
+				}
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
 					return false, err
@@ -859,21 +894,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				if dispatched {
 					// inputs.json has the inputs of a run code, if any, and what qory adds, which the
-					// report has.
-					var file string
-					var data []byte
-					if file, data, err = fromCode.writeInputs(in, qoryInputs{HarnessExtensions: rep.Extensions, Outputs: fromCode.outputs(types)}); err != nil {
-						return false, keyedError(fromCode, inputsNotWritten(err))
-					}
-					checks.inputs, checks.inputsData = file, data
-					if err := copyInputs(at.home, data); err != nil {
-						return false, keyedError(fromCode, inputsNotCopied(at.home, err))
-					}
-					// A home that is not this run's alone, from --home or harness.home, keeps
-					// no copy once the run is over.
-					if runHome == "" {
-						copied := filepath.Join(at.home, inputsFile)
-						cleanups = append(cleanups, func() { removeInputsCopy(copied, said) })
+					// report has. Session 1 writes it once the branch switch and the setup are
+					// done, so its start commits are final; a later session starts at the last
+					// pushed commits, so it writes it here.
+					inputsPending = qoryInputs{HarnessExtensions: rep.Extensions, Outputs: fromCode.outputs(types)}
+					if later {
+						if err := writeSessionInputs(); err != nil {
+							return false, err
+						}
 					}
 				}
 				if fromCode != nil {
@@ -1484,6 +1512,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				if prepErr == nil && copied != nil && !copied.plain && !copied.readOnly && fetches && spec.setupWhere != config.SetupInside {
 					prepErr = recordSetupWork()
+				}
+				// After the setup: the locked checks of a Verify session run here, before the
+				// session's inputs.json, which they add to.
+				if prepErr == nil && dispatched {
+					prepErr = writeSessionInputs()
 				}
 				if beforeJoin != nil {
 					beforeJoin()

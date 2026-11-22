@@ -659,6 +659,31 @@ type qoryInputs struct {
 	// Outputs is the outputs of the run's stage, in the stage's order, [] for none, as
 	// [codeRun.outputs] has them.
 	Outputs []inputOutput `json:"outputs"`
+	// StartCommits is the commit each repository of the run is at when the session starts,
+	// [] for a run with no branch, and StartArtifacts the folder of the session's launch
+	// snapshot, see [startArtifacts]. The push step's scope check reads the same values.
+	StartCommits   []inputCommit `json:"start_commits"`
+	StartArtifacts string        `json:"start_artifacts"`
+}
+
+// inputCommit is one entry of [qoryInputs.StartCommits]: the repository's folder, as an
+// absolute path, and its [preparation.WorkRepository.Commit].
+type inputCommit struct {
+	Path   string `json:"path"`
+	Commit string `json:"commit"`
+}
+
+// startCommits is the [qoryInputs.StartCommits] of branch, whose repositories are in the
+// working folder cwd, an absolute path; nil for no branch.
+func startCommits(branch *preparation.WorkBranch, cwd string) []inputCommit {
+	if branch == nil {
+		return nil
+	}
+	out := make([]inputCommit, len(branch.Repositories))
+	for i, r := range branch.Repositories {
+		out[i] = inputCommit{Path: filepath.Join(cwd, filepath.FromSlash(r.Dir)), Commit: r.Commit}
+	}
+	return out
 }
 
 // inputOutput is one output of the run's stage in [qoryInputs]: its type, whether the
@@ -827,6 +852,9 @@ func withQoryMember(inputs []byte, q qoryInputs) ([]byte, error) {
 	}
 	if q.Outputs == nil {
 		q.Outputs = []inputOutput{}
+	}
+	if q.StartCommits == nil {
+		q.StartCommits = []inputCommit{}
 	}
 	value, err := json.Marshal(q)
 	if err != nil {
