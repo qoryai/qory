@@ -26,7 +26,11 @@ release may change what an existing document does, and states it under Upgrading
   registry closes `failed` with `environment_image_missing`, where it closed with
   `image_missing`, which Forager takes only for a close before a join. The codes are the end
   codes of the run outcome contract of the integrations repository. The line qory prints has
-  the cause alone.
+  the cause alone. A next-session request that Qory Apiary refuses, or that has no answer,
+  closes the run `failed` with `next_session_failed`. An output check before the push that
+  finds a required output missing, or an output that fails its read, fill, schema or size
+  check, closes the run `failed` with `outputs_invalid`; the same failure after the push
+  has no end code.
 - `qory destination clone <id>...` clones destinations of a run inside its session: each
   id from `destinations` in `$QORY_HARNESS_HOME/inputs.json`, at depth 1, through the
   wall's proxy, into `/tmp/qory-destinations/<system>/<path>`. It prints one line per id,
@@ -54,8 +58,8 @@ release may change what an existing document does, and states it under Upgrading
   request again for 10 minutes after no response, a refusal of the gateway's, Qory Apiary's
   refusals with a status of 500 or above, and `rate_limited`. Qory Apiary's `run_ended`
   closes the run as the session ended. Any other refusal of Qory Apiary's, and a status
-  below 500 other than 429 with no refusal, close it `failed`, exit 1, with the cause
-  alone: `qory run: The next-session request after session <n> failed.`, then the status
+  below 500 other than 429 with no refusal, close it `failed`, exit 1, with the end code
+  `next_session_failed` and the cause alone: `qory run: The next-session request after session <n> failed.`, then the status
   and the message of Qory Apiary or the gateway. The steps before a later session need a
   wall and no container of the run kept, and past the setup's limit they close the run
   `cancelled` with `timeout`, exit 124. In such a walled run with a run API, Forager's
@@ -356,8 +360,8 @@ release may change what an existing document does, and states it under Upgrading
   type's to `main`. A required output that the session did not write, and that no version of
   the run has, fails the step: `Write <type> to the outbox: the stage requires it and the
   session wrote none.` qory reads, fills and checks the outputs, and checks the required
-  ones, before the push with the local head, so an output that fails pushes nothing, and
-  again after the push. qory removes the outbox before each session, so an output that a
+  ones, before the push with the local head, so an output that fails pushes nothing and
+  closes the run `failed` with `outputs_invalid`, and again after the push. qory removes the outbox before each session, so an output that a
   failed session or an earlier run left is never stored; a `.qory` that is a link stops the
   run with `Remove .qory/outbox, then start the run again: a session starts with no
   outbox.` A type of the outputs or of `deliver` whose `json_schema` does not convert

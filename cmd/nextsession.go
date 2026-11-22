@@ -49,7 +49,8 @@ type nextSender func(ctx context.Context, body []byte) ([]byte, error)
 //   - ended, the line of [runEndedLine], when the run is over at Qory Apiary or at the
 //     gateway: one send, no retry, and the run closes as it was;
 //   - an error, when the run cannot go on: a refusal of Qory Apiary's, an answer outside its
-//     schema, or no answer after nextSessionLimit. The run then closes failed.
+//     schema, or no answer after nextSessionLimit. The run then closes failed, with the end
+//     code next_session_failed after a refusal or no answer, see [nextSessionFailed].
 //
 // A request with no response, a refusal of the gateway's, and a refusal of Qory Apiary's
 // with a status of 500 or above or the code rate_limited are sent again, see [retryNext].
@@ -76,7 +77,7 @@ func askNextSession(ctx context.Context, send nextSender, session int, out sessi
 		// shortcut: the link of the pinned Forager passes no Retry-After on, so every wait
 		// doubles; read Retry-After here once Forager's link error has it.
 		if ctx.Err() != nil || submissionWait(ctx, wait) != nil {
-			return contracts.NextSessionAnswer{}, "", fmt.Errorf(textNextNoAnswer, session, limitText(nextSessionLimit), nextDetail(err))
+			return contracts.NextSessionAnswer{}, "", &nextSessionFailed{fmt.Errorf(textNextNoAnswer, session, limitText(nextSessionLimit), nextDetail(err))}
 		}
 		wait = min(2*wait, nextMaxWait)
 	}
@@ -125,7 +126,22 @@ func retryNext(err error) bool {
 // nextRefused is the error of a response that ends the run and is not sent again, see
 // [retryNext]: the cause alone, then the status and the text of Qory Apiary or the gateway.
 func nextRefused(session int, err error) error {
-	return fmt.Errorf(textNextRefused, session, nextDetail(err))
+	return &nextSessionFailed{fmt.Errorf(textNextRefused, session, nextDetail(err))}
+}
+
+// nextSessionFailed is the error of a next-session request that was refused or had no
+// answer: its line, and the end code next_session_failed. An answer that qory cannot read,
+// and a request that qory could not write, have no end code: the request was sent and
+// answered, or not sent.
+type nextSessionFailed struct{ err error }
+
+func (e *nextSessionFailed) Error() string { return e.err.Error() }
+
+func (e *nextSessionFailed) Unwrap() error { return e.err }
+
+// EndCode is next_session_failed.
+func (e *nextSessionFailed) EndCode() contracts.EndCode {
+	return contracts.EndCodeNextSessionFailed
 }
 
 // nextDetail is the status and the text of err as a line of the next-session request shows

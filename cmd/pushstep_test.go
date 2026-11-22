@@ -1304,7 +1304,7 @@ func TestAFileBesideTheOutputStaysInTheOutbox(t *testing.T) {
 
 // TestAnOutputWithAMemberThatQoryFillsStoresNothing is a session whose output sets branch,
 // a member that qory fills: qory stores no version, and the run fails with the line that says which
-// member to remove.
+// member to remove and the end code outputs_invalid.
 func TestAnOutputWithAMemberThatQoryFillsStoresNothing(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.noOutput = true
@@ -1314,6 +1314,7 @@ func TestAnOutputWithAMemberThatQoryFillsStoresNothing(t *testing.T) {
 		writeFile(t, filepath.Join(dir, ".qory", "outbox", "pull-request", "pull-request.json"), `{"title":"Add a file","branch":"main"}`)
 	}, nil)
 	r.wantsClose(t, event.StateFailed, 1)
+	r.wantsReason(t, string(contracts.EndCodeOutputsInvalid))
 	wants(t, r.out, "Remove branch from the pull-request output: qory fills it at the push.")
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST, want 0", posts)
@@ -1324,13 +1325,15 @@ func TestAnOutputWithAMemberThatQoryFillsStoresNothing(t *testing.T) {
 // TestAPushedHeadThatDiffersFailsTheStoreWithTheWayOut is an output whose schema allows one
 // commit, a session that leaves two, and a check before the push that takes the head one
 // commit back, as when the head that lands differs from the local head: the push lands, the
-// check after the push fails, and its line says to delete the branch.
+// check after the push fails, its line says to delete the branch, and the run closes with no
+// end code, since outputs_invalid is for a check that stops the run before the push.
 func TestAPushedHeadThatDiffersFailsTheStoreWithTheWayOut(t *testing.T) {
 	process := strings.Replace(pullRequestProcess, "commits: {type: array, x-qory-fill: pushed-commits}", "commits: {type: array, maxItems: 1, x-qory-fill: pushed-commits}", 1)
 	p := newPushRepoWith(t, "write", map[string]string{"modules/hello/process.yaml": process})
 	t.Cleanup(cmd.SetCheckedHeadOneBack())
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
+	r.wantsReason(t, "")
 	if p.branchHead(t) == "" {
 		t.Fatalf("the forge has no branch\n%s", r.out)
 	}
@@ -1341,7 +1344,8 @@ func TestAPushedHeadThatDiffersFailsTheStoreWithTheWayOut(t *testing.T) {
 }
 
 // TestAnOutputThatBreaksItsSchemaPostsNothing is a session whose output has no title, which
-// the type requires: qory posts nothing, and the run fails with the line that names the type.
+// the type requires: qory pushes and posts nothing, and the run fails with the line that names
+// the type and the end code outputs_invalid.
 func TestAnOutputThatBreaksItsSchemaPostsNothing(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.noOutput = true
@@ -1351,6 +1355,7 @@ func TestAnOutputThatBreaksItsSchemaPostsNothing(t *testing.T) {
 		writeFile(t, filepath.Join(dir, ".qory", "outbox", "pull-request", "pull-request.json"), `{"text":"No title."}`)
 	}, nil)
 	r.wantsClose(t, event.StateFailed, 1)
+	r.wantsReason(t, string(contracts.EndCodeOutputsInvalid))
 	wants(t, r.out, "Fix the pull-request output: it breaks its schema at ")
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST, want 0", posts)
@@ -1359,13 +1364,15 @@ func TestAnOutputThatBreaksItsSchemaPostsNothing(t *testing.T) {
 }
 
 // TestAMissingRequiredOutputFailsTheRun is a stage that requires the pull-request output and
-// a session that writes none: the run fails with the line that names the file to write.
+// a session that writes none: qory pushes and posts nothing, and the run fails with the line
+// that names the file to write and the end code outputs_invalid.
 func TestAMissingRequiredOutputFailsTheRun(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.noOutput = true
 	p.api.outputs = `[{"type":"pull-request","required":true,"version":null,"check":"missing"}]`
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
+	r.wantsReason(t, string(contracts.EndCodeOutputsInvalid))
 	wants(t, r.out, "Write pull-request to the outbox: the stage requires it and the session wrote none.\n  .qory/outbox/pull-request/pull-request.json\n")
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST, want 0", posts)
@@ -1374,6 +1381,36 @@ func TestAMissingRequiredOutputFailsTheRun(t *testing.T) {
 	if got := gitOut(t, p.h.dir, "log", "-1", "--format=%s"); got != changesLeft {
 		t.Errorf("the working folder's last commit is %q, want the commit of what the agent left", got)
 	}
+}
+
+// TestAMissingOutputWithNoIndexHasNoEndCode is a stage that requires the pull-request output,
+// a session that writes none, and a read of the run's versions that gets a 500: the check
+// before the push stops the step, qory pushes and posts nothing, and the run closes failed
+// with no end code, since the read failed and no output was found missing.
+func TestAMissingOutputWithNoIndexHasNoEndCode(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.noOutput = true
+	p.api.outputs = `[{"type":"pull-request","required":true,"version":null,"check":"missing"}]`
+	// Only the reads after the session fail: the run reads the versions before it too.
+	var ran atomic.Bool
+	p.api.index = func(_ int, w http.ResponseWriter) bool {
+		if !ran.Load() {
+			return false
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		return true
+	}
+	r := p.run(t, func(dir string) {
+		writesAndCommits(t)(dir)
+		ran.Store(true)
+	}, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	r.wantsReason(t, "")
+	wants(t, r.out, "output pull-request was not stored")
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST, want 0", posts)
+	}
+	notPushed(t, p, r)
 }
 
 // notPushed fails the test unless the forge has no branch of the work item, and the working
@@ -1394,8 +1431,8 @@ func notPushed(t *testing.T, p *pushRepo, r pushed) {
 
 // TestALinkedOutboxFolderIsNotRead is a session that links .qory/outbox/pull-request to a
 // folder of this machine that has a pull-request.json with a title: the run stores no
-// version, fails with the line that says the output is unreadable, and prints nothing of the
-// host's file.
+// version, fails with the line that says the output is unreadable and the end code
+// outputs_invalid, and prints nothing of the host's file.
 func TestALinkedOutboxFolderIsNotRead(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.noOutput = true
@@ -1412,6 +1449,7 @@ func TestALinkedOutboxFolderIsNotRead(t *testing.T) {
 		}
 	}, nil)
 	r.wantsClose(t, event.StateFailed, 1)
+	r.wantsReason(t, string(contracts.EndCodeOutputsInvalid))
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST, want 0", posts)
 	}
