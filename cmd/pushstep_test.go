@@ -453,6 +453,7 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	nowhere := cmd.Nowhere{
 		System: proxygittest.Host, Repositories: p.repositories, RunAPI: p.api.base(),
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
+		StackProxy: p.h.server.Stack.URL, StackCABundle: p.h.server.Stack.CABundle,
 		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, PushProxyErr: p.proxyErr, NoPushProxy: p.noPush, OnCall: p.onCall,
 		PushProxy: p.pushVia.URL, PushCABundle: p.pushVia.CABundle, AtGateway: p.real, Real: p.real,
 		SetRunAPICheck: p.onSetCheck, RunAPIErr: p.runAPIErr, PolicyImage: p.policyImage, PushedCommits: p.viaLink,
@@ -684,6 +685,34 @@ func TestAReadRunPushesNothing(t *testing.T) {
 				t.Errorf("%d POST, want 0", posts)
 			}
 		})
+	}
+}
+
+// TestAWriteRunWhoseInputsListDestinationsPushes is a write run whose documents contain a
+// harness document and whose inputs list destinations: qory fetches its target at the
+// target version before the session, and the push step pushes what the agent left to the
+// work item's branch, as for a run whose inputs list none.
+func TestAWriteRunWhoseInputsListDestinationsPushes(t *testing.T) {
+	files := harnessFiles(t, "write")
+	p := newPushRepo(t, "write")
+	harness := servedHarness(t, p.h, files)
+	p.change = func(d map[string]any) {
+		d["inputs"].(map[string]any)["destinations"] = siteDestinations
+		d["harness"] = harness
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	wants(t, r.out, "qory run: fetched acme/site at "+p.first[:12]+" in ")
+	head := p.branchHead(t)
+	if head == "" {
+		t.Fatalf("the forge has no branch\n%s", r.out)
+	}
+	name, state := r.step()
+	if want := "push qory/" + workItem + " to " + proxygittest.Host + "/acme/site"; name != want || state != event.StateSucceeded {
+		t.Errorf("the push step is %q %s, want %q succeeded\n%+v", name, state, want, r.steps)
+	}
+	if p.h.server.StackTunnels() == 0 {
+		t.Error("the stack proxy led no connection, want the harness's fetch")
 	}
 }
 

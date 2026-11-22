@@ -293,3 +293,35 @@ func TestTheTargetIsTheEntryOfItsPath(t *testing.T) {
 		}
 	}
 }
+
+// TestTargetAloneCutsTheListToTheTarget is the list of a run that fetches its target
+// alone: cut to the target when the target is its first entry on the run's system, and as
+// it came when the target is a later entry, not in the list, on another system, or alone,
+// or the list does not pass Check. Other names keep their values.
+func TestTargetAloneCutsTheListToTheTarget(t *testing.T) {
+	site := Target{System: "git.test", Path: "acme/site"}
+	for _, c := range []struct {
+		system, list string
+		at           Target
+		want         string
+	}{
+		{"git.test", "acme/site,acme/shop,acme/tools", site, "acme/site"},
+		{"git.test", "acme/shop,acme/site", site, "acme/shop,acme/site"},
+		{"git.test", "acme/shop,acme/tools", site, "acme/shop,acme/tools"},
+		{"git.test", "acme/site", site, "acme/site"},
+		{"other.test", "acme/site,acme/shop", site, "acme/site,acme/shop"},
+		{"git.test", "acme/site,acme/site", site, "acme/site,acme/site"},
+		{ForgeGitHub, "Acme/Site,acme/shop", Target{System: ForgeGitHub, Path: "acme/site"}, "Acme/Site"},
+	} {
+		getenv := func(name string) string {
+			return map[string]string{EnvSystem: c.system, EnvRepositories: c.list, "OTHER": "o"}[name]
+		}
+		alone := TargetAlone(getenv, c.at)
+		if got := alone(EnvRepositories); got != c.want {
+			t.Errorf("%s on %s for %s: %q, want %q", c.list, c.system, c.at.Path, got, c.want)
+		}
+		if alone("OTHER") != "o" || alone(EnvSystem) != c.system {
+			t.Errorf("%s: another name changed", c.list)
+		}
+	}
+}

@@ -85,7 +85,7 @@ More: https://github.com/qoryai/qory`,
 	}
 	// The completion script is qory setup completion, and setup shell loads it.
 	root.CompletionOptions.DisableDefaultCmd = true
-	root.AddCommand(newVersion(), newUpdate(), newSetup(), newHarness(), newWorktree(), newConfig(), newRun(), newGateway(), newImage(), newAccessKeyCommand(), newApiary(), newWorkItem(), newArtifact(), newReviewFiles())
+	root.AddCommand(newVersion(), newUpdate(), newSetup(), newHarness(), newWorktree(), newConfig(), newRun(), newGateway(), newImage(), newAccessKeyCommand(), newApiary(), newWorkItem(), newArtifact(), newDestination(), newReviewFiles())
 	root.AddCommand(shortcuts()...)
 	root.AddCommand(worktreeShortcuts()...)
 	root.PersistentFlags().BoolP("verbose", "v", false, "print more of what the command does; each command's help lists what")

@@ -54,6 +54,13 @@ func TestRunStartedHasSetupForARunFromAControlPlane(t *testing.T) {
 // called, the run's spec after it, and runSetup's error.
 func setupSpecOf(t *testing.T, where string, wallEnv, flagEnv []string, harness func(*runSpec), agentEnv func(session.SessionSpec) ([]string, error)) (*session.SetupSpec, runSpec, error) {
 	t.Helper()
+	return setupSpecCut(t, where, wallEnv, flagEnv, harness, agentEnv, "acme/shop", nil)
+}
+
+// setupSpecCut is [setupSpecOf] with the server's repositories, and with the fetch's
+// getenv that cut makes of [runValues], or runValues itself for a nil cut.
+func setupSpecCut(t *testing.T, where string, wallEnv, flagEnv []string, harness func(*runSpec), agentEnv func(session.SessionSpec) ([]string, error), repositories string, cut func(func(string) string) func(string) string) (*session.SetupSpec, runSpec, error) {
+	t.Helper()
 	rt, err := catalog.Lookup("claude", "")
 	if err != nil {
 		t.Fatal(err)
@@ -68,12 +75,44 @@ func setupSpecOf(t *testing.T, where string, wallEnv, flagEnv []string, harness 
 		harness(&spec)
 	}
 	var got *session.SetupSpec
-	run := &nowhere{note: func(string) {}, values: Nowhere{System: "git.example.com", Repositories: "acme/shop", AgentEnv: agentEnv, Setup: func(s session.SetupSpec) error {
+	run := &nowhere{note: func(string) {}, values: Nowhere{System: "git.example.com", Repositories: repositories, AgentEnv: agentEnv, Setup: func(s session.SetupSpec) error {
 		got = &s
 		return nil
 	}}}
-	err = runSetup(t.Context(), run, &spec, false)
+	values := runValues(run)
+	if cut != nil {
+		values = cut(values)
+	}
+	err = runSetup(t.Context(), run, &spec, false, values)
 	return got, spec, err
+}
+
+// TestASetupOutsideGetsTheListTheFetchTook is the setup of a run whose fetch took the
+// target alone of the server's list acme/shop,acme/tools: the setup container's
+// QORY_RUN_REPOSITORIES is acme/shop, in place of AgentEnv's value, and every other
+// variable is as AgentEnv returns it. With the list as it came, the variable stays.
+func TestASetupOutsideGetsTheListTheFetchTook(t *testing.T) {
+	agent := []string{"QORY_RUN_REPOSITORIES=acme/shop,acme/tools", "QORY_RUN_SYSTEM=git.example.com", "SERVER_VALUE=s"}
+	agentEnv := func(session.SessionSpec) ([]string, error) { return slices.Clone(agent), nil }
+	alone := func(values func(string) string) func(string) string {
+		return preparation.TargetAlone(values, preparation.Target{System: "git.example.com", Path: "acme/shop"})
+	}
+	for _, c := range []struct {
+		name string
+		cut  func(func(string) string) func(string) string
+		want []string
+	}{
+		{"cut", alone, []string{"QORY_RUN_SYSTEM=git.example.com", "SERVER_VALUE=s", "QORY_RUN_REPOSITORIES=acme/shop"}},
+		{"as it came", nil, agent},
+	} {
+		got, _, err := setupSpecCut(t, "", nil, nil, nil, agentEnv, "acme/shop,acme/tools", c.cut)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got == nil || !slices.Equal(got.Env, c.want) {
+			t.Errorf("%s: the setup's variables are %v, want %q", c.name, got, c.want)
+		}
+	}
 }
 
 // TestASetupOutsideGetsTheAgentsEnvironment is a setup outside with wall.env and --env
@@ -279,7 +318,7 @@ func TestASetupOfCodexLeavesEtcCodexToTheBind(t *testing.T) {
 				got = s.Commands
 				return nil
 			}}}
-			if err := runSetup(t.Context(), run, &spec, c.gitSession); err != nil {
+			if err := runSetup(t.Context(), run, &spec, c.gitSession, runValues(run)); err != nil {
 				t.Fatal(err)
 			}
 			if where == config.SetupInside {
