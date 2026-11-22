@@ -27,8 +27,8 @@ func scopeFolders(t *testing.T) (clone, snapshot string) {
 
 // TestAScopeCheckRunsOnTheCloneAsTheGivenUser is a scope check that passes: the container
 // runs the command with --base and --artifacts last, as the given user, with the clone as
-// the working folder and the snapshot at the files folder, both read-only, and nothing is
-// fetched.
+// the writable working folder, and the home and the snapshot at the files folder
+// read-only; nothing is fetched.
 func TestAScopeCheckRunsOnTheCloneAsTheGivenUser(t *testing.T) {
 	f := newFixture(t, "#!/usr/bin/env node")
 	clone, snapshot := scopeFolders(t)
@@ -44,10 +44,10 @@ func TestAScopeCheckRunsOnTheCloneAsTheGivenUser(t *testing.T) {
 	if got := strings.Join(created[len(created)-8:], " "); got != f.program+" "+f.c.Image+" scope --plan --base "+base+" --artifacts /qory-push-check/files" {
 		t.Errorf("the command: %s", got)
 	}
-	for _, want := range []string{"src=" + clone + ",dst=/qory-push-check/artifacts,readonly", "src=" + snapshot + ",dst=/qory-push-check/files,readonly"} {
-		if !slices.Contains(f.e.mounts, "type=bind,"+want) {
-			t.Errorf("the mounts %v lack %s", f.e.mounts, want)
-		}
+	want := []string{"type=bind,src=" + f.c.Home + ",dst=" + f.c.Home + ",readonly", "type=bind,src=" + clone + ",dst=/qory-push-check/artifacts",
+		"type=bind,src=" + snapshot + ",dst=/qory-push-check/files,readonly"}
+	if !slices.Equal(f.e.mounts, want) {
+		t.Errorf("the mounts are %q, want %q", f.e.mounts, want)
 	}
 	if f.e.pulled["app.go"] != "package app\n" || f.e.pushed["index.json"] == "" || len(f.fetched) != 0 {
 		t.Errorf("the container got %v and %v, and fetched %v", f.e.pulled, f.e.pushed, f.fetched)
@@ -99,5 +99,24 @@ func TestAScopeCheckEndsByItsExit(t *testing.T) {
 	}
 	if _, err := run(f); err == nil || !strings.Contains(err.Error(), "Cannot connect to the Docker daemon") {
 		t.Errorf("a failed engine: %v", err)
+	}
+}
+
+// TestAPushCheckMountsEveryFolderReadOnly is a push check with the run's inputs: the home,
+// the working folder, the pushed files and inputs.json are all read-only, as only a scope
+// check's clone is writable.
+func TestAPushCheckMountsEveryFolderReadOnly(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	f.c.Inputs, f.c.InputsData = filepath.Join(t.TempDir(), "inputs.json"), []byte(`{}`)
+	if r, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"})); r != nil || err != nil {
+		t.Fatalf("got %+v, %v", r, err)
+	}
+	if len(f.e.mounts) != 4 {
+		t.Fatalf("the mounts are %q, want 4", f.e.mounts)
+	}
+	for _, m := range f.e.mounts {
+		if !strings.HasSuffix(m, ",readonly") {
+			t.Errorf("the mount %s is writable", m)
+		}
 	}
 }

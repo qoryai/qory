@@ -62,9 +62,9 @@ func (e *engine) run(ctx context.Context, argv []string, stdout, stderr io.Write
 					e.modes[src] = info.Mode().Perm()
 				}
 				switch {
-				case strings.Contains(a, "dst="+pushcheck.WorkDir+","):
+				case strings.Contains(a+",", "dst="+pushcheck.WorkDir+","):
 					e.pulled = tree(src)
-				case strings.Contains(a, "dst="+pushcheck.FilesDir+","):
+				case strings.Contains(a+",", "dst="+pushcheck.FilesDir+","):
 					e.pushed = tree(src)
 				}
 			}

@@ -15,14 +15,14 @@ import (
 	"github.com/qoryai/qory/internal/pushcheck"
 )
 
-// TestARealScopeCheckReadsAReadOnlyClone runs a scope check in a container of this
+// TestARealScopeCheckWritesOnlyTheClone runs a scope check in a container of this
 // machine's engine, from the image QORY_TEST_GIT_IMAGE names, which has git: on a fresh
-// clone of a commit past the start, mounted read-only, the program's git reads the commits
-// as the clone's owner, ScopeUser, and can write neither the clone nor the snapshot. It
-// runs as another user too: an engine that maps the owner of a bind, as a desktop VM does,
-// lets git read the clone, and it only logs that case. It runs only with
+// clone of a commit past the start, the program's git reads the commits and writes an
+// object as the clone's owner, ScopeUser, and can write neither the snapshot nor the home.
+// It runs as another user too, and only logs that case: an engine that maps the owner of
+// a bind, as a desktop VM does, lets git read the clone. It runs only with
 // QORY_TEST_DOCKER=1, docker on the PATH and the image present.
-func TestARealScopeCheckReadsAReadOnlyClone(t *testing.T) {
+func TestARealScopeCheckWritesOnlyTheClone(t *testing.T) {
 	image := os.Getenv("QORY_TEST_GIT_IMAGE")
 	switch {
 	case os.Getenv("QORY_TEST_DOCKER") != "1":
@@ -86,7 +86,8 @@ func TestARealScopeCheckReadsAReadOnlyClone(t *testing.T) {
 	script := "#!/bin/sh\nset -e\ntest \"$1 $3 $4\" = \"--base --artifacts " + pushcheck.FilesDir + "\"\n" +
 		"git rev-parse HEAD\ngit status --porcelain\ngit merge-base --is-ancestor \"$2\" HEAD\n" +
 		"git diff --name-only \"$2\" HEAD\ntest -f \"$4/index.json\"\n" +
-		"if touch \"$4/x\" 2>/dev/null; then exit 9; fi\nif touch x 2>/dev/null; then exit 9; fi\n" +
+		"git hash-object -w --stdin </dev/null\n" +
+		"if touch \"$4/x\" 2>/dev/null; then exit 9; fi\nif touch \"$0.x\" 2>/dev/null; then exit 9; fi\n" +
 		"test \"$(id -u)\" = " + uid + "\n"
 	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -97,9 +98,6 @@ func TestARealScopeCheckReadsAReadOnlyClone(t *testing.T) {
 	}
 	if end.TimedOut || end.NotStarted != "" || end.ExitCode != 0 {
 		t.Errorf("as the clone's owner %s: %+v", user, end)
-	}
-	if status := git(clone, "status", "--porcelain"); status != "" {
-		t.Errorf("the check changed the clone:\n%s", status)
 	}
 	// Another user: git stops on the clone's owner.
 	end, err = c.Scope(context.Background(), []string{program}, clone, snapshot, start, "4242:4242")

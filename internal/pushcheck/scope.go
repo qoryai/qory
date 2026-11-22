@@ -57,16 +57,21 @@ type ScopeEnd struct {
 
 // Scope runs command, the scope check of a plan type with its program's absolute path in
 // the home, within [Budget], on clone, a fresh clone of a session's commits, as the
-// working folder, with snapshot, the session's launch snapshot, read-only at [FilesDir],
-// as the user user: command's arguments, then --base base --artifacts [FilesDir]. The
-// container is the checker's, see [Checker.Check]. The engine's failures are errors.
+// writable working folder, with snapshot, the session's launch snapshot, read-only at
+// [FilesDir], as the user user: command's arguments, then --base base --artifacts
+// [FilesDir]. The container is the checker's, see [Checker.Check]. The engine's failures
+// are errors.
 func (c *Checker) Scope(ctx context.Context, command []string, clone, snapshot, base, user string) (ScopeEnd, error) {
 	ctx, cancel := context.WithTimeout(ctx, Budget)
 	defer cancel()
 	args := append(slices.Clone(command[1:]), "--base", base, "--artifacts", FilesDir)
 	scoped := *c
 	scoped.User = user
-	end, err := scoped.run(ctx, command[0], args, clone, snapshot, "")
+	// The harness's git writes objects, so the clone alone is writable: it is a fresh copy
+	// that qory removes after the check.
+	binds := []bind{{src: c.Home, dst: c.Home}, {src: clone, dst: WorkDir, writable: true},
+		{src: snapshot, dst: FilesDir}}
+	end, err := scoped.run(ctx, container{program: command[0], args: args, binds: binds, workdir: WorkDir})
 	switch {
 	case err != nil:
 		return ScopeEnd{}, err

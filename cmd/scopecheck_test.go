@@ -92,7 +92,8 @@ func (p *pushRepo) wantsNoPush(t *testing.T, r pushed, code contracts.EndCode, w
 // TestCommitsOutsideThePlanStopTheirPush is a session whose scope check exits 1 with its
 // findings: nothing is pushed, the run ends push_scope_refused, and the line has the
 // repository, the plan type, the commits and the findings. The check ran on the clone with
-// --base at the session's start and --artifacts at the snapshot, read-only.
+// --base at the session's start and --artifacts at the snapshot, read-only, and the clone
+// writable.
 func TestCommitsOutsideThePlanStopTheirPush(t *testing.T) {
 	docker, log := scopeDocker(t, "exit 1", "src/app.go: outside the plan\n")
 	p := scopedRepo(t, docker)
@@ -100,7 +101,7 @@ func TestCommitsOutsideThePlanStopTheirPush(t *testing.T) {
 	p.wantsNoPush(t, r, contracts.EndCodePushScopeRefused, "qory run: The commits do not pass the scope check of the session's plan, so qory pushed nothing.\n  Repository acme/site, plan type change-plan, commits "+p.first[:12]+" to ")
 	wants(t, r.out, ".\n  src/app.go: outside the plan\n")
 	created := checkLog(t, log)
-	for _, want := range []string{"/modules/hello/checks/scope.sh example.com/agent:1 --base " + p.first + " --artifacts /qory-push-check/files\n", "/clone,dst=/qory-push-check/artifacts,readonly", "/artifacts,dst=/qory-push-check/files,readonly", " --network none "} {
+	for _, want := range []string{"/modules/hello/checks/scope.sh example.com/agent:1 --base " + p.first + " --artifacts /qory-push-check/files\n", "/clone,dst=/qory-push-check/artifacts ", "/artifacts,dst=/qory-push-check/files,readonly", " --network none "} {
 		if !strings.Contains(created, want) {
 			t.Errorf("the scope check's create lacks %q:\n%s", want, created)
 		}
