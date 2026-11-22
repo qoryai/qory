@@ -2,6 +2,7 @@ package exports
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"os"
@@ -29,13 +30,16 @@ type ProcessType struct {
 	Marks map[string]string
 	// SizeLimit is size_limit, the most bytes of a version's files, 0 when the entry has none.
 	SizeLimit int64
+	// Unread is why json_schema has no JSON form, one line, with Schema nil; "" when it has one.
+	Unread string
 }
 
 // ProcessTypes returns artifact_types of the process.yaml at the root of the module folder
 // dir, read through dir opened as an [os.Root], as [Exports.Verify] reads it. ok is false when
 // the folder has no such file, and when the file cannot be read or decoded or has an alias.
 // The compose checked the file, as [Exports.Verify] checks it, so an entry with no name, a
-// name or a send that is not a string, or a json_schema with no JSON form is left out.
+// name or a send that is not a string is left out, and a json_schema with no JSON form sets
+// Unread.
 func ProcessTypes(dir string) (types []ProcessType, ok bool) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
@@ -69,14 +73,18 @@ func ProcessTypes(dir string) (types []ProcessType, ok bool) {
 		}
 		if n := value(entry, "json_schema"); n != nil {
 			doc, why := jsonValue(n, "json_schema")
-			if why != "" {
-				continue
-			}
 			inlined := InlinePrimitives(doc)
-			if t.Schema, err = json.Marshal(inlined); err != nil {
-				continue
+			schema, err := json.Marshal(inlined)
+			switch {
+			case why != "":
+				// why is the fix, then the cause on line 2.
+				_, cause, _ := strings.Cut(why, "\n  ")
+				t.Unread = strings.TrimSuffix(cmp.Or(cause, why), ".")
+			case err != nil:
+				t.Unread = err.Error()
+			default:
+				t.Schema, t.Marks = schema, fillMarks(inlined)
 			}
-			t.Marks = fillMarks(inlined)
 		}
 		types = append(types, t)
 	}

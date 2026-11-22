@@ -141,6 +141,37 @@ func TestProcessTypesReadsEachTypeWithItsDeliverSchemaAndMarks(t *testing.T) {
 	}
 }
 
+// TestProcessTypesKeepsATypeWhoseSchemaDoesNotConvert is a type whose json_schema has a key
+// that is a number, which JSON does not have, beside a type with a schema: the first is read
+// with no schema and the cause, on one line with no period, and the second as it is.
+func TestProcessTypesKeepsATypeWhoseSchemaDoesNotConvert(t *testing.T) {
+	dir := t.TempDir()
+	body := `artifact_types:
+  - name: reply
+    base_view: structured
+    json_schema:
+      type: object
+      properties:
+        1: {type: string}
+  - name: notes
+    base_view: structured
+    json_schema: {type: object}
+`
+	if err := os.WriteFile(filepath.Join(dir, exports.ProcessFileName), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	types, ok := exports.ProcessTypes(dir)
+	if !ok || len(types) != 2 {
+		t.Fatalf("ok %v, types %+v", ok, types)
+	}
+	if reply := types[0]; reply.Name != "reply" || reply.Schema != nil || reply.Unread != "A JSON key is a string" {
+		t.Errorf("reply is %+v", reply)
+	}
+	if notes := types[1]; notes.Name != "notes" || string(notes.Schema) != `{"type":"object"}` || notes.Unread != "" {
+		t.Errorf("notes is %+v", notes)
+	}
+}
+
 // TestFirstBrokenPlaceIsThePointerOfTheFirstRule is a document that breaks its schema at
 // /title and one that breaks it at the root: the place is /title and /.
 func TestFirstBrokenPlaceIsThePointerOfTheFirstRule(t *testing.T) {

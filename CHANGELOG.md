@@ -330,7 +330,9 @@ release may change what an existing document does, and states it under Upgrading
   session wrote none.` qory removes the outbox before each session, so an output that a
   failed session or an earlier run left is never stored; a `.qory` that is a link stops the
   run with `Remove .qory/outbox, then take the work item in again: a session starts with no
-  outbox.` A run with no repository stores its outputs alone, in the step `store
+  outbox.` A type of the outputs or of `deliver` whose `json_schema` does not convert
+  to JSON stops the run: `Report the run to the instance admin of Qory Apiary: an output's
+  schema does not convert.` A run with no repository stores its outputs alone, in the step `store
   the outputs`. See The outputs of a session in `docs/run.md`.
 - A module can declare checks for the files of an artifact type with `push_checks` in
   `qory-module.yaml`: each item has `type`, `command`, a program in the module and its

@@ -3258,6 +3258,14 @@ Each type of the stage's outputs becomes a folder of the outbox. A type that is 
 then `The stage lists the output type <type>, not a name of a-z, 0-9 and single hyphens; the
 code is used` indented by two spaces.
 
+A type that the stage's outputs or `deliver` of the run documents list, and whose
+`json_schema` in the composed `process.yaml` is not a JSON value, stops a run from a run code
+before its session, exit 1: `qory run: Report the run to the instance admin of Qory Apiary: an
+output's schema does not convert.`, then `The json_schema of artifact type <type> is not a
+JSON Schema that qory can read: <cause>. The run code is used up.` indented by two spaces.
+The compose checks each `json_schema` first, so a harness that passes the compose does not
+stop here.
+
 | Type | The session writes |
 |---|---|
 | a type with a `json_schema` | one JSON object, `<type>/<type>.json`, such as `pull-request/pull-request.json` |

@@ -693,6 +693,31 @@ func (r *codeRun) outputs(types []exports.ProcessType) []inputOutput {
 	return out
 }
 
+// checkOutputTypes stops the run of r on a type of types, the artifact types of the
+// composed harness, whose json_schema does not convert, when the stage's outputs or the
+// documents' deliver list the type: the outputs of such a type would go unchecked. nil for r
+// nil, a run with a run key and no run code.
+func (r *codeRun) checkOutputTypes(types []exports.ProcessType) error {
+	if r == nil {
+		return nil
+	}
+	listed := map[string]bool{}
+	if r.snapshot != nil {
+		for _, o := range r.snapshot.Outputs {
+			listed[o.Type] = true
+		}
+	}
+	for _, d := range r.deliver {
+		listed[d.Type] = true
+	}
+	for _, t := range types {
+		if t.Unread != "" && listed[t.Name] {
+			return fmt.Errorf(textSchemaUnread, shownText(provisioner.ShownType(t.Name)), shownText(t.Unread))
+		}
+	}
+	return nil
+}
+
 // deliveredTypes is types, the artifact types of the composed harness, with the send of each
 // from r's deliver, the documents' deliver: a type that deliver does not list has no send,
 // and a type that deliver lists and types do not define is added with its send alone. The

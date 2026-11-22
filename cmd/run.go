@@ -832,6 +832,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// types are the artifact types of the composed process.yaml, which inputs.json
 				// and the submit step read; the send of each comes from the documents' deliver.
 				types, _ := harnessTypes(rep)
+				if err := fromCode.checkOutputTypes(types); err != nil {
+					return false, err
+				}
 				extensions, pins, pinFile = rep.Extensions, c.runtimes, c.pinFile
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {

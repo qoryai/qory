@@ -13,6 +13,7 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/primitives"
+	"github.com/qoryai/qory/internal/runapi"
 )
 
 // pullRequestSchemaType is a delivered structured type with a title and every mark, as the
@@ -334,5 +335,34 @@ func TestClearOutboxRemovesTheOutboxAlone(t *testing.T) {
 	err := clearOutbox(qoryLink)
 	if err == nil || !strings.HasPrefix(err.Error(), "Remove .qory/outbox, then take the work item in again: ") || !exists(filepath.Join(outside, "outbox", "reply.json")) {
 		t.Errorf("a .qory that is a link: %v", err)
+	}
+}
+
+// TestATypeWhoseSchemaDoesNotConvertStopsTheRun is a composed harness whose type notes has a
+// json_schema that does not convert: a run whose stage's outputs or documents' deliver list
+// notes stops with the accepted text, and a run that lists only reply goes on, as does a run
+// with no run code.
+func TestATypeWhoseSchemaDoesNotConvertStopsTheRun(t *testing.T) {
+	types := []exports.ProcessType{
+		{Name: "reply", Schema: json.RawMessage(`{"type":"object"}`)},
+		{Name: "notes", Unread: "A JSON key is a string"},
+	}
+	want := "Report the run to the instance admin of Qory Apiary: an output's schema does not convert.\n" +
+		"  The json_schema of artifact type notes is not a JSON Schema that qory can read: A JSON key is a string. The run code is used up."
+	for name, r := range map[string]*codeRun{
+		"a stage output": {snapshot: &runapi.Snapshot{Outputs: []runapi.Output{{Type: "reply"}, {Type: "notes"}}}},
+		"a deliver":      {snapshot: &runapi.Snapshot{}, deliver: []contracts.Deliver{{Type: "notes", Send: "after_gate"}}},
+		"no snapshot":    {deliver: []contracts.Deliver{{Type: "notes", Send: "after_gate"}}},
+	} {
+		if err := r.checkOutputTypes(types); err == nil || err.Error() != want {
+			t.Errorf("%s: %v, want %q", name, err, want)
+		}
+	}
+	listsReply := &codeRun{snapshot: &runapi.Snapshot{Outputs: []runapi.Output{{Type: "reply"}}}}
+	if err := listsReply.checkOutputTypes(types); err != nil {
+		t.Errorf("a run that lists reply alone: %v", err)
+	}
+	if err := (*codeRun)(nil).checkOutputTypes(types); err != nil {
+		t.Errorf("a run with no run code: %v", err)
 	}
 }
