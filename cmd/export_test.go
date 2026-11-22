@@ -1230,18 +1230,19 @@ func SetInstallRuntimes(on bool) func() {
 
 // SetInstallStandIn makes a run of Claude Code that installs nothing start a copy of its
 // launch's program, from a new folder under root that others can read, as an install
-// makes one, and returns what restores the default. A launch whose Command is an absolute
-// path that is no file on this machine, such as the agent of a test's image, gets a program
-// that runs that path inside the session's container. Any other Command gets a program that
-// exits 0.
+// makes one, and returns what restores the default. A launch whose Command is a name, such
+// as sh, or an absolute path that is no file on this machine, such as the agent of a test's
+// image, gets a program that runs that Command where the session runs, inside its container
+// behind a wall. A launch whose Command is claude, or a file that cannot be read, gets a
+// program that exits 0, so no test starts Claude Code.
 func SetInstallStandIn(root string) func() {
 	before := installStandIn
 	installStandIn = func(command string) (*runtimeinstall.Installed, error) {
 		data, err := os.ReadFile(command)
 		switch {
-		case !filepath.IsAbs(command):
+		case command == "claude":
 			data = []byte("#!/bin/sh\nexit 0\n")
-		case errors.Is(err, fs.ErrNotExist):
+		case !filepath.IsAbs(command) || errors.Is(err, fs.ErrNotExist):
 			data = []byte("#!/bin/sh\nexec '" + command + "' \"$@\"\n")
 		case err != nil:
 			data = []byte("#!/bin/sh\nexit 0\n")
