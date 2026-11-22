@@ -251,3 +251,23 @@ func TestTheScopeCheckReadsTheLaunchSnapshot(t *testing.T) {
 		t.Errorf("the scope check read %q, want the launch snapshot %q", checked, launched)
 	}
 }
+
+// TestALaunchSnapshotThatFailsStopsTheSession is a run whose read of the artifact index for
+// the launch snapshot fails: the agent does not start, and the run closes run_api_failed.
+func TestALaunchSnapshotThatFailsStopsTheSession(t *testing.T) {
+	docker, _ := scopeDocker(t, "exit 0", "")
+	p := scopedRepo(t, docker)
+	p.api.index = func(n int, w http.ResponseWriter) bool {
+		if n < 2 {
+			return false
+		}
+		failing(w, http.StatusInternalServerError, "internal", "")
+		return true
+	}
+	joined := false
+	r := p.run(t, func(string) { joined = true }, nil)
+	if joined || len(r.closes) != 1 || r.closes[0].Reason != string(contracts.EndCodeRunAPIFailed) {
+		t.Errorf("joined %v, closed %+v, want no join and run_api_failed\n%s", joined, r.closes, r.out)
+	}
+	wants(t, r.out, "qory run: The fetch of the session's start artifacts failed, so the agent did not start.\n  Cause: ")
+}

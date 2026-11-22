@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -137,8 +136,7 @@ func TestALaunchSnapshotThatFailsEndsRunAPIFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = startArtifacts(t.Context(), client, t.TempDir(), t.TempDir(), "build-plan")
-	var reason *reasonError
-	if !errors.As(err, &reason) || reason.code != string(contracts.EndCodeRunAPIFailed) ||
+	if endCodeOf(err) != contracts.EndCodeRunAPIFailed ||
 		!strings.HasPrefix(err.Error(), "The fetch of the session's start artifacts failed, so the agent did not start.\n  Cause: ") {
 		t.Errorf("got %v", err)
 	}

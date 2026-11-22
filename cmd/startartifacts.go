@@ -11,8 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/qoryai/integrations/contracts"
-
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/runapi"
 )
@@ -31,7 +29,7 @@ const textStartArtifacts = "The fetch of the session's start artifacts failed, s
 // snapshot is the newest version of plan that is neither cancelled nor a withdrawal, and
 // of each other artifact the version a gate approved, laid out as qory artifact pull
 // writes them, with an index.json that lists only those versions. A fetch through the run
-// API that fails is a [*reasonError] of run_api_failed. A run with no run API, client
+// API that fails is [textStartArtifacts], see [startArtifactsFailed]. A run with no run API, client
 // nil, and a server with the feature workflow_model off get a snapshot with no artifact.
 // shortcut: a run with no run API gets an empty snapshot; replace it when a run with no
 // control plane checks its scope.
@@ -47,7 +45,7 @@ func startArtifacts(ctx context.Context, client *runapi.Client, runDir, in, plan
 		return "", fmt.Errorf("making the folder of the start artifacts failed: %w", exports.HideError(err))
 	}
 	if err := fetchStartArtifacts(ctx, client, snapshot, plan); err != nil {
-		return "", &reasonError{code: string(contracts.EndCodeRunAPIFailed), text: fmt.Sprintf(textStartArtifacts, strings.TrimSuffix(shownError(err), "."))}
+		return "", startArtifactsFailed(err)
 	}
 	if err := copyTree(snapshot, copied); err != nil {
 		return "", fmt.Errorf("copying the start artifacts to the inputs folder failed: %w", exports.HideError(err))
@@ -55,9 +53,15 @@ func startArtifacts(ctx context.Context, client *runapi.Client, runDir, in, plan
 	return snapshot, nil
 }
 
+// startArtifactsFailed is [textStartArtifacts] for err, the fetch's error, with err kept for
+// [endCodeOf]: a failed call to the run API, a [*runapi.CallError], ends run_api_failed.
+func startArtifactsFailed(err error) error {
+	return &shownCause{line: fmt.Errorf(textStartArtifacts, strings.TrimSuffix(shownError(err), ".")), cause: err}
+}
+
 // launchSnapshot is [startArtifacts] for a session of run, through its run API; with no
 // run API, the snapshot has no artifact. A run API whose client cannot be made is the
-// fetch's error.
+// fetch's error. The error is a line of qory run.
 func launchSnapshot(ctx context.Context, run openedRun, in, plan string) (string, error) {
 	var client *runapi.Client
 	if hasRunAPI(run) {
@@ -66,12 +70,12 @@ func launchSnapshot(ctx context.Context, run openedRun, in, plan string) (string
 			client, err = runapi.New(base, httpClient)
 		}
 		if err != nil {
-			return "", &runLineError{&reasonError{code: string(contracts.EndCodeRunAPIFailed), text: fmt.Sprintf(textStartArtifacts, strings.TrimSuffix(shownError(err), "."))}}
+			return "", &runLineError{startArtifactsFailed(err)}
 		}
 	}
 	snapshot, err := startArtifacts(ctx, client, run.Dir(), in, plan)
-	var reason *reasonError
-	if errors.As(err, &reason) {
+	var fetch *shownCause
+	if errors.As(err, &fetch) {
 		return "", &runLineError{err}
 	}
 	return snapshot, err
