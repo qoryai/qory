@@ -527,10 +527,11 @@ func TestARunCodesTimeLimitMinutesIsTheSessionsTimeLimit(t *testing.T) {
 	}
 }
 
-// TestARunCodeWithSharedRunAndFullSuiteRunsOneSession is a run from a run code whose
-// documents set shared_run and type_settings.full_suite to true: qory takes the documents and starts
-// the run as it does without them, with the time limit of the documents.
-func TestARunCodeWithSharedRunAndFullSuiteRunsOneSession(t *testing.T) {
+// TestARunCodeWithSharedRunAndFullSuiteStartsSession1 is a run from a run code whose
+// documents set shared_run and type_settings.full_suite to true: qory takes the documents
+// and starts session 1 as it starts a run without them, with the time limit of the
+// documents. The tests of the later sessions are in sessionloop_test.go.
+func TestARunCodeWithSharedRunAndFullSuiteStartsSession1(t *testing.T) {
 	r := runFromCodeWith(t, behindAWall(t), nil, writesHello, func(d map[string]any) {
 		d["time_limit_minutes"], d["shared_run"], d["type_settings"] = 60, true, map[string]any{"full_suite": true}
 	})

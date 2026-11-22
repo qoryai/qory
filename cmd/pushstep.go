@@ -194,6 +194,9 @@ type sessionPush struct {
 	// [preparation.Push]: true for a walled run.
 	agentStopped bool
 	checks       *runPushChecks
+	// shared is whether the run's documents set shared_run, so a later session may follow
+	// the push: the push then needs [agentStopProof].
+	shared bool
 	// handoff is the checkout that has the session's hand-off file, "" for none.
 	handoff string
 	// ended is the line that says the report of pushed commits found the run over, Qory
@@ -215,6 +218,13 @@ func (p *sessionPush) after(ending *pushEnding, out session.Outcome) (session.Ou
 	if p.ended != "" {
 		return out, nil
 	}
+	if p.shared {
+		if err := agentStopProof(p.agentStopped, p.run.ContainerKept(), "qory pushed nothing"); err != nil {
+			ending.noStep = true
+			ending.settle(p.stopNow())
+			return ending.outcome(err), err
+		}
+	}
 	ctx, cancel := pushContext(p.ctx, p.again, p.limit, pushTimes.limit, pushTimes.signal)
 	defer cancel()
 	var err error
@@ -234,7 +244,7 @@ func (p *sessionPush) after(ending *pushEnding, out session.Outcome) (session.Ou
 	return out, nil
 }
 
-// pushAfterSession is [sessionPush.after], which qory run calls once, after its session.
+// pushAfterSession is [sessionPush.after], which qory run calls after each session.
 // A test replaces it to stand in for further sessions of the run around the step.
 var pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outcome) (session.Outcome, error) {
 	return p.after(ending, out)

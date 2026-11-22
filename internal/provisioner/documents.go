@@ -63,7 +63,11 @@ func ReadDocuments(documents json.RawMessage) (contracts.Documents, error) {
 	if json.Compact(&inputs, doc.Inputs) != nil || inputs.Len() > contracts.MaxInputs {
 		return contracts.Documents{}, fmt.Errorf("its inputs are larger than %d bytes", contracts.MaxInputs)
 	}
-	if err := checkRunSettings(documentsSchema, doc.Step, doc.RunSettings); err != nil {
+	// run_settings comes only for the step workflow, which the schema checks too.
+	if doc.RunSettings != nil && doc.Step != StepWorkflow {
+		return contracts.Documents{}, fmt.Errorf("it breaks %s", documentsSchema)
+	}
+	if err := checkRunSettings(documentsSchema, doc.RunSettings); err != nil {
 		return contracts.Documents{}, err
 	}
 	if doc.Subject != nil && doc.Subject.Kind == SubjectWorkItem {
@@ -85,21 +89,17 @@ func ReadDocuments(documents json.RawMessage) (contracts.Documents, error) {
 	return doc, nil
 }
 
-// checkRunSettings checks rs, the run_settings of documents of the schema name already
-// checked. It checks again that run_settings comes only for the step workflow, which the
-// schema checks too. It then checks the rules the schema states and cannot check: the
-// ids in provider_models are unique, effort is listed for model, each tier's model is
+// checkRunSettings checks rs, the model settings of a document of the schema name already
+// checked, for the rules the schema states and cannot check: the ids in provider_models
+// are unique, effort is listed for model, each tier's model is
 // listed, and each tier's effort is listed for that tier's model. The schema checks each
 // value with Go's regexp, whose $ matches only at the end of the text, so a value with a
 // trailing line feed is refused there.
-func checkRunSettings(name, step string, rs *contracts.RunSettings) error {
+func checkRunSettings(name string, rs *contracts.RunSettings) error {
 	if rs == nil {
 		return nil
 	}
 	broken := fmt.Errorf("it breaks %s", name)
-	if step != StepWorkflow {
-		return broken
-	}
 	efforts := make(map[string][]string, len(rs.ProviderModels))
 	for _, m := range rs.ProviderModels {
 		if _, twice := efforts[m.ID]; twice {

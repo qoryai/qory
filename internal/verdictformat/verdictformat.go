@@ -20,6 +20,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/primitives"
 	"github.com/qoryai/qory/internal/runapi"
 )
 
@@ -348,30 +349,11 @@ func checkLine(n int, name, line string) error {
 		case '\n', '\r':
 			return fmt.Errorf("Write the %s of point %d on one line. It has a line break (%U).", name, n, r)
 		}
-		if Excluded(r) {
+		if primitives.StopsLine(r) {
 			return fmt.Errorf("Remove the character %U from the %s of point %d: the contract's $defs line excludes it.", r, name, n)
 		}
 	}
 	return nil
-}
-
-// Excluded reports whether the schema's $defs line excludes r: any control character,
-// tab, line feed and carriage return included, a bidirectional control, a separator
-// U+2028 or U+2029, or one of the format characters it lists.
-func Excluded(r rune) bool {
-	switch {
-	case r <= 0x1f, r >= 0x7f && r <= 0x9f:
-		return true
-	case r == 0xad, r == 0x61c, r == 0x180e, r == 0x200b, r == 0x200e, r == 0x200f:
-		return true
-	case r == 0x2028, r == 0x2029, r >= 0x202a && r <= 0x202e:
-		return true
-	case r >= 0x2060 && r <= 0x2064, r >= 0x2066 && r <= 0x2069:
-		return true
-	case r == 0xfeff, r >= 0xfff9 && r <= 0xfffb:
-		return true
-	}
-	return false
 }
 
 // kind is the JSON kind of value, a value of a decoder with UseNumber.

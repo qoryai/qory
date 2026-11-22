@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"unicode"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
@@ -360,7 +361,7 @@ func TestMoreThanTwentyFindingsKeepTheVerdictValid(t *testing.T) {
 		if i%5 == 0 {
 			severity = "blocking"
 		}
-		findings = append(findings, fmt.Sprintf(`{"severity":%q,"quote":"q","problem":"p","fix":"f","proof":"failing input: x","point":"point %d\twith a tab"}`, severity, i+1))
+		findings = append(findings, fmt.Sprintf(`{"severity":%q,"quote":"q","problem":"p","fix":"f","proof":"failing input: x","point":"point %d with a space"}`, severity, i+1))
 	}
 	report := reportAt(t, `{"reviewer":"code-reviewer","findings":[`+strings.Join(findings, ",")+`]}`)
 	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: report}}})
@@ -368,7 +369,7 @@ func TestMoreThanTwentyFindingsKeepTheVerdictValid(t *testing.T) {
 		t.Fatalf("the verdict has %d points", len(d.Points))
 	}
 	// The 5 blocking findings come first, and the last point states the 6 that no point lists.
-	if d.Points[0].Text != "point 1 with a tab" || d.Points[4].Text != "point 21 with a tab" {
+	if d.Points[0].Text != "point 1 with a space" || d.Points[4].Text != "point 21 with a space" {
 		t.Errorf("the first points are %+v", d.Points[:5])
 	}
 	if d.Points[19].Text != "The review has 6 more open findings than these points list." {
@@ -403,13 +404,15 @@ func TestDecideStopsOnARoundMadeWrong(t *testing.T) {
 }
 
 func TestAPointOfSpacesIsNoValidReport(t *testing.T) {
-	// The format stops a point of ASCII spaces, and Decide one of Unicode spaces or of
-	// characters that the harness's plain() removes.
+	// The format stops a point of ASCII spaces and a point with a character that a line
+	// has no room for, such as a tab or U+200B. Decide stops one of Unicode spaces or of
+	// characters that the harness's plain() removes and the format passes.
 	const format, trimmed = "does not match pattern", "the point has no character that shows"
 	for name, c := range map[string]struct{ point, cause string }{
 		"a space": {" ", format}, "a tab": {"\t", format}, "U+00A0": {"\u00a0", trimmed}, "U+00A0 and a space": {"\u00a0 ", trimmed},
-		"U+200B": {"\u200b", trimmed}, "U+3164": {"\u3164", trimmed}, "U+034F": {"\u034f", trimmed},
-		"U+FEFF": {"\ufeff", trimmed}, "the four": {"\u200b \u3164\u034f\ufeff", trimmed},
+		"U+200B": {"\u200b", format}, "U+3164": {"\u3164", trimmed}, "U+034F": {"\u034f", trimmed},
+		"U+FEFF": {"\ufeff", format}, "U+200B, U+3164, U+034F and U+FEFF": {"\u200b \u3164\u034f\ufeff", format},
+		"U+3164 and U+034F": {"\u3164\u034f", trimmed},
 	} {
 		point := c.point
 		t.Run(name, func(t *testing.T) {
@@ -429,11 +432,47 @@ func TestAPointOfSpacesIsNoValidReport(t *testing.T) {
 		})
 	}
 	// The spaces around a point's text go.
-	finding := `{"severity":"non-blocking","quote":"q","problem":"p","fix":"f","proof":"broken rule: r","point":"\u00a0 one point\t"}`
+	finding := `{"severity":"non-blocking","quote":"q","problem":"p","fix":"f","proof":"broken rule: r","point":"\u00a0 one point \u00a0"}`
 	report := reportAt(t, `{"reviewer":"code-reviewer","findings":[`+finding+`]}`)
 	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: report}}})
 	if got := d.Open.Reviewers[0].Findings; len(got) != 1 || got[0].Point != "one point" {
 		t.Errorf("the findings are %+v", got)
+	}
+}
+
+// TestAPointHasTheCharacterRuleOfALine checks that a plain point and one with U+200D in
+// an emoji sequence pass, and that one with U+200B and one with the tag character U+E0041
+// fail the report format, as any text that is not one line of text does.
+func TestAPointHasTheCharacterRuleOfALine(t *testing.T) {
+	const format = "Reviewer code-reviewer wrote a report that does not match the report format: at '/findings/0/point'"
+	for _, c := range []struct {
+		name, point string
+		valid       bool
+	}{
+		{"a plain point", "The check is missing", true},
+		{"U+200D in an emoji", "Fix \U0001F468\u200D\U0001F469 first", true},
+		{"U+200B", "Fix\u200Bit", false},
+		{"U+E0041", "Fix\U000E0041it", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			finding, err := json.Marshal(map[string]string{"severity": "non-blocking", "quote": "q", "problem": "p",
+				"fix": "f", "proof": "broken rule: r", "point": c.point})
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := reportAt(t, `{"reviewer":"code-reviewer","findings":[`+string(finding)+`]}`)
+			d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: report}}})
+			got := d.Open.Reviewers[0].Findings
+			if len(got) != 1 {
+				t.Fatalf("the findings are %+v", got)
+			}
+			if c.valid && (got[0].Severity != NonBlocking || got[0].Point != c.point) {
+				t.Errorf("the finding is %+v, want the point %q", got[0], c.point)
+			}
+			if !c.valid && (got[0].Severity != Blocking || !strings.HasPrefix(got[0].Point, format)) {
+				t.Errorf("the finding is %+v, want a report that does not match the format", got[0])
+			}
+		})
 	}
 }
 
@@ -557,6 +596,37 @@ func TestAHiddenPointHasQorysTextInTheVerdict(t *testing.T) {
 		Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]}`)}}})
 	if p := d.Open.Reviewers[0].Findings[0].Point; p != "The full suite failed." {
 		t.Errorf("the suite's point is %q", p)
+	}
+}
+
+// TestPlainLineLeavesNoStoppedCharacter: for every code point that is not a surrogate, the
+// line that plainLine makes of a text with it has no character that the verdict's $defs line
+// stops, so the point passes the verdict schema.
+func TestPlainLineLeavesNoStoppedCharacter(t *testing.T) {
+	data, err := os.ReadFile("../../contracts/harness/v1/verdict.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const url = "https://qory.dev/contracts/harness/v1/verdict.schema.json"
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource(url, doc); err != nil {
+		t.Fatal(err)
+	}
+	line, err := c.Compile(url + "#/$defs/line")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if r >= 0xd800 && r <= 0xdfff {
+			continue
+		}
+		if got := plainLine("a"+string(r)+"b", 500); line.Validate(got) != nil {
+			t.Errorf("%U: plainLine leaves %q, which the verdict line stops", r, got)
+		}
 	}
 }
 
