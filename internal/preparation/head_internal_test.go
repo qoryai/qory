@@ -298,7 +298,7 @@ func TestAnApprovedStartMovesToNoPushedCommit(t *testing.T) {
 		moves    bool
 	}{
 		{"an approved version stays", true, false},
-		{"the stage's own version moves", false, true},
+		{"the stage's version moves", false, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			base, dir := t.TempDir(), emptyFolder(t)

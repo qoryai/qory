@@ -185,15 +185,17 @@ func featureOff(err error) bool {
 }
 
 // startVersion is the version that a run starts from, of the artifact of target's
-// collection, the name [outputName] gives a delivered output: the newest version that the work
-// item's stage wrote and that is not cancelled, as for Build; else the version that a gate
-// approved, as for Verify; nil with none of these, where the run starts at what the run
-// documents check out. A newest version that is a withdrawal counts as none. artifact is the
-// type of the version's artifact; with a nil version it is set only when the approved version
-// is not in the index. approved is true when the version is the one that a gate approved, not
-// one that the stage wrote: the run stays at its commit. A stage with no version that is not
-// cancelled has the approved version too, so such a Build run stays at it. When types of the
-// run's outputs have such artifacts, the version with the latest time of all wins.
+// collection, the name [outputName] gives a delivered output: the newest version of the
+// artifact that is not cancelled, when the work item's stage wrote it, as for Build; else the
+// version that a gate approved, as for Verify; nil with none of these, where the run starts at
+// what the run documents check out. A newest version that is a withdrawal counts as none.
+// artifact is the type of the version's artifact; with a nil version it is set only when the
+// approved version is not in the index. approved is true when the version is the one that a
+// gate approved, not one that the stage wrote: the run stays at its commit. A run whose newest
+// version that is not cancelled was not written by its stage has the approved version too (no
+// version of its stage, every version of its stage cancelled, or a newer version of another
+// stage), so a Build run in that state stays at it. When types of the run's outputs have such
+// artifacts, the version with the latest time of all wins.
 // shortcut: two delivered types of one stage written by different runs give the newest one;
 // replace it when the run API names the version a run starts from. [startCommit] confirms the
 // start with another version of the same run when the newest one has no reference to it.

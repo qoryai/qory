@@ -204,9 +204,20 @@ func TestStartVersionFindsNoApprovedVersionOutsideTheIndex(t *testing.T) {
 
 // TestStartVersionReportsTheApproval is the third result of [startVersion]: true exactly when
 // the version is the one that the approval lists, so the run stays at its commit. A version that
-// the stage wrote is false, with an approval or not. A stage with every version cancelled has the
-// approved version, so a Build run stays at it too.
+// the stage wrote is false, with an approval or not. A run whose newest version that is not
+// cancelled was not written by its stage has the approved version, so a Build run stays at it
+// too. Of two types, the version with the later time wins, and the result is true when it is
+// the approved one.
 func TestStartVersionReportsTheApproval(t *testing.T) {
+	// twoTypes is two artifacts of [startTarget]'s collection: the pull-request one has av_1 of
+	// st_a, approved, at pullRequestAt, and the notes one has av_2 of st_b at notesAt.
+	twoTypes := func(pullRequestAt, notesAt string) *runapi.Index {
+		a, b, approved := "st_a", "st_b", "av_1"
+		return &runapi.Index{Artifacts: []runapi.Artifact{
+			{Type: "pull-request", Name: startName, NewestVersion: 1, ApprovedVersion: &approved, Versions: []runapi.Version{{ID: "av_1", Number: 1, StageID: &a, At: pullRequestAt}}},
+			{Type: "notes", Name: startName, NewestVersion: 1, Versions: []runapi.Version{{ID: "av_2", Number: 1, StageID: &b, At: notesAt}}},
+		}}
+	}
 	for name, c := range map[string]struct {
 		snapshot *runapi.Snapshot
 		index    *runapi.Index
@@ -228,7 +239,19 @@ func TestStartVersionReportsTheApproval(t *testing.T) {
 		"every version of the stage cancelled leaves the approved version": {
 			stageSnapshot(), approvedAs(cancelledAt(branchIndex([2]string{"av_1", "st_a"}, [2]string{"av_2", "st_b"}), "av_2"), "av_1"), "av_1", true,
 		},
+		"a newer version of another stage leaves the approved version": {
+			stageSnapshot(), approvedAs(branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_a"}), "av_1"), "av_1", true,
+		},
+		"a newer version of another stage, with no approval, is no start": {
+			stageSnapshot(), branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_a"}), "", false,
+		},
 		"no version": {stageSnapshot(), branchIndex([2]string{"av_1", "st_a"}), "", false},
+		"of two types, the stage's later version wins over the approved one": {
+			stageSnapshot(), twoTypes("2026-11-02T09:00:00Z", "2026-11-02T10:00:00Z"), "av_2", false,
+		},
+		"of two types, the approved later version wins over the stage's": {
+			stageSnapshot(), twoTypes("2026-11-02T10:00:00Z", "2026-11-02T09:00:00Z"), "av_1", true,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, _, approved := startVersion(c.snapshot, c.index, startTarget)
@@ -263,9 +286,9 @@ func TestStartVersionTakesTheLatestOfTwoTypes(t *testing.T) {
 // that the time limit stopped. The start is the newest commit that the run of the picked version
 // pushed and that a version of that run confirms: C with the version of run 3, A when a member
 // cancelled it, and never D, B or the newest commit of another run. skipped is the entry of D
-// alone, so no entry of another run is. A stage that wrote nothing,
-// as Verify, starts at the version that the approval lists, whose run 4 pushed E and then F, and
-// confirmed E only, though the index has a newer version of run 5, which pushed G.
+// alone, so no entry of another run is. A stage that wrote nothing, as Verify, starts at the
+// version that the approval lists, whose run 4 pushed E and then F, and confirmed E only,
+// though the index has a newer version of run 5, which pushed G.
 func TestStartCommitIsTheNewestConfirmedCommitOfThePickedVersionsRun(t *testing.T) {
 	commit := func(c string) string { return strings.Repeat(c, 40) }
 	confirms := map[string]string{"av_1": commit("a"), "av_2": commit("b"), "av_3": commit("c"), "av_4": commit("e"), "av_5": commit("g")}

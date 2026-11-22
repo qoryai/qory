@@ -2324,9 +2324,10 @@ commit, moves the run nowhere.
 
 A run whose start version is the one that a gate approved (step 2), as a run of a stage that
 wrote no version, such as Verify, does not move: it starts at that version's commit, whatever
-a later run pushed. A run whose stage has no version that is not cancelled gets step 2 too, so
-a Build run with every version of its stage cancelled starts at the approved version and stays
-at its commit.
+a later run pushed. A run whose newest version that is not cancelled was not written by its
+stage gets step 2 too (no version of its stage, every version of its stage cancelled, or a
+newer version of another stage), so a run of Build in that state starts at the approved
+version and stays at its commit.
 
 qory composes the harness at `target_version`, with the read targets at the heads of their
 default branches, before it checks out the work item's branch. A read target whose version
