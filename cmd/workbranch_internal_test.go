@@ -123,6 +123,19 @@ func TestStartVersion(t *testing.T) {
 			cancelledAt(branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_b"}, [2]string{"av_3", "st_b"}), "av_3"),
 			"av_2",
 		},
+		// A version that a member cancelled is skipped wherever it is. A run that the time
+		// limit stopped is no member's cancel: the index marks only a member's cancel, so
+		// its version has no mark and counts.
+		"a cancelled version between two is skipped and the newest is taken": {
+			stageSnapshot(),
+			cancelledAt(branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_b"}, [2]string{"av_3", "st_b"}), "av_2"),
+			"av_3",
+		},
+		"two cancelled newest versions leave the oldest": {
+			stageSnapshot(),
+			cancelledAt(branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_b"}, [2]string{"av_3", "st_b"}), "av_2", "av_3"),
+			"av_1",
+		},
 		"a cancelled version of the stage leaves the approved version": {
 			stageSnapshot(),
 			approvedAs(cancelledAt(branchIndex([2]string{"av_1", "st_a"}, [2]string{"av_2", "st_b"}), "av_2"), "av_1"),
@@ -203,6 +216,94 @@ func TestStartVersionTakesTheLatestOfTwoTypes(t *testing.T) {
 	}
 	if got, _ := startVersion(stageSnapshot(), index, &contracts.Target{Collection: "R_1001"}); got != nil {
 		t.Errorf("a target with no address starts at %s", got.ID)
+	}
+}
+
+// TestStartCommitIsTheNewestConfirmedCommitOfThePickedVersionsRun is the version and the commit
+// that a run starts at, from [startVersion] and then [startCommit] as [codeRun.readBranch]
+// calls them. Run 1 pushed A, run 2 pushed B and a member cancelled it, run 3 pushed C and then
+// D, and its version confirms C only. The version of run 3 has no cancelled mark, as for a run
+// that the time limit stopped. The start is the newest commit that the run of the picked version
+// pushed and that a version of that run confirms: C with the version of run 3, A when a member
+// cancelled it, and never D, B or the newest commit of another run. skipped is the entry of D
+// alone, so no entry of another run is. A stage that wrote nothing,
+// as Verify, starts at the version that the approval lists, whose run 4 pushed E and then F, and
+// confirmed E only, though the index has a newer version of run 5, which pushed G.
+func TestStartCommitIsTheNewestConfirmedCommitOfThePickedVersionsRun(t *testing.T) {
+	commit := func(c string) string { return strings.Repeat(c, 40) }
+	confirms := map[string]string{"av_1": commit("a"), "av_2": commit("b"), "av_3": commit("c"), "av_4": commit("e"), "av_5": commit("g")}
+	file := func(id string) string {
+		return `{"target":{"collection":"R_1001"},"head":{"collection":"R_1001","address":{"system":"git.example.com","path":"` + confirms[id] + `"}}}`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for id := range confirms {
+			if strings.HasPrefix(r.URL.Path, "/v1/runs/r/artifacts/"+id+"/files/") {
+				io.WriteString(w, file(id))
+				return
+			}
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	client, err := runapi.New(server.URL+"/v1/runs/r", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// withRuns sets the writer and the file of each version of index: av_N is by run_N.
+	withRuns := func(index *runapi.Index) *runapi.Index {
+		versions := index.Artifacts[0].Versions
+		for i := range versions {
+			id := versions[i].ID
+			sum := sha256.Sum256([]byte(file(id)))
+			versions[i].Writer = runapi.Writer{Kind: "run", RunID: "run_" + strings.TrimPrefix(id, "av_")}
+			versions[i].Files = []runapi.File{{Filename: "f.json", Size: int64(len(file(id))), SHA256: hex.EncodeToString(sum[:])}}
+		}
+
+		return index
+	}
+	entry := func(run, c string, cancelled bool) runapi.PushedEntry {
+		return runapi.PushedEntry{System: "git.example.com", Path: "acme/shop", Commit: commit(c), RunID: run, Cancelled: cancelled}
+	}
+	pushed := []runapi.PushedEntry{
+		entry("run_1", "a", false), entry("run_2", "b", true), entry("run_3", "c", false), entry("run_3", "d", false),
+		entry("run_4", "e", false), entry("run_4", "f", false), entry("run_5", "g", false),
+	}
+	build := func() *runapi.Index {
+		return branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_b"}, [2]string{"av_3", "st_b"})
+	}
+	verify := stageSnapshot()
+	*verify.Stage.ID = "st_c"
+
+	for name, c := range map[string]struct {
+		snapshot *runapi.Snapshot
+		index    *runapi.Index
+		version  string
+		start    string
+		skipped  []int
+	}{
+		"a run at its time limit counts, its unconfirmed push does not": {
+			stageSnapshot(), withRuns(cancelledAt(build(), "av_2")), "av_3", commit("c"), []int{3},
+		},
+		"a cancelled newest version leaves the version before": {
+			stageSnapshot(), withRuns(cancelledAt(build(), "av_2", "av_3")), "av_1", commit("a"), nil,
+		},
+		"a stage that wrote nothing takes the approved version's confirmed commit": {
+			verify, withRuns(approvedAs(branchIndex([2]string{"av_4", "st_b"}, [2]string{"av_5", "st_b"}), "av_4")), "av_4", commit("e"), []int{5},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if len(c.snapshot.Outputs) != 0 {
+				t.Fatalf("the snapshot lists outputs %v", c.snapshot.Outputs)
+			}
+			version, typ := startVersion(c.snapshot, c.index, startTarget)
+			if version == nil || version.ID != c.version {
+				t.Fatalf("the version is %+v, want %s", version, c.version)
+			}
+			got, skipped, err := startCommit(t.Context(), client, version, typ, sameRunVersions(c.index, startTarget, version), pushed, startTarget)
+			if err != nil || got != c.start || !slices.Equal(skipped, c.skipped) {
+				t.Errorf("start %q, skipped %v, %v; want %s and %v", got, skipped, err, c.start, c.skipped)
+			}
+		})
 	}
 }
 
