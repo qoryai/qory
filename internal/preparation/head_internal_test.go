@@ -453,7 +453,8 @@ func TestTheTextsOfTheHeadCheckStartWithTheFix(t *testing.T) {
 		"textHeadMissing":  {(&HeadChanged{Branch: branch, System: "git.example.com", Path: "acme/shop", Expected: strings.Repeat("b", 40)}).Error(), "qory run: Create "},
 		"textHeadNoRead":   {fmt.Sprintf(textHeadNoRead, "acme/shop", "git.example.com", "cause"), "qory run: Take "},
 		"textOutboxCommit": {fmt.Sprintf(textOutboxCommitted, "git.example.com/acme/shop", strings.Repeat("a", 40), ".qory/outbox/pull-request/pull-request.json"), "qory run: Keep "},
-		"textListFailed":   {listFailed(WorkRepository{Path: "acme/shop"}, strings.Repeat("a", 40), strings.Repeat("b", 40), errors.New("cause")).Error(), "qory run: Take "},
+		"textListFailed":   {listFailed(false, WorkRepository{Path: "acme/shop"}, strings.Repeat("a", 40), strings.Repeat("b", 40), errors.New("cause")).Error(), "qory run: Start "},
+		"textListFromCode": {listFailed(true, WorkRepository{Path: "acme/shop"}, strings.Repeat("a", 40), strings.Repeat("b", 40), errors.New("cause")).Error(), "qory run: Start "},
 	} {
 		line, _, _ := strings.Cut(c.text, "\n")
 		if n := utf8.RuneCountInString(line); n > 100 {

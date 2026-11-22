@@ -3015,10 +3015,10 @@ The step does this, in order:
    nothing.`, then four lines indented by two spaces: `A commit of this run has a path under
    .qory/outbox/.`, `Repository <system>/<path>.`, `Commit <commit>.` and `Path <path>.` A commit that added the path and a later commit that
    removed it counts too, since the push would send the file in the history. A list of the
-   commits that fails stops the step before any push: `qory run: Take the work item in
-   again in Qory Apiary: the list of the run's commits failed.`, then `Listing the commits
-   of <path> from commit <start> to <head> failed: <error>. qory pushed nothing. The run code
-   is used up.` indented by two spaces. After a session that succeeded, qory then reads,
+   commits that fails stops the step before any push: `qory run: Start the run again: the
+   list of the run's commits failed.`, then `Listing the commits of <path> from commit
+   <start> to <head> failed: <error>. qory pushed nothing. The run code is used up.`
+   indented by two spaces. After a session that succeeded, qory then reads,
    fills and checks the session's outputs with the heads that the push would leave, see [The
    outputs of a session](#the-outputs-of-a-session): an output that fails stops the step
    before any push.
@@ -3146,9 +3146,9 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `Keep .qory/outbox/ out of the commits of this run; qory pushed nothing.`, then four
   lines indented by two spaces: `A commit of this run has a path under .qory/outbox/.`,
   `Repository <system>/<path>.`, `Commit <commit>.` and `Path <path>.`
-- `Take the work item in again in Qory Apiary: the list of the run's commits failed.`, then
-  `Listing the commits of <path> from commit <start> to <head> failed: <error>. qory pushed
-  nothing. The run code is used up.` indented by two spaces
+- `Start the run again: the list of the run's commits failed.`, then `Listing the commits of
+  <path> from commit <start> to <head> failed: <error>. qory pushed nothing. The run code is
+  used up.` indented by two spaces
 - `Take the work item in again in Qory Apiary: the run's host proxy could not read the head.`,
   then three lines indented by two spaces: `qory could not read the head of the branch, so it
   pushed nothing.`, `Repository <system>/<path>.` and `Cause: <error>; the code is used`

@@ -29,15 +29,15 @@ func TestACommitThatHadTheOutboxIsFoundAfterALaterCommitRemovedIt(t *testing.T) 
 
 	git := stepGit(noRemote, "")
 	r := WorkRepository{Path: "acme/site"}
-	err := outboxCommitted(context.Background(), git, dir, "git.test", r, start, removed)
+	err := outboxCommitted(context.Background(), git, dir, "git.test", r, start, removed, true)
 	want := "qory run: Keep .qory/outbox/ out of the commits of this run; qory pushed nothing.\n  A commit of this run has a path under .qory/outbox/.\n  Repository git.test/acme/site.\n  Commit " + added + ".\n  Path .qory/outbox/pull-request/pull-request.json."
 	if err == nil || err.Error() != want {
 		t.Errorf("the refusal is %v, want\n%s", err, want)
 	}
-	if err := outboxCommitted(context.Background(), git, dir, "git.test", r, start, plain); err != nil {
+	if err := outboxCommitted(context.Background(), git, dir, "git.test", r, start, plain, true); err != nil {
 		t.Errorf("a range with no such commit is refused: %v", err)
 	}
-	if err := outboxCommitted(context.Background(), git, dir, "git.test", r, removed, removed); err != nil {
+	if err := outboxCommitted(context.Background(), git, dir, "git.test", r, removed, removed, true); err != nil {
 		t.Errorf("an empty range is refused: %v", err)
 	}
 
@@ -49,7 +49,7 @@ func TestACommitThatHadTheOutboxIsFoundAfterALaterCommitRemovedIt(t *testing.T) 
 	run(t, dir, "checkout", "--quiet", "main")
 	run(t, dir, "-c", "user.name=qory", "-c", "user.email=qory@localhost", "merge", "--quiet", "--no-ff", "-m", "merge", "side")
 	merged := run(t, dir, "rev-parse", "HEAD")
-	if err := outboxCommitted(context.Background(), git, dir, "git.test", r, removed, merged); err == nil || !strings.Contains(err.Error(), ".qory/outbox/pull-request/pull-request.json") {
+	if err := outboxCommitted(context.Background(), git, dir, "git.test", r, removed, merged, true); err == nil || !strings.Contains(err.Error(), ".qory/outbox/pull-request/pull-request.json") {
 		t.Errorf("a merge range with the file is not refused: %v", err)
 	}
 }
@@ -67,7 +67,7 @@ func TestACommitWithTheOutboxInAnotherCaseIsRefused(t *testing.T) {
 	write(t, filepath.Join(dir, ".QORY", "Outbox", "x"), "x\n")
 	run(t, dir, "add", "-f", ".QORY/Outbox/x")
 	added := commitHere(t, dir)
-	err := outboxCommitted(context.Background(), stepGit(noRemote, ""), dir, "git.test", WorkRepository{Path: "acme/site"}, start, added)
+	err := outboxCommitted(context.Background(), stepGit(noRemote, ""), dir, "git.test", WorkRepository{Path: "acme/site"}, start, added, true)
 	if err == nil || !strings.Contains(err.Error(), "Commit "+added+".") || !strings.Contains(err.Error(), "Path .QORY/Outbox/x.") {
 		t.Errorf("the refusal is %v, want the commit %s and the path .QORY/Outbox/x", err, added)
 	}
@@ -84,12 +84,32 @@ func TestAListOfCommitsThatFailsSaysTheListFailed(t *testing.T) {
 	run(t, dir, "config", "user.email", "qory@localhost")
 	write(t, filepath.Join(dir, "a.txt"), "a\n")
 	head := commitHere(t, dir)
-	err := outboxCommitted(context.Background(), stepGit(noRemote, ""), dir, "git.test", WorkRepository{Path: "acme/site"}, strings.Repeat("1", 40), head)
-	want := "qory run: Take the work item in again in Qory Apiary: the list of the run's commits failed.\n  Listing the commits of acme/site from commit 111111111111 to " + head[:12] + " failed: "
+	err := outboxCommitted(context.Background(), stepGit(noRemote, ""), dir, "git.test", WorkRepository{Path: "acme/site"}, strings.Repeat("1", 40), head, true)
+	want := "qory run: Start the run again: the list of the run's commits failed.\n  Listing the commits of acme/site from commit 111111111111 to " + head[:12] + " failed: "
 	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), ". qory pushed nothing. The run code is used up.") {
 		t.Fatalf("the error is %v, want the start %q", err, want)
 	}
 	if strings.Contains(err.Error(), "descends from") {
 		t.Errorf("the error has the text of the history check: %v", err)
+	}
+}
+
+// TestOutboxCommittedOfALocalRunNamesNoRunCode is [OutboxCommitted], the check of a local run,
+// whose list of commits fails: the text ends with "qory pushed nothing.", with no words about a
+// run code, which a local run does not have.
+func TestOutboxCommittedOfALocalRunNamesNoRunCode(t *testing.T) {
+	needGit(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "--quiet", "-b", "main")
+	run(t, dir, "config", "user.name", "qory")
+	run(t, dir, "config", "user.email", "qory@localhost")
+	write(t, filepath.Join(dir, "a.txt"), "a\n")
+	head := commitHere(t, dir)
+	err := OutboxCommitted(context.Background(), dir, "git.test", "acme/site", strings.Repeat("1", 40), head)
+	if err == nil || !strings.HasPrefix(err.Error(), "qory run: Start the run again: ") || !strings.HasSuffix(err.Error(), ". qory pushed nothing.") {
+		t.Fatalf("the error is %v", err)
+	}
+	if strings.Contains(err.Error(), "run code") {
+		t.Errorf("the text of a local run names a run code: %v", err)
 	}
 }

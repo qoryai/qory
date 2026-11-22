@@ -20,17 +20,18 @@ const textOutboxCommitted = "qory run: Keep " + outboxDir + "/ out of the commit
 // with the path path on system: the check of [Push] on the commits from start, not included, to
 // head, included.
 func OutboxCommitted(ctx context.Context, dir, system, path, start, head string) error {
-	return outboxCommitted(ctx, git, dir, system, WorkRepository{Path: path}, start, head)
+	return outboxCommitted(ctx, git, dir, system, WorkRepository{Path: path}, start, head, false)
 }
 
 // outboxCommitted checks the commits from start, not included, to head, included, of the
 // repository at dir, merges included, and returns the refusal for the first commit that has
 // a path under [outboxDir]; nil for none. A commit that adds the path and a later one that
-// removes it still count: the file stays in the history that a push sends.
-func outboxCommitted(ctx context.Context, git gitRunner, dir, system string, r WorkRepository, start, head string) error {
+// removes it still count: the file stays in the history that a push sends. fromCode is a run
+// from a run code, whose failed list has [textListFailedFromCode].
+func outboxCommitted(ctx context.Context, git gitRunner, dir, system string, r WorkRepository, start, head string, fromCode bool) error {
 	out, err := git(ctx, dir, "rev-list", "--reverse", start+".."+head)
 	if err != nil {
-		return listFailed(r, start, head, err)
+		return listFailed(fromCode, r, start, head, err)
 	}
 	for commit := range strings.FieldsSeq(out) {
 		paths, err := git(ctx, dir, "diff-tree", "-r", "-m", "--root", "--no-commit-id", "--name-only", "-z", "--no-renames", commit, "--", ":(top,literal,icase)"+outboxDir)

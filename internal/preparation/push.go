@@ -43,13 +43,16 @@ const (
 	textNoHistory        = "qory run: take the work item in again in Qory Apiary: the check that HEAD of %s descends from commit %s failed: %s; the code is used"
 	textNotFastForward   = "qory run: take the work item in again in Qory Apiary, and keep the run's commits on top of commit %[3]s: HEAD of %[1]s is at %[2]s, which does not descend from it, so a push would not be a fast-forward; the code is used"
 	textDeleteBranch     = "delete branch %[1]s of %[2]s on %[3]s"
-	textListFailed       = "qory run: Take the work item in again in Qory Apiary: the list of the run's commits failed.\n  Listing the commits of %s from commit %s to %s failed: %s. qory pushed nothing. The run code is used up."
+	textListFailed       = "qory run: Start the run again: the list of the run's commits failed.\n  Listing the commits of %s from commit %s to %s failed: %s. qory pushed nothing."
 	textPushedNoVersion  = "qory run: %s\n  qory pushed %s and stored no version, because the push of the next repository failed: %s"
 	textPushRefused      = "qory run: change the rule on %[3]s that stops a push to %[1]s of %[2]s, then take the work item in again: the push failed: %[4]s; the code is used"
 	textPushForbidden    = "qory run: Contact support: the push was refused (403).\n  One of these most likely stopped it:\n  1. The run's push proxy refuses a push that is not a plain push to the push_ref of the push credential (for example a signed push or a push with push options), and qory pushes to refs/heads/%[3]s (wall:push-ref).\n  2. The run's push credential has no item for /%[1]s.git/git-receive-pack on %[2]s, and the push proxy refuses every other host and path.\n  3. The forge stopped the push: its permission for the push credential, or a branch rule.\n  The push of %[1]s to %[2]s returned 403: %[4]s; the code is used"
 	textPushNoCredential = "qory run: give the run's credential for %[2]s write access to %[1]s, then take the work item in again: the push through the run's gateway failed: %[3]s; the code is used"
 	textPushNotReached   = "qory run: Let the run's gateway reach %[2]s, then take the work item in again.\n  The push of %[1]s through the run's push proxy failed: %[3]s; the code is used"
 )
+
+// textListFailedFromCode is [textListFailed] for a run from a run code.
+const textListFailedFromCode = textListFailed + " The run code is used up."
 
 // maxFailedPushLines is the most lines of the forge, and the most commits, that a failed
 // push prints for one repository.
@@ -163,7 +166,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 		if heads[i] == "" {
 			continue
 		}
-		if err := outboxCommitted(ctx, stepGit(noRemote, ""), folders[i], b.system, r, r.Start, heads[i]); err != nil {
+		if err := outboxCommitted(ctx, stepGit(noRemote, ""), folders[i], b.system, r, r.Start, heads[i], true); err != nil {
 			return nil, err
 		}
 	}
@@ -176,7 +179,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			continue
 		}
 		if commits[i], err = runCommits(ctx, stepGit(noRemote, ""), folders[i], r.Start, heads[i]); err != nil {
-			return nil, listFailed(r, r.Start, heads[i], err)
+			return nil, listFailed(true, r, r.Start, heads[i], err)
 		}
 		version = withCommit(version, b.system, r.Path, heads[i], r.Start, baseBranch(r.DefaultBranch), commits[i])
 	}
@@ -234,9 +237,14 @@ func (e *pushedNoVersion) Error() string { return e.text }
 func (e *pushedNoVersion) Unwrap() error { return e.err }
 
 // listFailed is the error of a list of the commits of the repository r from start to head
-// that failed with err, before any push.
-func listFailed(r WorkRepository, start, head string, err error) error {
-	return fmt.Errorf(textListFailed, shownPath(r.Path), shortCommit(start), shortCommit(head), integration.Printable(exports.HideURLError(err).Error()))
+// that failed with err, before any push: [textListFailedFromCode] for a run from a run code,
+// fromCode, and [textListFailed] for a local run.
+func listFailed(fromCode bool, r WorkRepository, start, head string, err error) error {
+	text := textListFailed
+	if fromCode {
+		text = textListFailedFromCode
+	}
+	return fmt.Errorf(text, shownPath(r.Path), shortCommit(start), shortCommit(head), integration.Printable(exports.HideURLError(err).Error()))
 }
 
 // runCommits lists the commits from start, not included, to head, included, of the
