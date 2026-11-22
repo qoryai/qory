@@ -319,7 +319,7 @@ release may change what an existing document does, and states it under Upgrading
   check, stores one version, and removes the output from the outbox. The version of a
   delivered type goes to the artifact `t-` and the first 32 hexadecimal digits of the SHA-256 of the target's `collection`; any other
   type's to `main`. A required output that the session did not write, and that no version of
-  the run has, fails the step: `Write <type> to the outbox: the stage requires it, and the
+  the run has, fails the step: `Write <type> to the outbox: the stage requires it and the
   session wrote none.` A run with no repository stores its outputs alone, in the step `store
   the outputs`. See The outputs of a session in `docs/run.md`.
 - A module can declare checks for the files of an artifact type with `push_checks` in

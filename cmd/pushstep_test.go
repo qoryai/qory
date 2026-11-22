@@ -1279,7 +1279,7 @@ func TestAMissingRequiredOutputFailsTheRun(t *testing.T) {
 	p.api.outputs = `[{"type":"pull-request","required":true,"version":null,"check":"missing"}]`
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "Write pull-request to the outbox: the stage requires it, and the session wrote none.\n  .qory/outbox/pull-request/pull-request.json\n")
+	wants(t, r.out, "Write pull-request to the outbox: the stage requires it and the session wrote none.\n  .qory/outbox/pull-request/pull-request.json\n")
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST, want 0", posts)
 	}

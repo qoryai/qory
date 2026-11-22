@@ -3310,7 +3310,7 @@ reply output; the run has no repository to push.`
 Each of these lines fails the step, and the run closes `failed`, exit 1. `<type>` is the
 output's type:
 
-- `Write <type> to the outbox: the stage requires it, and the session wrote none.`, then
+- `Write <type> to the outbox: the stage requires it and the session wrote none.`, then
   indented by two spaces `.qory/outbox/<type>/<type>.json` for a type with a `json_schema`,
   or `.qory/outbox/<type>/` for any other
 - `Remove <member> from the <type> output: qory fills it at the push.`, where `<member>` is

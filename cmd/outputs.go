@@ -49,7 +49,7 @@ const (
 // The words of the outputs of a session. Line 1 is the fix, then the cause; a type is cut
 // as [provisioner.ShownType] cuts it.
 const (
-	textOutputMissing   = "Write %s to the outbox: the stage requires it, and the session wrote none.\n  %s"
+	textOutputMissing   = "Write %s to the outbox: the stage requires it and the session wrote none.\n  %s"
 	textOutputHasMember = "Remove %s from the %s output: qory fills it at the push."
 	textOutputBroken    = "Fix the %s output: it breaks its schema at %s."
 	textOutputNotJSON   = "Write the %s output as one JSON object: the file is not one."

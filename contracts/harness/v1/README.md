@@ -843,7 +843,7 @@ goes from the outbox. A session that did not succeed stores nothing. A required 
 that the outbox does not have, and that no version of the run has, stops the step:
 
 ```text
-Write pull-request to the outbox: the stage requires it, and the session wrote none.
+Write pull-request to the outbox: the stage requires it and the session wrote none.
   .qory/outbox/pull-request/pull-request.json
 ```
 

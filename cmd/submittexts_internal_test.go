@@ -53,7 +53,7 @@ func TestTheTextsOfTheSubmitStepHaveAShortLineOne(t *testing.T) {
 		"textLocalNoCommits":     textLocalNoCommits,
 		"textLocalNoRemote":      textLocalNoRemote,
 		"textLocalPushURLs":      textLocalPushURLs,
-		"textOutputMissing":      "qory run: " + fmt.Sprintf(textOutputMissing, "pull-request", ".qory/outbox/pull-request/pull-request.json"),
+		"textOutputMissing":      "qory run: " + fmt.Sprintf(textOutputMissing, "a-type-of-19-chars.", ".qory/outbox/pull-request/pull-request.json"),
 		"textOutputHasMember":    "qory run: " + fmt.Sprintf(textOutputHasMember, "base_branch", "pull-request"),
 		"textOutputBroken":       "qory run: " + fmt.Sprintf(textOutputBroken, "pull-request", strings.Repeat("/x", maxShownPlace/2)),
 		"textOutputNotJSON":      "qory run: " + fmt.Sprintf(textOutputNotJSON, "pull-request"),
