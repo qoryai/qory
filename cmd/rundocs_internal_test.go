@@ -470,7 +470,7 @@ func TestAMissingWorkflowEndsTheRunWithItsReason(t *testing.T) {
 	const fix = "add a skill workflow-example to "
 	const cause = ", or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-example or example (workflow_not_in_harness); the code is used"
 	doc := &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}
-	target := &contracts.Target{System: "code.example.com", Path: "acme/site"}
+	target := &contracts.Target{Collection: "R_1001", Address: &contracts.TargetAddress{System: "code.example.com", Path: "acme/site"}}
 	for _, c := range []struct {
 		harness *contracts.HarnessDocument
 		target  *contracts.Target
@@ -480,7 +480,8 @@ func TestAMissingWorkflowEndsTheRunWithItsReason(t *testing.T) {
 		{nil, target, "code.example.com", "the checkout's harness in the repository acme/site"},
 		{nil, target, "forge.example.org", "the checkout's harness for the target acme/site"},
 		{nil, target, "", "the checkout's harness for the target acme/site"},
-		{nil, &contracts.Target{System: "tickets.example.com", Path: "queue-7"}, "code.example.com", "the checkout's harness for the target queue-7"},
+		{nil, &contracts.Target{Collection: "queue-7", Address: &contracts.TargetAddress{System: "tickets.example.com", Path: "queue-7"}}, "code.example.com", "the checkout's harness for the target queue-7"},
+		{nil, &contracts.Target{Collection: "queue-7"}, "", "the checkout's harness"},
 		{nil, nil, "code.example.com", "the checkout's harness"},
 		{doc, target, "code.example.com", "the workspace's harness"},
 	} {
@@ -561,14 +562,13 @@ func TestAHarnessDocumentWithASourceQoryDoesNotFetchStops(t *testing.T) {
 // TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime is a harness document
 // with no extends, whose section defines a stack with workflows: harnessChecked checks
 // its modules and no base, and qory writes it with target.runtime set to the run's
-// runtime, run_settings.runtime, the workflows as the documents have them but for
-// time_limit, which qory leaves out: a run's time limit is the documents'
-// time_limit_minutes alone.
+// runtime, run_settings.runtime, and the workflows as the documents have them, plan and
+// tier included.
 func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing.T) {
 	defined := func(git string) *contracts.HarnessDocument {
 		return &contracts.HarnessDocument{Harness: contracts.HarnessSection{
 			Modules:   []contracts.HarnessModule{{Name: "tools", Source: contracts.HarnessSource{Git: git, Ref: "main"}}},
-			Workflows: map[string]contracts.HarnessWorkflow{"example": {Access: "write", TimeLimit: "45m"}},
+			Workflows: map[string]contracts.HarnessWorkflow{"example": {Access: "write", Plan: "build-plan", Tier: "thinking"}},
 		}}
 	}
 	if err := harnessChecked(defined("https://code.example.com/team/tools.git"), true); err != nil {
@@ -594,11 +594,8 @@ func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing
 			t.Fatal(err)
 		}
 		h := doc.Harness
-		if h.Extends != nil || h.Target.Runtime != settings.Runtime || len(h.Modules) != 1 || h.Workflows["example"] != (contracts.HarnessWorkflow{Access: "write"}) {
+		if h.Extends != nil || h.Target.Runtime != settings.Runtime || len(h.Modules) != 1 || h.Workflows["example"] != (contracts.HarnessWorkflow{Access: "write", Plan: "build-plan", Tier: "thinking"}) {
 			t.Errorf("run settings %+v: harness.yaml has:\n%s", settings, r.harness)
-		}
-		if strings.Contains(string(r.harness), "time_limit") {
-			t.Errorf("harness.yaml has a time_limit:\n%s", r.harness)
 		}
 	}
 	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
@@ -720,13 +717,14 @@ func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
 		documents string
 		lacks     bool
 	}{
-		{`{"step":"explore","run_settings":{}}`, true},
-		{`{"step":"explore","run_settings":{"runtime":""}}`, true},
-		{`{"step":"explore","run_settings":{"runtime":null}}`, true},
-		{`{"step":"explore","run_settings":{"runtime":"codex"}}`, false},
-		{`{"step":"explore"}`, true},
-		{`{"step":"explore","run_settings":null}`, true},
-		{`{"step":"explore","run_settings":"claude"}`, false},
+		{`{"step":"workflow","run_settings":{}}`, true},
+		{`{"step":"workflow","run_settings":{"runtime":""}}`, true},
+		{`{"step":"workflow","run_settings":{"runtime":null}}`, true},
+		{`{"step":"workflow","run_settings":{"runtime":"codex"}}`, false},
+		{`{"step":"workflow"}`, true},
+		{`{"step":"workflow","run_settings":null}`, true},
+		{`{"step":"workflow","run_settings":"claude"}`, false},
+		{`{"step":"explore"}`, false},
 		{`{"step":"prebuild","run_settings":{}}`, false},
 		{`{"step":"prebuild"}`, false},
 	} {
@@ -736,6 +734,32 @@ func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
 	}
 	if _, err := codeDocumentsOf(json.RawMessage(`{"step":"prebuild","run_settings":{}}`)); err == nil || !strings.Contains(err.Error(), "documents.schema.json") {
 		t.Errorf("a prebuild with run settings and no runtime: %v", err)
+	}
+}
+
+// TestARunCodesWorkItemIsASubjectOfThatKind is documents of the step workflow whose
+// subject is a work item, a ticket, or absent: the run's work item is the subject's id for
+// the kind work_item alone, so a run for another kind reads no work item and its branch.
+// Documents with no workflow, which the schema refuses, stop the run.
+func TestARunCodesWorkItemIsASubjectOfThatKind(t *testing.T) {
+	settings := &contracts.RunSettings{Runtime: "claude"}
+	for _, c := range []struct {
+		subject *contracts.Subject
+		want    string
+	}{
+		{&contracts.Subject{Kind: "work_item", ID: "wi_8Kx2mQ4vT9"}, "wi_8Kx2mQ4vT9"},
+		{&contracts.Subject{Kind: "ticket", ID: "TRK-1"}, ""},
+		{nil, ""},
+	} {
+		r, err := codeRunOf(contracts.Documents{Step: "workflow", Inputs: json.RawMessage(`{}`), Workflow: "example", Subject: c.subject, Trigger: "take_in", RunSettings: settings})
+		if err != nil {
+			t.Errorf("the subject %+v: %v", c.subject, err)
+		} else if r.workItem != c.want {
+			t.Errorf("the subject %+v: the work item %q, want %q", c.subject, r.workItem, c.want)
+		}
+	}
+	if _, err := codeRunOf(contracts.Documents{Step: "workflow", Inputs: json.RawMessage(`{}`), RunSettings: settings}); err == nil || !strings.HasSuffix(err.Error(), "has no workflow"+codeUsed) {
+		t.Errorf("no workflow: %v", err)
 	}
 }
 

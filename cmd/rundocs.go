@@ -96,8 +96,10 @@ func fromAnswerOnly(cmd *cobra.Command, runtime string, extra []string) error {
 // documents' time_limit_minutes, the limit of session 1, 0 for none, and
 // harness_hidden. named is set when harness_hidden is true: no text of the run shows
 // the address of a harness source.
-// target is the documents' target and target_version, which the fetch uses for the
-// target's repository. workItem is the id of the documents' work item, "" for none.
+// target is the address of the documents' target and target_version, which the fetch
+// uses for the target's repository, and empty for a target with no address. workItem is
+// the id of the documents' subject when the subject is a work item, and "" for a subject
+// of another kind or none.
 type codeRun struct {
 	runtime  string
 	settings []provisioner.Setting
@@ -157,12 +159,13 @@ const inSettings = "of the harness in the workspace's settings in Qory Apiary"
 const harnessFile = "harness.yaml"
 
 // codeDocumentsOf reads documents, the documents of the answer to a run code, for a
-// step qory runs: explore, which [codeRunOf] reads further, or prebuild, which
-// [runCodePrebuild] runs. Each error is exit 1. Each ends with [codeUsed], except
-// [textNoRuntime], whose first line ends with it: explore documents start an agent
-// session, so they require run settings with a runtime. Documents with no run settings,
-// or with run settings whose runtime is missing, empty or null, get that refusal before
-// the schema check, see [lacksRuntime].
+// step qory runs: workflow, which [codeRunOf] reads further, or prebuild, which
+// [runCodePrebuild] runs. The schema allows these two steps alone, so the check of the
+// step is a guard. Each error is exit 1. Each ends with [codeUsed], except
+// [textNoRuntime] and the error of another step, whose first lines end with it. Workflow
+// documents start an agent session, so they require run settings with a runtime.
+// Documents with no run settings, or with run settings whose runtime is missing, empty or
+// null, get that refusal before the schema check, see [lacksRuntime].
 func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
 	if lacksRuntime(documents) {
 		return contracts.Documents{}, noRuntime()
@@ -171,13 +174,13 @@ func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
 	switch {
 	case err != nil:
 		return doc, fmt.Errorf("update qory, or ask Qory Apiary's instance admin: the response to the run code does not pass qory's checks: %v%s", err, codeUsed)
-	case doc.Step != provisioner.StepExplore && doc.Step != provisioner.StepPrebuild:
-		return doc, fmt.Errorf("update qory: the response to the run code is for the step %s, and qory runs a run code's run for the steps explore and prebuild only%s", doc.Step, codeUsed)
+	case doc.Step != provisioner.StepWorkflow && doc.Step != provisioner.StepPrebuild:
+		return doc, fmt.Errorf("update qory: the run code's response has a step qory does not run%s.\n  qory runs a run code's run for the steps workflow and prebuild only, and the step is %s.", codeUsed, integration.Printable(exports.Value(doc.Step, false)))
 	}
 	return doc, nil
 }
 
-// codeRunOf reads doc, the documents of the answer to a run code for the step explore.
+// codeRunOf reads doc, the documents of the answer to a run code for the step workflow.
 // Each error ends with [codeUsed], [textNoRuntime] on its first line: a source of the
 // harness document that qory does not fetch is an input error, see [harnessChecked], and
 // every other error is exit 1.
@@ -191,7 +194,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	hidden := doc.HarnessHidden != nil && *doc.HarnessHidden
 	runtime, settings := provisioner.Settings(doc.RunSettings)
 	// A workflow runs on the runtime of the workspace or of its workflow settings, which
-	// Qory Apiary sends in run_settings, required in explore documents; qory sets no
+	// Qory Apiary sends in run_settings, required in workflow documents; qory sets no
 	// default runtime. codeDocumentsOf refuses such documents first; this check covers
 	// documents that reach codeRunOf another way.
 	if runtime == "" {
@@ -209,13 +212,15 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The fetch reads the target's address alone: a target with no address, such as a
+	// place that is not on a host, is not fetched, and its target_version is not used.
 	target := preparation.Target{FromCode: true}
-	if doc.Target != nil {
-		target.System, target.Path, target.Version = doc.Target.System, doc.Target.Path, doc.TargetVersion
+	if doc.Target != nil && doc.Target.Address != nil {
+		target.System, target.Path, target.Version = doc.Target.Address.System, doc.Target.Address.Path, doc.TargetVersion
 	}
 	r := &codeRun{runtime: runtime, settings: settings, harness: harness, harnessDoc: doc.Harness, runSettings: doc.RunSettings, shared: doc.SharedRun, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: doc.FullSuite, hidden: hidden, target: target, access: doc.Access}
-	if doc.WorkItem != nil {
-		r.workItem = doc.WorkItem.ID
+	if doc.Subject != nil && doc.Subject.Kind == provisioner.SubjectWorkItem {
+		r.workItem = doc.Subject.ID
 	}
 	if hidden {
 		r.named = source.NewNamed(r.phrase())
@@ -225,16 +230,15 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 }
 
 // harnessFor is h, the documents' harness document, as qory writes it for a session of
-// runtime, nil for no document: its workflows with no time_limit, and, for a section that
-// defines a stack, target.runtime set to runtime.
+// runtime, nil for no document: each workflow with its access, plan and tier, and, for a
+// section that defines a stack, target.runtime set to runtime.
 func harnessFor(h *contracts.HarnessDocument, runtime string) ([]byte, error) {
 	if h == nil {
 		return nil, nil
 	}
-	section := withoutTimeLimits(h.Harness)
-	var written any = contracts.HarnessDocument{Harness: section}
-	if section.Extends == nil {
-		written = definedHarness{Harness: definedSection{HarnessSection: section, Target: definedTarget{Runtime: runtime}}}
+	var written any = h
+	if h.Harness.Extends == nil {
+		written = definedHarness{Harness: definedSection{HarnessSection: h.Harness, Target: definedTarget{Runtime: runtime}}}
 	}
 	harness, err := json.MarshalIndent(written, "", "  ")
 	if err != nil {
@@ -272,22 +276,6 @@ func (r *codeRun) next(a contracts.NextSessionAnswer) error {
 // whose documents have no target.
 func (r *codeRun) writes() bool {
 	return r != nil && r.access == stack.AccessWrite
-}
-
-// withoutTimeLimits is s with no time_limit in its workflows. The run contract still
-// allows one there, and a stack has no such key: a run's time limit comes only from the
-// documents' time_limit_minutes.
-func withoutTimeLimits(s contracts.HarnessSection) contracts.HarnessSection {
-	if len(s.Workflows) == 0 {
-		return s
-	}
-	workflows := make(map[string]contracts.HarnessWorkflow, len(s.Workflows))
-	for name, w := range s.Workflows {
-		w.TimeLimit = ""
-		workflows[name] = w
-	}
-	s.Workflows = workflows
-	return s
 }
 
 // definedHarness is a harness document whose section defines a stack, as qory writes it
@@ -795,13 +783,13 @@ func (r *codeRun) harnessAt(system string) string {
 // with [codeUsed] and a full stop.
 const textNoRuntime = "The run settings set no runtime, so the run did not start" + codeUsed + ".\n  qory runs one of %s."
 
-// noRuntime is the error of explore documents with no run settings, or with run
+// noRuntime is the error of workflow documents with no run settings, or with run
 // settings that set no runtime. It is exit 1.
 func noRuntime() error {
 	return fmt.Errorf(textNoRuntime, listOf(runRuntimes()))
 }
 
-// lacksRuntime reports whether documents are for the step explore, which starts an agent
+// lacksRuntime reports whether documents are for the step workflow, which starts an agent
 // session and so requires run settings with a runtime, and have no run_settings, a null
 // one, or run settings with no runtime, an empty one or a null one. Any other form, such as run
 // settings that are no object, is left to the schema check. A prebuild starts no agent
@@ -811,7 +799,7 @@ func lacksRuntime(documents json.RawMessage) bool {
 		Step        string          `json:"step"`
 		RunSettings json.RawMessage `json:"run_settings"`
 	}
-	if json.Unmarshal(documents, &d) != nil || d.Step != provisioner.StepExplore {
+	if json.Unmarshal(documents, &d) != nil || d.Step != provisioner.StepWorkflow {
 		return false
 	}
 	if len(d.RunSettings) == 0 || string(d.RunSettings) == "null" {

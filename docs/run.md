@@ -2083,16 +2083,22 @@ writes nothing more there; the run goes on. The descriptor works on Linux and ma
 #### What the run takes from the response
 
 Qory Apiary's signed response to the code contains the run's documents beside the run key:
-the step, the domain and the inputs; for the step explore, the work item, the run
-settings, the time limit, the harness, the workflow and `harness_hidden`; for the step prebuild, the target
-and the places of its images at a registry. qory runs the steps explore and prebuild.
-The documents of an explore can also contain `shared_run` and `full_suite`. With `full_suite`
-true, the session runs the full test suite when it ends, see [The full suite](#the-full-suite).
-With `shared_run` true, the run has more than one session, see [A run of several
-sessions](#a-run-of-several-sessions).
-qory checks the documents as the run contract's `documents.schema.json`, and, for the
-step explore, checks that `inputs.domain` and `inputs.work_item.id` match the domain and
-the work item. Then a run of the step explore:
+the step, the domain and the inputs; for the step `workflow`, the `subject`, the run
+settings, the time limit, the harness, the workflow and `harness_hidden`; for the step
+`prebuild`, the target and the places of its images at a registry. qory runs the steps
+`workflow` and `prebuild`. A run of the step `workflow` runs the workflow that the
+documents set, whichever workflow of the process Qory Apiary starts. The `subject` is
+what the run is for: its `kind`, such as `work_item` or `ticket`, its `id`, and, when
+Qory Apiary has them, its `url` and `title`. The documents may also contain a `trigger`,
+what started the run, such as `take_in`; qory reads it and changes nothing for it.
+The documents of the step `workflow` can also contain `shared_run` and `full_suite`. With
+`full_suite` true, the session runs the full test suite when it ends, see [The full
+suite](#the-full-suite). With `shared_run` true, the run has more than one session, see
+[A run of several sessions](#a-run-of-several-sessions).
+qory checks the documents as the run contract's `documents.schema.json`, and, for a
+subject of the kind `work_item`, checks that `inputs.domain` and `inputs.work_item.id`
+match the domain and the subject's `id`. Only a run whose subject has the kind
+`work_item` works on the branch `qory/<work item id>`. Then a run of the step `workflow`:
 
 - composes the harness that the documents contain, or, when they contain none, the
   checkout's `qory.yaml` or `harness.yaml`, through the run's stack proxy (see [The run's
@@ -2183,10 +2189,10 @@ add a <kind> workflow-<workflow> to <harness>, or set another workflow in Qory A
 `<kind>` is `skill`, the kind that `claude` and `codex`, the runtimes a run code runs
 on, run from a headless start. `<harness>` is `the workspace's harness` for a run whose
 documents contain a harness. For one whose documents contain none, it is `the checkout's
-harness`, with the target's `path` after it when the documents have a target: `the
-checkout's harness in the repository <path>` when the target's `system` is
-`QORY_RUN_SYSTEM`, and `the checkout's harness for the target <path>` on any other
-system. A workflow whose skill or command
+harness`, with the `path` of the target's `address` after it when the documents have a
+target with an address: `the checkout's harness in the repository <path>` when the
+address's `system` is `QORY_RUN_SYSTEM`, and `the checkout's harness for the target
+<path>` on any other system. A workflow whose skill or command
 the runtime runs by no name from a headless start closes the run with `no_session`.
 
 A run sees the checkout read-only when `access` in its documents is `read`, or when
@@ -2201,9 +2207,15 @@ the checkout: with no wall it stops after the compose, exit 1, and qory closes i
 with `write_needs_wall`. A run takes the lower of the two accesses, in the order `read`,
 `write-no-push`, `write`. See [Read workflows](#read-workflows).
 
+A target in the documents is one of an adapter's collections, `collection`, and, when the
+place has one, its `address`: the host name, `system`, and the `path` on it. Of the
+target, qory reads only the address: for the fetch, and for the `<harness>` of the
+`workflow_not_in_harness` line. A target with no address, such as a place that is not on
+a host, is not fetched.
+
 The documents of a run with a target may set `target_version`: the version at which Qory
-Apiary checked the target for a harness file. When the target's `system` is
-`QORY_RUN_SYSTEM`, the target is the run's repository: Qory Apiary lists the target's
+Apiary checked the target for a harness file. When the `system` of the target's address
+is `QORY_RUN_SYSTEM`, the target is the run's repository: Qory Apiary lists the address's
 `path` first in `QORY_RUN_REPOSITORIES`, compared in any letter case on github.com. qory
 fetches that repository at the version, which must be a full commit id, by its id, in
 place of the head of its default branch. The fetch goes through the run's gateway at
@@ -2214,8 +2226,8 @@ use. The fetch line shows the commit: `qory run: fetched example-org/shop at
 the checkout's `qory.yaml` or `harness.yaml` as that commit has it. The further
 repositories are fetched at the head of their default branches.
 
-When the target is on another system than `QORY_RUN_SYSTEM`, or `QORY_RUN_SYSTEM` is
-not set, qory does not use `target_version`.
+When the target has no address, its address is on another system than
+`QORY_RUN_SYSTEM`, or `QORY_RUN_SYSTEM` is not set, qory does not use `target_version`.
 
 A run of a work item at a `target_version` of a target on `QORY_RUN_SYSTEM` works on the
 branch `qory/<work item id>`. qory reads the work item and its artifacts through the run API
@@ -2510,21 +2522,19 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
 - `update qory, or ask Qory Apiary's instance admin: the response to the run code does not
   pass qory's checks: <reason>; the code is used`, where `<reason>` is a check that failed,
   such as `it breaks documents.schema.json`, and contains no value of the response
-  but a member's name, an id, a revision or a byte count
-- `update qory: the response to the run code is for the step <step>, and qory runs a run
-  code's run for the steps explore and prebuild only; the code is used`
+  but a member's name, an id, a revision or a byte count. Documents with a step other
+  than `workflow` and `prebuild`, and documents of the step `workflow` with no
+  `workflow`, stop with `it breaks documents.schema.json`
 - `set wall.image, pinned by its digest, wall.user and wall.prebuild_image in
   forager.yaml: a prebuild from a run code builds with them; the code is used`
 - `run the prebuild on a machine without an access key: this machine has an access key in
   <path>, and a prebuild fetches the target's code with git on this machine, outside the
   wall; the code is used`, when a file with an access key's secret appeared beside `forager.yaml` while
   the code was redeemed
-- `set a workflow for the workspace in Qory Apiary, then take the work item in again: the
-  response to the run code has no workflow; the code is used`
 - `The run settings set no runtime, so the run did not start; the code is used.` and the
   next line `qory runs one of claude and codex.`, when the documents
   contain no `run_settings`, a null one, or `run_settings` whose `runtime` is missing,
-  empty or null, before anything is installed or fetched. Documents of the step explore start an
+  empty or null, before anything is installed or fetched. Documents of the step workflow start an
   agent session, so they require `run_settings` with a `runtime`; qory checks for them
   before the schema check. Qory Apiary sends the runtime of the workspace, or of the
   workflow's settings when they set one; qory sets no default runtime. The documents of

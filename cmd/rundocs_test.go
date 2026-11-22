@@ -100,11 +100,12 @@ func TestARunCodeTakesNoStackRuntimeOrArguments(t *testing.T) {
 
 // TestARunCodeWhoseAnswerQoryDoesNotRunStops is a redemption whose documents qory does
 // not run: none, documents that break the schema, a stack or a stack_reference, which
-// the schema does not allow, a step other than explore and prebuild, a prebuild on a
-// machine whose forager.yaml has no wall, no workflow, no runtime (no run settings, null
-// run settings, run settings with no runtime, an empty one, or a null one), a runtime
-// with no descriptor in Forager and no install in qory, a runtime with no headless
-// start, and a runtime qory does not render.
+// the schema does not allow, a step other than workflow and prebuild, the step explore,
+// a work_item in place of a subject, no workflow, which the schema requires for the
+// step workflow, a prebuild on a machine whose forager.yaml has no wall, no runtime (no
+// run settings, null run settings, run settings with no runtime, an empty one, or a null
+// one), a runtime with no descriptor in Forager and no install in qory, a runtime with no
+// headless start, and a runtime qory does not render.
 // Each stops the run after the one redemption, before it opens, with a line that starts
 // with its fix and ends "; the code is used", on line 1 for no runtime: exit 2 for an
 // answer with no documents, which Forager refuses, and exit 1 for the rest.
@@ -122,18 +123,18 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 	}{
 		{"none", nil, "use another run code: the enrolment answer has no documents"},
 		{"an unknown member", codeDocuments(t, func(d map[string]any) { d["prompt"] = "x" }), broken},
-		{"a time limit under 15 minutes", codeDocuments(t, func(d map[string]any) { d["time_limit_minutes"] = 14 }), broken},
+		{"a time limit of 0 minutes", codeDocuments(t, func(d map[string]any) { d["time_limit_minutes"] = 0 }), broken},
 		{"a time limit in the run settings", codeDocuments(t, func(d map[string]any) {
 			d["run_settings"] = map[string]any{"runtime": "claude", "time_limit_minutes": 45}
 		}), broken},
 		{"a run id", codeDocuments(t, func(d map[string]any) { d["run_id"] = keyRunID }), broken},
 		{"another domain in inputs", codeDocuments(t, func(d map[string]any) { d["inputs"].(map[string]any)["domain"] = "marketing" }),
 			checks + "its inputs.domain is not its domain; the code is used"},
-		{"another step", json.RawMessage(`{"step":"triage","domain":"software","inputs":{"version":1}}`),
-			"update qory: the response to the run code is for the step triage, and qory runs a run code's run for the steps explore and prebuild only; the code is used"},
+		{"another step", json.RawMessage(`{"step":"triage","domain":"software","inputs":{"version":1}}`), broken},
+		{"the step explore", codeDocuments(t, func(d map[string]any) { d["step"] = "explore" }), broken},
+		{"a work item in place of a subject", codeDocuments(t, func(d map[string]any) { d["work_item"] = d["subject"]; delete(d, "subject") }), broken},
 		{"prebuild with no wall", preDocs, "set wall.image, pinned by its digest, wall.user and wall.prebuild_image in forager.yaml: a prebuild from a run code builds with them; the code is used"},
-		{"no workflow", codeDocuments(t, func(d map[string]any) { delete(d, "workflow"); delete(d, "harness_hidden") }),
-			"set a workflow for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no workflow; the code is used"},
+		{"no workflow", codeDocuments(t, func(d map[string]any) { delete(d, "workflow"); delete(d, "harness_hidden") }), broken},
 		{"a stack", codeDocuments(t, func(d map[string]any) { d["stack"] = "core" }), broken},
 		{"a stack reference", codeDocuments(t, func(d map[string]any) {
 			d["stack"], d["stack_reference"] = "core", "https://code.example.com/team/stacks#release-7:core"
@@ -387,6 +388,40 @@ func TestARunCodeStartsItsWorkflow(t *testing.T) {
 	}
 	if i := slices.Index(r.spec.Args, "--settings"); i < 0 || i+1 >= len(r.spec.Args) || !strings.Contains(r.spec.Args[i+1], `"model": "example-large"`) {
 		t.Errorf("Claude Code's settings have no model example-large: %q", r.spec.Args)
+	}
+}
+
+// TestARunCodeOfAnySubjectStartsItsWorkflow is a run from a run code of the step
+// workflow, for the workflow hello: once with a subject of the kind work_item and the
+// trigger take_in, as the contract's fixture has them, and once with a subject of the
+// kind ticket, whose inputs have no work item. Each starts the workflow hello, so qory
+// starts the workflow that the documents name, whatever the subject.
+func TestARunCodeOfAnySubjectStartsItsWorkflow(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		change func(map[string]any)
+	}{
+		{"a work item", func(d map[string]any) {
+			if d["step"] != "workflow" || d["subject"].(map[string]any)["kind"] != "work_item" {
+				t.Fatalf("the documents have the step %v and the subject %v", d["step"], d["subject"])
+			}
+			d["trigger"] = "take_in"
+		}},
+		{"a ticket", func(d map[string]any) {
+			d["subject"] = map[string]any{"kind": "ticket", "id": "TRK-1", "title": "Checkout fails on an empty cart"}
+			delete(d["inputs"].(map[string]any), "work_item")
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := runFromCodeWith(t, behindAWall(t), nil, writesHello, c.change)
+			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			wants(t, r.out, "qory run: the run "+keyRunID+" starts the workflow hello of the workspace's harness on claude\n")
+			if i := slices.Index(r.spec.Args, "-p"); i < 0 || i+1 >= len(r.spec.Args) || !strings.HasPrefix(r.spec.Args[i+1], "/harness:hello ") {
+				t.Errorf("the session does not start the workflow hello: %q", r.spec.Args)
+			}
+		})
 	}
 }
 

@@ -421,7 +421,7 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	t.Helper()
 	g := newCodeRelay(t)
 	g.documents = codeDocuments(t, func(d map[string]any) {
-		target := map[string]any{"system": proxygittest.Host, "path": "acme/site"}
+		target := map[string]any{"collection": "R_1001", "address": map[string]any{"system": proxygittest.Host, "path": "acme/site"}}
 		d["target"], d["inputs"].(map[string]any)["target"] = target, target
 		d["target_version"] = p.first
 		d["harness_hidden"] = false
@@ -625,7 +625,7 @@ func TestAWriteRunPushesWhatTheAgentLeft(t *testing.T) {
 func TestThePushStepPushesRefsHeadsQoryAndTheWorkItemId(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.change = func(d map[string]any) {
-		d["work_item"].(map[string]any)["id"] = "wi_01HZX"
+		d["subject"].(map[string]any)["id"] = "wi_01HZX"
 		if in, ok := d["inputs"].(map[string]any); ok && in["work_item"] != nil {
 			in["work_item"].(map[string]any)["id"] = "wi_01HZX"
 		}

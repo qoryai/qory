@@ -58,9 +58,15 @@ func runAtVersion(t *testing.T, h *hostFetch, repositories, version string) (str
 // runAtVersionOn is [runAtVersion] with the run opened on system, "" for none.
 func runAtVersionOn(t *testing.T, h *hostFetch, system, repositories, version string) (string, error, keyRun, []string) {
 	t.Helper()
+	target := map[string]any{"collection": "R_1001", "address": map[string]any{"system": proxygittest.Host, "path": "acme/site"}}
+	return runAtTarget(t, h, system, repositories, version, target)
+}
+
+// runAtTarget is [runAtVersionOn] with the documents' target, target.
+func runAtTarget(t *testing.T, h *hostFetch, system, repositories, version string, target map[string]any) (string, error, keyRun, []string) {
+	t.Helper()
 	g := newCodeRelay(t)
 	g.documents = codeDocuments(t, func(d map[string]any) {
-		target := map[string]any{"system": proxygittest.Host, "path": "acme/site"}
 		d["target"], d["inputs"].(map[string]any)["target"] = target, target
 		d["target_version"] = version
 		if version == "" {
@@ -230,6 +236,52 @@ func TestARunCodeAtATargetVersionWithNoRepositoryRunsOn(t *testing.T) {
 	if i := slices.Index(args, "-p"); i < 0 || i+1 >= len(args) || !strings.Contains(args[i+1], "hello ") {
 		t.Errorf("the session does not start the workflow hello: %q", args)
 	}
+}
+
+// TestARunCodeWhoseTargetHasNoAddressUsesNoVersion is a run from a run code whose
+// documents set a target with a collection and no address, and a target_version, the
+// first commit of acme/site:
+//   - with no QORY_RUN_SYSTEM and no repository, as for a place that is not on a host,
+//     qory run fetches nothing and composes the qory.yaml in the working folder;
+//   - with QORY_RUN_SYSTEM git.test and the repository acme/site, whose path is also the
+//     collection's ref, qory run fetches acme/site at the head of its default branch and
+//     does not use the version. The head has no workflow hello, so the run stops with
+//     workflow_not_in_harness, and the line shows the checkout's harness with no path.
+func TestARunCodeWhoseTargetHasNoAddressUsesNoVersion(t *testing.T) {
+	t.Run("no repositories", func(t *testing.T) {
+		h, first, _, files := versionRepository(t)
+		for name, content := range files {
+			writeFile(t, filepath.Join(h.dir, filepath.FromSlash(name)), content)
+		}
+		out, err, n, args := runAtTarget(t, h, "", "", first, map[string]any{"collection": "profile-7"})
+		if !n.joined {
+			t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
+		}
+		wants(t, out, "qory run: composed ")
+		lacks(t, out, "qory run: fetched ", first[:12])
+		if i := slices.Index(args, "-p"); i < 0 || i+1 >= len(args) || !strings.Contains(args[i+1], "hello ") {
+			t.Errorf("the session does not start the workflow hello: %q", args)
+		}
+		data, _ := os.ReadFile(h.argv)
+		for line := range strings.Lines(string(data)) {
+			if slices.Contains(strings.Fields(line), "fetch") {
+				t.Errorf("git ran a fetch: %s", line)
+			}
+		}
+	})
+	t.Run("the listed repository is fetched at its head, not at the version", func(t *testing.T) {
+		h, first, head, _ := versionRepository(t)
+		out, err, n, _ := runAtTarget(t, h, proxygittest.Host, "acme/site", first, map[string]any{"collection": "acme/site"})
+		if cmd.ExitCode(err) != 1 || n.joined {
+			t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", err, cmd.ExitCode(err), out)
+		}
+		wants(t, out, "qory run: fetched acme/site at "+head[:12]+" in ")
+		lacks(t, out, first[:12])
+		if got := gitOut(t, h.dir, "rev-parse", "HEAD"); got != head {
+			t.Errorf("the working folder is at %s, want the head %s", got, head)
+		}
+		wants(t, out+err.Error(), "add a skill workflow-hello to the checkout's harness, or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-hello or hello (workflow_not_in_harness); the code is used")
+	})
 }
 
 // TestARunCodeWhoseTargetIsNotTheFirstRepositoryStops is a run from a run code whose

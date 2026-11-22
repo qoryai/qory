@@ -31,10 +31,11 @@ var compiledDocuments = sync.OnceValues(func() (*jsonschema.Schema, error) {
 // that, so the value of such a member is never decoded or copied. Then the rules the
 // schema states and cannot check are checked: the inputs, compacted, are at most
 // contracts.MaxInputs bytes; run_settings is checked as [checkRunSettings] describes; and for
-// the step explore, inputs.domain must be the domain and inputs.work_item.id the work
-// item's id, as the explore inputs schema states. Inputs are the documents' bytes,
-// which the run reads unchanged. The error contains a member's name, the schema's name
-// or a byte count, never a value of documents.
+// a subject of the kind work_item, inputs.domain must be the domain and
+// inputs.work_item.id the subject's id, as documents.schema.json states. A subject of
+// another kind has no such rule. Inputs are the documents' bytes, which the run reads
+// unchanged. The error contains a member's name, the schema's name or a byte count,
+// never a value of documents.
 func ReadDocuments(documents json.RawMessage) (contracts.Documents, error) {
 	v := jsontext.Value(documents)
 	if !v.IsValid() {
@@ -60,27 +61,29 @@ func ReadDocuments(documents json.RawMessage) (contracts.Documents, error) {
 	if json.Compact(&inputs, doc.Inputs) != nil || inputs.Len() > contracts.MaxInputs {
 		return contracts.Documents{}, fmt.Errorf("its inputs are larger than %d bytes", contracts.MaxInputs)
 	}
-	// run_settings comes only for the step explore, which the schema checks too.
-	if doc.RunSettings != nil && doc.Step != StepExplore {
+	// run_settings comes only for the step workflow, which the schema checks too.
+	if doc.RunSettings != nil && doc.Step != StepWorkflow {
 		return contracts.Documents{}, fmt.Errorf("it breaks %s", documentsSchema)
 	}
 	if err := checkRunSettings(documentsSchema, doc.RunSettings); err != nil {
 		return contracts.Documents{}, err
 	}
-	if doc.Step == StepExplore {
+	if doc.Subject != nil && doc.Subject.Kind == SubjectWorkItem {
+		// case:strict: inputs may contain members beside these, so a decode that ignores
+		// letter case would read a later DOMAIN in place of domain.
 		var in struct {
-			Domain   string `json:"domain"`
+			Domain   string `json:"domain,case:strict"`
 			WorkItem *struct {
-				ID string `json:"id"`
-			} `json:"work_item"`
+				ID string `json:"id,case:strict"`
+			} `json:"work_item,case:strict"`
 		}
 		switch {
 		case json.Unmarshal(doc.Inputs, &in) != nil:
-			return contracts.Documents{}, errors.New("its inputs do not read as the explore step's inputs")
+			return contracts.Documents{}, errors.New("its inputs do not read as the inputs of a work item's run")
 		case in.Domain != doc.Domain:
 			return contracts.Documents{}, errors.New("its inputs.domain is not its domain")
-		case in.WorkItem == nil || doc.WorkItem == nil || in.WorkItem.ID != doc.WorkItem.ID:
-			return contracts.Documents{}, errors.New("its inputs.work_item.id is not its work item's id")
+		case in.WorkItem == nil || in.WorkItem.ID != doc.Subject.ID:
+			return contracts.Documents{}, errors.New("its inputs.work_item.id is not its subject's id")
 		}
 	}
 	return doc, nil

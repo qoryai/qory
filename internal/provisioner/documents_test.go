@@ -50,8 +50,9 @@ func noValue(t *testing.T, name string, err error) {
 }
 
 // TestEveryDocumentsFixtureIsRead reads each of the contract's documents fixtures: each
-// is read with its step, its domain, its workflow and harness as written, its run
-// settings as sent, and its inputs as the documents' bytes.
+// is read with its step, its domain, its workflow and harness, its subject and trigger
+// as written, its run settings as sent, and its inputs as the documents' bytes. A
+// subject of a kind other than work_item, whose inputs have no work item, is read.
 func TestEveryDocumentsFixtureIsRead(t *testing.T) {
 	names, err := fs.Glob(contracts.RunFS, "fixtures/documents/*.json")
 	if err != nil || len(names) < 18 {
@@ -78,6 +79,7 @@ func TestEveryDocumentsFixtureIsRead(t *testing.T) {
 				t.Fatal(err)
 			}
 			if doc.Step != want.Step || doc.Domain != want.Domain || doc.Workflow != want.Workflow || !reflect.DeepEqual(doc.Harness, want.Harness) ||
+				!reflect.DeepEqual(doc.Subject, want.Subject) || doc.Trigger != want.Trigger ||
 				(doc.Target == nil) != (doc.Access == "") || doc.ImageDestination != want.ImageDestination {
 				t.Errorf("read %+v", doc)
 			}
@@ -139,7 +141,9 @@ func TestEveryInvalidDocumentsFixtureFails(t *testing.T) {
 }
 
 // TestBrokenDocumentsAreRefused refuses documents that break the schema, a rule it
-// states, or the explore inputs' rules: each error contains no value of the documents.
+// states, or the rules of the inputs of a work item's run, also when the inputs repeat
+// domain, work_item or id in capitals with the matching value: each error contains no
+// value of the documents.
 func TestBrokenDocumentsAreRefused(t *testing.T) {
 	const broken = "it breaks documents.schema.json"
 	inputs := func(doc map[string]any) map[string]any { return doc["inputs"].(map[string]any) }
@@ -147,13 +151,21 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 	withSettings := func(edit func(d map[string]any)) json.RawMessage {
 		return documentsOf(t, "explore-run-settings.json", edit)
 	}
+	// alsoAfter is raw with the member also after its one copy of member: the member in
+	// capitals, which a decode that ignores letter case reads last.
+	alsoAfter := func(raw json.RawMessage, member, also string) json.RawMessage {
+		if bytes.Count(raw, []byte(member)) != 1 {
+			t.Fatalf("%s is not once in %s", member, raw)
+		}
+		return bytes.Replace(raw, []byte(member), []byte(member+","+also), 1)
+	}
 	for _, c := range []struct {
 		name string
 		raw  json.RawMessage
 		want string
 	}{
 		{"not JSON", json.RawMessage(`{"step":`), ""},
-		{"a member twice", json.RawMessage(`{"step":"explore","step":"explore"}`), ""},
+		{"a member twice", json.RawMessage(`{"step":"workflow","step":"workflow"}`), ""},
 		{"an array", json.RawMessage(`[]`), "it is not a JSON object"},
 		{"a string", json.RawMessage(`"x"`), ""},
 		{"null", json.RawMessage(`null`), ""},
@@ -167,8 +179,16 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 		{"another domain in inputs", documentsOf(t, "explore-workflow.json", func(d map[string]any) { inputs(d)["domain"] = "marketing" }), "its inputs.domain is not its domain"},
 		{"another work item in inputs", documentsOf(t, "explore-workflow.json", func(d map[string]any) {
 			inputs(d)["work_item"].(map[string]any)["id"] = "wi_0000000000"
-		}), "its inputs.work_item.id is not its work item's id"},
-		{"no work item in inputs", documentsOf(t, "explore-workflow.json", func(d map[string]any) { delete(inputs(d), "work_item") }), "its inputs.work_item.id is not its work item's id"},
+		}), "its inputs.work_item.id is not its subject's id"},
+		{"no work item in inputs", documentsOf(t, "explore-workflow.json", func(d map[string]any) { delete(inputs(d), "work_item") }), "its inputs.work_item.id is not its subject's id"},
+		{"another domain in inputs, and the domain as DOMAIN", alsoAfter(documentsOf(t, "explore-workflow.json", func(d map[string]any) { inputs(d)["domain"] = "marketing" }),
+			`"domain":"marketing"`, `"DOMAIN":"software"`), "its inputs.domain is not its domain"},
+		{"another work item in inputs, and the work item as WORK_ITEM", alsoAfter(documentsOf(t, "explore-workflow.json", func(d map[string]any) {
+			inputs(d)["work_item"] = map[string]any{"id": "wi_0000000000"}
+		}), `"work_item":{"id":"wi_0000000000"}`, `"WORK_ITEM":{"id":"wi_8Kx2mQ4vT9"}`), "its inputs.work_item.id is not its subject's id"},
+		{"another work item id in inputs, and the id as ID", alsoAfter(documentsOf(t, "explore-workflow.json", func(d map[string]any) {
+			inputs(d)["work_item"].(map[string]any)["id"] = "wi_0000000000"
+		}), `"id":"wi_0000000000"`, `"ID":"wi_8Kx2mQ4vT9"`), "its inputs.work_item.id is not its subject's id"},
 		{"inputs too large", documentsOf(t, "explore-without-target.json", func(d map[string]any) {
 			inputs(d)["x"] = strings.Repeat("a", contracts.MaxInputs)
 		}), "its inputs are larger than 786432 bytes"},
@@ -187,7 +207,7 @@ func TestBrokenDocumentsAreRefused(t *testing.T) {
 		{"a runtime with a trailing line feed", withSettings(func(d map[string]any) { settings(d)["runtime"] = "claude\n" }), broken},
 		{"a key in the run settings", withSettings(func(d map[string]any) { settings(d)["api_key"] = "example-key" }), broken},
 		{"a time limit in the run settings", withSettings(func(d map[string]any) { settings(d)["time_limit_minutes"] = 45 }), broken},
-		{"a time limit of 14 minutes", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 14 }), broken},
+		{"a time limit of 0 minutes", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 0 }), broken},
 		{"a time limit of 1441 minutes", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 1441 }), broken},
 		{"a time limit with a fraction", withSettings(func(d map[string]any) { d["time_limit_minutes"] = 45.5 }), broken},
 		{"shared_run that is not a boolean", withSettings(func(d map[string]any) { d["shared_run"] = "yes" }), broken},

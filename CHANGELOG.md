@@ -493,24 +493,26 @@ release may change what an existing document does, and states it under Upgrading
   since no other user may replace a file in it. qory never writes or removes the file.
   `qory run`, `qory run pool`, `qory run register` and `qory run end` stop with an error
   when the setting is there.
-- A run from a run code whose documents set `target_version` fetches the target's
-  repository, the first entry of `QORY_RUN_REPOSITORIES`, at that commit, by its id, in
-  place of the head of its default branch, onto a local branch with the default branch's
-  name and no upstream. When the documents contain no harness document, the compose reads
-  the checkout's `qory.yaml` or `harness.yaml` as Qory Apiary checked it. Each of these
+- A run from a run code whose documents set `target_version` fetches the repository at
+  the target's `address`, its `system` and `path`, the first entry of
+  `QORY_RUN_REPOSITORIES`, at that commit, by its id, in place of the head of its default
+  branch, onto a local branch with the default branch's name and no upstream. When the
+  documents contain no harness document, the compose reads the checkout's `qory.yaml` or
+  `harness.yaml` as Qory Apiary checked it. Each of these
   stops the run before the compose, exit 1: a target on the run's system that is a later
   entry of `QORY_RUN_REPOSITORIES`, that the list does not contain, or with an empty
   list; a version that is not a commit id; and a commit that the server does not have or
-  does not serve by its id. A target on another system, or a run with no
-  `QORY_RUN_SYSTEM`, does not use `target_version`.
+  does not serve by its id. A target with no address, only an adapter's `collection`,
+  is not fetched and does not use `target_version`, nor does a target on another system
+  or a run with no `QORY_RUN_SYSTEM`.
 - The harness section of a `qory.yaml` that defines a stack, without `extends`, may list
   `workflows`, with the keys and checks of a `qory-stack.yaml`, such as `access`. A
   section that extends a stack takes the base's workflows, and one that also
   lists `workflows` stops with exit 2, `remove workflows or extends: a harness section
   that extends a stack takes the workflows of its base`.
 - A run from a run code composes a harness document with no `extends`, which defines a
-  stack, for the run's runtime, `run_settings.runtime`. qory leaves out a `time_limit`
-  of a workflow there, which the run documents allow and a stack does not have.
+  stack, for the run's runtime, `run_settings.runtime`, with the `access`, `plan` and
+  `tier` of each of its workflows as the run documents set them.
 - `QORY_STATUS_FD=<n>` makes `qory run` also write qory's lines, masked, to the open
   descriptor `<n>`: the `✓`, `✗` and `⚠` lines, every `qory run:` line, Forager's lines
   among them, and the last error line, an error of the flags included, each only when
@@ -752,6 +754,19 @@ release may change what an existing document does, and states it under Upgrading
   or a line or paragraph separator. Qory Apiary keeps the stored text unchanged. `.json`
   files stay valid JSON, any other file that is not valid UTF-8 or has a NUL byte stays as
   it is, and an escaped file is downloaded again on each pull.
+- A run from a run code runs the step `workflow`, in place of `explore`: it starts the
+  workflow that the run documents set, whichever workflow of the process Qory Apiary
+  starts. The documents name what the run is for in `subject`, with a `kind`, such as
+  `work_item` or `ticket`, and an `id`, in place of `work_item`, and may set a
+  `trigger`, such as `take_in`, which qory reads and changes nothing for. qory checks
+  `inputs.domain` and `inputs.work_item.id` only for a subject of the kind `work_item`,
+  and only such a run works on the branch `qory/<work item id>`. Documents with the step
+  `explore` or the member `work_item` stop the run after the redemption, exit 1, with `it
+  breaks documents.schema.json`. Documents of a step other than `workflow` and
+  `prebuild`, which stopped with `update qory: … for the steps explore and prebuild
+  only`, and documents with neither `workflow` nor `harness_hidden`, which stopped with
+  `set a workflow for the workspace in Qory Apiary, then take the work item in again:
+  …`, stop with `it breaks documents.schema.json` too.
 - The `config.toml` of a Codex home, and of a walled Codex run, sets
   `web_search = "disabled"`. Without the key, Codex 0.169.0 turns web search on: cached,
   or live in a run with `--sandbox danger-full-access`, such as a walled run.
@@ -779,10 +794,10 @@ release may change what an existing document does, and states it under Upgrading
   stopped on most of them at Forager's check, with Forager's lines, and passed a key under
   `hooks`. A walled run stopped on `hooks.state` and `hooks={…}`, and passed the other
   keys under `hooks`, such as `hooks.Stop`. Every run passed `--trust`.
-- A run from a run code whose explore documents contain no `run_settings` stops before
+- A run from a run code whose workflow documents contain no `run_settings` stops before
   anything is installed or fetched, with `The run settings set no runtime, so the run
   did not start; the code is used.` and `qory runs one of claude and codex.` Until now,
-  such a run started on `claude`. Explore documents start an agent session, so they
+  such a run started on `claude`. Workflow documents start an agent session, so they
   require `run_settings` with a `runtime`. Documents whose `run_settings` are null, or
   whose `runtime` is missing, empty or null, stop with the same line, where they stopped
   with `it breaks documents.schema.json`. A workflow runs on the runtime of the
