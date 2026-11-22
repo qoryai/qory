@@ -232,16 +232,20 @@ func nest(a, b string) bool {
 }
 
 // clonesFolder is the line of a failure to store what, an id or [allClones], in the folder
-// root, with cause. The path and the cause go on the second line, from a path error when
-// cause is one.
+// root, with cause. The path and the cause go on the second line, from a path error or the
+// new path of a rename's error when cause is one.
 func clonesFolder(what, root string, cause error) error {
 	path, why := root, cause.Error()
 	var pe *fs.PathError
-	if errors.As(cause, &pe) {
+	var le *os.LinkError
+	switch {
+	case errors.As(cause, &pe):
 		path, why = pe.Path, pe.Op+": "+pe.Err.Error()
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(root, path)
-		}
+	case errors.As(cause, &le):
+		path, why = le.New, le.Op+": "+le.Err.Error()
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
 	}
 	return fmt.Errorf(textClonesFolder, what, integration.Printable(path), integration.Printable(why))
 }
@@ -317,12 +321,41 @@ func cloned(r *os.Root, d clone) bool {
 	return folders(r, filepath.Join(d.rel, ".git"), false) == nil
 }
 
+// placeFree checks the place of d's clone under r before the clone: a link or a file at a
+// folder above it, at its folder or at its folder's .git stops it, so no clone is made that
+// cannot be stored. A missing part is free.
+func placeFree(r *os.Root, d clone) error {
+	err := folders(r, filepath.Dir(d.rel), false)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, p := range []string{d.rel, filepath.Join(d.rel, ".git")} {
+		info, err := r.Lstat(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			return &fs.PathError{Op: "lstat", Path: p, Err: errLinkOrFile}
+		}
+	}
+	return nil
+}
+
 // cloneInto clones d into a new folder under r and moves it to d's folder, whose parts
-// [folders] makes.
+// [folders] makes, once [placeFree] passed.
 //
 // shortcut: a raw git clone in the session skips the id check and the count but stays inside the run's read credential; accepted under 910
 func cloneInto(c *cobra.Command, r *os.Root, d clone) error {
 	root := r.Name()
+	if err := placeFree(r, d); err != nil {
+		return clonesFolder(d.id, root, err)
+	}
 	tmp, err := os.MkdirTemp(root, clonePrefix)
 	if err != nil {
 		return clonesFolder(d.id, root, err)
@@ -335,8 +368,9 @@ func cloneInto(c *cobra.Command, r *os.Root, d clone) error {
 	if err := folders(r, filepath.Dir(d.rel), true); err != nil {
 		return clonesFolder(d.id, root, err)
 	}
+	// A folder at d's place that is not a clone and has files stops the rename.
 	if err := r.Rename(filepath.Join(filepath.Base(tmp), "repository"), d.rel); err != nil {
-		return fmt.Errorf(textCloneAgain, d.id, "its folder is in use")
+		return clonesFolder(d.id, root, err)
 	}
 	return nil
 }

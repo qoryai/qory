@@ -442,32 +442,70 @@ func TestDestinationCloneStopsAtACorruptRecord(t *testing.T) {
 	}
 }
 
-// TestDestinationCloneFollowsNoLinkBelowTheFolder is a link that something put at
-// git.test/acme in the folder of the clones, to a folder outside that has acme/web with a
-// .git folder: the call does not take it for a clone, stops, exit 1, with the id on line 1
-// and the link's path on line 2, and writes nothing through the link.
+// TestDestinationCloneFollowsNoLinkBelowTheFolder is a link that something put in the
+// folder of the clones, to a folder outside that has web/.git: at git.test/acme, above the
+// clone's folder, at git.test/acme/web, the clone's folder, and at git.test/acme/web/.git.
+// The call does not take the link for a clone, stops before it clones, exit 1, with the id
+// on line 1 and the link's path on line 2, and writes nothing through the link.
 func TestDestinationCloneFollowsNoLinkBelowTheFolder(t *testing.T) {
+	for _, at := range []string{"acme", "acme/web", "acme/web/.git"} {
+		t.Run(at, func(t *testing.T) {
+			c := destinationSession(t)
+			elsewhere := tempDir(t)
+			if err := os.MkdirAll(filepath.Join(elsewhere, "web", ".git"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			link := filepath.Join(c.root, proxygittest.Host, filepath.FromSlash(at))
+			if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(elsewhere, link); err != nil {
+				t.Fatal(err)
+			}
+			out, err := run(t, "destination", "clone", webID)
+			wantLine(t, err, 1, "Ask the instance admin of Qory Apiary to check the machine: it cannot store "+webID+".\n  "+link+": lstat: a link or a file, and qory clones only into folders")
+			if out != "" {
+				t.Errorf("printed %q", out)
+			}
+			if n := c.s.Tunnels(); n != 0 {
+				t.Errorf("the call opened %d tunnels", n)
+			}
+			if names := entryNames(mustReadDir(t, elsewhere)); !slices.Equal(names, []string{"web"}) {
+				t.Errorf("the folder behind the link has %v", names)
+			}
+			if names := entryNames(mustReadDir(t, filepath.Join(elsewhere, "web"))); !slices.Equal(names, []string{".git"}) {
+				t.Errorf("web behind the link has %v", names)
+			}
+			wantFile(t, filepath.Join(c.root, "_cloned"), "")
+		})
+	}
+}
+
+// TestDestinationCloneStopsAtAFolderThatIsNoClone is a folder with a file and no .git at
+// the clone's place: the clone cannot move there, so the call stops, exit 1, with the id on
+// line 1 and the folder's path on line 2, and the folder keeps its file.
+func TestDestinationCloneStopsAtAFolderThatIsNoClone(t *testing.T) {
 	c := destinationSession(t)
-	elsewhere := tempDir(t)
-	if err := os.MkdirAll(filepath.Join(elsewhere, "web", ".git"), 0o700); err != nil {
-		t.Fatal(err)
+	dir := filepath.Join(c.root, proxygittest.Host, "acme", "web")
+	writeFile(t, filepath.Join(dir, "notes.txt"), "notes\n")
+	_, err := run(t, "destination", "clone", webID)
+	if err == nil {
+		t.Fatal("no error")
 	}
-	link := filepath.Join(c.root, proxygittest.Host, "acme")
-	if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
-		t.Fatal(err)
+	// The rename's name and cause differ between systems: renameat, file exists, and
+	// directory not empty.
+	want := "Ask the instance admin of Qory Apiary to check the machine: it cannot store " + webID + ".\n  " + dir + ": rename"
+	if !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("error %q, want it to start with %q", err, want)
 	}
-	if err := os.Symlink(elsewhere, link); err != nil {
-		t.Fatal(err)
-	}
-	out, err := run(t, "destination", "clone", webID)
-	wantLine(t, err, 1, "Ask the instance admin of Qory Apiary to check the machine: it cannot store "+webID+".\n  "+link+": lstat: a link or a file, and qory clones only into folders")
-	if out != "" {
-		t.Errorf("printed %q", out)
-	}
-	if entries, _ := os.ReadDir(filepath.Join(elsewhere, "web")); len(entries) != 1 {
-		t.Errorf("the folder behind the link has %d entries, want .git alone", len(entries))
-	}
+	wantLine(t, err, 1, err.Error())
+	wantFile(t, filepath.Join(dir, "notes.txt"), "notes\n")
 	wantFile(t, filepath.Join(c.root, "_cloned"), "")
+	for _, name := range entryNames(mustReadDir(t, c.root)) {
+		if strings.HasPrefix(name, "_clone-") {
+			t.Errorf("the clone's temporary folder %s is left", name)
+		}
+	}
 }
 
 // TestDestinationCloneStopsAtNestedDestinations is acme/deep, which commits a link sub to

@@ -4147,10 +4147,13 @@ one line per id, in the order given: the id and the folder. A destination that t
 session cloned before is not cloned again, and its line is the same. The clone goes
 through the wall's proxy, which reads with the run's read credential.
 
-qory fetches the target before the session, as for a run with no `destinations`, when the
-run's access is `write` or `write-no-push`, or when its documents contain no harness
-document, since qory then composes the harness of the target's repository. A run that may
-write also reads its branch and runs its push step.
+qory fetches before the session, as for a run with no `destinations`, in two cases:
+
+- The run's access is `write` or `write-no-push`. qory fetches the target and each further
+  repository of the run configuration, reads the run's branch, and runs its push step.
+- The run's documents contain no harness document. qory fetches the target alone, the first
+  repository of the run configuration, since it composes the harness of the target's
+  repository. The setup gets that list too, in `QORY_RUN_REPOSITORIES`.
 
 These calls exit 2 and clone nothing, with the fix on line 1:
 
@@ -4171,7 +4174,7 @@ the id and no path of the machine:
 | `Give the integration access to <id> in Qory Apiary, then click Run Explore again.` | The host returned 401, 403 or 404. Line 2 is `The host returned <status> to the clone.` |
 | `Ask the instance admin of Qory Apiary to let the proxy reach the host of <id>.` | The wall's proxy returned 403 or 407. |
 | `Run Explore again later: the clone of <id> failed: <cause>.` | Any other failed clone. The cause contains no URL. |
-| `Ask the instance admin of Qory Apiary to check the machine: it cannot store <id>.` | A folder of the clone is a link or a file, or qory cannot make it. Line 2 has the path and the cause. The id is the call's first. For a record of the clones that is not a list of ids, `the clones` stands in place of the id. |
+| `Ask the instance admin of Qory Apiary to check the machine: it cannot store <id>.` | A folder of the clone or its `.git` is a link or a file, the clone's folder has files and no clone, or qory cannot make a folder. Line 2 has the path and the cause. The id is the call's first. For a record of the clones that is not a list of ids, `the clones` stands in place of the id. |
 | `Ask the instance admin of Qory Apiary to fix the destinations of this run: they are malformed.` | The destinations do not have the shape of the explore inputs. Line 2 has the cause. |
 | `Ask the instance admin of Qory Apiary to separate destination <id> from another.` | The path of `<id>` lies inside the path of another destination on the same system, or contains it. Line 2 has both ids. qory clones neither, so no clone lands in another one's folder. |
 
