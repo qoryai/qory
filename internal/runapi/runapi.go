@@ -183,18 +183,18 @@ type GivenVerdict struct {
 // run_again only: Qory Apiary shows it in place of the action's sentence. Fix is empty
 // for none. The contract is contracts/harness/v1/verdict.schema.json.
 type Point struct {
-	Text     string `json:"text"`
-	Action   string `json:"action"`
-	Question string `json:"question,omitempty"`
-	Fix      string `json:"fix,omitempty"`
+	Text     string `json:"text,case:strict"`
+	Action   string `json:"action,case:strict"`
+	Question string `json:"question,omitempty,case:strict"`
+	Fix      string `json:"fix,omitempty,case:strict"`
 }
 
 // Track is the track that a verdict proposes for the work item, with the reason. ID is
 // the id of a track that the gate of the run's stage offers. The contract is
 // contracts/harness/v1/verdict.schema.json.
 type Track struct {
-	ID     string `json:"id"`
-	Reason string `json:"reason"`
+	ID     string `json:"id,case:strict"`
+	Reason string `json:"reason,case:strict"`
 }
 
 // Index is the work item's artifacts with their versions. Raw is the whole response, as

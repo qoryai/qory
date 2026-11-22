@@ -534,7 +534,7 @@ type priorVerdict struct {
 
 // agentVerdict is the newest verdict that the run wrote, nil when it wrote none. It is read
 // from the artifact index and its file, since the work item's newest verdict can be an earlier
-// run's.
+// run's. A member whose name differs from a defined one only in letter case is not read.
 func agentVerdict(ctx context.Context, client *runapi.Client, runID string) (*priorVerdict, error) {
 	ctx, cancel := context.WithTimeout(ctx, runAPITimeout)
 	defer cancel()
@@ -566,9 +566,9 @@ func agentVerdict(ctx context.Context, client *runapi.Client, runID string) (*pr
 		return nil, err
 	}
 	var d struct {
-		Verdict string         `json:"verdict"`
-		Points  []runapi.Point `json:"points"`
-		Track   *runapi.Track  `json:"track"`
+		Verdict string         `json:"verdict,case:strict"`
+		Points  []runapi.Point `json:"points,case:strict"`
+		Track   *runapi.Track  `json:"track,case:strict"`
 	}
 	if err := json.Unmarshal(file.Bytes(), &d); err != nil {
 		return nil, fmt.Errorf("the run's verdict is not a verdict document: %w", err)

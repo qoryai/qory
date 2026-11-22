@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -618,6 +619,62 @@ func TestAnAgentsVerdictStandsOverARedSuite(t *testing.T) {
 				t.Errorf("posted %q, want %s", posted, c.want)
 			}
 		})
+	}
+}
+
+// TestAVerdictMemberInAnotherCaseIsNotRead reads the agent's verdict.json with a second
+// member written in another case, such as "Verdict", "Points", or "Text" in a point,
+// before and after the defined one: the verdict keeps the defined members' values. A
+// build that matches member names in any case fails here.
+func TestAVerdictMemberInAnotherCaseIsNotRead(t *testing.T) {
+	// body has a slot before and after the members of the verdict, of its point and of its
+	// track.
+	const body = `{%s"verdict":"escalate","points":[{%s"text":"Pick one.","action":"answer","question":"q1"%s}],` +
+		`"track":{%s"id":"small","reason":"One file."%s}%s}`
+	want := &priorVerdict{
+		verdict: runapi.VerdictEscalate,
+		points:  []runapi.Point{{Text: "Pick one.", Action: "answer", Question: "q1"}},
+		track:   &runapi.Track{ID: "small", Reason: "One file."},
+	}
+	// before and after are the slots of body before and after the members of each object.
+	before := map[string]int{"verdict": 0, "point": 1, "track": 3}
+	after := map[string]int{"verdict": 5, "point": 2, "track": 4}
+	for _, c := range []struct {
+		object, variant string
+	}{
+		{"verdict", `"Verdict":"passed"`},
+		{"verdict", `"Points":[]`},
+		{"verdict", `"TRACK":null`},
+		{"point", `"Text":"Other."`},
+		{"point", `"ACTION":"run_again"`},
+		{"point", `"Question":"q2"`},
+		{"point", `"Fix":"Other."`},
+		{"track", `"ID":"large"`},
+		{"track", `"Reason":"Other."`},
+	} {
+		for _, at := range []string{"before", "after"} {
+			slots := make([]any, 6)
+			for i := range slots {
+				slots[i] = ""
+			}
+			if at == "before" {
+				slots[before[c.object]] = c.variant + ","
+			} else {
+				slots[after[c.object]] = "," + c.variant
+			}
+			t.Run(c.variant+" "+at, func(t *testing.T) {
+				h := newHelper(t)
+				h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: fmt.Sprintf(body, slots...)})
+				client, err := runapi.New(h.api.base(), http.DefaultClient)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := agentVerdict(t.Context(), client, "r1")
+				if err != nil || !reflect.DeepEqual(got, want) {
+					t.Errorf("read %+v, %v, want %+v", got, err, want)
+				}
+			})
+		}
 	}
 }
 
