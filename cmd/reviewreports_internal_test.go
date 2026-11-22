@@ -170,3 +170,59 @@ func TestCheckReviewReportsRefusesTheRunCopiesFolder(t *testing.T) {
 		t.Errorf("a folder in the run copies folder %s returned %v", copies, err)
 	}
 }
+
+func TestCheckReviewReportsWantsANewFolderWithOneMount(t *testing.T) {
+	base := t.TempDir()
+	dir := func(parts ...string) string {
+		p := filepath.Join(append([]string{base}, parts...)...)
+		if err := os.MkdirAll(p, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	checkout, artifacts, home := dir("checkout"), dir("artifacts"), dir("home")
+	reports := dir("run", "review-reports-1")
+	itself := wall.Mount{Path: reports}
+	check := func(r string, mounts ...wall.Mount) error {
+		return checkReviewReports(r, checkout, artifacts, home, mounts)
+	}
+
+	used := dir("run", "review-reports-2")
+	if err := os.WriteFile(filepath.Join(used, "code-reviewer.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shared := dir("run", "review-reports-3")
+	if err := os.Chmod(shared, 0o770); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(reports, link); err != nil {
+		t.Fatal(err)
+	}
+
+	oneMount := "Give the reports folder one mount, writable at its path, and no other.\n"
+	for _, c := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"a trailing slash on a link", check(link+"/", wall.Mount{Path: link + "/"}), "Give the review session an absolute, clean path for the reports folder.\n"},
+		{"a folder with a report in it", check(used, wall.Mount{Path: used}), "Give the review session a new, empty reports folder.\n"},
+		{"a group-writable folder", check(shared, wall.Mount{Path: shared}), "Give the review session a reports folder of qory's user, with no group or other write bit.\n"},
+		{"no mount", check(reports), oneMount},
+		{"two writable mounts", check(reports, itself, wall.Mount{Path: reports, Target: "/x"}), oneMount},
+		{"a read-only mount beside", check(reports, itself, wall.Mount{Path: reports, ReadOnly: true}), oneMount},
+		{"a mount inside", check(reports, itself, wall.Mount{Path: filepath.Join(reports, "sub")}), oneMount},
+		{"a target inside", check(reports, itself, wall.Mount{Path: artifacts, ReadOnly: true, Target: filepath.Join(reports, "sub")}), oneMount},
+	} {
+		if c.err == nil || !strings.HasPrefix(c.err.Error(), c.want) {
+			t.Errorf("%s: returned %v, want %q", c.name, c.err, c.want)
+		}
+	}
+	if err := check(reports, itself, wall.Mount{Path: dir("run"), ReadOnly: true}); err != nil {
+		t.Errorf("a read-only mount of the run folder returned %v", err)
+	}
+	if _, _, err := newReviewReports("run", 1); err == nil || !strings.HasPrefix(err.Error(), "Give the review round an absolute, clean folder for its reports.\n") {
+		t.Errorf("a relative folder returned %v", err)
+	}
+}
