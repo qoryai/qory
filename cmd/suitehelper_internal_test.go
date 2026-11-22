@@ -22,6 +22,7 @@ import (
 
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/stack"
@@ -169,11 +170,18 @@ type apiRun struct {
 	openedRun
 	api *fakeAPI
 	dir string
+	// client is the run API's HTTP client, http.DefaultClient when nil.
+	client *http.Client
 }
 
-func (r apiRun) RunAPI() (*http.Client, string, error) { return http.DefaultClient, r.api.base(), nil }
-func (r apiRun) Dir() string                           { return r.dir }
-func (r apiRun) Image() session.Image                  { return session.Image{Ref: "example.test/build:1"} }
+func (r apiRun) RunAPI() (*http.Client, string, error) {
+	if r.client != nil {
+		return r.client, r.api.base(), nil
+	}
+	return http.DefaultClient, r.api.base(), nil
+}
+func (r apiRun) Dir() string          { return r.dir }
+func (r apiRun) Image() session.Image { return session.Image{Ref: "example.test/build:1"} }
 
 // helperRun is a suiteRun for a workspace and a run folder, the lines it said, and the api.
 type helperRun struct {
@@ -679,32 +687,36 @@ func TestAVerdictMemberInAnotherCaseIsNotRead(t *testing.T) {
 	}
 }
 
-// TestAFailedPostDoesNotEndTheRunPassed: the run API refuses the verdict, or the agent's verdict
-// cannot be read: the run closes failed with exit status 1, and the line has the fix first.
+// TestAFailedPostDoesNotEndTheRunPassed: the run API rejects the verdict, or the agent's verdict
+// cannot be read: the run closes failed with exit status 1, and the line has the fix first. A
+// post that gets a 503 or a 409 closes with run_api_failed; a verdict that qory does not send
+// closes with no end code.
 func TestAFailedPostDoesNotEndTheRunPassed(t *testing.T) {
 	was := submissionWait
 	submissionWait = func(context.Context, time.Duration) error { return nil }
 	t.Cleanup(func() { submissionWait = was })
+	called := string(contracts.EndCodeRunAPIFailed)
 	for _, c := range []struct {
-		name  string
-		setup func(h helperRun)
-		posts int
+		name   string
+		setup  func(h helperRun)
+		posts  int
+		reason string
 	}{
-		{"the run API answers 503", func(h helperRun) { h.api.verdictStatus = http.StatusServiceUnavailable }, maxSubmissionTries},
-		{"the run API answers 409", func(h helperRun) { h.api.verdictStatus = http.StatusConflict }, 1},
+		{"the run API answers 503", func(h helperRun) { h.api.verdictStatus = http.StatusServiceUnavailable }, maxSubmissionTries, called},
+		{"the run API answers 409", func(h helperRun) { h.api.verdictStatus = http.StatusConflict }, 1, called},
 		{"the agent's verdict is no valid verdict", func(h helperRun) {
 			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: `{"verdict":"escalate","points":[{"text":"` + strings.Repeat("a", 600) + `","action":"run_again"}]}`})
-		}, 0},
+		}, 0, ""},
 		{"the verdict file is no JSON", func(h helperRun) {
 			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: "passed"})
-		}, 0},
+		}, 0, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHelper(t)
 			c.setup(h)
 			got, err := h.after(ranRed(t, h), succeeded)
-			if got.State != event.StateFailed || got.ExitCode != 1 {
-				t.Errorf("outcome %+v, want failed with 1", got)
+			if got.State != event.StateFailed || got.ExitCode != 1 || got.Reason != c.reason {
+				t.Errorf("outcome %+v, want failed with 1 and the reason %q", got, c.reason)
 			}
 			if ExitCode(err) != 1 {
 				t.Errorf("error %v, exit status %d, want 1", err, ExitCode(err))
@@ -723,6 +735,48 @@ func TestAFailedPostDoesNotEndTheRunPassed(t *testing.T) {
 			}
 			if first, _, _ := strings.Cut(line, "\n"); len(first) > 100 {
 				t.Errorf("the first line has %d characters: %q", len(first), first)
+			}
+		})
+	}
+}
+
+// waitForEnd is a transport that sends nothing and returns when the request's context ends.
+type waitForEnd struct{}
+
+func (waitForEnd) RoundTrip(r *http.Request) (*http.Response, error) {
+	<-r.Context().Done()
+	return nil, r.Context().Err()
+}
+
+// TestACutPostHasNoEndCode: a second signal that ended the post's context before qory could
+// read the agent's verdict closes the run failed with no end code, since no call failed. A
+// request that times out while the post's context is live closes it with run_api_failed.
+func TestACutPostHasNoEndCode(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		client  *http.Client
+		stopped bool
+		reason  string
+	}{
+		{"cut by a second signal", &http.Client{Transport: waitForEnd{}}, true, ""},
+		{"timed out", &http.Client{Transport: waitForEnd{}, Timeout: 50 * time.Millisecond}, false,
+			string(contracts.EndCodeRunAPIFailed)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHelper(t)
+			h.run = apiRun{api: h.api, dir: h.runDir, client: c.client}
+			again, stop := context.WithCancel(context.Background())
+			defer stop()
+			if c.stopped {
+				stop()
+			}
+			res := &session.Result{After: ranRed(t, h)}
+			got, err := h.suiteRun.after(context.Background(), again, time.Time{}, res, succeeded)
+			if got.State != event.StateFailed || got.ExitCode != 1 || got.Reason != c.reason {
+				t.Errorf("outcome %+v, want failed with 1 and the reason %q", got, c.reason)
+			}
+			if ExitCode(err) != 1 {
+				t.Errorf("error %v, exit status %d, want 1", err, ExitCode(err))
 			}
 		})
 	}

@@ -323,7 +323,8 @@ func (c *Client) Artifacts(ctx context.Context) (*Index, error) {
 // Download writes the bytes of file, a file of the version versionID in the index, to w,
 // and checks them against the size and the SHA-256 in the index. The gateway stops a file
 // that fails its check by ending the connection, so a read error is a failed download. On
-// an error, w may contain part of the file or bytes that fail the check: discard them.
+// an error, w may contain part of the file or bytes that fail the check: discard them. A
+// request that was sent and failed is a [*CallError]; a failed write to w is not.
 func (c *Client) Download(ctx context.Context, versionID string, file File, w io.Writer) error {
 	for _, segment := range []string{versionID, file.Filename} {
 		if !pathSegment(segment) {
@@ -343,7 +344,7 @@ func (c *Client) Download(ctx context.Context, versionID string, file File, w io
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		return readError(response, request)
+		return &CallError{readError(response, request)}
 	}
 
 	// One byte past the size is enough to show that the file is longer than the index says.
@@ -357,22 +358,22 @@ func (c *Client) Download(ctx context.Context, versionID string, file File, w io
 	}
 
 	if err != nil {
-		return fmt.Errorf("Pull %s again. %s failed after %d bytes: %w", file.Filename, request, size, err)
+		return &CallError{fmt.Errorf("Pull %s again. %s failed after %d bytes: %w", file.Filename, request, size, err)}
 	}
 
 	if size > file.Size {
-		return fmt.Errorf("Pull %s again. %s returned more bytes than the %d that the index lists.",
-			file.Filename, request, file.Size)
+		return &CallError{fmt.Errorf("Pull %s again. %s returned more bytes than the %d that the index lists.",
+			file.Filename, request, file.Size)}
 	}
 
 	if size < file.Size {
-		return fmt.Errorf("Pull %s again. %s returned %d bytes, and the index lists %d.",
-			file.Filename, request, size, file.Size)
+		return &CallError{fmt.Errorf("Pull %s again. %s returned %d bytes, and the index lists %d.",
+			file.Filename, request, size, file.Size)}
 	}
 
 	if sum := hex.EncodeToString(digest.Sum(nil)); !strings.EqualFold(sum, file.SHA256) {
-		return fmt.Errorf("Pull %s again. %s returned bytes with SHA-256 %s, and the index lists %s.",
-			file.Filename, request, sum, file.SHA256)
+		return &CallError{fmt.Errorf("Pull %s again. %s returned bytes with SHA-256 %s, and the index lists %s.",
+			file.Filename, request, sum, file.SHA256)}
 	}
 
 	return nil
@@ -589,7 +590,7 @@ type answerHead struct {
 }
 
 // exchange sends a request and decodes a response with the status want into target. It
-// returns the response's body.
+// returns the response's body. Each failure after the request was made is a [*CallError].
 func (c *Client) exchange(
 	ctx context.Context, method, path string, body []byte, want int, target any,
 ) (json.RawMessage, error) {
@@ -602,42 +603,47 @@ func (c *Client) exchange(
 	defer response.Body.Close()
 
 	if response.StatusCode != want {
-		return nil, readError(response, request)
+		return nil, &CallError{readError(response, request)}
 	}
 
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponse+1))
 	if err != nil {
-		return nil, fmt.Errorf("Try again. Reading the response to %s failed: %w", request, err)
+		return nil, &CallError{fmt.Errorf("Try again. Reading the response to %s failed: %w", request, err)}
 	}
 
 	if len(raw) > maxResponse {
-		return nil, fmt.Errorf("Check the run's gateway. The response to %s is over %d bytes.", request, maxResponse)
+		return nil, &CallError{fmt.Errorf("Check the run's gateway. The response to %s is over %d bytes.",
+			request, maxResponse)}
 	}
 
 	var head answerHead
 
 	if err := json.Unmarshal(raw, &head); err != nil {
-		return nil, fmt.Errorf("Check the run's gateway. The response to %s is not the run API's JSON: %w", request, err)
+		return nil, &CallError{fmt.Errorf("Check the run's gateway. The response to %s is not the run API's JSON: %w",
+			request, err)}
 	}
 
 	if head.Version == nil {
-		return nil, fmt.Errorf("Check the run's gateway. The response to %s has no version.", request)
+		return nil, &CallError{fmt.Errorf("Check the run's gateway. The response to %s has no version.", request)}
 	}
 
 	if *head.Version != wireVersion {
-		return nil, fmt.Errorf("Update qory. This qory reads version %d of the run API, and %s returned version %d.",
-			wireVersion, request, *head.Version)
+		return nil, &CallError{fmt.Errorf(
+			"Update qory. This qory reads version %d of the run API, and %s returned version %d.",
+			wireVersion, request, *head.Version)}
 	}
 
 	if err := json.Unmarshal(raw, target); err != nil {
-		return nil, fmt.Errorf("Check the run's gateway. The response to %s is not the run API's JSON: %w", request, err)
+		return nil, &CallError{fmt.Errorf("Check the run's gateway. The response to %s is not the run API's JSON: %w",
+			request, err)}
 	}
 
 	return raw, nil
 }
 
 // send sends a request, with a JSON body when body is not nil. Only the caller's
-// context stops it; the *http.Client sets any other time limit.
+// context stops it; the *http.Client sets any other time limit. A request with no response
+// is a [*CallError]; a request that could not be made is not.
 func (c *Client) send(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
 	var reader io.Reader
 	if body != nil {
@@ -656,11 +662,11 @@ func (c *Client) send(ctx context.Context, method, path string, body []byte) (*h
 	response, err := c.http.Do(request)
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, fmt.Errorf("Run the command again. %s %s stopped: %w", method, path, ctx.Err())
+			return nil, &CallError{fmt.Errorf("Run the command again. %s %s stopped: %w", method, path, ctx.Err())}
 		}
 
-		return nil, fmt.Errorf("Check that the run's gateway is reachable at %s. %s %s failed: %w",
-			c.base, method, path, err)
+		return nil, &CallError{fmt.Errorf("Check that the run's gateway is reachable at %s. %s %s failed: %w",
+			c.base, method, path, err)}
 	}
 
 	return response, nil

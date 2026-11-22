@@ -2239,11 +2239,14 @@ When the target has no address, its address is on another system than
 
 A run of a work item at a `target_version` of a target on `QORY_RUN_SYSTEM` works on the
 branch `qory/<work item id>`. qory reads the work item and its artifacts through the run API
-before the fetch. It picks the commit the run starts at in the target's repository, the
-start commit, from the artifact of the target's collection: the artifact that a delivered
-output of the target goes to, `t-` and the first 32 lower-case hexadecimal digits of the
-SHA-256 of the target's `collection` (see
-[Outputs](../contracts/harness/v1/README.md#outputs)):
+before the fetch. A read that fails at the run API, with an error status, no answer or an
+answer that is not the run API's, stops the run before the agent starts and closes it `failed`
+with the end code `run_api_failed`. A 404 with no error code at the read of the work item is a
+server with the feature `workflow_model` off: the run then reads nothing and goes on. qory picks
+the commit the run starts at in the target's repository, the start commit, from the artifact
+of the target's collection: the artifact that a delivered output of the target goes to, `t-`
+and the first 32 lower-case hexadecimal digits of the SHA-256 of the target's `collection`
+(see [Outputs](../contracts/harness/v1/README.md#outputs)):
 
 1. The newest version of that artifact, when the work item's stage wrote it.
 2. Else, the version of that artifact that a gate approved, unless the newest version is a
@@ -3308,20 +3311,21 @@ The run code is used up.` indented by two spaces. A harness with no `process.yam
 no type, so a write run of a work item stops on any type that `deliver` lists.
 
 First, qory reads each output, and fills and checks each output of a type with a
-`json_schema`. For a run with a branch, qory does this, and the check of the required
-outputs, twice: after it commits what the agent left and before the push, with the local
-head, and again after the push, with the head that landed. An output that fails before the
-push, or a required output that no session wrote, stops the step before any push: the
-commits stay in the working folder, the forge gets none of them, and the run closes `failed`
-with the end code `outputs_invalid`. A failed read of the run's versions in that check
-closes the run `failed` with no end code. An output that fails after the push adds the line
-`Before the round, delete branch qory/<work item id> of <path> on <system>.`, indented by
-two spaces, and the run closes `failed` with no end code. A run with no repository checks
-its outputs once, before it stores any version: an output that fails, or a required output
-that no session wrote, closes the run `failed` with the end code `outputs_invalid`. A failed
-read of the run's versions, a failed store and any failure after a version was stored close
-the run `failed` with no end code. An output that fails one of these stops the step before
-any version is stored:
+`json_schema`. For a run with a branch, qory does this, and the check of the required outputs,
+twice: after it commits what the agent left and before the push, with the local head, and
+again after the push, with the head that landed. An output that fails before the push, or a
+required output that no session wrote, stops the step before any push: the commits stay in the
+working folder, the forge gets none of them, and the run closes `failed` with the end code
+`outputs_invalid`. A read of the run's versions in that check that fails at the run API closes
+the run `failed` with the end code `run_api_failed`. An output that fails after the push adds
+the line `Before the round, delete branch qory/<work item id> of <path> on <system>.`,
+indented by two spaces, and the run closes `failed` with no end code. A run with no repository
+checks its outputs once, before it stores any version: an output that fails, or a required
+output that no session wrote, closes the run `failed` with the end code `outputs_invalid`. A
+read of the run's versions or a store that fails at the run API closes the run `failed` with
+the end code `run_api_failed`. A version over the limit of a request, which qory does not
+send, and any other failure after a version was stored close it with no end code. An output
+that fails one of these stops the step before any version is stored:
 
 1. qory reads the files, at most the type's `size_limit` in all, or 10 MiB for a type with
    none. A type's folder of more than 100 entries stops the read before any file is read,
@@ -3366,10 +3370,11 @@ A run with no repository pushes nothing, and prints `qory run: stored the <type>
 run has no repository to push.` for each output that it stores, such as `qory run: stored the
 reply output; the run has no repository to push.`
 
-Each of these lines fails the step, and the run closes `failed`, exit 1. Before the push of
-a run with a branch, and before any version is stored in a run with no repository, the run
-closes with the end code `outputs_invalid`; after the push, with no end code. `<type>` is the
-output's type:
+Each of these lines fails the step, and the run closes `failed`, exit 1. Before the push of a
+run with a branch, and before any version is stored in a run with no repository, the run
+closes with the end code `outputs_invalid`; after the push, with no end code. After the push,
+a call to the run API that fails, such as the store of a version or the fetch of a push check,
+closes the run with the end code `run_api_failed`. `<type>` is the output's type:
 
 - `Write <type> to the outbox: the stage requires it and the session wrote none.`, then
   indented by two spaces `.qory/outbox/<type>/<type>.json` for a type with a `json_schema`,
@@ -4616,11 +4621,13 @@ documents set `shared_run`, qory sends the next-session request once the verdict
 the push step passed (see [A run of several sessions](#a-run-of-several-sessions)); otherwise
 the run closes as its session did, and the verdict starts the next round in Qory Apiary. If
 qory cannot post the verdict, it closes the run `failed` and exits 1, so a verdict of `passed`
-that the agent posted does not stand over a suite that did not pass. A stop of `qory run` that
-cuts the step posts the red verdict with the point `The full suite did not finish: the run was
-stopped.`, with one request that has 5 seconds, and closes the run `cancelled` with the reason
-`interrupted` and exit status 1, whether or not the post worked. qory checks each verdict
-against the verdict format before it posts it.
+that the agent posted does not stand over a suite that did not pass. A call to the run API in
+this step that fails, such as the post or the read of the agent's verdict, closes the run with
+the end code `run_api_failed`. A post that a stop or a time limit cuts closes the run with no
+end code. A stop of `qory run` that cuts the step posts the red verdict with the point `The
+full suite did not finish: the run was stopped.`, with one request that has 5 seconds, and
+closes the run `cancelled` with the reason `interrupted` and exit status 1, whether or not the
+post worked. qory checks each verdict against the verdict format before it posts it.
 
 The point has a text and, for a red suite, sometimes a fix, each on one line. The text is, in this
 order of preference:

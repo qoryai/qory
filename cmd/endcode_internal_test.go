@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -12,15 +14,60 @@ import (
 	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/preparation"
+	"github.com/qoryai/qory/internal/runapi"
 )
+
+// failedCall is the error of a GET of the artifact index that got status and body from the
+// run API: a [*runapi.CallError].
+func failedCall(t *testing.T, status int, body string) error {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+	defer server.Close()
+	client, err := runapi.New(server.URL+"/v1/runs/r", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Artifacts(context.Background())
+	if !errors.As(err, new(*runapi.CallError)) {
+		t.Fatalf("the read failed with %v, want a CallError", err)
+	}
+	return err
+}
+
+// notSent is the error of a version over the limit of a request, which the client does not
+// send.
+func notSent(t *testing.T) error {
+	t.Helper()
+	client, err := runapi.New("http://127.0.0.1:1/v1/runs/r", http.DefaultClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.PushArtifact(context.Background(), runapi.Push{
+		Type:  "pull-request",
+		Files: []runapi.PushFile{{Filename: "a", Content: make([]byte, runapi.MaxBody)}},
+	})
+	if err == nil {
+		t.Fatal("a version over the limit was sent")
+	}
+	return err
+}
 
 // TestAFailedPushStepClosesWithItsEndCode is [pushEnding.outcome] after a session that
 // succeeded: a push step that failed closes the run failed with the end code of its error as
 // the reason, when the error has one, however the error is wrapped or joined with another;
 // a step that failed with no end code, a cut step, and a session that did not succeed close
-// with no end code.
+// with no end code. A failed call to the run API, also under the line that shows it, closes
+// with run_api_failed, and any other code in the error comes first. A request that was not
+// sent has no end code, and a step whose context ended closes as a stop or a time limit does.
 func TestAFailedPushStepClosesWithItsEndCode(t *testing.T) {
 	noCredential := &runLineError{pushProxyError(errors.New(errNowhereNoPush))}
+	call := failedCall(t, http.StatusInternalServerError, "")
+	shown := withCause(notStored(nil, "pull-request", shownError(call)), call)
+	// A 422 unknown_type answer, which gives qory artifact push its exit status, gives exit 1 here.
+	unknownType := failedCall(t, http.StatusUnprocessableEntity, `{"error":"unknown_type"}`)
 	refused := &runLineError{&preparation.PushRefusedError{}}
 	notRecorded := &runLineError{recordFailed("qory/w-1", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", errors.New("the link closed"))}
 	succeeded := session.Outcome{State: event.StateSucceeded}
@@ -35,7 +82,14 @@ func TestAFailedPushStepClosesWithItsEndCode(t *testing.T) {
 		"outputs invalid":            {pushEnding{session: succeeded}, &runLineError{&outputsInvalid{errors.New("the output is missing")}}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodeOutputsInvalid), ExitCode: 1}},
 		"refused, then not recorded": {pushEnding{session: succeeded}, &runLineError{errors.Join(refused, notRecorded)}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePushRefused), ExitCode: 1}},
 		"another failure":            {pushEnding{session: succeeded}, &runLineError{errors.New("the push failed")}, session.Outcome{State: event.StateFailed, ExitCode: 1}},
+		"run API call failed":        {pushEnding{session: succeeded}, &runLineError{shown}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodeRunAPIFailed), ExitCode: 1}},
+		"run API, then push refused": {pushEnding{session: succeeded}, &runLineError{errors.Join(shown, refused)}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePushRefused), ExitCode: 1}},
+		"run API under outputs":      {pushEnding{session: succeeded}, &outputsInvalid{call}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodeOutputsInvalid), ExitCode: 1}},
+		"a 4xx answer":               {pushEnding{session: succeeded}, &runLineError{withCause(errors.New("no type"), unknownType)}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodeRunAPIFailed), ExitCode: 1}},
+		"request not sent":           {pushEnding{session: succeeded}, &runLineError{withCause(errors.New("not stored"), notSent(t))}, session.Outcome{State: event.StateFailed, ExitCode: 1}},
 		"cut at the time limit":      {pushEnding{session: succeeded, cut: true}, refused, session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}},
+		"run API, cut at the limit":  {pushEnding{session: succeeded, cut: true}, &runLineError{shown}, session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}},
+		"run API, cut by a stop":     {pushEnding{session: succeeded, cut: true, stopped: true}, &runLineError{shown}, session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}},
 		"session failed":             {pushEnding{session: session.Outcome{State: event.StateFailed, ExitCode: 3}}, refused, session.Outcome{State: event.StateFailed, ExitCode: 3}},
 	} {
 		if got := c.ending.outcome(c.err); got != c.want {
@@ -45,13 +99,15 @@ func TestAFailedPushStepClosesWithItsEndCode(t *testing.T) {
 }
 
 // TestForagersCloseTakesTheEndCodes is a run that Forager opens at a gateway in this process,
-// closed failed with each end code as the reason: the session's check of the outcome takes it,
-// and Close returns the reason as given.
+// closed failed with each end code as the reason, with exit code 1, or -1 for run_api_failed
+// as qory closes a run whose session does not join: the session's check of the outcome takes
+// it, and Close returns the reason as given.
 func TestForagersCloseTakesTheEndCodes(t *testing.T) {
 	for _, code := range []contracts.EndCode{
 		contracts.EndCodePushCredentialMissing, contracts.EndCodePushRefused,
 		contracts.EndCodePrebuiltImageTooLarge, contracts.EndCodePushNotRecorded,
 		contracts.EndCodeNextSessionFailed, contracts.EndCodeOutputsInvalid,
+		contracts.EndCodeRunAPIFailed,
 	} {
 		t.Run(string(code), func(t *testing.T) {
 			ctx := context.Background()
@@ -60,7 +116,11 @@ func TestForagersCloseTakesTheEndCodes(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer at.g.Close(ctx)
-			closed, err := at.run.Close(ctx, session.Outcome{State: event.StateFailed, Reason: string(code), ExitCode: 1})
+			exit := 1
+			if code == contracts.EndCodeRunAPIFailed {
+				exit = -1
+			}
+			closed, err := at.run.Close(ctx, session.Outcome{State: event.StateFailed, Reason: string(code), ExitCode: exit})
 			if err != nil {
 				t.Fatalf("Close refused the outcome: %v", err)
 			}
@@ -81,6 +141,7 @@ func TestForagersCloseTakesTheEndCodesAfterAJoin(t *testing.T) {
 		contracts.EndCodePushCredentialMissing, contracts.EndCodePushRefused,
 		contracts.EndCodePrebuiltImageTooLarge, contracts.EndCodePushNotRecorded,
 		contracts.EndCodeNextSessionFailed, contracts.EndCodeOutputsInvalid,
+		contracts.EndCodeRunAPIFailed,
 	} {
 		t.Run(string(code), func(t *testing.T) {
 			ctx := context.Background()
