@@ -278,7 +278,7 @@ func TestWorkItemShowStopsOnTextThatIsNotUTF8InARun(t *testing.T) {
 	server.snapshot = "{\"version\":1,\"ticket\":{\"title\":\"\xff\"}}"
 
 	out, err := run(t, "work-item", "show")
-	if err == nil || !strings.HasPrefix(err.Error(), "Contact support: the run API sent a work item that is not valid JSON text.\n  ") {
+	if err == nil || !strings.HasPrefix(err.Error(), "The run API sent a work item that is not valid JSON text.\n  ") {
 		t.Errorf("err = %v", err)
 	}
 
@@ -1847,7 +1847,7 @@ func TestArtifactPullStopsOnAnIndexThatIsNotUTF8(t *testing.T) {
 	server.index = "{\"version\":1,\"artifacts\":[],\"x\":\"\xff\"}"
 
 	_, err := run(t, "artifact", "pull")
-	if err == nil || !strings.HasPrefix(err.Error(), "Contact support: the run API sent an artifact index that is not valid JSON text.\n  ") {
+	if err == nil || !strings.HasPrefix(err.Error(), "The run API sent an artifact index that is not valid JSON text.\n  ") {
 		t.Errorf("err = %v", err)
 	}
 

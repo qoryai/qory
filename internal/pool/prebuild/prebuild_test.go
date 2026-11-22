@@ -466,7 +466,7 @@ func (e *env) build(ctx context.Context, o devimage.Options) (devimage.Result, e
 	case "limit":
 		return devimage.Result{}, devimage.ErrLimit
 	case "toobig":
-		return devimage.Result{}, &devimage.RefusedError{Err: errors.New(testTooBig)}
+		return devimage.Result{}, &devimage.RefusedError{Err: tooLargeError{testTooBig}}
 	case "missing":
 		return devimage.Result{}, pullError{why: "Error response from daemon: manifest for r.example/env:1 not found: manifest unknown: manifest unknown", missing: true}
 	case "unreachable":
@@ -481,7 +481,7 @@ func (e *env) build(ctx context.Context, o devimage.Options) (devimage.Result, e
 
 // testTooBig is the build's refusal of an image over the run's largest size, as
 // internal/prebuild writes it.
-const testTooBig = "Make the image smaller, or contact support to raise Largest prebuilt image.\nThe image is 5.0 GB (5000000001 bytes).\nThe limit is 5.0 GB (5000000000 bytes). The image is removed."
+const testTooBig = "The repository's image is over the limit for a prebuilt image.\n  The image is 5.0 GB (5000000001 bytes).\n  The limit is 5.0 GB (5000000000 bytes). The image is removed."
 
 // cmpOr is s, or or when s is empty.
 func cmpOr(s, or string) string {
@@ -505,6 +505,15 @@ func (e pullError) Error() string {
 
 // Is reports whether target is [devimage.ErrImageMissing], for a missing image.
 func (e pullError) Is(target error) bool { return e.missing && target == devimage.ErrImageMissing }
+
+// tooLargeError is the build's text of an image over the limit, as [devimage.ErrImageTooLarge].
+type tooLargeError struct{ text string }
+
+// Error is the build's text.
+func (e tooLargeError) Error() string { return e.text }
+
+// Is reports whether target is [devimage.ErrImageTooLarge].
+func (e tooLargeError) Is(target error) bool { return target == devimage.ErrImageTooLarge }
 
 // ready marks that a fake waits for its context.
 func (e *env) ready() {
@@ -829,9 +838,12 @@ var (
 	closedFailed    = session.Outcome{State: "failed", ExitCode: -1}
 	closedTimeout   = session.Outcome{State: "cancelled", Reason: "timeout", ExitCode: 124}
 	closedStopped   = session.Outcome{State: "cancelled", Reason: "interrupted", ExitCode: -1}
-	// closedImageMissing is the close Forager's Run.Close takes for an image not in its
-	// registry: failed, image_missing and -1, in a run no session joined.
-	closedImageMissing = session.Outcome{State: "failed", Reason: "image_missing", ExitCode: -1}
+	// closedTooLarge is the close of a repository image over the limit: failed,
+	// prebuilt_image_too_large and -1.
+	closedTooLarge = session.Outcome{State: "failed", Reason: "prebuilt_image_too_large", ExitCode: -1}
+	// closedImageMissing is the close Forager's Run.Close takes for an environment image not in
+	// its registry: failed, environment_image_missing and -1, after the step's session joined.
+	closedImageMissing = session.Outcome{State: "failed", Reason: "environment_image_missing", ExitCode: -1}
 )
 
 // testEnvImage is a run's environment image, by digest.

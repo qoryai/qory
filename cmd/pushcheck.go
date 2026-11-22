@@ -370,7 +370,7 @@ const notesFile = "notes.json"
 
 // textNotesNotList is the error of a work item whose notes in the run API's response are
 // not a JSON array.
-const textNotesNotList = "Contact support: the notes in the run API's response are not a JSON array."
+const textNotesNotList = "The notes in the run API's response are not a JSON array."
 
 // artifactsForCheck is the fetch of a push check through client: the work item's notes
 // as notes.json, the artifact index, and the newest version of each artifact of the

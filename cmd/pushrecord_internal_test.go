@@ -170,7 +170,7 @@ func TestLongLabelsAreSplitBeforeABodyPasses64KiB(t *testing.T) {
 func TestALaterCallStopsWhenAnEarlierOneFails(t *testing.T) {
 	send, sizes := recordServer(t, func(int) int { return http.StatusBadRequest })
 	_, err := recordLanded(context.Background(), send, "qory/w-1", landedRepositories(65))
-	if err == nil || !strings.HasPrefix(err.Error(), "qory run: Contact support: Qory Apiary did not record the last push.\n  qory pushed "+strings.Repeat("b", 40)+" to qory/w-1.\nQory Apiary returned 400: ") {
+	if err == nil || !strings.HasPrefix(err.Error(), "qory run: Qory Apiary did not record the last push.\n  qory pushed "+strings.Repeat("b", 40)+" to qory/w-1.\n  Qory Apiary returned 400: ") {
 		t.Errorf("err = %v", err)
 	}
 	if !slices.Equal(*sizes, []int{64}) {
@@ -178,12 +178,12 @@ func TestALaterCallStopsWhenAnEarlierOneFails(t *testing.T) {
 	}
 }
 
-// TestAReportCutDuringTheCallStillGivesTheContactSupportLine is a context that ends during the
+// TestAReportCutDuringTheCallStillGivesTheNotRecordedLine is a context that ends during the
 // report, as Ctrl-C or the time limit ends it: just after the link returned 503, while the
-// request has no response, and while qory waits to send again. Each returns the whole Contact
-// support line, with no step to retry.
-func TestAReportCutDuringTheCallStillGivesTheContactSupportLine(t *testing.T) {
-	const head = "qory run: Contact support: Qory Apiary did not record the last push.\n  qory pushed bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb to qory/w-1.\n"
+// request has no response, and while qory waits to send again. Each returns the whole not-recorded
+// line, with no step to retry.
+func TestAReportCutDuringTheCallStillGivesTheNotRecordedLine(t *testing.T) {
+	const head = "qory run: Qory Apiary did not record the last push.\n  qory pushed bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb to qory/w-1.\n  "
 	for name, c := range map[string]struct {
 		send func(ctx context.Context, cancel context.CancelFunc) ([]byte, error)
 		wait bool
@@ -246,7 +246,7 @@ func TestTheResponsesToAReportAreSortedByWhoReturnedThem(t *testing.T) {
 		err   error
 		ended string
 		again bool
-		// failure is the second line of the Contact support text, "" for a response that ends
+		// failure is the third line of the not-recorded text, "" for a response that ends
 		// the run.
 		failure string
 	}{
@@ -276,7 +276,7 @@ func TestTheResponsesToAReportAreSortedByWhoReturnedThem(t *testing.T) {
 			t.Errorf("%s: sent again = %v, want %v", name, got, c.again)
 		}
 		if c.failure != "" {
-			want := "qory run: Contact support: Qory Apiary did not record the last push.\n  qory pushed " + strings.Repeat("b", 40) + " to qory/w-1.\n" + c.failure
+			want := "qory run: Qory Apiary did not record the last push.\n  qory pushed " + strings.Repeat("b", 40) + " to qory/w-1.\n  " + c.failure
 			if got := recordFailed("qory/w-1", strings.Repeat("b", 40), c.err).Error(); got != want {
 				t.Errorf("%s: the failure is %q, want %q", name, got, want)
 			}
@@ -352,7 +352,7 @@ func TestAClosedRunInTheSecondCallOfThreeEndsTheReport(t *testing.T) {
 
 // TestAnErrorOfARunWithNoControlPlaneIsSentAgainAndFails is the error of [session.Run] for an
 // open run with no control plane, which does not wrap [session.ErrRunClosed]: the call is sent
-// 4 times, after 1 s, 2 s and 4 s, and the report fails with the contact support line.
+// 4 times, after 1 s, 2 s and 4 s, and the report fails with the line that Qory Apiary did not record the last push.
 func TestAnErrorOfARunWithNoControlPlaneIsSentAgainAndFails(t *testing.T) {
 	var waits []time.Duration
 	before := submissionWait
@@ -364,8 +364,8 @@ func TestAnErrorOfARunWithNoControlPlaneIsSentAgainAndFails(t *testing.T) {
 		return nil, errors.New("Open the run with a control plane to send the pushed-commits request: this run has none.")
 	}
 	ended, err := recordLanded(context.Background(), send, "qory/w-1", landedRepositories(1))
-	if ended != "" || err == nil || !strings.Contains(err.Error(), "Contact support: Qory Apiary did not record the last push.") {
-		t.Errorf("ended = %q, err = %v, want no end and the contact support line", ended, err)
+	if ended != "" || err == nil || !strings.Contains(err.Error(), "qory run: Qory Apiary did not record the last push.") {
+		t.Errorf("ended = %q, err = %v, want no end and the not-recorded line", ended, err)
 	}
 	if want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}; sent != 4 || !slices.Equal(waits, want) {
 		t.Errorf("%d calls sent and the waits %v, want 4 and %v", sent, waits, want)

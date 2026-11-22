@@ -255,20 +255,21 @@ func TestAReportThatIsNeverTakenEndsTheRun(t *testing.T) {
 	t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
 	r := p.run(t, commitFirst(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
+	r.wantsReason(t, "push_not_recorded")
 	head := p.branchHead(t)
 	if head == "" || head == p.first {
 		t.Fatalf("the branch is at %q: the push did not land", head)
 	}
-	wants(t, r.out, "qory run: Contact support: Qory Apiary did not record the last push.\n  qory pushed "+head+" to "+recordBranch+".\nQory Apiary returned 503: unavailable\n")
+	wants(t, r.out, "qory run: Qory Apiary did not record the last push.\n  qory pushed "+head+" to "+recordBranch+".\n  Qory Apiary returned 503: unavailable\n")
 	for _, retry := range []string{"Try again", "Run the command again"} {
 		if strings.Contains(r.out, retry) {
 			t.Errorf("the output has %q, but qory has sent the report again 3 times\n%s", retry, r.out)
 		}
 	}
-	const line1 = "qory run: Contact support: Qory Apiary did not record the last push."
+	const line1 = "qory run: Qory Apiary did not record the last push."
 	found := false
 	for _, line := range strings.Split(r.out, "\n") {
-		if strings.HasPrefix(line, "qory run: Contact support:") {
+		if strings.HasPrefix(line, "qory run: Qory Apiary did not record") {
 			found = true
 			if line != line1 || len(line) > 100 {
 				t.Errorf("line 1 is %q with %d characters, want %q and at most 100", line, len(line), line1)
@@ -276,7 +277,7 @@ func TestAReportThatIsNeverTakenEndsTheRun(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("the output has no Contact support line\n%s", r.out)
+		t.Errorf("the output has no line 1 of the failed report\n%s", r.out)
 	}
 	if calls, _ := p.api.reports(); calls != 4 {
 		t.Errorf("%d reports, want 4", calls)
@@ -302,7 +303,7 @@ func TestAnInternalFailureOfTheRunAPIIsTheGatewaysLine(t *testing.T) {
 	failsRecord(p, 1, http.StatusInternalServerError, "internal", "")
 	r := p.run(t, commitFirst(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "qory run: Contact support: Qory Apiary did not record the last push.\n  qory pushed "+p.branchHead(t)+" to "+recordBranch+".\nThe gateway returned 500: internal\n")
+	wants(t, r.out, "qory run: Qory Apiary did not record the last push.\n  qory pushed "+p.branchHead(t)+" to "+recordBranch+".\n  The gateway returned 500: internal\n")
 	if calls, _ := p.api.reports(); calls != 4 {
 		t.Errorf("%d reports, want 4", calls)
 	}
@@ -329,7 +330,7 @@ func TestAReportThatGetsAnother4xxEndsTheRunAtOnce(t *testing.T) {
 			t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
 			r := p.run(t, commitFirst(t), nil)
 			r.wantsClose(t, event.StateFailed, 1)
-			wants(t, r.out, "qory run: Contact support: Qory Apiary did not record the last push.\n  qory pushed "+p.branchHead(t)+" to "+recordBranch+".\n"+fmt.Sprintf("Qory Apiary returned %d: %s\n", c.status, c.text))
+			wants(t, r.out, "qory run: Qory Apiary did not record the last push.\n  qory pushed "+p.branchHead(t)+" to "+recordBranch+".\n  "+fmt.Sprintf("Qory Apiary returned %d: %s\n", c.status, c.text))
 			if calls, _ := p.api.reports(); calls != 1 || len(p.waits) != 0 {
 				t.Errorf("%d reports and the waits %v, want 1 and none", calls, p.waits)
 			}
@@ -352,7 +353,7 @@ func TestWhatTheGatewayDoesNotPassOnIsA502AndIsSentAgain(t *testing.T) {
 			t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
 			r := p.run(t, commitFirst(t), nil)
 			r.wantsClose(t, event.StateFailed, 1)
-			wants(t, r.out, "qory run: Contact support: Qory Apiary did not record the last push.\n  qory pushed "+p.branchHead(t)+" to "+recordBranch+".\nThe gateway returned 502: ")
+			wants(t, r.out, "qory run: Qory Apiary did not record the last push.\n  qory pushed "+p.branchHead(t)+" to "+recordBranch+".\n  The gateway returned 502: ")
 			if calls, _ := p.api.reports(); calls != 4 {
 				t.Errorf("%d reports, want 4", calls)
 			}
@@ -386,7 +387,7 @@ func TestAGatewayRefusalOfA4xxEndsTheRunAtOnce(t *testing.T) {
 			t.Cleanup(cmd.SetLaterSessions(func() { secondRan = true }))
 			r := p.run(t, commitFirst(t), nil)
 			r.wantsClose(t, event.StateFailed, 1)
-			wants(t, r.out, "qory run: Contact support: Qory Apiary did not record the last push.\n  qory pushed "+p.branchHead(t)+" to "+recordBranch+".\n"+fmt.Sprintf("The gateway returned %d: %s\n", c.status, c.code))
+			wants(t, r.out, "qory run: Qory Apiary did not record the last push.\n  qory pushed "+p.branchHead(t)+" to "+recordBranch+".\n  "+fmt.Sprintf("The gateway returned %d: %s\n", c.status, c.code))
 			if strings.Contains(r.out, "Send the") {
 				t.Errorf("the output has a step to send the call again\n%s", r.out)
 			}
@@ -401,7 +402,7 @@ func TestAGatewayRefusalOfA4xxEndsTheRunAtOnce(t *testing.T) {
 }
 
 // TestAGatewayThatStaysDownEndsTheRunAfterFourSends is a gateway 502 on every send: the run
-// closes failed with the Contact support line and 502, after 1 s, 2 s and 4 s.
+// closes failed with the not-recorded line and 502, after 1 s, 2 s and 4 s.
 func TestAGatewayThatStaysDownEndsTheRunAfterFourSends(t *testing.T) {
 	for name, down := range map[string]error{
 		"502": cmd.GatewayRefusal(http.StatusBadGateway, "control_plane_unavailable"),
@@ -415,7 +416,7 @@ func TestAGatewayThatStaysDownEndsTheRunAfterFourSends(t *testing.T) {
 			r := p.run(t, commitFirst(t), nil)
 			r.wantsClose(t, event.StateFailed, 1)
 			status := map[string]string{"502": "502: control_plane_unavailable", "503": "503: Service Unavailable"}[name]
-			wants(t, r.out, "qory run: Contact support: Qory Apiary did not record the last push.\n  qory pushed "+p.branchHead(t)+" to "+recordBranch+".\nThe gateway returned "+status+"\n")
+			wants(t, r.out, "qory run: Qory Apiary did not record the last push.\n  qory pushed "+p.branchHead(t)+" to "+recordBranch+".\n  The gateway returned "+status+"\n")
 			if strings.Contains(r.out, "Send the") {
 				t.Errorf("the output has a step to send the call again\n%s", r.out)
 			}
@@ -491,7 +492,7 @@ func TestAGatewayThatEndedTheRunStopsTheReport(t *testing.T) {
 // TestAClosedRunEndsTheReportQuietly is a report whose call returns an error that wraps
 // [session.ErrRunClosed], as the run does when it sent nothing because it is closed: qory sends
 // the call once, with no wait, stores no version, starts no session 2, and prints the two lines
-// of an ended run with the code run_closed and no line that says to contact support. The step
+// of an ended run with the code run_closed and no line that sends the reader to support. The step
 // succeeds.
 func TestAClosedRunEndsTheReportQuietly(t *testing.T) {
 	p := newPushRepo(t, "write")
@@ -515,8 +516,8 @@ func TestAClosedRunEndsTheReportQuietly(t *testing.T) {
 	if got := strings.Count(r.out, line); got != 1 {
 		t.Errorf("the lines of the ended run are in the output %d times, want 1\n%s", got, r.out)
 	}
-	if strings.Contains(r.out, "Contact support") {
-		t.Errorf("the output tells the reader to contact support\n%s", r.out)
+	if strings.Contains(r.out, "Contact "+"support") {
+		t.Errorf("the output sends the reader to support\n%s", r.out)
 	}
 	if got := r.pushSteps(); len(got) != 1 || got[0] != event.StateSucceeded {
 		t.Errorf("the push steps exited %v, want one succeeded", got)
@@ -616,7 +617,7 @@ func TestAPushThatLandedBeforeASecondRepositoryFailedIsReported(t *testing.T) {
 }
 
 // TestAPartialPushWhoseReportFailsGivesBothLines is the run above with a report that gets
-// 403: the line of the second push's failure comes first, then the Contact support line.
+// 403: the line of the second push's failure comes first, then the not-recorded line.
 func TestAPartialPushWhoseReportFailsGivesBothLines(t *testing.T) {
 	p := newPushRepo(t, "write")
 	failsRecord(p, 1, http.StatusForbidden, "", "")
@@ -634,7 +635,7 @@ func TestAPartialPushWhoseReportFailsGivesBothLines(t *testing.T) {
 	}, nil)
 	r.wantsClose(t, event.StateFailed, 1)
 	first := strings.Index(r.out, "the push of the next repository failed")
-	second := strings.Index(r.out, "qory run: Contact support: Qory Apiary did not record the last push.\n  qory pushed "+p.branchHead(t))
+	second := strings.Index(r.out, "qory run: Qory Apiary did not record the last push.\n  qory pushed "+p.branchHead(t))
 	if first < 0 || second < first {
 		t.Errorf("the lines are out of order or missing\n%s", r.out)
 	}
@@ -667,8 +668,8 @@ func TestAPartialPushWhoseReportGetsRunEndedEndsTheRun(t *testing.T) {
 	if got := strings.Count(r.out, ended); got != 1 {
 		t.Errorf("the line of the ended run is in the output %d times, want 1\n%s", got, r.out)
 	}
-	if strings.Contains(r.out, "Contact support: Qory Apiary did not record the last push.") {
-		t.Errorf("the output has the Contact support line, but Qory Apiary ended the run\n%s", r.out)
+	if strings.Contains(r.out, "Qory Apiary did not record the last push.") {
+		t.Errorf("the output has the not-recorded line, but Qory Apiary ended the run\n%s", r.out)
 	}
 	if secondRan {
 		t.Error("session 2 started after run_ended")

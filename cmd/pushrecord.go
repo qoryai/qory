@@ -11,6 +11,7 @@ import (
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/server"
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
@@ -26,7 +27,7 @@ import (
 // code, one of [server.EndCodes]. textLastPushUnrecorded follows either line: the push that
 // the report was about is on the forge, and Qory Apiary has no record of it.
 const (
-	textNotRecorded       = "qory run: Contact support: Qory Apiary did not record the last push.\n  qory pushed %s to %s.\n%s"
+	textNotRecorded       = "qory run: Qory Apiary did not record the last push.\n  qory pushed %s to %s.\n  %s"
 	textRecordApiary      = "Qory Apiary returned %d: %s"
 	textRecordGateway     = "The gateway returned %d: %s"
 	textRecordNoReply     = "Qory Apiary sent no response: %s"
@@ -188,6 +189,14 @@ func retryPushed(err error) bool {
 	return !ok || status >= http.StatusInternalServerError || status == http.StatusTooManyRequests
 }
 
+// notRecordedError is [recordFailed]'s error: its text, and the end code push_not_recorded.
+type notRecordedError struct{ text string }
+
+func (e *notRecordedError) Error() string { return e.text }
+
+// EndCode is push_not_recorded.
+func (e *notRecordedError) EndCode() contracts.EndCode { return contracts.EndCodePushNotRecorded }
+
 // recordFailed is the error that ends a run whose push Qory Apiary did not record: the
 // first commit of the call that failed, the branch ref, then the status with the message or
 // code of Qory Apiary or of the gateway, whichever returned it, or the cause of a request with
@@ -210,5 +219,5 @@ func recordFailed(ref, commit string, err error) error {
 	default:
 		detail = fmt.Sprintf(textRecordNoReply, shownError(err))
 	}
-	return fmt.Errorf(textNotRecorded, commit, ref, detail)
+	return &notRecordedError{fmt.Sprintf(textNotRecorded, commit, ref, detail)}
 }

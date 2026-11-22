@@ -18,6 +18,15 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A run from a run code whose step fails closes `failed` with an end code as the reason,
+  where it closed with no reason before: `push_credential_missing` for a run configuration
+  with no push credential, `push_refused` for a push that got 403, `push_not_recorded` for a
+  push that Qory Apiary did not record, and `prebuilt_image_too_large` for a prebuild whose
+  repository image is over the limit. A prebuild whose environment image is not in its
+  registry closes `failed` with `environment_image_missing`, where it closed with
+  `image_missing`, which Forager takes only for a close before a join. The codes are the end
+  codes of the run outcome contract of the integrations repository. The line qory prints has
+  the cause alone.
 - `qory destination clone <id>...` clones destinations of a run inside its session: each
   id from `destinations` in `$QORY_HARNESS_HOME/inputs.json`, at depth 1, through the
   wall's proxy, into `/tmp/qory-destinations/<system>/<path>`. It prints one line per id,
@@ -44,14 +53,16 @@ release may change what an existing document does, and states it under Upgrading
   harness report lists each session's runtime and tiers in `sessions`. qory sends the
   request again for 10 minutes after no response, a refusal of the gateway's, Qory Apiary's
   refusals with a status of 500 or above, and `rate_limited`. Qory Apiary's `run_ended`
-  closes the run as the session ended, and any other refusal of Qory Apiary's closes it
-  `failed`, exit 1. The steps before a later session need a wall and no container of the
-  run kept, and past the setup's limit they close the run `cancelled` with `timeout`, exit
-  124. In such a walled run with a run API, Forager's forwarder checks the POSTs from
-  behind the wall to the run API from session 1 on, also before any session has push
-  checks: the forwarder then passes one request per connection through the wall, and a
-  POST to the run API with a body needs one `Content-Length` and no `Transfer-Encoding`: a
-  chunked body gets a 400.
+  closes the run as the session ended. Any other refusal of Qory Apiary's, and a status
+  below 500 other than 429 with no refusal, close it `failed`, exit 1, with the cause
+  alone: `qory run: The next-session request after session <n> failed.`, then the status
+  and the message of Qory Apiary or the gateway. The steps before a later session need a
+  wall and no container of the run kept, and past the setup's limit they close the run
+  `cancelled` with `timeout`, exit 124. In such a walled run with a run API, Forager's
+  forwarder checks the POSTs from behind the wall to the run API from session 1 on, also
+  before any session has push checks: the forwarder then passes one request per connection
+  through the wall, and a POST to the run API with a body needs one `Content-Length` and no
+  `Transfer-Encoding`: a chunked body gets a 400.
 - The agent of a walled run gets `QORY_SESSION`, the session's number from 1, which Forager
   sets at each join: `qory run agent-env` keeps the name, as it keeps `QORY_RUN_ID`.
 - In a home composed for codex alone, a Codex agent with a tier gets the tier's model as
@@ -166,13 +177,13 @@ release may change what an existing document does, and states it under Upgrading
   `session_lost` or `batch_refused`. A second line follows: `qory run: The last push is on
   the branch, and Qory Apiary did not record it.` On any other 4xx status, the gateway's 413
   `payload_too_large` among them, or when the retries are used up, the run ends `failed`
-  before the next session with `qory run: Contact support: Qory Apiary did not record the
-  last push.`, then `  qory pushed <commit> to qory/<work item id>.`, then `Qory Apiary
-  returned <status>: <message or code>`, or `The gateway returned <status>: <code>` for a
-  status that the gateway returned.
+  before the next session with `qory run: Qory Apiary did not record the last push.`,
+  then `  qory pushed <commit> to qory/<work item id>.`, then `  Qory Apiary returned
+  <status>: <message or code>`, or `  The gateway returned <status>: <code>` for a status
+  that the gateway returned.
   When the run is already closed and Forager sends nothing (`session.ErrRunClosed`), qory
-  sends the call once and prints the same two lines as for a 410 with the code `run_closed`,
-  with no `Contact support` line and no end code of qory's.
+  sends the call once and prints the same two lines as for a 410 with the code `run_closed`.
+  qory sends no end code for it, because the run is closed.
 - A stack's workflow may set `tier` to `light`, `balanced` or `thinking`, which names the
   main session's model and effort for a dispatched run. Any other value refuses the
   stack. `qory run` does not read it.
@@ -731,14 +742,15 @@ release may change what an existing document does, and states it under Upgrading
   posts `escalate` with the point `The full suite did not start: <cause>.`; for a cause in the
   plan that the agent wrote, such as no `full` row, it posts `changes-requested` with the
   point and a fix, and over an agent's `changes-requested` it adds the point. A session
-  whose after step did not run posts `escalate` with `The full suite did not run: ...`, and so does
-  a run API that cannot be reached at the launch. A container that did not start posts `Contact
-  support: ...`, with the macOS case named. qory prints the same cause, and the fix first, as a line at
-  the launch, and the cause alone as the line at the end of the run. A step that reaches its limit
-  before the suite's command started posts `escalate`; one that reaches it after stays red. A green suite posts
-  nothing. If qory cannot post the verdict, the run closes `failed`. A stop of `qory run` during
-  the suite closes the run `cancelled`, with the reason `interrupted`. See The full suite in
-  `docs/run.md`.
+  whose after step did not run posts `escalate` with `The full suite did not run: ...`, and
+  so does a run API that cannot be reached at the launch. A container that did not start
+  posts the cause alone, `The full suite did not start, because its container ...`, with the
+  macOS case named. qory prints the same cause as a line at the launch, and in fewer words
+  as the line at the end of the run. A step that reaches its limit before the suite's
+  command started posts `escalate`; one that reaches it after stays red. A green suite posts
+  nothing. If qory cannot post the verdict, the run closes `failed`. A stop of `qory run`
+  during the suite closes the run `cancelled`, with the reason `interrupted`. See The full
+  suite in `docs/run.md`.
 - A run whose model key the model provider rejected, while another model key of the run
   is usable, ends with `✗ the run was paused: the model provider rejected a model key,
   and the run can continue on another key` after the runtime's line, exit 1. When the
@@ -856,7 +868,9 @@ release may change what an existing document does, and states it under Upgrading
   control or format character except newline, tab, the zero width joiner and non-joiner,
   or a line or paragraph separator. Qory Apiary keeps the stored text unchanged. `.json`
   files stay valid JSON, any other file that is not valid UTF-8 or has a NUL byte stays as
-  it is, and an escaped file is downloaded again on each pull.
+  it is, and an escaped file is downloaded again on each pull. A work item or an
+  `index.json` from the run API that is not valid JSON text stops the command with the
+  cause alone, such as `The run API sent a work item that is not valid JSON text.`
 - A run from a run code runs the step `workflow`, in place of `explore`: it starts the
   workflow that the run documents set, whichever workflow of the process Qory Apiary
   starts. The documents name what the run is for in `subject`, with a `kind`, such as
@@ -1047,14 +1061,14 @@ release may change what an existing document does, and states it under Upgrading
   describes; qory reads `shared_run` and changes nothing for it.
 - The push step of a write run pushes through the run's push proxy, which sets the run
   configuration's push credentials alone, and the run's proxy no longer adds push
-  credentials. A run with no push credential stops at the push with `Contact
-  support: this run has no push credential, so qory pushed nothing.` The fetch, the
+  credentials. A run with no push credential stops at the push with `This run
+  has no push credential, so qory pushed nothing.` The fetch, the
   runtime's install, and a prebuild stay on the run's proxy.
 - A prebuild started from Qory Apiary applies the instance's Largest prebuilt image
   setting, which the run documents carry as `largest_prebuilt_image_bytes`, in decimal
   bytes. The limit applies to the repository's image, before qory adds Chromium, ffmpeg
   and the parsers. When that image is larger, the prebuild stops before the tools step with
-  `Make the image smaller, or contact support to raise Largest prebuilt image.` on line 1,
+  `The repository's image is over the limit for a prebuilt image.` on line 1,
   then the size and the limit in GB and in bytes, and removes an image the build made. An
   image of exactly the limit is kept, and without the member any size is kept. The last
   line of a successful prebuild still prints the final size. `qory prebuild` has no limit.
@@ -1099,7 +1113,7 @@ release may change what an existing document does, and states it under Upgrading
   the fix, in at most 100 characters, and the indented lines after it show the cause, as the
   compose errors do. Which input fails, and the exit status, stay the same.
 - When the push of a run's work gets 403 from the run's push proxy, the first line of the
-  error is `Contact support: the push was refused (403).` The line `One of these most
+  error is `The push was refused (403).` The line `One of these most
   likely stopped it:` follows, then one line for each likely cause: the push proxy refuses
   a push that is not a plain push to the `push_ref` of the push credential (for example a
   signed push or a push with push options), and qory pushes to
@@ -1596,9 +1610,9 @@ release may change what an existing document does, and states it under Upgrading
   and the configuration's commands from a folder bound read-only at `/qory/proxy`, so
   `ssh`, `git://`, UDP and a base image from a host outside the run's egress fail.
   An environment image or standard image that the build starts from must not set access
-  to the host in its `devcontainer.metadata` label, nor the variables that change what
-  the agent does. When the documents' `environment_image` is not in its registry, qory
-  closes the run as failed with the reason `image_missing`. qory stops a prebuild whose
+  to the host in its `devcontainer.metadata` label, nor the variables that change what the
+  agent does. When the documents' `environment_image` is not in its registry, qory closes
+  the run as failed with the reason `environment_image_missing`. qory stops a prebuild whose
   policy is not the one of the run configuration Qory Apiary serves for the workspace,
   before anything is fetched, and, when `forager.yaml` sets `pool.registry`, one whose
   destinations are not under it. The build takes `wall.image`, pinned by its digest,

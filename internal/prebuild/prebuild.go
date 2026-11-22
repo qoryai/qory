@@ -136,7 +136,7 @@ const (
 	textEnvImage     = "the image sets %s in its environment, which change what the agent does; the image is removed"
 	textProxyBaked   = "the final image sets %s in its environment to a value the image before the commands did not; the image is removed"
 	textSizeUnread   = "docker image inspect printed a size that does not read: %s"
-	textTooBig       = "Make the image smaller, or contact support to raise Largest prebuilt image.\nThe repository's image is %s, before qory adds Chromium, ffmpeg and the parsers.\nThe limit is %s.%s"
+	textTooBig       = "The repository's image is over the limit for a prebuilt image.\n  The image is %s, before qory adds Chromium, ffmpeg and the parsers.\n  The limit is %s.%s"
 	textTooBigGone   = " The image is removed."
 	textNotCopied    = "the repository could not be copied to " + Workspace + ": %s"
 	textConfigUnread = "docker image inspect printed a configuration that does not read"
@@ -191,6 +191,19 @@ var (
 // registry does not have: docker pull found no manifest or no repository for it. The
 // build's error matches it with errors.Is, and its text is the pull's.
 var ErrImageMissing = errors.New("the environment image is not in its registry")
+
+// ErrImageTooLarge is a repository image over [Options.LargestImageBytes]. The build's
+// error matches it with errors.Is, and its text is [textTooBig].
+var ErrImageTooLarge = errors.New("the repository's image is over the limit for a prebuilt image")
+
+// tooLargeError is the refusal of a repository image over the limit, with its text.
+type tooLargeError struct{ text string }
+
+// Error is the text of the refusal.
+func (e *tooLargeError) Error() string { return e.text }
+
+// Is reports whether target is [ErrImageTooLarge].
+func (e *tooLargeError) Is(target error) bool { return target == ErrImageTooLarge }
 
 // RefusedError is a refusal: a flag, the repository or its configuration that no image
 // is built from, before anything is built or run, or what the build made that is not
@@ -1242,7 +1255,7 @@ func (b *build) checkLargest(ctx context.Context, ref string, built bool) error 
 	if built {
 		gone = textTooBigGone
 	}
-	return refused(fmt.Errorf(textTooBig, humanDecimal(size), humanDecimal(b.o.LargestImageBytes), gone))
+	return refused(&tooLargeError{fmt.Sprintf(textTooBig, humanDecimal(size), humanDecimal(b.o.LargestImageBytes), gone)})
 }
 
 // humanDecimal is a size in decimal GB, as docker shows sizes, with one decimal, and in

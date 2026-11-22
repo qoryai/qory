@@ -42,17 +42,16 @@ func TestForagerNoPushProxyErrorIsTheOneQoryMatches(t *testing.T) {
 }
 
 // TestTheNoPushCredentialLineStartsWithTheFix is [textPushNoCred] as qory run prints it:
-// line 1, with "qory run: ", is the fix, starts with a capital and has at most 100
-// characters, the cause follows indented, the code is used ends it, and the error
-// unwraps to Forager's.
+// line 1, with "qory run: ", is the cause, starts with a capital and has at most 100
+// characters, line 2 follows indented, and the error unwraps to Forager's.
 func TestTheNoPushCredentialLineStartsWithTheFix(t *testing.T) {
 	forager := errors.New(errNowhereNoPush)
 	err := &runLineError{pushProxyError(forager)}
 	first, rest, found := strings.Cut("qory run: "+err.Error(), "\n")
-	if !found || !strings.HasPrefix(rest, "  ") || !strings.HasSuffix(rest, codeUsed) {
-		t.Errorf("the lines are %q, want the cause indented and ending with %q", err.Error(), codeUsed)
+	if !found || !strings.HasPrefix(rest, "  ") {
+		t.Errorf("the lines are %q, want line 2 indented", err.Error())
 	}
-	const want = "qory run: Contact support: this run has no push credential, so qory pushed nothing."
+	const want = "qory run: This run has no push credential, so qory pushed nothing."
 	if len(first) > 100 || first != want {
 		t.Errorf("line 1 is %d characters: %q, want at most 100 and %q", len(first), first, want)
 	}

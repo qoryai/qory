@@ -663,6 +663,14 @@ func (r pushed) wantsClose(t *testing.T, state string, code int) {
 	}
 }
 
+// wantsReason checks that the run closed with the end code why as its reason.
+func (r pushed) wantsReason(t *testing.T, why string) {
+	t.Helper()
+	if len(r.closes) != 1 || r.closes[0].Reason != why {
+		t.Errorf("the run closed with %+v, want the reason %q", r.closes, why)
+	}
+}
+
 // commitAll commits every file in dir, as an agent does.
 func commitAll(t *testing.T, dir, message string) {
 	t.Helper()
@@ -1008,7 +1016,7 @@ func TestAFailedPushKeepsTheEndOfTheSession(t *testing.T) {
 	if _, state := r.step(); state != event.StateFailed {
 		t.Errorf("the step ended %q, want failed", state)
 	}
-	wants(t, r.out, "this run has no push credential, so qory pushed nothing")
+	wants(t, r.out, "This run has no push credential, so qory pushed nothing.")
 }
 
 // TestARunTheGatewayClosedPushesNothing is a session that ended because Qory Apiary closed
@@ -1733,7 +1741,8 @@ func TestAPushThatARuleRefusesSaysWhatToAllow(t *testing.T) {
 	p.h.server.Refuse("/acme/site.git/git-receive-pack")
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "qory run: Contact support: the push was refused (403).\n"+
+	r.wantsReason(t, "push_refused")
+	wants(t, r.out, "qory run: The push was refused (403).\n"+
 		"  One of these most likely stopped it:\n"+
 		"  1. The run's push proxy refuses a push that is not a plain push to the push_ref of the push credential (for example a signed push or a push with push options), and qory pushes to refs/heads/qory/"+workItem+" (wall:push-ref).\n"+
 		"  2. The run's push credential has no item for /acme/site.git/git-receive-pack on "+proxygittest.Host+", and the push proxy refuses every other host and path.\n"+
@@ -2516,6 +2525,35 @@ func TestASecondRepositoryWhoseHeadMovedEndsTheRunWithPushHeadChanged(t *testing
 	wants(t, r.out, "qory run: "+deleteBranch+"\n  qory pushed acme/site and stored no version, because the push of the next repository failed: Set the branch to the expected commit or delete it; its head is not that commit.")
 	if got := proxygittest.Git(t, lib, "rev-parse", "refs/heads/qory/"+workItem); got != moved {
 		t.Errorf("the second repository's branch is at %s, want %s", got, moved)
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST went out", posts)
+	}
+}
+
+// TestASecondRepositoryThatGets403EndsTheRunWithPushRefused is a run of two repositories
+// whose first push landed and whose second push got 403 from the push proxy: no version is
+// stored, and the run closes failed with the code push_refused, which the error of the
+// second push has under the line of the pushed repository.
+func TestASecondRepositoryThatGets403EndsTheRunWithPushRefused(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
+	lib := filepath.Join(p.h.server.Root, "acme", "lib.git")
+	proxygittest.Git(t, lib, "config", "http.receivepack", "true")
+	p.h.server.Refuse("/acme/lib.git/git-receive-pack")
+	p.repositories = "acme/site,acme/lib"
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
+	}, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	r.wantsReason(t, string(contracts.EndCodePushRefused))
+	wants(t, r.out, "qory run: "+deleteBranch+"\n  qory pushed acme/site and stored no version, because the push of the next repository failed: The push was refused (403).")
+	if p.branchHead(t) == "" {
+		t.Error("the first repository has no branch")
+	}
+	if got := proxygittest.Git(t, lib, "for-each-ref", "refs/heads/qory/"); got != "" {
+		t.Errorf("the second repository has the branch: %s", got)
 	}
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST went out", posts)

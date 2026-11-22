@@ -208,11 +208,13 @@ type stepResult struct {
 	Environment *stepImage `json:"environment,omitempty"`
 	Base        string     `json:"base,omitempty"`
 	// Error is why the step did not push, "" when it did; ImageMissing is true
-	// when the environment image is not in its registry; Stopped is the step a stop ended,
+	// when the environment image is not in its registry; ImageTooLarge is true when the
+	// repository's image is over the limit; Stopped is the step a stop ended,
 	// [stoppedBuild] or [stoppedPush], "" for none.
-	Error        string `json:"error,omitempty"`
-	ImageMissing bool   `json:"image_missing,omitempty"`
-	Stopped      string `json:"stopped,omitempty"`
+	Error         string `json:"error,omitempty"`
+	ImageMissing  bool   `json:"image_missing,omitempty"`
+	ImageTooLarge bool   `json:"image_too_large,omitempty"`
+	Stopped       string `json:"stopped,omitempty"`
 }
 
 // RunStep is the prebuild's step behind the wall, in the working folder s.Dir: the
@@ -232,7 +234,7 @@ func RunStep(ctx context.Context, st Step, s StepSettings) error {
 	var res stepResult
 	stopped, err := s.run(ctx, st, &res)
 	if err != nil {
-		res = stepResult{Error: err.Error(), ImageMissing: errors.Is(err, devimage.ErrImageMissing)}
+		res = stepResult{Error: err.Error(), ImageMissing: errors.Is(err, devimage.ErrImageMissing), ImageTooLarge: errors.Is(err, devimage.ErrImageTooLarge)}
 		if ctx.Err() != nil {
 			res.Stopped = stopped
 		}

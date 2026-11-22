@@ -64,17 +64,17 @@ const (
 
 // The points of a suite that did not start, which a person must see: the cause follows the colon.
 const (
-	textShownMac           = "Contact support: the full suite needs a Linux machine; this machine runs Docker on macOS."
-	textShownNone          = "Contact support: the full suite's container did not start."
-	textShownExit          = "Contact support: the full suite's container exited with status "
+	textShownMac           = "The full suite needs a Linux machine; this machine runs Docker on macOS."
+	textShownNone          = "The full suite's container did not start."
+	textShownExit          = "The full suite's container exited with status "
 	textPointNoStartCap    = "The full suite did not start: the after step used its %d minutes before the command."
-	textPointNoStartMac    = "Contact support: the full suite needs a Linux machine, and this run's machine runs Docker on macOS."
-	textPointNoStartNone   = "Contact support: the full suite did not start, because its container did not start."
+	textPointNoStartMac    = "The full suite needs a Linux machine, and this run's machine runs Docker on macOS."
+	textPointNoStartNone   = "The full suite did not start, because its container did not start."
 	textPointNoStartFolder = "The full suite did not start: the script could not make a folder it needs."
 	textPointNoStartClone  = "The full suite did not start: git could not clone HEAD of the workspace."
 	textPointNoStartHead   = "The full suite did not start: git could not read HEAD of the workspace."
 	textPointNoStartShell  = "The full suite did not start: the image may lack sh or git (exit 127)."
-	textPointNoStartExit   = "Contact support: the full suite did not start, because its container exited with status %d."
+	textPointNoStartExit   = "The full suite did not start, because its container exited with status %d."
 )
 
 // suiteMinutes is the time the suite's cap counts in: the cap is limit minutes.

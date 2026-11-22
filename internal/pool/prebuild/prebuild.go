@@ -64,10 +64,10 @@ import (
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/mask"
 	"github.com/qoryai/forager/policy"
-	"github.com/qoryai/forager/refusal"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/sink"
 	"github.com/qoryai/forager/wall"
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
@@ -224,7 +224,7 @@ type Run struct {
 	// EnvironmentImage is the documents' environment_image: the image the build's target
 	// step starts from, by digest, as [devimage.Options.EnvironmentImage]; "" builds the
 	// environment step. A run whose environment image is not in its registry closes
-	// failed with image_missing and -1.
+	// failed with environment_image_missing and -1.
 	EnvironmentImage string
 	// LargestImageBytes is the documents' largest_prebuilt_image_bytes: the largest size
 	// of the repository's image, before qory adds its tools, in decimal bytes, as docker
@@ -267,8 +267,10 @@ type Result struct {
 //	step                                     the run closes
 //	the fetch at its time limit              cancelled, timeout, 124
 //	ctx ended                                cancelled, interrupted, -1
-//	the build: environment image not in      failed, image_missing, -1
+//	the build: environment image not in      failed, environment_image_missing, -1
 //	  its registry
+//	the build: repository image over the     failed, prebuilt_image_too_large, -1
+//	  limit
 //	any other failure                        failed, -1
 //	dev.qory.run.built written               succeeded, -1
 //
@@ -357,8 +359,11 @@ func Launch(ctx context.Context, s Settings, r Run) (res Result, err error) {
 	}
 	// The step, behind the wall.
 	got, err := s.step(ctx, run, r, dir)
-	if got.ImageMissing {
-		out = session.Outcome{State: event.StateFailed, Reason: refusal.ImageMissing, ExitCode: -1}
+	switch {
+	case got.ImageMissing:
+		out = session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodeEnvironmentImageMissing), ExitCode: -1}
+	case got.ImageTooLarge:
+		out = session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePrebuiltImageTooLarge), ExitCode: -1}
 	}
 	if err != nil {
 		return res, err
@@ -422,7 +427,7 @@ func (s Settings) step(ctx context.Context, run Opened, r Run, dir string) (step
 	case readErr != nil:
 		return stepResult{}, readErr
 	case got.Error != "":
-		return stepResult{ImageMissing: got.ImageMissing}, errors.New(shownError(got.Error))
+		return stepResult{ImageMissing: got.ImageMissing, ImageTooLarge: got.ImageTooLarge}, errors.New(shownError(got.Error))
 	case joined != nil && joined.ExitCode != 0:
 		return stepResult{}, fmt.Errorf(textStepExited, ended(child.Result{ExitCode: joined.ExitCode}))
 	}

@@ -2475,12 +2475,13 @@ engine may have held before the build. Nothing is pushed. The run closes as fail
 qory exits 1 with these lines, the first after the prefix `prebuild: `:
 
 ```text
-prebuild: Make the image smaller, or contact support to raise Largest prebuilt image.
-The repository's image is 5.0 GB (5000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.
-The limit is 5.0 GB (5000000000 bytes). The image is removed.
+prebuild: The repository's image is over the limit for a prebuilt image.
+  The image is 5.0 GB (5000000001 bytes), before qory adds Chromium, ffmpeg and the parsers.
+  The limit is 5.0 GB (5000000000 bytes). The image is removed.
 ```
 
-The last line has no `The image is removed.` when the engine pulled the image. A
+The run closes `failed` with the reason `prebuilt_image_too_large`. The last line has no
+`The image is removed.` when the engine pulled the image. A
 repository image of exactly the limit is kept. The last line of a successful prebuild
 prints the size of the final image. Without the member, the build keeps an image of any
 size. The member is set only for a prebuild started from Qory Apiary, from the
@@ -2520,15 +2521,15 @@ After the redemption, qory prints `qory run: through the gateway <host>, run <ru
 with `:<port>` after the host when the gateway's URL has a port. Then it prints each line
 of the fetch, and of the session behind the wall, after `qory run: <run id>: `. When the
 registry of `environment_image` has no such image, qory closes the run as failed with the
-reason `image_missing`. A fetch past its 15 minutes closes the run as cancelled with the
-reason `timeout`, a signal as cancelled with the reason `interrupted`, and any other
-failure as failed. In each case qory exits 1. When events of the run did not reach the
-gateway at the close, qory keeps the run's folder under `pool/runs/<run id>`, the record
-and those events in it. After a prebuild that succeeded, qory exits 1 with `check that
-this machine reaches the run's gateway: <n> events of the run did not reach it;
+reason `environment_image_missing`. A fetch past its 15 minutes closes the run as cancelled
+with the reason `timeout`, a signal as cancelled with the reason `interrupted`, and any
+other failure as failed. In each case qory exits 1. When events of the run did not reach the
+gateway at the close, qory keeps the run's folder under `pool/runs/<run id>`, the record and
+those events in it. After a prebuild that succeeded, qory exits 1 with `check that this
+machine reaches the run's gateway: <n> events of the run did not reach it;
 <record>/undelivered contains them`, with `1 event` for one. After a failure, qory prints
-that line as `qory run: <run id>: check that this machine reaches the run's gateway: …`,
-and exits 1 with the failure's error. qory removes the run's folder in every other case.
+that line as `qory run: <run id>: check that this machine reaches the run's gateway: …`, and
+exits 1 with the failure's error. qory removes the run's folder in every other case.
 
 Each of these errors stops the run before the code is sent, exit 2:
 
@@ -2920,9 +2921,12 @@ doubles. Then:
 - Every other refusal of Qory Apiary's, a status below 500 other than 429 with no refusal,
   no answer after 10 minutes, an answer outside `next-session-answer.schema.json`, or an
   answer whose `must_understand` lists a member that qory does not read: the run closes
-  `failed`, exit 1, with a line that starts with its fix, such as `qory run: Contact
-  support: the next-session request after session <n> failed.`, then `Qory Apiary returned
-  <status>: <message or code>`. An answer with `"branch": "main"` and `"must_understand":
+  `failed`, exit 1, with no end code as the reason. A refusal of Qory Apiary's, and a status
+  below 500 other than 429 with no refusal, print the cause alone: `qory run: The
+  next-session request after session <n> failed.`, then `Qory Apiary returned <status>:
+  <message or code>` or `The gateway returned <status>: <message or name of the status>`.
+  No answer after 10 minutes, and an answer that qory does not read, print a line that
+  starts with its fix. An answer with `"branch": "main"` and `"must_understand":
   ["/branch"]` gets `qory run: Update qory.`, then `The answer to the next-session request
   after session <n> does not pass qory's checks.` and `The answer does not pass them: its
   must_understand lists a member of next-session-answer.schema.json that qory does not
@@ -3045,11 +3049,12 @@ returns 403 to a push that is not a plain push to the credential's `push_ref`, w
 run's branch: a push to any other ref, a signed push, and a push with push options.
 
 A run whose run configuration has no push credential has no push proxy. The step fails with
-`qory run: Contact support: this run has no push credential, so qory pushed nothing.`,
-a second line with the cause, and `the code is used`, and qory pushes nothing. A credential
-in forager.yaml is never a push credential. The run's proxy, which the agent, the setup, the
-fetch, and the runtime's install go through, sets no push credential, so a push through it
-gets 403, as a credential with no `push_ref` does.
+`qory run: This run has no push credential, so qory pushed nothing.`, then `  The run
+configuration has no credential with purpose push.`, and qory pushes nothing. The run closes
+`failed` with the reason `push_credential_missing`. A credential in forager.yaml is never a
+push credential. The run's proxy, which the agent, the setup, the fetch, and the runtime's
+install go through, sets no push credential, so a push through it gets 403, as a credential
+with no `push_ref` does.
 
 The step counts toward the run's time limit, and has 120 seconds when the run has less left,
 also after the session used up the limit. The 120 seconds do not count the full suite's after
@@ -3158,7 +3163,7 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 - `change the rule on <system> that stops a push to qory/<work item id> of <path>, then take
   the work item in again: the push failed: <error>; the code is used`, when a rule or a
   hook on the system stops the update
-- `Contact support: the push was refused (403).`, then lines indented by two spaces:
+- `The push was refused (403).`, then lines indented by two spaces:
   `One of these most likely stopped it:`, the three causes, and a last line with the error.
   The causes are `1. The run's push proxy refuses a push that is not a plain push to the
   push_ref of the push credential (for example a signed push or a push with push options),
@@ -3167,6 +3172,8 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   proxy refuses every other host and path.`, `3. The forge stopped the push: its permission
   for the push credential, or a branch rule.` The last line is
   `The push of <path> to <system> returned 403: <error>; the code is used`
+
+  A run whose push got this 403 closes `failed` with the reason `push_refused`.
 - `give the run's credential for <system> write access to <path>, then take the work item in
   again: the push through the run's gateway failed: <error>; the code is used`
 - `Let the run's gateway reach <system>, then take the work item in again.`, then a line
@@ -3678,19 +3685,20 @@ gateway, and its 410 arrives as 502 `control_plane_unavailable`: both are sent a
   prints that line as well, and the step fails with the push's error.
 - The run is already closed, so Forager sends nothing (`session.ErrRunClosed`: `Run.Close`
   began or the gateway closed the run): qory sends the call once, with no wait, and prints
-  the same two lines as for a 410 with the code `run_closed`. No `Contact support` line
-  follows, and qory sends no end code. An error of an open run that has no control plane is
+  the same two lines as for a 410 with the code `run_closed`. qory sends no end code,
+  because the run is closed. An error of an open run that has no control plane is
   not this case, and fails the step as any other error with no status does.
 - Any other 4xx status, the gateway's 413 `payload_too_large` among them, or the retries used
   up: the step fails, the run closes `failed` before the next session, and qory prints
-  `qory run: Contact support: Qory Apiary did not record the last push.`, then
-  `  qory pushed <commit> to qory/<work item id>.`, then `Qory Apiary returned <status>:
+  `qory run: Qory Apiary did not record the last push.`, then
+  `  qory pushed <commit> to qory/<work item id>.`, then `  Qory Apiary returned <status>:
   <message or code>`. For a status that the gateway returned, not Qory Apiary, the last line is
-  `The gateway returned <status>: <code>`, with the name of the status in place of the code
-  when the response has none, as `Service Unavailable` for a 503 with no body. For a request
-  with no response, or one that a stop or the time limit cut, the last line is `Qory Apiary
-  sent no response: <cause>`. No line has a step to retry. `<commit>` is the first commit of the
-  call that failed. The pushed commits stay on the forge, and no output is stored.
+  `  The gateway returned <status>: <code>`, with the name of the status in place of the
+  code when the response has none, as `Service Unavailable` for a 503 with no body. For a
+  request with no response, or one that a stop or the time limit cut, the last line is `Qory
+  Apiary sent no response: <cause>`. No line has a step to retry. `<commit>` is the first
+  commit of the call that failed. The pushed commits stay on the forge, and no output is
+  stored. The run closes `failed` with the reason `push_not_recorded`.
 
 A removal of the setup container that failed runs no step: qory commits nothing and pushes
 nothing, and the run ends as a failed step ends it, with this line:
@@ -4625,13 +4633,13 @@ order of preference:
   the stack: the workflow has no plan.`, printed as it is, with no `The full suite did not start:`
   lead.
 - For an after step whose container did not start or exited before the script (-1, 125 or another
-  status, including a status file that is missing or garbled), the text starts with `Contact
-  support:`. On a machine that runs macOS it is `Contact support: the full suite needs a Linux
-  machine, and this run's machine runs Docker on macOS.` Elsewhere it is `Contact support: the
-  full suite did not start, because its container exited with status <n>.`, or `... because its
-  container did not start.` for -1. The line at the end of the run has the same cause in fewer
-  words, so that it fits 100 characters with the prefix `qory run: `: on macOS `Contact support:
-  the full suite needs a Linux machine; this machine runs Docker on macOS.`, and for a result
+  status, including a status file that is missing or garbled), the text is the cause alone. On a
+  machine that runs macOS it is `The full suite needs a Linux machine, and this run's machine runs
+  Docker on macOS.` Elsewhere it is `The full suite did not start, because its container exited
+  with status <n>.`, or `... because its container did not start.` for -1. The line at the end
+  of the run has the same cause in fewer words, so that it fits 100 characters with the prefix
+  `qory run: `: on macOS `The full suite needs a Linux machine; this machine runs Docker on
+  macOS.`, and for a result
   file that is no path below the repository `The full suite did not start: the result file is no
   path below the repository.`
 - With a host that the proxy refused while the after step ran, `Allow <host> in the run's policy,

@@ -39,7 +39,7 @@ const (
 	textPushStepMany    = "push %s to %s and %d further repositories"
 	textStoreStep       = "store the outputs"
 	textPushNoProxy     = "take the work item in again in Qory Apiary: the run's push proxy, through which qory pushes the run's commits, did not open: %s" + codeUsed
-	textPushNoCred      = "Contact support: this run has no push credential, so qory pushed nothing.\n  The run configuration has no credential with purpose push, so qory pushed nothing" + codeUsed
+	textPushNoCred      = "This run has no push credential, so qory pushed nothing.\n  The run configuration has no credential with purpose push."
 	textPushNoReadProxy = "Take the work item in again in Qory Apiary: the run's host proxy did not open.\n  qory could not read the head of the branch, so it pushed nothing.\n  Cause: %s" + codeUsed
 	textPushNoRunAPI    = "take the work item in again in Qory Apiary: the run API is not reachable" + codeUsed + "\n  %s"
 	textNoOutputType    = "Define %s in the workspace's Artifact types, then run the round again.%s"
@@ -364,6 +364,32 @@ type noPushCredential struct{ err error }
 func (e *noPushCredential) Error() string { return textPushNoCred }
 
 func (e *noPushCredential) Unwrap() error { return e.err }
+
+// EndCode is push_credential_missing.
+func (e *noPushCredential) EndCode() contracts.EndCode { return contracts.EndCodePushCredentialMissing }
+
+// endCoder is an error that says which end code a run that fails with it closes with.
+type endCoder interface{ EndCode() contracts.EndCode }
+
+// endCodeOf is the end code of the first error in err's tree that has one, "" for none. An
+// error that joins several errors gives the code of the first that has one, in the order
+// they were joined.
+func endCodeOf(err error) contracts.EndCode {
+	if c, ok := err.(endCoder); ok {
+		return c.EndCode()
+	}
+	switch u := err.(type) {
+	case interface{ Unwrap() []error }:
+		for _, e := range u.Unwrap() {
+			if code := endCodeOf(e); code != "" {
+				return code
+			}
+		}
+	case interface{ Unwrap() error }:
+		return endCodeOf(u.Unwrap())
+	}
+	return ""
+}
 
 // pushProxyError is the push step's error for err, the error of PushProxy: a
 // [*noPushCredential] for a run with no push credential, [textPushNoProxy] with Forager's
@@ -697,7 +723,9 @@ func (e *pushEnding) settle(now stopRead) {
 // that close. A stop that landed after the refusal still wins, and a session that was
 // interrupted, cancelled or paused keeps its end. Any other failure after a session that did not
 // succeed keeps the session's end, whatever the step did. After a session that succeeded, a cut
-// step with no refusal closes the run as a stop does, and a failed one closes it failed with the status of err.
+// step with no refusal closes the run as a stop does, and a failed one closes it failed with the
+// status of err, and with the end code of err as the reason when err has one:
+// push_credential_missing, push_refused or push_not_recorded, see [endCodeOf].
 func (e pushEnding) outcome(err error) session.Outcome {
 	changed := errors.As(err, new(*preparation.HeadChanged))
 	switch {
@@ -713,7 +741,7 @@ func (e pushEnding) outcome(err error) session.Outcome {
 	case e.cut && !changed:
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
 	}
-	out := session.Outcome{State: event.StateFailed, ExitCode: ExitCode(err)}
+	out := session.Outcome{State: event.StateFailed, Reason: string(endCodeOf(err)), ExitCode: ExitCode(err)}
 	if changed {
 		out.Reason = string(contracts.EndCodePushHeadChanged)
 	}

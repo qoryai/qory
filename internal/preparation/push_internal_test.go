@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qoryai/integrations/contracts"
+
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/proxygit"
 )
@@ -219,8 +221,8 @@ func TestPushFailed(t *testing.T) {
 	b := &WorkBranch{Ref: testRef, system: "git.example.com"}
 	for output, want := range map[string]string{
 		" ! [remote rejected] a -> b (protected)":           "qory run: change the rule on git.example.com",
-		"error: RPC failed; HTTP 403 curl 22":               "qory run: Contact support: the push was refused (403).",
-		"fatal: unable to access 'x': returned error: 403":  "qory run: Contact support: the push was refused (403).",
+		"error: RPC failed; HTTP 403 curl 22":               "qory run: The push was refused (403).",
+		"fatal: unable to access 'x': returned error: 403":  "qory run: The push was refused (403).",
 		"fatal: Authentication failed for 'https://x/'":     "qory run: give the run's credential for git.example.com write access to acme/shop",
 		"fatal: unable to access 'x': Could not resolve":    "qory run: Let the run's gateway reach git.example.com, then take the work item in again.",
 		"fatal: https://u:token-123@git.example.com/ fails": "qory run: Let the run's gateway reach git.example.com, then take the work item in again.",
@@ -242,17 +244,20 @@ func TestPushFailed(t *testing.T) {
 }
 
 // TestAForbiddenPushNamesTheThreeCauses is the 403 of a push, with a long path: line 1 is
-// exactly the text to contact support, then the three causes, each on a line indented by
+// the cause alone, then the three causes, each on a line indented by
 // two spaces, and the forge's output with the code's mark.
 func TestAForbiddenPushNamesTheThreeCauses(t *testing.T) {
 	b := &WorkBranch{Ref: testRef, system: "git.example.com"}
 	path := "acme/" + strings.Repeat("long-repository-name-", 4)
 	err := pushFailed(b, path, &gitError{line: "x", exit: 1, output: "fatal: unable to access 'x': returned error: 403"})
+	if coded, ok := err.(interface{ EndCode() contracts.EndCode }); !ok || coded.EndCode() != contracts.EndCodePushRefused {
+		t.Errorf("the error %T has no end code push_refused", err)
+	}
 	lines := strings.Split(err.Error(), "\n")
 	if len(lines) != 6 {
 		t.Fatalf("the error has %d lines, want 6:\n%v", len(lines), err)
 	}
-	if want := "qory run: Contact support: the push was refused (403)."; lines[0] != want {
+	if want := "qory run: The push was refused (403)."; lines[0] != want {
 		t.Errorf("the first line is %q, want %q", lines[0], want)
 	}
 	if want := "  One of these most likely stopped it:"; lines[1] != want {
@@ -279,7 +284,7 @@ func TestPushFailureFirstLinesAreShort(t *testing.T) {
 	b := &WorkBranch{Ref: testRef, system: "git.internal.example.com"}
 	path := "acme/" + strings.Repeat("long-repository-name-", 4)
 	for output, want := range map[string]string{
-		"fatal: unable to access 'x': returned error: 403": "qory run: Contact support: the push was refused (403).",
+		"fatal: unable to access 'x': returned error: 403": "qory run: The push was refused (403).",
 		"fatal: unable to access 'x': Could not resolve":   "qory run: Let the run's gateway reach git.internal.example.com, then take the work item in again.",
 	} {
 		err := pushFailed(b, path, &gitError{line: output, exit: 1, output: output})
