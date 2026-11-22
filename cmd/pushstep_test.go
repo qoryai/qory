@@ -1484,6 +1484,49 @@ func TestACommitOfNoCancelledRunStopsTheLease(t *testing.T) {
 	}
 }
 
+// TestACommitThatNoVersionConfirmsIsReplacedWithALease is a run whose session 1 stored a
+// version with the head A and whose session 2 pushed B above A and stored no version: the next
+// run starts at A, not at B, its push replaces B with a lease, and its version's base is A.
+func TestACommitThatNoVersionConfirmsIsReplacedWithALease(t *testing.T) {
+	p := newPushRepo(t, "write")
+	first := p.run(t, writesAndCommits(t), nil)
+	first.wantsClose(t, event.StateSucceeded, 0)
+	a := p.branchHead(t)
+	other := tempDir(t)
+	proxygittest.Git(t, other, "clone", "--quiet", p.bare, ".")
+	proxygittest.Git(t, other, "checkout", "--quiet", "qory/"+workItem)
+	writeFile(t, filepath.Join(other, "session2.txt"), "session 2\n")
+	commitAll(t, other, "Session 2")
+	proxygittest.Git(t, other, "push", "--quiet", "origin", "HEAD:refs/heads/qory/"+workItem)
+	b := p.branchHead(t)
+	p.api.mu.Lock()
+	p.api.rows = append(p.api.rows, recordedRow{System: p.api.rows[0].System, Path: p.api.rows[0].Path, Commit: b})
+	p.api.rowRuns = append(p.api.rowRuns, first.runID)
+	p.api.mu.Unlock()
+
+	p.again(t)
+	p.api.number = 58
+	var startedAt string
+	second := p.run(t, func(dir string) {
+		startedAt = gitOut(t, dir, "rev-parse", "HEAD")
+		writeFile(t, filepath.Join(dir, "second.txt"), "second\n")
+	}, nil)
+	second.wantsClose(t, event.StateSucceeded, 0)
+	if startedAt != a {
+		t.Errorf("the run started at %s, want A %s, not B %s\n%s", startedAt, a, b, second.out)
+	}
+	head := p.branchHead(t)
+	if got := proxygittest.Git(t, p.bare, "merge-base", a, head); got != a || head == a {
+		t.Errorf("the branch is at %s, want a commit above A", head)
+	}
+	if got := proxygittest.Git(t, p.bare, "merge-base", b, head); got == b {
+		t.Errorf("B is still on the branch at %s", head)
+	}
+	if base := pathOf(p.api.document(t, 2)["base"]); base != a {
+		t.Errorf("the base is %s, want A %s", base, a)
+	}
+}
+
 // TestOnlyAWriteRunHasTheOutboxVariable is the variable QORY_OUTBOX in the session of a run
 // at write, with the path of the checkout's .qory/outbox, and its absence in a run the
 // workflow lowers to write-no-push: that run stores no outputs.

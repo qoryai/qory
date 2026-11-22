@@ -114,20 +114,28 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, deadline time.T
 	}
 
 	branch := &preparation.WorkBranch{Ref: preparation.WorkItemRef(r.workItem)}
+	pushed := snapshot.PushedCommits
 
 	version, artifact := startVersion(snapshot, index, r.targetRef)
 	if version == nil && artifact != "" {
 		return nil, fmt.Errorf(textNoStart, fmt.Sprintf(textNoApproved, shownText(artifact)))
 	}
 	if version != nil {
-		commit, err := startCommit(ctx, client, version, artifact, sameRunVersions(index, r.targetRef, version), snapshot.PushedCommits, r.targetRef)
+		commit, skipped, err := startCommit(ctx, client, version, artifact, sameRunVersions(index, r.targetRef, version), pushed, r.targetRef)
 		if err != nil {
 			return nil, err
 		}
 		branch.Version = []preparation.Repository{{System: r.targetRef.Address.System, Path: r.targetRef.Address.Path, Commit: commit}}
+		// A commit that the start's run pushed after the start, which no version of the run
+		// confirms, counts as a cancelled run's: the run does not move there, and its push
+		// replaces it.
+		pushed = slices.Clone(pushed)
+		for _, i := range skipped {
+			pushed[i].Cancelled = true
+		}
 	}
 
-	if err := pushedStarts(branch, snapshot.PushedCommits); err != nil {
+	if err := pushedStarts(branch, pushed); err != nil {
 		return nil, err
 	}
 
@@ -249,58 +257,88 @@ func sameRunVersions(index *runapi.Index, target *contracts.Target, chosen *runa
 	return out
 }
 
-// startCommit is the commit a run starts at in the target's repository: the newest commit of
+// startCommit is the commit a run starts at in the target's repository: of the commits of
 // pushed, the work item's pushed commits, that the run which wrote version pushed to the
-// target's address, confirmed by the version's file, which has exactly one top-level reference
-// to that commit in the target's collection. When the file of version does not confirm it,
-// the first of others, the other versions of that run, whose file does confirm it. typ is the
-// version's artifact type.
-func startCommit(ctx context.Context, client *runapi.Client, version *runapi.Version, typ string, others []startVersionOf, pushed []runapi.PushedEntry, target *contracts.Target) (string, error) {
+// target's address, the newest that a version of that run confirms. A version confirms a
+// commit when its one file has exactly one top-level reference to that commit in the
+// target's collection: version first, then others, the other versions of that run, in their
+// order. skipped is the index in pushed of each entry of that run for the target's address
+// that is newer than the start: a session of the run pushed it and stored no version that
+// confirms it. typ is the version's artifact type. With no confirmed commit the error
+// is about the newest one.
+func startCommit(ctx context.Context, client *runapi.Client, version *runapi.Version, typ string, others []startVersionOf, pushed []runapi.PushedEntry, target *contracts.Target) (commit string, skipped []int, err error) {
 	shown := shownText(typ)
 	repository := shownText(target.Address.System + "/" + target.Address.Path)
-	commit := ""
-	for _, e := range pushed {
+	var entries []int
+	for i, e := range pushed {
 		if e.RunID == version.Writer.RunID && e.System == target.Address.System && preparation.SameRepository(e.System, e.Path, target.Address.Path) {
-			commit = e.Commit
+			entries = append(entries, i)
 		}
 	}
-	if commit == "" || version.Writer.Kind != "run" {
-		return "", fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartEntry, version.Number, shown, shownText(version.Writer.RunID), repository))
+	if len(entries) == 0 || version.Writer.Kind != "run" {
+		return "", nil, fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartEntry, version.Number, shown, shownText(version.Writer.RunID), repository))
 	}
-	found, err := references(ctx, client, version, commit, target)
+	counts, err := references(ctx, client, version, target)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	if found == 1 {
-		return commit, nil
-	}
-	for _, o := range others {
-		if n, err := references(ctx, client, o.version, commit, target); err == nil && n == 1 {
-			return commit, nil
+	// The files of others are read once each, and only when version does not confirm a commit;
+	// a version whose download fails confirms nothing.
+	var read []referenceCount
+	confirmed := func(commit string) bool {
+		if counts.count(commit) == 1 {
+			return true
 		}
+		if read == nil {
+			read = make([]referenceCount, 0, len(others))
+			for _, o := range others {
+				refs, err := references(ctx, client, o.version, target)
+				if err != nil {
+					refs = nil
+				}
+				read = append(read, refs)
+			}
+		}
+		return slices.ContainsFunc(read, func(refs referenceCount) bool { return refs.count(commit) == 1 })
 	}
-	if found < 0 {
-		return "", fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartFile, version.Number, shown, maxStartFile))
+	for k := len(entries) - 1; k >= 0; k-- {
+		commit = pushed[entries[k]].Commit
+		if !confirmed(commit) {
+			continue
+		}
+		return commit, entries[k+1:], nil
 	}
-	return "", fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartReference, version.Number, shown, found, shownCommitID(commit), repository))
+	newest := pushed[entries[len(entries)-1]].Commit
+	if counts == nil {
+		return "", nil, fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartFile, version.Number, shown, maxStartFile))
+	}
+	return "", nil, fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartReference, version.Number, shown, counts.count(newest), shownCommitID(newest), repository))
 }
 
-// references is the number of top-level references in the one file of version to commit in
-// target's collection; -1 for a version that has no one JSON file of at most [maxStartFile]
-// bytes. An error is that of the download, and ends with [codeUsed].
-func references(ctx context.Context, client *runapi.Client, version *runapi.Version, commit string, target *contracts.Target) (int, error) {
+// referenceCount is the number of top-level references in a version's file to each address
+// path in the target's collection; nil for a version that has no one JSON file of at most
+// [maxStartFile] bytes.
+type referenceCount map[string]int
+
+// count is the number of top-level references to commit.
+func (c referenceCount) count(commit string) int { return c[commit] }
+
+// references is the count of top-level references in the one file of version, per address
+// path, in target's collection; nil for a version that has no one JSON file of at most
+// [maxStartFile] bytes. An error is that of the download, and ends with [codeUsed].
+func references(ctx context.Context, client *runapi.Client, version *runapi.Version, target *contracts.Target) (referenceCount, error) {
 	if len(version.Files) != 1 || version.Files[0].Size > maxStartFile {
-		return -1, nil
+		return nil, nil
 	}
 	var content bytes.Buffer
 	if err := client.Download(ctx, version.ID, version.Files[0], &content); err != nil {
-		return 0, fmt.Errorf("%w%s", err, codeUsed)
+		return nil, fmt.Errorf("%w%s", err, codeUsed)
 	}
 	var members map[string]json.RawMessage
 	if err := json.Unmarshal(content.Bytes(), &members); err != nil {
-		return -1, nil
+		return nil, nil
 	}
-	found := 0
+	found := referenceCount{}
 	for _, raw := range members {
 		var ref struct {
 			Collection string `json:"collection,case:strict"`
@@ -309,8 +347,8 @@ func references(ctx context.Context, client *runapi.Client, version *runapi.Vers
 				Path   string `json:"path,case:strict"`
 			} `json:"address,case:strict"`
 		}
-		if json.Unmarshal(raw, &ref) == nil && ref.Collection == target.Collection && ref.Address != nil && ref.Address.Path == commit {
-			found++
+		if json.Unmarshal(raw, &ref) == nil && ref.Collection == target.Collection && ref.Address != nil {
+			found[ref.Address.Path]++
 		}
 	}
 	return found, nil

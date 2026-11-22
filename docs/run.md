@@ -2256,10 +2256,14 @@ When every version is cancelled, step 1 finds none. When artifacts of several ty
 that name, the version with the latest time wins.
 
 The start commit is the newest commit that the run which wrote the version pushed to the
-target's repository, from `pushed_commits` in the response to `GET /work-item`. qory
-confirms it with the version's file: the file has exactly one top-level `reference` whose
-`collection` is the target's and whose `address.path` is that commit. The further
-repositories start at the head of their default branches.
+target's repository, from `pushed_commits` in the response to `GET /work-item`, and that a
+version of that run confirms: the version's file, or the file of another version of the same
+run, has exactly one top-level `reference` whose `collection` is the target's and whose
+`address.path` is that commit. qory checks the run's commits newest first. A newer commit
+that no version confirms, such as one that a later session of a shared run pushed before it
+failed, counts as a cancelled run's commit: the run does not move to it, and the push
+replaces it with a lease. The further repositories start at the head of their default
+branches.
 
 Then the run moves to the newest commit of the repository that an earlier run pushed, when
 a person did not cancel that run and the commit descends from the start commit. qory reads
@@ -2289,8 +2293,8 @@ copy.
 A run stops before the agent starts when:
 
 - the run that wrote the version pushed no commit to the target, the version's file is
-  not one JSON object of at most 786432 bytes, or the file has no one top-level reference
-  to the commit;
+  not one JSON object of at most 786432 bytes, or no version of that run has one top-level
+  reference to any commit that the run pushed to the target;
 - the approved version is not in the artifact's index;
 - the work item's list of pushed commits has a value that is not a full commit id;
 - a commit is not on its repository;
@@ -2309,7 +2313,8 @@ Each of these lines stops the run, exit 1. `<c>` is a commit's first 12 characte
     <system>/<path>.`
   - `Version <n> of the artifact <type> has no one JSON file of at most 786432 bytes.`
   - `Version <n> of the artifact <type> has <count> top-level references to commit <c> of
-    <system>/<path>, not 1.`
+    <system>/<path>, not 1.`, where `<c>` is the newest commit that the run pushed to the
+    target
   - `The approved version of the artifact <type> is not in the artifact's index.`
 - `The version that the run starts from has commit <c>, which is not a commit on
   <path> on <system>, so the run did not start; the code is used`, then a line indented

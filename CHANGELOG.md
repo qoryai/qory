@@ -271,8 +271,10 @@ release may change what an existing document does, and states it under Upgrading
   pushes each repository with new commits to `qory/<work item id>`, and stores a version of
   each output that the session wrote to the outbox. The next run in the same stage starts at
   that commit. A session that failed, timed out or was cancelled gets the same step, its
-  commit shows how it ended, and it stores no output. See The push step of a write run in
-  `docs/run.md`.
+  commit shows how it ended, and it stores no output. The next run starts at the newest
+  commit of the version's run that a version of that run confirms: a commit that a later
+  session pushed with no version is skipped, and the next push replaces it with a lease. See
+  The push step of a write run in `docs/run.md`.
 - A skill reads its work item and stores what it made with `qory work-item show`, `qory
   artifact pull`, `qory artifact push` and `qory run verdict`. In a run they use Qory
   Apiary through the gateway, at `QORY_RUN_API`. Outside a run they use the checkout's

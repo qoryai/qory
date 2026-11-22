@@ -267,11 +267,65 @@ func TestStartCommitIsConfirmedByAnotherVersionOfTheSameRun(t *testing.T) {
 	if len(others) != 1 || others[0].version.ID != "av_pr" {
 		t.Fatalf("the other versions are %+v, want av_pr alone", others)
 	}
-	if got, err := startCommit(t.Context(), client, chosen, "notes", others, pushed, startTarget); err != nil || got != commit {
+	if got, _, err := startCommit(t.Context(), client, chosen, "notes", others, pushed, startTarget); err != nil || got != commit {
 		t.Errorf("start %q, %v, want %s", got, err, commit)
 	}
-	if _, err := startCommit(t.Context(), client, chosen, "notes", nil, pushed, startTarget); err == nil || !strings.Contains(err.Error(), "has 0 top-level references") {
+	if _, _, err := startCommit(t.Context(), client, chosen, "notes", nil, pushed, startTarget); err == nil || !strings.Contains(err.Error(), "has 0 top-level references") {
 		t.Errorf("notes alone: %v", err)
+	}
+}
+
+// TestStartCommitWalksTheRunsCommitsNewestFirst is a run that pushed A, B and C to the
+// target, with an entry of acme/lib and one of another run between them, and stored one
+// version: with the head A, B and C are skipped and A is the start; with the head B, C is
+// skipped; with the head C, nothing is. A version that confirms none stops with the newest
+// commit.
+func TestStartCommitWalksTheRunsCommitsNewestFirst(t *testing.T) {
+	a, b, c := strings.Repeat("a", 40), strings.Repeat("b", 40), strings.Repeat("c", 40)
+	head := ""
+	file := func() string {
+		return `{"target":{"collection":"R_1001"},"head":{"collection":"R_1001","address":{"system":"git.example.com","path":"` + head + `"}}}`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, file())
+	}))
+	t.Cleanup(server.Close)
+	client, err := runapi.New(server.URL+"/v1/runs/r", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := func(path, commit, run string) runapi.PushedEntry {
+		return runapi.PushedEntry{System: "git.example.com", Path: path, Commit: commit, RunID: run}
+	}
+	pushed := []runapi.PushedEntry{
+		entry("acme/shop", a, "run_1"), entry("acme/lib", b, "run_1"), entry("acme/shop", b, "run_1"),
+		entry("acme/shop", strings.Repeat("e", 40), "run_2"), entry("acme/shop", c, "run_1"),
+	}
+	version := func() *runapi.Version {
+		sum := sha256.Sum256([]byte(file()))
+		return &runapi.Version{ID: "av_1", Number: 1, Writer: runapi.Writer{Kind: "run", RunID: "run_1"},
+			Files: []runapi.File{{Filename: "f.json", Size: int64(len(file())), SHA256: hex.EncodeToString(sum[:])}}}
+	}
+	for name, c := range map[string]struct {
+		head, want string
+		skipped    []int
+	}{
+		"the oldest commit": {a, a, []int{2, 4}},
+		"a middle commit":   {b, b, []int{4}},
+		"the newest commit": {c, c, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			head = c.head
+			got, skipped, err := startCommit(t.Context(), client, version(), "pull-request", nil, pushed, startTarget)
+			if err != nil || got != c.want || !slices.Equal(skipped, c.skipped) {
+				t.Errorf("start %q, skipped %v, %v; want %s and %v", got, skipped, err, c.want, c.skipped)
+			}
+		})
+	}
+	head = strings.Repeat("d", 40)
+	if _, _, err := startCommit(t.Context(), client, version(), "pull-request", nil, pushed, startTarget); err == nil ||
+		!strings.Contains(err.Error(), "has 0 top-level references to commit "+c[:12]+" of git.example.com/acme/shop, not 1.") {
+		t.Errorf("no confirmed commit: %v", err)
 	}
 }
 
