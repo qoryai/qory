@@ -2214,9 +2214,10 @@ with `write_needs_wall`. A run takes the lower of the two accesses, in the order
 `write-no-push`, `write`. See [Read workflows](#read-workflows).
 
 A target in the documents is one of an adapter's collections, `collection`, and, when the
-place has one, its `address`: the host name, `system`, and the `path` on it. qory reads
-the address alone, for the fetch. A target with no address, such as a place that is not
-on a host, is not fetched.
+place has one, its `address`: the host name, `system`, and the `path` on it. Of the
+target, qory reads only the address: for the fetch, and for the `<harness>` of the
+`workflow_not_in_harness` line. A target with no address, such as a place that is not on
+a host, is not fetched.
 
 The documents of a run with a target may set `target_version`: the version at which Qory
 Apiary checked the target for a harness file. When the `system` of the target's address

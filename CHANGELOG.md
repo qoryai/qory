@@ -503,8 +503,9 @@ release may change what an existing document does, and states it under Upgrading
 - A run from a run code whose documents set `target_version` fetches the repository at
   the target's `address`, its `system` and `path`, the first entry of
   `QORY_RUN_REPOSITORIES`, at that commit, by its id, in place of the head of its default
-  branch, onto a local branch with the default branch's name and no upstream. When the documents contain no harness document, the compose reads
-  the checkout's `qory.yaml` or `harness.yaml` as Qory Apiary checked it. Each of these
+  branch, onto a local branch with the default branch's name and no upstream. When the
+  documents contain no harness document, the compose reads the checkout's `qory.yaml` or
+  `harness.yaml` as Qory Apiary checked it. Each of these
   stops the run before the compose, exit 1: a target on the run's system that is a later
   entry of `QORY_RUN_REPOSITORIES`, that the list does not contain, or with an empty
   list; a version that is not a commit id; and a commit that the server does not have or
@@ -775,15 +776,6 @@ release may change what an existing document does, and states it under Upgrading
 - `qory run pool` acts on a signed 403 or 409 from Qory Apiary whose body it cannot read
   by its status alone: it keeps the dispatch and sends the release again, or `dispatched`
   again while the lease lasts. A machine end stops on a signed 400, 403 or 404.
-- A run from a run code runs the step `workflow`, in place of `explore`: it starts the
-  workflow that the run documents set, whichever workflow of the process Qory Apiary
-  starts. The documents name what the run is for in `subject`, with a `kind`, such as
-  `work_item` or `ticket`, and an `id`, in place of `work_item`, and may set a
-  `trigger`, such as `take_in`, which qory reads and changes nothing for. qory checks
-  `inputs.domain` and `inputs.work_item.id` only for a subject of the kind `work_item`,
-  and only such a run works on the branch `qory/<work item id>`. Documents with the step
-  `explore` or the member `work_item` stop the run after the redemption, exit 1, with `it
-  breaks documents.schema.json`.
 - An `artifact_types` message whose first line has more than 98 characters shows each
   long key or type name shortened on that line and in full on its last line.
 - `qory work-item show`, `qory artifact pull` (`index.json`, the files of a version and
@@ -793,6 +785,19 @@ release may change what an existing document does, and states it under Upgrading
   or a line or paragraph separator. Qory Apiary keeps the stored text unchanged. `.json`
   files stay valid JSON, any other file that is not valid UTF-8 or has a NUL byte stays as
   it is, and an escaped file is downloaded again on each pull.
+- A run from a run code runs the step `workflow`, in place of `explore`: it starts the
+  workflow that the run documents set, whichever workflow of the process Qory Apiary
+  starts. The documents name what the run is for in `subject`, with a `kind`, such as
+  `work_item` or `ticket`, and an `id`, in place of `work_item`, and may set a
+  `trigger`, such as `take_in`, which qory reads and changes nothing for. qory checks
+  `inputs.domain` and `inputs.work_item.id` only for a subject of the kind `work_item`,
+  and only such a run works on the branch `qory/<work item id>`. Documents with the step
+  `explore` or the member `work_item` stop the run after the redemption, exit 1, with `it
+  breaks documents.schema.json`. Documents of a step other than `workflow` and
+  `prebuild`, which stopped with `update qory: … for the steps explore and prebuild
+  only`, and documents with neither `workflow` nor `harness_hidden`, which stopped with
+  `set a workflow for the workspace in Qory Apiary, then take the work item in again:
+  …`, stop with `it breaks documents.schema.json` too.
 - The `config.toml` of a Codex home, and of a walled Codex run, sets
   `web_search = "disabled"`. Without the key, Codex 0.169.0 turns web search on: cached,
   or live in a run with `--sandbox danger-full-access`, such as a walled run.

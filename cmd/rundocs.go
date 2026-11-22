@@ -163,10 +163,10 @@ const harnessFile = "harness.yaml"
 // step qory runs: workflow, which [codeRunOf] reads further, or prebuild, which
 // [runCodePrebuild] runs. The schema allows these two steps alone, so the check of the
 // step is a guard. Each error is exit 1. Each ends with [codeUsed], except
-// [textNoRuntime], whose first line ends with it: workflow documents start an agent
-// session, so they require run settings with a runtime. Documents with no run settings,
-// or with run settings whose runtime is missing, empty or null, get that refusal before
-// the schema check, see [lacksRuntime].
+// [textNoRuntime] and the error of another step, whose first lines end with it. Workflow
+// documents start an agent session, so they require run settings with a runtime.
+// Documents with no run settings, or with run settings whose runtime is missing, empty or
+// null, get that refusal before the schema check, see [lacksRuntime].
 func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
 	if lacksRuntime(documents) {
 		return contracts.Documents{}, noRuntime()
@@ -176,7 +176,7 @@ func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
 	case err != nil:
 		return doc, fmt.Errorf("update qory, or ask Qory Apiary's instance admin: the response to the run code does not pass qory's checks: %v%s", err, codeUsed)
 	case doc.Step != provisioner.StepWorkflow && doc.Step != provisioner.StepPrebuild:
-		return doc, fmt.Errorf("update qory: the response to the run code is for the step %s, and qory runs a run code's run for the steps workflow and prebuild only%s", doc.Step, codeUsed)
+		return doc, fmt.Errorf("update qory: the run code's response has a step qory does not run%s.\n  qory runs a run code's run for the steps workflow and prebuild only, and the step is %s.", codeUsed, integration.Printable(exports.Value(doc.Step, false)))
 	}
 	return doc, nil
 }
@@ -245,8 +245,8 @@ func fullSuiteIn(settings json.RawMessage) bool {
 }
 
 // harnessFor is h, the documents' harness document, as qory writes it for a session of
-// runtime, nil for no document: for a section that defines a stack, with target.runtime
-// set to runtime.
+// runtime, nil for no document: each workflow with its access, plan and tier, and, for a
+// section that defines a stack, target.runtime set to runtime.
 func harnessFor(h *contracts.HarnessDocument, runtime string) ([]byte, error) {
 	if h == nil {
 		return nil, nil

@@ -360,7 +360,7 @@ func hasKey(node any, skipOwn bool, keys ...string) bool {
 // primitiveDefinitions is $defs of the primitives schema, as JSON decoded into Go values.
 var primitiveDefinitions = sync.OnceValue(func() map[string]any {
 	var doc struct {
-		Defs map[string]any `json:"$defs"`
+		Defs map[string]any `json:"$defs,case:strict"`
 	}
 	if err := json.Unmarshal(primitives.Schema, &doc); err != nil {
 		panic("exports: the embedded primitives schema is no JSON: " + err.Error())

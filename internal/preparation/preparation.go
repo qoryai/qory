@@ -197,8 +197,8 @@ var (
 var baseURL = ""
 
 // Target is the target of a run's documents, the place a change would go, and the
-// version of it that the documents set: a run code's target.system, target.path and
-// target_version.
+// version of it that the documents set: a run code's target.address.system,
+// target.address.path and target_version.
 type Target struct {
 	System, Path, Version string
 	// Branch is the branch of the run's work item, nil for none. It is used only when
