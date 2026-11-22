@@ -226,8 +226,8 @@ func pushChecker(ctx context.Context, run openedRun, home, runID string, spec *r
 }
 
 // newChecker is a checker of the push checks checks of a walled run, as [pushChecker]
-// describes it, whose temporary folders go in dir, a new folder that it makes. The
-// locked checks of a Verify session run matrix with it, see [runVerify].
+// describes it, whose temporary folders go in dir, a new folder that it makes. The scope
+// check of the push step runs with it too, with no checks, see [runPushChecks.scopeCheck].
 func newChecker(ctx context.Context, run openedRun, home, runID string, spec *runSpec,
 	fromCode bool, checks []compose.PushCheck, dir string) (*pushcheck.Checker, error) {
 	d, ok := spec.Wall.(*wall.Docker)

@@ -1527,8 +1527,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if prepErr == nil && copied != nil && !copied.plain && !copied.readOnly && fetches && spec.setupWhere != config.SetupInside {
 					prepErr = recordSetupWork()
 				}
-				// After the setup: the locked checks of a Verify session run here, before the
-				// session's inputs.json, which they add to.
+				// After the setup, qory writes the session's inputs.json; a step that adds to
+				// inputs.json goes before this one.
 				if prepErr == nil && dispatched {
 					prepErr = writeSessionInputs()
 				}
