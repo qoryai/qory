@@ -444,6 +444,43 @@ func TestARunOfSeveralSessionsEndsAsItsAnswersAndSessionsSay(t *testing.T) {
 	}
 }
 
+// TestAFailedNextSessionRequestClosesWithItsEndCode is a run whose next-session request
+// after session 1 fails. Each case is one join, and the run closes failed, exit 1, with the
+// line it printed before the end code:
+//   - Qory Apiary's refusal not_found: the end code next_session_failed;
+//   - no answer within the request's limit, here 300 ms: next_session_failed;
+//   - an answer outside next-session-answer.schema.json: no end code, since Qory Apiary
+//     answered.
+func TestAFailedNextSessionRequestClosesWithItsEndCode(t *testing.T) {
+	for name, c := range map[string]struct {
+		send   func(context.Context, []byte) ([]byte, error)
+		reason string
+		line   string
+	}{
+		"refused": {send: func(context.Context, []byte) ([]byte, error) {
+			return nil, &accesskey.Refusal{Status: http.StatusNotFound, Code: "not_found", From: accesskey.FromApiary, Text: "Example text."}
+		}, reason: "next_session_failed", line: "qory run: The next-session request after session 1 failed.\n  Qory Apiary returned 404: Example text.\n"},
+		"no answer": {send: func(context.Context, []byte) ([]byte, error) {
+			return nil, errors.New("dial tcp: connection refused")
+		}, reason: "next_session_failed", line: "qory run: Check the gateway's connection to Qory Apiary, then take the work item in again.\n  The next-session request after session 1 had no successful response within 300ms.\n"},
+		"unread answer": {send: func(context.Context, []byte) ([]byte, error) {
+			return []byte(`{"next":"example"}`), nil
+		}, line: "qory run: Update qory.\n  The answer to the next-session request after session 1 does not pass qory's checks.\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Cleanup(cmd.SetNextSessionLimit(300 * time.Millisecond))
+			r := runLoop(t, loopSetup{nowhere: func(n *cmd.Nowhere) { n.NextSession = c.send }})
+			if len(r.joins) != 1 || cmd.ExitCode(r.err) != 1 {
+				t.Fatalf("%d joins, %v (exit %d)\n%s", len(r.joins), r.err, cmd.ExitCode(r.err), r.out)
+			}
+			if len(r.closes) != 1 || r.closes[0].State != event.StateFailed || r.closes[0].Reason != c.reason {
+				t.Errorf("the run closed with %+v, want failed with the reason %q", r.closes, c.reason)
+			}
+			wants(t, r.out, c.line)
+		})
+	}
+}
+
 // TestEachCodexSessionOfARunGetsANewHome is a walled run of two Codex sessions: each joins
 // with a Codex home in the wall, and the file that session 1 wrote in its home is gone when
 // session 2 joins.

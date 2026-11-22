@@ -1432,13 +1432,16 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			// noJoin closes a run whose next session does not join because of prepErr, an error of
 			// the steps before the join, and returns qory run's error: failed with no_session, or
-			// with the reason a [*reasonError] sets. A later session's steps, and the
-			// next-session request before them, end the run this way too.
+			// with the reason a [*reasonError] sets, or the end code of prepErr, see [endCodeOf].
+			// A later session's steps, and the next-session request before them, end the run this
+			// way too.
 			noJoin := func(prepErr error) error {
 				out := session.Outcome{State: event.StateFailed, ExitCode: -1}
 				var ended *reasonError
 				if errors.As(prepErr, &ended) {
 					out.Reason = ended.code
+				} else {
+					out.Reason = string(endCodeOf(prepErr))
 				}
 				closeRun(out)
 				lines.done(nil)
