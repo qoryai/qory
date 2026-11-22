@@ -26,8 +26,8 @@ release may change what an existing document does, and states it under Upgrading
   registry closes `failed` with `environment_image_missing`, where it closed with
   `image_missing`, which Forager takes only for a close before a join. The codes are the end
   codes of the run outcome contract of the integrations repository. The line qory prints has
-  the cause alone. A next-session request that Qory Apiary refuses, or that has no answer,
-  closes the run `failed` with `next_session_failed`. An output check before the push that
+  the cause alone. A refusal of Qory Apiary's of the next-session request, or no answer to
+  it, closes the run `failed` with `next_session_failed`. An output check before the push that
   finds a required output missing, or an output that fails its read, fill, schema or size
   check, closes the run `failed` with `outputs_invalid`; the same failure after the push
   has no end code.

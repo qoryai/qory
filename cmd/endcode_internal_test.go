@@ -73,7 +73,7 @@ func TestForagersCloseTakesTheEndCodes(t *testing.T) {
 
 // TestForagersCloseTakesTheEndCodesAfterAJoin is a run that Forager opens at a gateway in this
 // process, where a session joined and then the run closes failed with each end code of the list
-// as the reason, with exit code 1: the gateway takes the code after a join, as it does
+// as the reason, with exit code 1, or -1 for next_session_failed as qory closes it: the gateway takes the code after a join, as it does
 // before one, and Close returns the reason as given.
 func TestForagersCloseTakesTheEndCodesAfterAJoin(t *testing.T) {
 	for _, code := range []contracts.EndCode{
@@ -92,7 +92,13 @@ func TestForagersCloseTakesTheEndCodesAfterAJoin(t *testing.T) {
 			if _, err := at.run.Join(ctx, spec); err != nil {
 				t.Fatal(err)
 			}
-			closed, err := at.run.Close(ctx, session.Outcome{State: event.StateFailed, Reason: string(code), ExitCode: 1})
+			// A failed next-session request closes the run as a later session that does not
+			// join: with exit code -1.
+			exit := 1
+			if code == contracts.EndCodeNextSessionFailed {
+				exit = -1
+			}
+			closed, err := at.run.Close(ctx, session.Outcome{State: event.StateFailed, Reason: string(code), ExitCode: exit})
 			if err != nil {
 				t.Fatalf("Close refused the outcome after a join: %v", err)
 			}
