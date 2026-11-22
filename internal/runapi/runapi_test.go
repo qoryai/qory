@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -801,6 +802,79 @@ func TestAPushErrorHasItsMembers(t *testing.T) {
 
 	if apiError.Type != "demo-video" || apiError.Limit != 209715200 || apiError.Code != runapi.CodeTooLarge {
 		t.Errorf("error = %+v", apiError)
+	}
+}
+
+// TestAnAnswerMemberInAnotherCaseIsNotRead reads each answer of the run API with a second
+// member written in another case after the defined one, such as "Version" beside
+// "version": the client keeps the defined member's value. A build that matches member
+// names in any case fails here.
+func TestAnAnswerMemberInAnotherCaseIsNotRead(t *testing.T) {
+	snapshot := strings.Replace(snapshotExample, `"notes": [`, `"pushed_commits": [{"system": "github", "path": "o/r",`+
+		` "commit": "abc", "run_id": "run-0", "cancelled": false, "at": "2026-10-30T09:00:00Z"}],
+  "notes": [`, 1)
+	// read is the answer body as the client reads it, without Raw.
+	read := map[string]func(t *testing.T, body string) (any, error){
+		"work item": func(t *testing.T, body string) (any, error) {
+			got, err := serve(t, respond(http.StatusOK, body)).WorkItem(context.Background())
+			if got != nil {
+				got.Raw = nil
+			}
+			return got, err
+		},
+		"index": func(t *testing.T, body string) (any, error) {
+			got, err := serve(t, respond(http.StatusOK, body)).Artifacts(context.Background())
+			if got != nil {
+				got.Raw = nil
+			}
+			return got, err
+		},
+		"push": func(t *testing.T, body string) (any, error) {
+			return serve(t, respond(http.StatusCreated, body)).PushArtifact(context.Background(), runapi.Push{Type: "screenshot"})
+		},
+		"error": func(t *testing.T, body string) (any, error) {
+			_, err := serve(t, respond(http.StatusUnprocessableEntity, body)).PushArtifact(context.Background(), runapi.Push{Type: "screenshot"})
+			return nil, err
+		},
+	}
+	tooLarge := `{"error":"too_large","type":"demo-video","limit":1,"names":["a"],"message":"m","findings":["f"]}`
+	for _, c := range []struct {
+		answer, body, defined, variant string
+	}{
+		{"work item", snapshot, `"version": 1,`, `"Version": 2,`},
+		{"work item", snapshot, `"url": "https://example.test/wi_1"`, `, "ID": "wi_2"`},
+		{"work item", snapshot, `"workflow": "capture-demo", "round": 2`, `, "Number": 58`},
+		{"work item", snapshot, `"state": "running"`, `, "Name": "Other"`},
+		{"work item", snapshot, `"version": {"id": "av_1", "number": 2}`, `, "Required": false`},
+		{"work item", snapshot, `{"id": "av_1", "number": 2`, `, "ID": "av_9"`},
+		{"work item", snapshot, `"check": "missing"`, `, "Check": "passed"`},
+		{"work item", snapshot, `"version": {"id": "av_2", "number": 1}`, `, "Verdict": "passed"`},
+		{"work item", snapshot, `"at": "2026-10-30T09:00:00Z"`, `, "Commit": "def"`},
+		{"work item", snapshot, `"comments_omitted": 0,`, ` "Inputs": [], "Notes": [], "Run": {"number": 1},`},
+		{"index", indexExample, `"version": 1,`, `"Version": 2,`},
+		{"index", indexExample, `"newest_version": 2,`, ` "Newest_Version": 3,`},
+		{"index", indexExample, `"cancelled": true,`, ` "Cancelled": false,`},
+		{"index", indexExample, `"run_id": "run-1"`, `, "Kind": "person"`},
+		{"index", indexExample, `"sha256": "abc"`, `, "Size": 1`},
+		{"index", indexExample, `"by": {"name": "dana"`, `, "Name": "eve"`},
+		{"index", indexExample, "\n    }\n  ]", `, "Artifacts": []`},
+		{"push", pushedExample, `"number": 3`, `, "Number": 4`},
+		{"push", pushedExample, `"name": "checkout"`, `, "Name": "other"`},
+		{"push", pushedExample, `"number": 3}}`, `, "Artifact": {"name": "other"}`},
+		{"error", tooLarge, `"error":"too_large"`, `,"Error":"other"`},
+		{"error", tooLarge, `"findings":["f"]`, `,"Type":"other","Limit":2,"Names":[],"Message":"","Findings":[]`},
+	} {
+		t.Run(c.answer+" "+c.variant, func(t *testing.T) {
+			if strings.Count(c.body, c.defined) != 1 {
+				t.Fatalf("the body has %q %d times, want once", c.defined, strings.Count(c.body, c.defined))
+			}
+			body := strings.Replace(c.body, c.defined, c.defined+c.variant, 1)
+			want, wantErr := read[c.answer](t, c.body)
+			got, err := read[c.answer](t, body)
+			if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(err, wantErr) {
+				t.Errorf("read %+v, %v, want %+v, %v", got, err, want, wantErr)
+			}
+		})
 	}
 }
 

@@ -155,12 +155,12 @@ func readError(response *http.Response, request string) *Error {
 	apiError := &Error{Status: response.StatusCode, Request: request}
 
 	var body struct {
-		Error    string   `json:"error"`
-		Type     string   `json:"type"`
-		Limit    int64    `json:"limit"`
-		Names    []string `json:"names"`
-		Message  string   `json:"message"`
-		Findings []string `json:"findings"`
+		Error    string   `json:"error,case:strict"`
+		Type     string   `json:"type,case:strict"`
+		Limit    int64    `json:"limit,case:strict"`
+		Names    []string `json:"names,case:strict"`
+		Message  string   `json:"message,case:strict"`
+		Findings []string `json:"findings,case:strict"`
 	}
 
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxErrorResponse))
