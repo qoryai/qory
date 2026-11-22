@@ -164,7 +164,7 @@ func TestOneRepositoryOutsideTheScopeStopsEveryPush(t *testing.T) {
 }
 
 // TestAScopeCheckThatDoesNotPassStopsEveryPush is each way a scope check fails closed: an
-// exit 2 or 3 ends harness_invalid, a check past its limit push_scope_refused, a home with no
+// exit 2 or 3 ends harness_invalid, with a cause also when the check printed nothing, a check past its limit push_scope_refused, a home with no
 // scope-checks.json harness_invalid, a clone that fails repository_check_failed, and an
 // engine that fails machine_setup_invalid. Nothing is pushed.
 func TestAScopeCheckThatDoesNotPassStopsEveryPush(t *testing.T) {
@@ -174,9 +174,11 @@ func TestAScopeCheckThatDoesNotPassStopsEveryPush(t *testing.T) {
 		code        contracts.EndCode
 		want        string
 		setUp       func(t *testing.T)
+		silent      bool
 	}{
 		{name: "exit 2", start: "exit 2", code: contracts.EndCodeHarnessInvalid, want: "qory run: The scope check of the session's plan ended with an error, so qory pushed nothing.\n  Repository acme/site.\n  Cause: usage: scope --plan\n"},
 		{name: "exit 3", start: "exit 3", code: contracts.EndCodeHarnessInvalid, want: "  Cause: usage: scope --plan\n"},
+		{name: "exit 2 with no output", start: "exit 2", code: contracts.EndCodeHarnessInvalid, want: "  Repository acme/site.\n  Cause: The check exited with 2 and printed nothing.\n", silent: true},
 		{name: "a timeout", start: "sleep", code: contracts.EndCodePushScopeRefused, want: "qory run: The scope check of the session's plan did not end within 30 seconds; qory pushed nothing.\n  Repository acme/site.\n",
 			setUp: func(t *testing.T) { t.Cleanup(cmd.SetScopeCheckLimit(300 * time.Millisecond)) }},
 		{name: "no scope-checks.json", start: "exit 0", code: contracts.EndCodeHarnessInvalid, want: notRun + "the home has no scope checks, so no module declares one for the plan type change-plan.\n",
@@ -186,7 +188,11 @@ func TestAScopeCheckThatDoesNotPassStopsEveryPush(t *testing.T) {
 		{name: "a failed engine", start: "engine", code: contracts.EndCodeMachineSetupInvalid, want: notRun + "the engine did not create the check's container: Cannot connect to the Docker daemon"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			docker, _ := scopeDocker(t, c.start, "usage: scope --plan\n")
+			out := "usage: scope --plan\n"
+			if c.silent {
+				out = ""
+			}
+			docker, _ := scopeDocker(t, c.start, out)
 			p := scopedRepo(t, docker)
 			if c.setUp != nil {
 				c.setUp(t)
