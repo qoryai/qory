@@ -118,6 +118,23 @@ func SetLaterSessions(sessions ...func()) func() {
 	return func() { pushAfterSession = before }
 }
 
+// SetCheckedHeadOneBack has the check of the outputs before the push take each repository
+// one commit back from the head that the push leaves, as when the head that lands differs
+// from the local head. It returns what restores the default.
+func SetCheckedHeadOneBack() func() {
+	before := outputsBeforePush
+	outputsBeforePush = func(o *runOutputs, ctx context.Context, client *runapi.Client, runID, ref string, version []preparation.Repository) error {
+		for i := range version {
+			if n := len(version[i].Commits); n > 1 {
+				version[i].Commits = version[i].Commits[:n-1]
+				version[i].Commit = version[i].Commits[n-2].Commit
+			}
+		}
+		return before(o, ctx, client, runID, ref, version)
+	}
+	return func() { outputsBeforePush = before }
+}
+
 // SetStepAfterEnd makes the push step after a run's session stand in for a loop that calls
 // the step again after the run ended: when a step leaves the run ended, agent runs as a
 // later session would, and the step runs once more. again receives what that second call

@@ -73,7 +73,7 @@
       "required": ["artifact", "version"],
       "additionalProperties": false,
       "properties": {
-        "artifact": {"description": "The artifact type's name, such as proposal: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+        "artifact": {"description": "The artifact type's name, such as proposal: lowercase letters and digits in groups joined by single hyphens, starting with a letter, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"},
         "version": {"description": "The version's number, from 1.", "type": "integer", "minimum": 1},
         "screen": {"description": "The id of a screen in that artifact version, for a review comment on one screen of a mockup: 1 to 32 characters on one line. A JSON Schema cannot check that the version has that screen.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 32}
       }

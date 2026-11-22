@@ -7,8 +7,8 @@ import (
 	"unicode/utf8"
 )
 
-// TestTheTextsOfTheSubmitStepHaveAShortLineOne is each text of the hand-off file, the submit
-// program and the push step's reads that qory prints: line 1 has at most 100 characters with the
+// TestTheTextsOfTheSubmitStepHaveAShortLineOne is each text of the pull-request output, the
+// outputs, the start of a run, the submit program and the push step's reads that qory prints: line 1 has at most 100 characters with the
 // prefix "qory run: ". The texts of the push step's reads and of the local submit step start with
 // the fix, as an instruction. The other texts state the cause and start with no verb of an
 // instruction.
@@ -22,25 +22,60 @@ func TestTheTextsOfTheSubmitStepHaveAShortLineOne(t *testing.T) {
 		"textLocalNoHistory":    "Fix ",
 		"textLocalNoRemote":     "Set ",
 		"textLocalPushURLs":     "Remove ",
+		"textOutputMissing":     "Write ",
+		"textOutputHasMember":   "Remove ",
+		"textOutputBroken":      "Fix ",
+		"textOutputNotJSON":     "Write ",
+		"textOutputUnread":      "Fix ",
+		"textNoStart":           "Report ",
+		"textOutputTypeName":    "Report ",
+		"textNoOutputType":      "Define ",
+		"textPushNoRunAPI":      "take ",
+		"textOutputNotStored":   "take ",
+		"textOutputKept":        "take ",
+		"textOutputUnknown":     "check ",
+		"textOutboxNotEmpty":    "Remove ",
+		"textSchemaUnread":      "Report ",
+		"textDeliverNoType":     "Define ",
+		"textOutputTooBig":      "Cut ",
 	}
 	texts := map[string]string{
-		"textHandoffIgnored":    textHandoffIgnored,
-		"textHandoffDropped":    textHandoffDropped,
-		"textProgramFailed":     textProgramFailed,
-		"textProgramTimeout":    textProgramTimeout,
-		"textProgramNoStart":    textProgramNoStart,
-		"textProgramTooMany":    textProgramTooMany,
-		"textProgramNoDraft":    textProgramNoDraft,
-		"textProgramLeftOut":    textProgramLeftOut,
-		"textProgramNoFolder":   textProgramNoFolder,
-		"textPushNoReadProxy":   "qory run: " + textPushNoReadProxy,
-		"textPushChecksMissing": textPushChecksMissing,
-		"textPushCheckStopped":  textPushCheckStopped,
-		"textLocalPushFailed":   textLocalPushFailed,
-		"textLocalNoHistory":    textLocalNoHistory,
-		"textLocalNoCommits":    textLocalNoCommits,
-		"textLocalNoRemote":     textLocalNoRemote,
-		"textLocalPushURLs":     textLocalPushURLs,
+		"textHandoffIgnored":     textHandoffIgnored,
+		"textHandoffDropped":     textHandoffDropped,
+		"textProgramFailed":      textProgramFailed,
+		"textProgramTimeout":     textProgramTimeout,
+		"textProgramNoStart":     textProgramNoStart,
+		"textProgramTooMany":     textProgramTooMany,
+		"textProgramNoDraft":     textProgramNoDraft,
+		"textProgramLeftOut":     textProgramLeftOut,
+		"textProgramNoFolder":    textProgramNoFolder,
+		"textPushNoReadProxy":    "qory run: " + textPushNoReadProxy,
+		"textPushChecksMissing":  textPushChecksMissing,
+		"textPushCheckStopped":   textPushCheckStopped,
+		"textLocalPushFailed":    textLocalPushFailed,
+		"textLocalNoHistory":     textLocalNoHistory,
+		"textLocalNoCommits":     textLocalNoCommits,
+		"textLocalNoRemote":      textLocalNoRemote,
+		"textLocalPushURLs":      textLocalPushURLs,
+		"textOutputMissing":      "qory run: " + fmt.Sprintf(textOutputMissing, "a-type-of-19-chars.", ".qory/outbox/pull-request/pull-request.json"),
+		"textOutputHasMember":    "qory run: " + fmt.Sprintf(textOutputHasMember, "base_branch", "pull-request"),
+		"textOutputBroken":       "qory run: " + fmt.Sprintf(textOutputBroken, "pull-request", strings.Repeat("/x", maxShownPlace/2)),
+		"textOutputNotJSON":      "qory run: " + fmt.Sprintf(textOutputNotJSON, "pull-request"),
+		"textOutputUnread":       "qory run: " + fmt.Sprintf(textOutputUnread, "pull-request", "the path is not a regular file"),
+		"textOutputNoCommits":    fmt.Sprintf(textOutputNoCommits, "pull-request", "git.example.com/acme/shop"),
+		"textNoStart":            "qory run: " + textNoStart,
+		"textNoOutputType":       "qory run: " + fmt.Sprintf(textNoOutputType, "a-type-of-19-chars.", "\n  Before the round, delete branch qory/wi_01HZX of acme/shop on git.example.com."),
+		"textPushNoRunAPI":       "qory run: " + fmt.Sprintf(textPushNoRunAPI, "the run is closed"),
+		"textOutputNotStored":    "qory run: " + fmt.Sprintf(textOutputNotStored, "a-type-of-19-chars.", "the run is closed"),
+		"textOutputKept":         "qory run: " + fmt.Sprintf(textOutputKept, "a-type-of-19-chars.", "permission denied"),
+		"textOutputUnknown":      "qory run: " + fmt.Sprintf(textOutputUnknown, "a-type-of-19-chars.", "EOF"),
+		"textOutputNoPush":       fmt.Sprintf(textOutputNoPush, "a-type-of-19-chars."),
+		"textOutputHasMemberMax": "qory run: " + fmt.Sprintf(textOutputHasMember, "a-member-of-19-char", "a-type-of-19-chars."),
+		"textOutputNoCommitsMax": fmt.Sprintf(textOutputNoCommits, "a-type-of-19-chars.", "git.example.com/acme/shop"),
+		"textOutboxNotEmpty":     "qory run: " + fmt.Sprintf(textOutboxNotEmpty, "/home/dev/acme/shop", "permission denied"),
+		"textSchemaUnread":       "qory run: " + fmt.Sprintf(textSchemaUnread, "a-type-of-19-chars.", "A JSON key is a string"),
+		"textDeliverNoType":      "qory run: " + fmt.Sprintf(textDeliverNoType, "a-type-of-19-chars.", "a-type-of-19-chars."),
+		"textOutputTooBig":       "qory run: " + fmt.Sprintf(textOutputTooBig, "a-type-of-19-chars.", maxStartFile, "pull-request.json", maxStartFile+1),
 	}
 	for name, text := range texts {
 		line, _, _ := strings.Cut(text, "\n")

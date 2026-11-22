@@ -210,8 +210,8 @@ func TestASetupInsideKeepsTheAgentsVariables(t *testing.T) {
 	}
 }
 
-// recordOf is a record folder whose session.jsonl has text on stderr of the step.
-func recordOf(t *testing.T, step int, text string) string {
+// setupRecordOf is a record folder whose session.jsonl has text on stderr of the step.
+func setupRecordOf(t *testing.T, step int, text string) string {
 	t.Helper()
 	var data struct {
 		Type string `json:"type"`
@@ -269,7 +269,7 @@ func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
 		"another line, exit 126":   {"exec format error\n", 126, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got := toolFixes(recordOf(t, 3, c.text), &session.SetupError{Name: checkToolsStep, Step: 3, ExitCode: c.code})
+			got := toolFixes(setupRecordOf(t, 3, c.text), &session.SetupError{Name: checkToolsStep, Step: 3, ExitCode: c.code})
 			if !slices.Equal(got, c.want) {
 				t.Errorf("%.200q, want %.200q", got, c.want)
 			}
@@ -281,7 +281,7 @@ func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
 // times: as many lines print as the check has failures to report.
 func TestToolFixesKeepsAtMostWhatTheCheckPrints(t *testing.T) {
 	text := strings.Repeat("install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has\n", 200_000)
-	got := toolFixes(recordOf(t, 3, text), &session.SetupError{Name: checkToolsStep, Step: 3, ExitCode: 1})
+	got := toolFixes(setupRecordOf(t, 3, text), &session.SetupError{Name: checkToolsStep, Step: 3, ExitCode: 1})
 	if want := len(image.SessionTools()) + 1; len(got) != want {
 		t.Errorf("%d lines, want %d", len(got), want)
 	}

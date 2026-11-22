@@ -107,7 +107,7 @@ func commandLimit(rep report.Report) any {
 }
 
 // TestABranchCommitDoesNotChangeTheHarnessOfTheNextRun is a run of a work item whose
-// submission version has a commit that changes what the compose reads: the run composes the
+// version of pull-request has a commit that changes what the compose reads: the run composes the
 // harness at target_version, so the report and the home are the ones of a run at
 // target_version whose branch has no version yet, and the working folder is on the
 // branch's commit.
@@ -131,7 +131,7 @@ func TestABranchCommitDoesNotChangeTheHarnessOfTheNextRun(t *testing.T) {
 			}
 
 			h, first, changed, _ := branchRepository(t, hello, func(work string) { change(t, work) })
-			out, err, n, _ = runOnBranch(t, h, first, branchAPI(t, branchDocument(t, changed)))
+			out, err, n, _ = runOnBranch(t, h, first, branchAPI(t, branchDocument(t, changed), changed))
 			if !n.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
 			}
@@ -161,7 +161,7 @@ func TestABranchCommitReachesTheHarnessOnceMerged(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h, _, changed, merge := branchRepository(t, hello, func(work string) { change(t, work) })
 			merge()
-			out, err, n, _ := runOnBranch(t, h, changed, branchAPI(t, branchDocument(t, changed)))
+			out, err, n, _ := runOnBranch(t, h, changed, branchAPI(t, branchDocument(t, changed), changed))
 			if !n.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
 			}
@@ -187,7 +187,7 @@ func TestABranchCommitReachesTheHarnessOnceMerged(t *testing.T) {
 }
 
 // TestABranchCommitThatChangesQoryStopsAfterTheCompose is a run of a work item whose
-// submission version has a commit that adds a file under .qory, where qory keeps the files
+// version of pull-request has a commit that adds a file under .qory, where qory keeps the files
 // of a run: the compose reads the target version, as it does for any branch, and the
 // checkout of the branch then stops the run before the agent starts.
 func TestABranchCommitThatChangesQoryStopsAfterTheCompose(t *testing.T) {
@@ -206,7 +206,7 @@ func TestABranchCommitThatChangesQoryStopsAfterTheCompose(t *testing.T) {
 	h, first, changed, _ := branchRepository(t, hello, func(work string) {
 		writeFile(t, filepath.Join(work, ".qory", "notes.md"), branchMarker+"\n")
 	})
-	out, err, n, _ = runOnBranch(t, h, first, branchAPI(t, branchDocument(t, changed)))
+	out, err, n, _ = runOnBranch(t, h, first, branchAPI(t, branchDocument(t, changed), changed))
 	if err == nil || n.joined {
 		t.Fatalf("%v (exit %d), want a stop before the join\n%s", err, cmd.ExitCode(err), out)
 	}

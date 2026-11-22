@@ -9,12 +9,12 @@ import (
 )
 
 // TestARunLoweredBelowWriteRunsNoSubmitStep is a run whose documents have access write and a
-// submit, of a harness with a submit program, whose stack declares the workflow write,
+// deliver, of a harness with a submit program, whose stack declares the workflow write,
 // write-no-push or read: the run starts no program. Only the run at write sets the hand-off
 // variable, and the others have no step of kind or name submit and store no version. The levels
-// gate the run at "submitLevel == stack.AccessWrite" in the run's setup. The submit line is not
-// checked here: this harness has no submit in its process, so the run prints none at any level,
-// and TestARunWhoseWorkflowLowersItBelowWritePrintsNoSubmitLine checks it.
+// gate the run at "submitLevel == stack.AccessWrite" in the run's setup. The deliver line is not
+// checked here: the documents deliver pull-request at the send of the harness's process.yaml,
+// so the run prints none at any level, and TestARunBelowWritePrintsNoDeliverLine checks it.
 func TestARunLoweredBelowWriteRunsNoSubmitStep(t *testing.T) {
 	for _, c := range []struct {
 		access string
@@ -24,19 +24,19 @@ func TestARunLoweredBelowWriteRunsNoSubmitStep(t *testing.T) {
 			p, log := newProgramRepo(t, c.access)
 			p.change = func(d map[string]any) {
 				d["access"] = "write"
-				d["submit"] = map[string]any{"type": "code-change", "send": "after_gate"}
+				d["deliver"] = []any{map[string]any{"type": "pull-request", "send": "after_gate"}}
 			}
 			var variables []string
 			p.mountsOf = func(spec session.SessionSpec) { variables = spec.Variables.Run }
 			agent := writesAndCommits(t)
 			r := p.run(t, agent, nil)
 			r.wantsClose(t, event.StateSucceeded, 0)
-			handoff := false
+			outbox := false
 			for _, v := range variables {
-				handoff = handoff || strings.HasPrefix(v, "QORY_SUBMISSION_HANDOFF=")
+				outbox = outbox || strings.HasPrefix(v, "QORY_OUTBOX=")
 			}
-			if handoff != c.write {
-				t.Errorf("hand-off variable %v, want %v", handoff, c.write)
+			if outbox != c.write {
+				t.Errorf("outbox variable %v, want %v", outbox, c.write)
 			}
 			wantsNoProgram(t, r, log)
 			if c.write {

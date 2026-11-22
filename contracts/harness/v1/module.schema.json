@@ -86,7 +86,7 @@
         "required": ["type", "command"],
         "additionalProperties": false,
         "properties": {
-          "type": {"description": "An artifact type: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+          "type": {"description": "An artifact type: lowercase letters and digits in groups joined by single hyphens, starting with a letter, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"},
           "command": {
             "description": "The program, a relative path inside the module with no .. part, then its arguments.",
             "type": "array",
@@ -100,7 +100,7 @@
             "description": "The other artifact types the check reads, each once.",
             "type": "array",
             "uniqueItems": true,
-            "items": {"type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"}
+            "items": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"}
           }
         }
       }
@@ -125,7 +125,7 @@
     "scope_checks": {
       "description": "The scope checks of the plans of an artifact type: for each type, one command, written to take --base <start commit> and --artifacts <folder> as its last arguments and to exit 0 when the plan holds. The compose declares and checks them, and qory run does not run them. Optional: a module without the key adds none. Only a module of a run's base stack counts: a scope_checks in a module that a checkout adds has no effect. One module declares a type.",
       "type": "object",
-      "propertyNames": {"maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+      "propertyNames": {"maxLength": 64, "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"},
       "additionalProperties": {
         "description": "One command: the program, a relative path inside the module with no .. part, then its arguments.",
         "type": "array",

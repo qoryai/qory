@@ -25,9 +25,9 @@ func timedOut() (*session.Result, error) {
 }
 
 // TestARunAfterATimeLimitStartsAtTheNewestPushedCommit is a run that the time limit stopped
-// after its agent made one commit and left edits, so the step pushed 2 commits: the stored
-// version is at the branch's head, and the next run, whose list of pushed commits has both
-// as not cancelled, starts at the newest one, replaces nothing and pushes on top of it.
+// after its agent made one commit and left edits, so the step pushed 2 commits and stored no
+// version: the next run, whose list of pushed commits has both as not cancelled, starts at the
+// newest one, replaces nothing and pushes on top of it.
 func TestARunAfterATimeLimitStartsAtTheNewestPushedCommit(t *testing.T) {
 	p := newPushRepo(t, "write")
 	first := p.run(t, writesAndCommits(t), timedOut)
@@ -37,12 +37,8 @@ func TestARunAfterATimeLimitStartsAtTheNewestPushedCommit(t *testing.T) {
 	if len(pushed) != 2 {
 		t.Fatalf("the time-limited run pushed %d commits, want 2\n%s", len(pushed), first.out)
 	}
-	doc := p.api.document(t, 1)
-	if got := doc.Repositories[0].Commit; got != head {
-		t.Errorf("the stored version is at %s, want the branch's head %s", got, head)
-	}
-	if got := doc.Repositories[0].Commits; len(got) != 2 || got[0].Commit != pushed[0] || got[1].Commit != pushed[1] {
-		t.Errorf("the version lists %+v, want the 2 pushed commits in order", got)
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("the time-limited run made %d POST, want 0", posts)
 	}
 
 	p.again(t)
@@ -66,8 +62,8 @@ func TestARunAfterATimeLimitStartsAtTheNewestPushedCommit(t *testing.T) {
 			t.Errorf("commit %s of the first run is not on the branch", commit)
 		}
 	}
-	if base := p.api.document(t, 2).Repositories[0].Base; base == nil || base.Commit != pushed[1] {
-		t.Errorf("the second version's base is %+v, want %s", base, pushed[1])
+	if base := pathOf(p.api.document(t, 1)["base"]); base != pushed[1] {
+		t.Errorf("the second run's version has the base %s, want %s", base, pushed[1])
 	}
 }
 
@@ -138,7 +134,7 @@ func TestARunReplacesTwoCancelledCommits(t *testing.T) {
 			t.Errorf("the cancelled commit %s is on the branch", commit)
 		}
 	}
-	if base := p.api.document(t, 1).Repositories[0].Base; base == nil || base.Commit != p.first {
-		t.Errorf("the base is %+v, want %s", base, p.first)
+	if base := pathOf(p.api.document(t, 1)["base"]); base != p.first {
+		t.Errorf("the base is %s, want %s", base, p.first)
 	}
 }

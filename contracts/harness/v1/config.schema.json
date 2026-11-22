@@ -141,7 +141,7 @@
             "then": {"required": ["access"], "properties": {"access": {"const": "write"}}},
             "properties": {
               "access": {
-                "description": "The access level the workflow declares for what a dispatched run of it works on: read, write-no-push, or write. Left out, it is read. A run takes the lower of this access and access in the run's documents, in the order read, write-no-push, write; documents with no target have no access, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is read, and on Claude Code its settings deny Edit, Write and NotebookEdit; such a run with no wall, with wall.setup: inside, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A write-no-push run has a writable checkout, no push step, no submit, and no version of the artifact submission. At write the checkout is writable and qory pushes what the agent left.",
+                "description": "The access level the workflow declares for what a dispatched run of it works on: read, write-no-push, or write. Left out, it is read. A run takes the lower of this access and access in the run's documents, in the order read, write-no-push, write; documents with no target have no access, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is read, and on Claude Code its settings deny Edit, Write and NotebookEdit; such a run with no wall, with wall.setup: inside, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A write-no-push run has a writable checkout, no push step, no outbox, and stores no output. At write the checkout is writable and qory pushes what the agent left.",
                 "enum": ["read", "write-no-push", "write"]
               },
               "tier": {
@@ -149,10 +149,10 @@
                 "enum": ["light", "balanced", "thinking"]
               },
               "plan": {
-                "description": "The artifact type whose launch version sets what the workflow's session may push: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes. Left out, the workflow names none. Only a workflow with access write names one, and qory harness compose ends with an error for a type that no module of the stack declares a scope check for in scope_checks.",
+                "description": "The artifact type whose launch version sets what the workflow's session may push: lowercase letters and digits in groups joined by single hyphens, starting with a letter, 1 to 64 bytes. Left out, the workflow names none. Only a workflow with access write names one, and qory harness compose ends with an error for a type that no module of the stack declares a scope check for in scope_checks.",
                 "type": "string",
                 "maxLength": 64,
-                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
               }
             }
           }

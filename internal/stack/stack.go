@@ -549,8 +549,8 @@ func TierList() string {
 // The access levels a workflow declares, see [Workflow.Access].
 const (
 	AccessRead = "read"
-	// AccessWriteNoPush is a writable checkout, no push step, no submit, and no version of
-	// the artifact submission.
+	// AccessWriteNoPush is a writable checkout, no push step, no outbox, and no stored
+	// output.
 	AccessWriteNoPush = "write-no-push"
 	AccessWrite       = "write"
 )
@@ -852,7 +852,7 @@ func (p *Stack) validate(compose bool) error {
 			if !runapi.ArtifactName(w.Plan) {
 				return exports.Refuse(
 					fmt.Sprintf("Set workflows.%s.plan to an artifact type.", name),
-					"An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.",
+					"An artifact type is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.",
 					fmt.Sprintf("The value is %s.", exports.Value(w.Plan, true)),
 					fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 			}

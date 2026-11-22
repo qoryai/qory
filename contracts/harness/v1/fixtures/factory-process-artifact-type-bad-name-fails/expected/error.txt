@@ -1,4 +1,4 @@
 Rename entry 1 of artifact_types.
-  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.
+  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.
   The name is "Reply_Draft".
   The entry is in modules/support-desk/process.yaml.

@@ -131,10 +131,10 @@ type headCheck struct {
 // push may go, where r.Commit is the commit the run expected and head the commit it
 // pushes. A head at the expected commit is a plain push. A branch that is not there is a
 // plain push only for a repository that [WorkBranch.fresh] says starts at the run
-// documents' checkout. A head that is a head a cancelled run pushed ([WorkBranch.Cancelled])
-// and that descends from the commit the run started at is a push that replaces the branch
-// with a lease on that head, before the run's first push alone. Any other head is a
-// [*HeadChanged].
+// documents' checkout. A head of [WorkBranch.Cancelled], which a cancelled run or a session
+// with no version pushed, and that descends from the commit the run started at is a push that
+// replaces the branch with a lease on that head, before the run's first push alone. Any other
+// head is a [*HeadChanged].
 //
 // Equality with a recorded head is enough: the record lists one head for each push of a
 // cancelled run, and the push replaces the position of the branch that this run set, with every

@@ -65,9 +65,9 @@ func TestTheInputsGetTheMemberQory(t *testing.T) {
 		ext          map[string]any
 		want         string
 	}{
-		{"members and extensions", "{\"version\": 1,\n \"b\": [2]}\n", ext, "{\"version\": 1,\n \"b\": [2]," + `"qory":{"harness_extensions":{"software-factory":{"command_limits_minutes":{"test":10}}}}}` + "\n"},
-		{"no extensions", `{"version":1}`, nil, `{"version":1,"qory":{"harness_extensions":{}}}` + "\n"},
-		{"no member", " { } ", map[string]any{}, `{ "qory":{"harness_extensions":{}}}` + "\n"},
+		{"members and extensions", "{\"version\": 1,\n \"b\": [2]}\n", ext, "{\"version\": 1,\n \"b\": [2]," + `"qory":{"harness_extensions":{"software-factory":{"command_limits_minutes":{"test":10}}},"outputs":[]}}` + "\n"},
+		{"no extensions", `{"version":1}`, nil, `{"version":1,"qory":{"harness_extensions":{},"outputs":[]}}` + "\n"},
+		{"no member", " { } ", map[string]any{}, `{ "qory":{"harness_extensions":{},"outputs":[]}}` + "\n"},
 	} {
 		got, err := withQoryMember([]byte(c.inputs), qoryInputs{HarnessExtensions: c.ext})
 		if err != nil || string(got) != c.want {

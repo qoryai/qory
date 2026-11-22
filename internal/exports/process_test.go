@@ -377,20 +377,7 @@ func TestProcessSchemaMatchesTheReader(t *testing.T) {
 		{strings.Replace(process, "name: Answer", `name: "Answer \U0001F468\u200d\U0001F469 \u200c"`, 1), true},
 		{strings.Replace(process, "name: Answer", "name: 3", 1), true},
 		{strings.Replace(process, "name: Answer", `name: ""`, 1), true},
-		{process + structured("submission") + "submit: {type: submission, send: end_of_run}\n", true},
-		{process + structured("submission") + "submit: {type: submission, send: after_gate}\n", true},
-		{process + structured("submission") + "submit: {type: submission, send: end_of_run, command: open-a-draft}\n", false},
-		{process + structured("submission") + "submit: {type: submission}\n", false},
-		{process + structured("submission") + "submit: {send: end_of_run}\n", false},
-		{process + structured("submission") + "submit: {type: submission, send: later}\n", false},
-		{process + structured("submission") + "submit: {type: submission, send: [end_of_run]}\n", false},
-		{process + structured("submission") + "submit: {type: Submission, send: end_of_run}\n", false},
-		{process + structured("submission") + "submit: {type: 3, send: end_of_run}\n", false},
-		{process + structured(strings.Repeat("a", 64)) + "submit: {type: " + strings.Repeat("a", 64) + ", send: end_of_run}\n", true},
-		{process + structured("submission") + "submit: {type: " + strings.Repeat("a", 65) + ", send: end_of_run}\n", false},
-		{process + structured("submission") + "submit:\n  - {type: submission, send: end_of_run}\n", false},
-		{process + structured("submission") + "submit: ~\n", false},
-		{process + structured("submission") + "submit: submission\n", false},
+		{process + structured("submission") + "submit: {type: submission, send: end_of_run}\n", false},
 		{process + "type_settings: {json_schema: {type: object, required: [full_suite], properties: {full_suite: {type: boolean}}}}\n", true},
 		{process + "type_settings: {json_schema: {}}\n", true},
 		{process + "type_settings: {}\n", false},
@@ -569,7 +556,7 @@ func TestVerifyPassesArtifactTypes(t *testing.T) {
 		"\n  - name: mockup",
 		"\n  - {name: acceptance-lock, withdrawable: false}\n  - {name: build-ledger, withdrawable: true}",
 		custom("document", "size_limit: 10485760, max_files: 20, withdrawable: false"),
-		"\n  - name: \"123\"\n  - name: a-1-b",
+		"\n  - name: \"t-123\"\n  - name: a-1-b",
 		"\n  - name: " + strings.Repeat("a", 64),
 		custom("document", "size_limit: 10485760, max_files: 20"),
 		custom("image", "size_limit: 52428800, max_files: 1"),
@@ -606,16 +593,18 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 		{"\n  - mockup", "Set entry 1 of artifact_types to an object with a name.\n  The entry is a string.\n  The entry is in {file}."},
 		{"\n  - ~", "Set entry 1 of artifact_types to an object with a name.\n  The entry is null.\n  The entry is in {file}."},
 		{"\n  - {base_view: file}", "Add name to entry 1 of artifact_types.\n  The entry has no name.\n  The entry is in {file}."},
-		{"\n  - {name: 3}", "Set the name of entry 1 of artifact_types to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, and the name is a number.\n  The entry is in {file}."},
-		{"\n  - {name: [a]}", "Set the name of entry 1 of artifact_types to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, and the name is a list.\n  The entry is in {file}."},
-		{"\n  - {name: ~}", "Set the name of entry 1 of artifact_types to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, and the name is null.\n  The entry is in {file}."},
+		{"\n  - {name: 3}", "Set the name of entry 1 of artifact_types to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, and the name is a number.\n  The entry is in {file}."},
+		{"\n  - {name: [a]}", "Set the name of entry 1 of artifact_types to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, and the name is a list.\n  The entry is in {file}."},
+		{"\n  - {name: ~}", "Set the name of entry 1 of artifact_types to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, and the name is null.\n  The entry is in {file}."},
 		{"\n  - {name: 2026-11-02}", "Set the name of entry 1 of artifact_types to a quoted string.\n  YAML reads \"2026-11-02\" as a value that is not a string.\n  The entry is in {file}."},
 		{"\n  - {name: !!binary aGk=}", "Set the name of entry 1 of artifact_types to a quoted string.\n  YAML reads \"aGk=\" as a value that is not a string.\n  The entry is in {file}."},
-		{"\n  - {name: \"\"}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `""` + ".\n  The entry is in {file}."},
-		{"\n  - {name: a--b}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"a--b"` + ".\n  The entry is in {file}."},
-		{"\n  - {name: -a}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"-a"` + ".\n  The entry is in {file}."},
-		{"\n  - {name: \"a\\n\"}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"a\n"` + ".\n  The entry is in {file}."},
-		{"\n  - {name: " + strings.Repeat("a", 65) + "}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"` + strings.Repeat("a", 65) + `"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: \"\"}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The name is " + `""` + ".\n  The entry is in {file}."},
+		{"\n  - {name: a--b}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The name is " + `"a--b"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: \"123\"}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The name is " + `"123"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: 1abc}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The name is " + `"1abc"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: -a}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The name is " + `"-a"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: \"a\\n\"}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The name is " + `"a\n"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: " + strings.Repeat("a", 65) + "}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The name is " + `"` + strings.Repeat("a", 65) + `"` + ".\n  The entry is in {file}."},
 		{"\n  - {name: mockup, owner: acme}", "Remove the key \"owner\" from entry 1 of artifact_types.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, withdrawable, and deliver.\n  The entry is in {file}."},
 		{"\n  - {name: mockup, [a]: b}", "Remove the key a list from entry 1 of artifact_types.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, withdrawable, and deliver.\n  The entry is in {file}."},
 		{"\n  - {name: mockup, withdrawable: \"no\"}", "Set withdrawable of artifact type mockup to true or false.\n  withdrawable is \"no\".\n  The type is in {file}."},
@@ -776,74 +765,13 @@ func structured(name string) string {
 	return "artifact_types:\n  - {name: " + name + ", base_view: structured, size_limit: 65536, max_files: 1, json_schema: {}}\n"
 }
 
-// submitTypes is artifact_types with a structured type submission, a document type
-// reply-draft and a standard type screenshot.
-const submitTypes = `artifact_types:
-  - {name: submission, base_view: structured, size_limit: 65536, max_files: 1, json_schema: {}}
-  - {name: reply-draft, base_view: document, size_limit: 65536, max_files: 1}
-  - name: screenshot
-`
-
-// TestVerifyChecksSubmit is each mistake in submit, next to submitTypes. Each refusal
-// starts with the fix, in a first line of at most 100 characters, then the cause, then
-// the file. Both values of send pass with the structured type; a type that no entry has,
-// a custom type of another base view and a standard type fail, as does any type with no
-// artifact_types.
-func TestVerifyChecksSubmit(t *testing.T) {
-	for _, body := range []string{"{type: submission, send: end_of_run}", "{send: after_gate, type: submission}"} {
-		if err := factory(t, process+submitTypes+"submit: "+body+"\n").Verify(); err != nil {
-			t.Errorf("%q: %v", body, err)
-		}
-	}
-	const sends = "end_of_run or after_gate"
-	const fix = "Set submit.type to a structured type of artifact_types.\n  "
-	// refusal is the refusal with fix and cause of the submit in file.
-	refusal := func(file, fixAndCause string) string { return fixAndCause + "\n  submit is in " + file + "." }
-	noTypes := factory(t, process+"submit: {type: submission, send: end_of_run}\n")
-	want := refusal(filepath.Join(noTypes.Root, "modules", "desk", exports.ProcessFileName), fix+"No entry of artifact_types is named submission.")
-	if err := noTypes.Verify(); err == nil || err.Error() != want {
-		t.Errorf("no artifact_types: %v\nwant %s", err, want)
-	}
-	for _, c := range []struct{ body, want string }{
-		{" {type: submision, send: end_of_run}", fix + "No entry of artifact_types is named submision."},
-		{" {type: reply-draft, send: end_of_run}", fix + "reply-draft has base_view document."},
-		{" {type: screenshot, send: after_gate}", fix + "screenshot is a standard type."},
-		{" ~", "Set submit to an object with type and send, or remove it.\n  submit is null."},
-		{" submission", "Set submit to an object with type and send, or remove it.\n  submit is a string."},
-		{"\n  - {type: submission, send: end_of_run}", "Set submit to an object with type and send, or remove it.\n  submit is a list."},
-		{" {type: submission, send: end_of_run, command: open-a-draft}", "Remove the key \"command\" from submit.\n  submit has only type and send."},
-		{" {type: submission, send: end_of_run, [a]: b}", "Remove the key a list from submit.\n  submit has only type and send."},
-		{" {type: submission, type: reply, send: end_of_run}", "Remove the second type from submit.\n  submit has the key type twice."},
-		{" {send: end_of_run}", "Add type to submit, the name of a structured entry of artifact_types.\n  submit has no type."},
-		{" {type: 3, send: end_of_run}", "Set submit.type to the name of a structured entry of artifact_types.\n  submit.type is a number."},
-		{" {type: ~, send: end_of_run}", "Set submit.type to the name of a structured entry of artifact_types.\n  submit.type is null."},
-		{" {type: [a], send: end_of_run}", "Set submit.type to the name of a structured entry of artifact_types.\n  submit.type is a list."},
-		{" {type: 2026-11-02, send: end_of_run}", "Set submit.type to a quoted string.\n  YAML reads \"2026-11-02\" as a type that is not a string."},
-		{" {type: Submission, send: end_of_run}", "Set submit.type to a name such as reply-draft, at most 64 bytes.\n  submit.type is \"Submission\"."},
-		{" {type: \"a\\nb\", send: end_of_run}", "Set submit.type to a name such as reply-draft, at most 64 bytes.\n  submit.type is \"a\\nb\"."},
-		{" {type: a--b, send: end_of_run}", "Set submit.type to a name such as reply-draft, at most 64 bytes.\n  submit.type is \"a--b\"."},
-		{" {type: submission}", "Add send to submit, " + sends + ".\n  submit has no send."},
-		{" {type: submission, send: later}", "Set submit.send to " + sends + ".\n  submit.send is \"later\"."},
-		{" {type: submission, send: End_of_run}", "Set submit.send to " + sends + ".\n  submit.send is \"End_of_run\"."},
-		{" {type: submission, send: [end_of_run]}", "Set submit.send to " + sends + ".\n  submit.send is a list."},
-		{" {type: submission, send: ~}", "Set submit.send to " + sends + ".\n  submit.send is null."},
-		{" {type: submission, send: 1}", "Set submit.send to " + sends + ".\n  submit.send is a number."},
-		{" {type: submission, send: true}", "Set submit.send to " + sends + ".\n  submit.send is a boolean."},
-		{" {type: submission, send: {a: b}}", "Set submit.send to " + sends + ".\n  submit.send is an object."},
-		{" {type: submission, send: !foo end_of_run}", "Set submit.send to a quoted string.\n  YAML reads \"end_of_run\" as a type that is not a string."},
-		{" {type: submission, send: !!binary ZW5kX29mX3J1bg==}", "Set submit.send to a quoted string.\n  YAML reads \"ZW5kX29mX3J1bg==\" as a type that is not a string."},
-		{" {type: submission, send: \"end_of_run\\nok\"}", "Set submit.send to " + sends + ".\n  submit.send is \"end_of_run\\nok\"."},
-	} {
-		e := factory(t, process+submitTypes+"submit:"+c.body+"\n")
-		want := refusal(filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName), c.want)
-		err := e.Verify()
-		if err == nil || err.Error() != want {
-			t.Errorf("%q: %v\nwant %s", c.body, err, want)
-			continue
-		}
-		if first, _, _ := strings.Cut(err.Error(), "\n"); utf8.RuneCountInString(first) > 100 {
-			t.Errorf("%q: the first line has %d characters, past 100: %s", c.body, utf8.RuneCountInString(first), first)
-		}
+// TestVerifyRefusesSubmit is a process.yaml with the key submit, which the process of
+// qory.process/v1 no longer has: a type is delivered by its deliver in artifact_types.
+func TestVerifyRefusesSubmit(t *testing.T) {
+	e := factory(t, process+structured("submission")+"submit: {type: submission, send: end_of_run}\n")
+	err := e.Verify()
+	if err == nil || !strings.HasPrefix(err.Error(), `Remove the key "submit" from line `) {
+		t.Errorf("the error is %v, want the refusal of the key submit", err)
 	}
 }
 
@@ -854,7 +782,7 @@ func TestVerifyPrintsOneRefusalForEachArtifactType(t *testing.T) {
 	file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
 	want := strings.Join([]string{
 		"Rename entry 2 of artifact_types.",
-		"  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.",
+		"  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.",
 		`  The name is "Mockup".`,
 		"  The entry is in " + file + ".",
 		"Add base_view and max_files to artifact type a-type, or leave only its name.",
@@ -1287,8 +1215,8 @@ func TestArtifactTypesSchemaMatchesTheReader(t *testing.T) {
 var surrogatePair = regexp.MustCompile(`\\u(?i:d[89ab][0-9a-f]{2})\\u(?i:d[c-f][0-9a-f]{2})`)
 
 // TestContractSchemasPassAsCustomTypes is each structured format of the contract,
-// acceptance-criteria.schema.json, verification.schema.json, submission.schema.json,
-// questions.schema.json, review-comments.schema.json, proposal-sources.schema.json and
+// acceptance-criteria.schema.json, verification.schema.json, questions.schema.json,
+// review-comments.schema.json, proposal-sources.schema.json and
 // verdict.schema.json, as the json_schema of a custom type: it passes the check and
 // process.schema.json, with a size limit that a structured type can have. The same type
 // with a schema that does not compile fails, so the check reads the entry.
@@ -1300,7 +1228,6 @@ func TestContractSchemasPassAsCustomTypes(t *testing.T) {
 	for _, c := range []struct{ name, sizeLimit string }{
 		{"acceptance-criteria", "65536"},
 		{"verification", "65536"},
-		{"submission", "262144"},
 		{"questions", "1048576"},
 		{"review-comments", "1048576"},
 		{"proposal-sources", "1048576"},
@@ -1591,9 +1518,10 @@ func schemaPasses(t *testing.T, body string) bool {
 }
 
 // TestVerifyChecksOutputs is outputs of a stage: a list of objects with type, the name
-// of an entry of artifact_types, and required, true or false. Each failure has the fix
-// first and names the stage. process.schema.json takes every shape here but a type that
-// artifact_types does not list, which a JSON Schema cannot state.
+// of an entry of artifact_types, required, true or false, and optional when, unless and
+// check. Each failure has the fix first and names the stage. process.schema.json takes
+// every shape here but a type that artifact_types does not list, which a JSON Schema
+// cannot state; qory takes any value of when, unless and check, which the schema checks.
 func TestVerifyChecksOutputs(t *testing.T) {
 	const place = "\n  The file is {file}."
 	const types = "\n  - name: mockup\n  - name: spec"
@@ -1616,9 +1544,18 @@ func TestVerifyChecksOutputs(t *testing.T) {
 		{"mockup", types, "Set outputs of the stage to a list, or remove it.\n  outputs of stage Check is a string." + place, false},
 		{"~", types, "Set outputs of the stage to a list, or remove it.\n  outputs of stage Check is null." + place, false},
 		{"[mockup]", types, "Set the entry of outputs to an object with type and required.\n  Entry 1 of outputs of stage Check is a string." + place, false},
-		{"[{type: mockup, extra: 1}]", types, "Remove the unknown key from the entry of outputs.\n  Entry 1 of outputs of stage Check has the key \"extra\", and an output has only type and required." + place, false},
+		{"[{type: mockup, extra: 1}]", types, "Remove the unknown key from the entry of outputs.\n  Entry 1 of outputs of stage Check has the key \"extra\", and an output has only type, required, when, unless and check." + place, false},
 		{"[{required: true}]", types, "Add type to the entry of outputs, the name of an entry of artifact_types.\n  Entry 1 of outputs of stage Check has no type." + place, false},
 		{"[{type: 5}]", types, "Set type of the entry of outputs to a quoted string, a name from artifact_types.\n  type of entry 1 of outputs of stage Check is a number." + place, false},
+		{"[{type: mockup, when: {input: spec}, unless: {track: fast-track}}]", types, "", true},
+		{"[{type: mockup, when: {track: fast-track}}, {type: spec, unless: {input: mockup}}]", types, "", true},
+		{"[{type: mockup, check: {exists: true}}, {type: spec, required: true, check: {reported: merged}}]", types, "", true},
+		{"[{type: mockup, when: {input: 1abc}}]", types, "", false},
+		{"[{type: mockup, unless: {track: Fast}}]", types, "", false},
+		{"[{type: mockup, when: spec}]", types, "", false},
+		{"[{type: mockup, check: {exists: false}}]", types, "", false},
+		{"[{type: mockup, check: {exists: true, reported: merged}}]", types, "", false},
+		{"[{type: 1abc}]", types, "Set type of the entry of outputs to a name such as reply-draft, at most 64 bytes.\n  type of entry 1 of outputs of stage Check is \"1abc\"." + place, false},
 		{"[{type: Bad_Name}]", types, "Set type of the entry of outputs to a name such as reply-draft, at most 64 bytes.\n  type of entry 1 of outputs of stage Check is \"Bad_Name\"." + place, false},
 		{"[{type: mockup}, {type: spec}, {type: mockup, required: true}]", types, "List each output type of stage Check once: mockup appears twice.\n  Entry 3 of outputs of stage Check has the type mockup, which an earlier entry has." + place, true},
 		{"[{type: mockup, required: maybe}]", types, "Set required of the entry of outputs to true or false.\n  required of entry 1 of outputs of stage Check is a string." + place, false},

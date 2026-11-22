@@ -36,8 +36,8 @@ release may change what an existing document does, and states it under Upgrading
   session with its workflow, runtime, model settings, model key and time limit. Each
   session's harness is composed from the run's sources at session 1's commits; a runtime is
   installed once per run, at the version the stack pins, with npm's signature checked as
-  for session 1; a Codex session gets a new Codex home; each push step that pushes commits
-  stores a version of `submission`. In a home that the run made, a later session's compose
+  for session 1; a Codex session gets a new Codex home; each push step stores
+  the session's outputs. In a home that the run made, a later session's compose
   keeps that session's runtime alone. A home from `--home` or `harness.home` keeps every
   runtime composed in it, so a later Codex session there gets no tier models when the home
   also has another runtime's tree. The route to qory serves the session that runs, and the
@@ -194,8 +194,8 @@ release may change what an existing document does, and states it under Upgrading
 - A run takes the lower of its workflow's `access` and `access` in its documents, in
   the order `read`, `write-no-push`, `write`. A workflow's `access` in a stack takes
   `write-no-push` in both schemas and in the stack check, and documents may have it. A
-  `write-no-push` run has a writable checkout, no push step, no submit, and no version
-  of the artifact `submission`. With no wall, it stops with `write_needs_wall`. The error
+  `write-no-push` run has a writable checkout, no push step and no outbox, and stores no
+  output. With no wall, it stops with `write_needs_wall`. The error
   for another workflow value now starts
   `Set workflows.<name>.access to a valid level.`
 - Every run of Codex installs Codex before its session, as a run of Claude Code installs
@@ -274,17 +274,20 @@ release may change what an existing document does, and states it under Upgrading
   `[features]` `shell_tool = false` in its agent file, so it has no shell. An agent with no
   `tools` key keeps the shell. An agent without write tools can still write files through Codex's
   `apply_patch` tool.
-- A run of a work item works on the branch `qory/<work item id>`, at the commit of the
-  artifact `submission` that its stage starts from. The harness still comes from
+- A run of a work item works on the branch `qory/<work item id>`, at the head of the
+  version of the target's artifact that its stage starts from. The harness still comes from
   `target_version`. A commit on the branch reaches a run's harness after you merge the
   branch into the target's default branch, the branch that its `HEAD` points to. Qory
   Apiary reads `target_version` there, so the next run's `target_version` contains the
   commit.
 - A write run of a work item ends with a push step: qory commits what the agent left,
-  pushes each repository with new commits to `qory/<work item id>`, and stores a new
-  version of the artifact `submission`. The next run in the same stage starts at that commit. A
-  session that failed, timed out or was cancelled gets the same step, and its commit and
-  version show how it ended. See The push step of a write run in `docs/run.md`.
+  pushes each repository with new commits to `qory/<work item id>`, and stores a version of
+  each output that the session wrote to the outbox. The next run in the same stage starts at
+  that commit. A session that failed, timed out or was cancelled gets the same step, its
+  commit shows how it ended, and it stores no output. The next run starts at the newest
+  commit of the version's run that a version of that run confirms: a commit that a later
+  session pushed with no version is skipped, and the next push replaces it with a lease. See
+  The push step of a write run in `docs/run.md`.
 - A skill reads its work item and stores what it made with `qory work-item show`, `qory
   artifact pull`, `qory artifact push` and `qory run verdict`. In a run they use Qory
   Apiary through the gateway, at `QORY_RUN_API`. Outside a run they use the checkout's
@@ -307,18 +310,49 @@ release may change what an existing document does, and states it under Upgrading
   `size_limit`, `max_files` and, for `base_view: structured`, `json_schema`. Every command
   that reads the configuration checks each entry and compiles each `json_schema`. See
   Artifact types in `contracts/harness/v1/README.md`.
-- Declare a factory's submit step with `submit` in its `process.yaml`: `type`, the name
-  of a structured entry of `artifact_types`, and `send`, `end_of_run` or `after_gate`.
-  `process.schema.json` has `submit`. Every command that reads the configuration checks
-  its form, and that `artifact_types` has a custom structured entry named `type`. See The
-  submit step in `contracts/harness/v1/README.md`.
-- A run from a run code whose level is `write` keeps its submit settings, `type` and
-  `send`, from `submit` of the run documents, and reads none from the composed harness's
-  `process.yaml`. When the composed harness has a different `submit`, `qory run` prints
-  one line after the compose: the documents' value and the harness's value, or only the
-  harness's value when the documents have no `submit`. A run at a lower level keeps no
-  submit settings and prints no line. See What the run takes from the response in
-  `docs/run.md`.
+- Mark an artifact type that Qory Apiary delivers to the target with `deliver` in
+  `artifact_types` of a factory's `process.yaml`: `send`, `end_of_run` or `after_gate`. Only
+  a custom structured type has `deliver`, with a `size_limit` of at most 786432 bytes and a
+  `json_schema` whose top-level `target` is the primitive `reference`. A top-level property
+  can have `x-qory-fill`, which qory fills from its push. Every command that reads the
+  configuration checks `deliver` and the marks. See Artifact types in
+  `contracts/harness/v1/README.md`.
+- A run from a run code takes `deliver` from the run documents alone: a type that they list
+  is delivered with their `send`, whatever the composed harness's `process.yaml` has. A
+  write run of a work item whose documents deliver a type that the composed `process.yaml`
+  does not define stops before its session: `Define <type> in the harness's process.yaml:
+  the run documents deliver it.` At the
+  level `write`, the compose step prints one line for each type whose `send` differs from
+  `deliver` of the composed harness's `process.yaml`, such as `qory run: deliver:
+  pull-request at end_of_run from the documents; harness has after_gate`. Documents that
+  list one type twice in `deliver` stop the run: `update qory, or ask Qory Apiary's instance
+  admin: the response to the run code does not pass qory's checks: it breaks
+  documents.schema.json; the code is used`, with `deliver lists <type> twice` on line 2. See
+  What the run takes from the response in `docs/run.md`.
+- A stage's outputs reach the session: `inputs.json` of a run from a run code has
+  `qory.outputs`, the stage's outputs in order, each with `type`, `required` and `schema`,
+  the type's `json_schema` with the primitives written out, or `null` for a type that the
+  composed `process.yaml` does not define. A stage with no output, and a run with a run key
+  and no run code, have `[]`. See The outputs of a session in `docs/run.md`.
+- A session writes each output to the outbox, the folder in `QORY_OUTBOX`: `.qory/outbox`
+  of the checkout, or of the working folder of a run with no repository. After a session
+  that succeeded, the push step reads each output of the stage, sets `target` of a type
+  that `deliver` of the run documents lists, fills the marked members from the push to the
+  target's repository, checks the file against the type's schema and, for a delivered
+  type, against 786432 bytes, the most that the next run reads, runs the type's push
+  check, stores one version, and removes the version's files from the outbox. The version of a
+  delivered type goes to the artifact `t-` and the first 32 hexadecimal digits of the SHA-256 of the target's `collection`; any other
+  type's to `main`. A required output that the session did not write, and that no version of
+  the run has, fails the step: `Write <type> to the outbox: the stage requires it and the
+  session wrote none.` qory reads, fills and checks the outputs, and checks the required
+  ones, before the push with the local head, so an output that fails pushes nothing, and
+  again after the push. qory removes the outbox before each session, so an output that a
+  failed session or an earlier run left is never stored; a `.qory` that is a link stops the
+  run with `Remove .qory/outbox, then start the run again: a session starts with no
+  outbox.` A type of the outputs or of `deliver` whose `json_schema` does not convert
+  to JSON stops the run: `Report the run to the instance admin of Qory Apiary: an output's
+  schema does not convert.` A run with no repository stores its outputs alone, in the step `store
+  the outputs`. See The outputs of a session in `docs/run.md`.
 - A module can declare checks for the files of an artifact type with `push_checks` in
   `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
   arguments, and optional `reads`, the other artifact types the check reads. The checks
@@ -350,10 +384,6 @@ release may change what an existing document does, and states it under Upgrading
   503 `push_check_unavailable`, qory run writes the cause on its stderr, and the push
   exits 1. Outside a run, `qory artifact push` runs no check. See The module manifest in
   `contracts/harness/v1/README.md`.
-- Version 1 of the submission format, `contracts/harness/v1/submission.schema.json`: what
-  a run submits for a work item, its branch `qory/<work item id>`, the commits in each
-  repository with the step that made each, the verdict, and the draft pull request. A
-  software factory can use it as the `json_schema` of the artifact type `submission`.
 - Version 1 of the acceptance criteria format,
   `contracts/harness/v1/acceptance-criteria.schema.json`: a `summary` and `criteria`, each
   with `id`, `text` and `check` (free text). A removed criterion has `removed` with its
@@ -769,13 +799,25 @@ release may change what an existing document does, and states it under Upgrading
   of another shape, a value that qory does not fill, or in a type without `deliver`.
 - A stage of the `process` of a `process.yaml` can have `outputs`, a list of objects
   with `type`, the name of an entry of `artifact_types`, and `required`, `true` or
-  `false`, `false` when left out. An output has no other key. qory stops the command
+  `false`, `false` when left out. qory stops the command
   with the fix on the first line when a stage has an output type that `artifact_types`
   does not list, or when a stage lists a type twice; the message has the stage and the
   type.
+- An output of a stage can also have `when` and `unless`, each a condition, and `check`,
+  as the process schema of Qory Apiary defines them. `process.schema.json` checks their
+  form, and qory checks no value of them. Any other key of an output stops the command
+  with `Remove the unknown key from the entry of outputs.` and, on the next line, `... and
+  an output has only type, required, when, unless and check.`
 
 ### Changed
 
+- An artifact type and an artifact name start with a letter: the rule is
+  `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most 64 bytes. A name that starts with a digit, such as `1abc`, fails each check of a type or a name: in `process.yaml`,
+  in `push_checks` and `scope_checks` of a module, in `plan` of a workflow, in `qory
+  artifact`, and in the output types of a stage at the start of a run. The contract
+  schemas and the messages state the rule. The message of `qory artifact` has the rule on
+  line 1, `Set type to lowercase letters, digits and single hyphens, a letter first and
+  no hyphen last.`, and `It has 1 to 64 characters. The value is <value>.` on line 2.
 - A read run whose documents contain a harness document and whose inputs list
   `destinations`, such as an Explore run, fetches nothing before its session; the agent
   clones the destinations it needs with `qory destination clone`. A run with no
@@ -797,8 +839,8 @@ release may change what an existing document does, and states it under Upgrading
   `must_understand` in them.
 - The verdict format takes a verdict kind and a point action that a later version adds:
   a kind of lower-case letters, digits and hyphens, and an action of lower-case letters,
-  digits and underscores, each starting with a letter and at most 64 characters. The
-  submission's `verdict` takes such a kind too. qory passes a kind it does not know on
+  digits and underscores, each starting with a letter and at most 64 characters. qory
+  passes a kind it does not know on
   unchanged, and takes it as not passed, so no draft follows. Over a red full suite, or a
   suite that did not start, such a kind becomes `escalate` with the agent's points and the
   suite's point. `qory run verdict` takes only `passed`, `changes-requested` and
@@ -881,42 +923,43 @@ release may change what an existing document does, and states it under Upgrading
   enrol` says "this machine's access key", and that enrol stops with an error when
   `access-key-secret` exists. `docs/run.md`, `docs/harness.md` and the harness contract
   README call the harness keys of a machine's `qory.yaml` "machine harness settings".
-- The push step stores a version of the artifact type `submission`, in place of `branch`,
-  one for each pushing session, with the verdict `none` when the session wrote none. Such a
-  session is the whole review round.
+- The push step stores the outputs of the session, in place of a version of `branch`.
   The step checks the head of the branch on the forge before it pushes. A head that is not
   the commit the run expected ends the run `failed` with the code `push_head_changed`, after a
   session that passed, failed or timed out. The push replaces the branch only when its head
-  is a head that the work item's record has for a cancelled run (one head for each push)
-  and that descends from the start commit, with a lease on that head. qory fetches
-  the history of the branch head only when a cancelled run recorded that head, and then
-  checks that it descends from the start commit. qory stops on a head below, above or
+  is a head that the work item's record has for a cancelled run (one head for each push),
+  or for the start's run after the start with no version to confirm it, and that descends
+  from the start commit, with a lease on that head. qory fetches the history of the branch
+  head only when the record lists that head as one of these, and then checks that it
+  descends from the start commit. qory stops on a head below, above or
   beside a recorded head, with no fetch. A run starts at the newest commit that an earlier run
   pushed and a person did not cancel.
-- The submission has `base.branch` for each repository the run pushed: the name of the
+- A delivered output's member that `pushed-base-branch` marks has the name of the target
   repository's default branch, read when the run fetched it. A name of more than 255
-  characters is left out.
+  characters gives an empty string.
 - A module manifest can declare `submit_program`, a command of the module that opens the
   draft pull request. A composed harness has one; a second declaration stops the compose.
-- A session hands its title, description and the step of each commit to the submit step in
-  the file at the path in `QORY_SUBMISSION_HANDOFF`. A commit with no step is `unreviewed`. qory
-  reads the file inside the checkout: a link as the file, or a link that leads out of the
-  checkout, ends the read. qory drops each of these, with a line that states the cause and
-  the values: a title with a control character; a title with no character that is not a
-  space, U+200C or U+200D; a title, description or step that is over a limit of the
-  submission format; a description with a NUL character or a line that is a marker of the
-  draft's block (`<!-- qory:start -->` or `<!-- qory:end -->`); a step with a character that
-  stops a title; and a step whose key is not a full lower-case commit id. One rule covers a
-  title, a step and the name of a machine step: a control character, a format character
-  other than U+200C and U+200D, and U+2028 and U+2029 stop a title or a step, and a name
-  loses them. U+200C and U+200D, as in an emoji sequence, stay.
-- qory adds `/.qory/handoff/` to the checkout's `.git/info/exclude` for a run on a work
-  item's branch, so `git add -A` and `git commit -a` leave the hand-off file out of a commit.
-  A commit of the run that has a path under `.qory/handoff/`, in any letter case, as
-  `git add -f` makes one, stops the push step before any push, and the run closes `failed`.
+- A session of a run with neither a run code nor a run key hands the draft's title, text and
+  the step of each commit to the submit program in its pull-request output,
+  `.qory/outbox/pull-request/pull-request.json` under the folder in `QORY_OUTBOX`. A commit
+  with no step is `unreviewed`. qory reads the file inside the copy: a link as the file, or
+  a link that leads out of the copy, ends the read. qory drops each of these, with a line
+  that states the cause and the values: a title with a control character; a title with no
+  character that is not a space, U+200C or U+200D; a title, text or step that is over a
+  limit of a draft; a text with a NUL character or a line that is a marker of the draft's
+  block (`<!-- qory:start -->` or `<!-- qory:end -->`); a step with a character that stops a
+  title; and a step whose key is not a full lower-case commit id. One rule covers a title, a
+  step and the name of a machine step: a control character, a format character other than
+  U+200C and U+200D, and U+2028 and U+2029 stop a title or a step, and a name loses them.
+  U+200C and U+200D, as in an emoji sequence, stay.
+- qory adds `/.qory/outbox/` to the checkout's `.git/info/exclude` for a run with an outbox
+  on the branch of its work item, so `git add -A` and `git commit -a` leave the outbox out
+  of a commit. A commit of the run that has a path under `.qory/outbox/`, in any letter
+  case, as `git add -f` makes one, stops the push step before any push, and the run closes
+  `failed`.
 - A run from a run code starts no submit program, relay, container or write token for the
-  forge's API: the push step pushes and stores the submission, with the draft `no-program`,
-  and the forge's adapter opens the draft pull request from it. The `submit_program` of the
+  forge's API: the push step pushes and stores the outputs, and the forge's adapter opens
+  the draft pull request from the stored pull-request output. The `submit_program` of the
   composed harness is for a run with neither a run code nor a run key (a run with a run key and
   no run code pushes nothing locally and runs no program). For each repository, qory pushes
   the checked head of `qory/run-<run id>` to the remote origin's one push address with the
@@ -927,17 +970,17 @@ release may change what an existing document does, and states it under Upgrading
   on the person's machine, outside the wall, with the person's login of the forge's command
   line, in a new session with no terminal, with the person's environment without any `QORY_`
   variable, and with `GIT_TERMINAL_PROMPT=0` and `GH_PROMPT_DISABLED=1`. The program never
-  pushes. A run whose session did not pass, or that wrote no hand-off text, gets the draft
-  `none`. For each repository whose program returned a draft, `qory run` prints
+  pushes. A run whose session did not pass, or that wrote no text in its pull-request
+  output, gets the draft `none`. For each repository whose program returned a draft, `qory
+  run` prints
   `Draft: <address>` as its last lines. The program gets the inputs `QORY_SUBMIT_*` and
   prints plain lines: the five `draft_` lines and a `commit_url` line for each commit. qory
-  stores them as the draft and the commit addresses, checks each value, and leaves out a line
-  that it cannot use. A program that ends with status 3 means that the person has no login of
+  takes the draft from them, checks each line, and leaves out a line that it cannot use; it
+  keeps no commit address. A program that ends with status 3 means that the person has no login of
   the forge's command line: the draft is `{"none": "login-needed", "exit": 3}`, qory prints the
   login command that the program prints as the first line of its standard error, and the
-  branch stays pushed. A program that runs past 120 seconds is `program-timeout`. The
-  submission format has the reason `login-needed`, the exit 0 for `program-failed`, and the
-  draft states `closed` and `merged`. In this build no push check is registered, so a run with
+  branch stays pushed. A program that runs past 120 seconds is `program-timeout`. In this
+  build no push check is registered, so a run with
   no run code and no run key pushes nothing, runs no program and prints `qory run: Push each
   branch by hand: the key and scope push checks of qory run are not registered.`, then one
   `Branch: <branch> in <folder>.` line for each repository with commits. A remote with
@@ -952,8 +995,7 @@ release may change what an existing document does, and states it under Upgrading
   list commits.`, and the next line is that qory ran no program for that repository. A second
   run does the work again on a new branch. See The submit program in `docs/run.md`.
 - A push that landed with no version stored has one way out in the line of `qory run`:
-  `delete branch qory/<work item id> of <path> on <system>`. The line also has this way out
-  when the list of the run's commits fails after the push landed. A branch whose head is not the
+  `delete branch qory/<work item id> of <path> on <system>`. A branch whose head is not the
   commit the run expected stops the step before any push, with the line `Set the branch to the
   expected commit or delete it` and the branch, the head and the expected commit on the next
   line. To go on, do one of the two, then take the work item in again. Moving the branch back
@@ -965,11 +1007,23 @@ release may change what an existing document does, and states it under Upgrading
   `Head: none`, and has the `git push` command that creates the branch. The next run creates
   a deleted branch at `target_version` when no version exists, and starts from the last
   version otherwise.
-- The lines that stopped a run on a stored version of the artifact submission with a fix for
-  Qory Apiary (a ref, a file, a format, a commit that is missing, is no commit, differs in `.qory` or
-  fails to check out) now state the fact first: `Version <n> of the artifact submission has a
-  ref other than <ref>, so the run did not start; the code is used`. They no longer name a
-  fix in Qory Apiary, because only a run stores a version.
+- A run of a work item starts at the head of the version of the target's artifact that its
+  stage wrote last, or else of the version that a gate approved: the newest commit that the
+  run which wrote the version pushed to the target, which the version's file has as its one
+  top-level `reference` to that commit. A start that qory cannot confirm stops the run with
+  `Report the run to the instance admin of Qory Apiary: no start found; the code is used`
+  and the cause on line 2, such as `Version 2 of the artifact pull-request has 0 top-level
+  references to commit 4b8e2f1a9c7d of github.com/example-org/shop, not 1.` The lines on
+  a commit that is no commit, differs in `.qory` or fails to check out state the fact first:
+  `The version that the run starts from has commit <c>, which is not a commit on <path> on
+  <system>, so the run did not start; the code is used`.
+- Every run of a work item from a run code with a run API reads the work item through `GET
+  /work-item` at its start, with or without a repository, as the stage's outputs come from
+  it. A setup past its limit in that read names the step `the read of the work item`. A stage
+  output type that is not a name of a-z, 0-9 and single hyphens that starts with a letter
+  and has at most 64 characters stops the run: `Report the run
+  to the instance admin of Qory Apiary: an output type is no name.` Until this
+  change, only a run on the work item's branch read it.
 - A run stops before the agent starts, with the line `Report this run to the instance admin of
   Qory Apiary.` and a second line `The list of pushed commits has <value>, which is not a
   full commit id, so the run did not start; the code is used`, when the work item's list of
@@ -1087,8 +1141,10 @@ release may change what an existing document does, and states it under Upgrading
   newest version that the run API's artifact index does not mark `cancelled`. A version
   that a cancelled run made counts for no stage, and an artifact whose versions are all
   cancelled gets no folder. The start commit of a run skips a cancelled version of the
-  artifact `submission` too. Before, all three took the newest version, cancelled or not. An
+  target's artifact too. Before, all three took the newest version, cancelled or not. An
   index without the field `cancelled` reads as no version cancelled.
+- qory builds with Forager 3a8876d8 and integrations effc22aa. The run documents have
+  `deliver` in place of `submit`.
 - qory builds with Forager 57a8deb5 and integrations e4bf534a.
   - In a run configuration from a control plane, the run's model key is
     `default_model_provider_credential_name`, which was `model_credential`, and each API
@@ -1909,25 +1965,17 @@ release may change what an existing document does, and states it under Upgrading
   The checks of `qory run verdict` and of the review round stop the same characters.
   The `point` of a finding in `review-report.schema.json` is a `line` too: a tab, U+200B
   and U+E0041 in a point fail the report format.
-- The hand-off drops a `description` that has a character that a text does not have: a control
+- A run with neither a run code nor a run key drops a text of its pull-request output that
+  has a character that a text does not have: a control
   character other than tab, line feed and carriage return, U+2028, U+2029, or a Cf character
   other than U+200C and U+200D, such as U+200B or the tag character U+E0041. It prints
   `Remove the character U+200B at character 4 of the description. qory dropped the
-  text.`, and the commit is `unreviewed`. Until this change, the run stored the
-  description and the submission then failed the check of the format.
-- The step leaves out each `draft_title` line of a submit program whose title has a character
-  that a title does not have, such as U+200B or a tag character, or has no character that is
-  not a space, U+200C or U+200D. It lists the line as a line that qory cannot use, with the
-  cause and the character as a code point, and the draft is `program-failed` as for any draft
-  line that qory leaves out. After a timeout, a program that did not start or an exit status
-  other than 0, 1 or 2, the step lists no line, because qory reads none. Until this
-  change, the step stored such a title and the submission then failed the check of the
-  format.
-- The submission format stops the same characters. The title of the text and the title of a
-  draft are a line with a character that is not a space, U+200C or U+200D; a step is a line;
-  the description is a text. Until this change, the title stopped only the control
-  characters U+0000 to U+001F and U+007F, and a step, a description and the title of a
-  draft had no rule.
+  text.`
+- The step leaves out each `draft_title` line of a submit program whose title has a control
+  or format character other than U+200C and U+200D, or only spaces, U+200C and U+200D. It
+  lists the line as a line that qory cannot use, with the cause `the title has a control or
+  format character, or only spaces, U+200C and U+200D`, and the draft is `program-failed` as
+  for any draft line that qory leaves out.
 - A stack, a stage name or a workflow in a `process.yaml` that has U+200B, U+2028, U+2029
   or another character that a line does not have is stopped, with the fix `Set stack in
   process.yaml to one line of text.` and the cause `The value has the character U+200B,
@@ -1938,8 +1986,7 @@ release may change what an existing document does, and states it under Upgrading
   write each pair as `\UXXXXXXXX` in a double-quoted string, such as `\U000E0041`, when you
   paste a schema of `contracts/harness/v1/` into a `json_schema`.
 - The patterns of the contract schemas and of the primitives write the control characters
-  as the regex escapes `\x00-\x1f` and `\x7f-\x9f`, and the branch name pattern of
-  `submission.schema.json` writes `\x00-\x20\x7f` the same way. A pattern written with
+  as the regex escapes `\x00-\x1f` and `\x7f-\x9f`. A pattern written with
   the JSON escape `\u0000` decodes to a raw control character, and a reader fails on a
   file that has one. The patterns accept and stop the same characters as before. A test
   fails when a pattern of a contract schema has a raw control character.

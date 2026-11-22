@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/qoryai/qory/internal/runcopy"
 )
 
 // TestThePushArgumentsAreTheCheckedCommitToTheNamedRemote is the git arguments of a local push: the
@@ -190,5 +192,58 @@ func TestThePrintedUnsetCommandRemovesAPushAddressOfTheEnvironment(t *testing.T)
 	}
 	if after := addresses(unset + "; " + get); after != "https://git.example.com/acme/keep.git" {
 		t.Errorf("%q leaves the addresses %q, want only the address of the repository file", unset, after)
+	}
+}
+
+// TestALocalRunWhoseListOfCommitsFailsSaysNoRunCode is the submit step of a local run whose start
+// commit the repository does not have, so the list of the run's commits fails: the lines have the
+// fix and the cause, and no words about a run code, which a local run does not have. No check
+// runs. The step cuts each line at 200 characters, and git's cause here cuts the end of line 2,
+// so [preparation.OutboxCommitted]'s test checks the end of the text.
+func TestALocalRunWhoseListOfCommitsFailsSaysNoRunCode(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Chdir(t.TempDir())
+	root := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		c := exec.Command("git", append([]string{"-c", "user.name=a", "-c", "user.email=a@example.com"}, args...)...)
+		c.Dir = root
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	git("init", "--quiet", "-b", "main")
+	git("commit", "--quiet", "--allow-empty", "-m", "start")
+	git("branch", "qory/run-1")
+	git("remote", "add", "origin", "https://git.example.com/acme/app.git")
+	for _, name := range requiredPushChecks {
+		before, had := localPushChecks[name]
+		registerPushCheck(name, func(context.Context, localRepository) error {
+			t.Error("a check ran")
+			return nil
+		})
+		t.Cleanup(func() {
+			if had {
+				localPushChecks[name] = before
+			} else {
+				delete(localPushChecks, name)
+			}
+		})
+	}
+	c := &runCopy{root: root, repos: []runcopy.Repository{{Base: strings.Repeat("1", 40)}}, landed: map[string]string{"": "qory/run-1"}}
+	var out strings.Builder
+	if drafts := c.submitLocal(context.Background(), &out, nil, true); drafts != nil {
+		t.Errorf("the step returned the drafts %q", drafts)
+	}
+	lines := out.String()
+	want := "qory run: Start the run again: the list of the run's commits failed.\n  Listing the commits of acme/app from commit 111111111111 to "
+	if !strings.HasPrefix(lines, want) {
+		t.Errorf("the lines are %q, want the start %q", lines, want)
+	}
+	if strings.Contains(strings.ToLower(lines), "run code") {
+		t.Errorf("the lines of a local run name a run code: %q", lines)
 	}
 }

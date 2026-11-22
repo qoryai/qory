@@ -35,7 +35,7 @@ func TestReadManifestReadsScopeChecks(t *testing.T) {
 // program that is empty or outside the module. Each refusal is compared whole.
 func TestReadManifestFailsOnScopeChecks(t *testing.T) {
 	head := "apiVersion: qory.dev/v1alpha1\nname: core\nscope_checks:\n"
-	typeRule := "An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes."
+	typeRule := "An artifact type is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes."
 	const notList = "Set scope_checks.plan to the program's path inside the module, then its arguments.\n  The value is not a list, or the list is empty."
 	badKey := "Set each key of scope_checks to an artifact type.\n  " + typeRule + "\n  The key is "
 	const oneCommand = "Give each plan type of scope_checks one command, a list of strings, not a list of lists."

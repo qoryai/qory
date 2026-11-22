@@ -1602,9 +1602,9 @@ func TestArtifactPushChecksItsArguments(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"artifact", "push", "Demo", path}, "Set the type"},
-		{[]string{"artifact", "push", "../demo", path}, "Set the type"},
-		{[]string{"artifact", "push", "demo", path, "--name", "a/b"}, "Set the --name"},
+		{[]string{"artifact", "push", "Demo", path}, "Set type to "},
+		{[]string{"artifact", "push", "../demo", path}, "Set type to "},
+		{[]string{"artifact", "push", "demo", path, "--name", "a/b"}, "Set --name to "},
 		{[]string{"artifact", "push", "demo", filepath.Join(root, "absent")}, "Pass a file that exists."},
 		{[]string{"artifact", "push", "demo", other}, "Pass a file, not a directory"},
 		{[]string{"artifact", "push", "demo", path, same}, "Rename one of the files named a.md."},
