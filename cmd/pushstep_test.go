@@ -2013,7 +2013,7 @@ func TestAFailedStoreAfterThePushClosesRunAPIFailed(t *testing.T) {
 				return true, false
 			},
 			index: func(n int, w http.ResponseWriter) bool {
-				if n == 1 {
+				if n <= 2 {
 					return false
 				}
 				failing(w, http.StatusServiceUnavailable, "unavailable", "")
