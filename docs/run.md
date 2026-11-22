@@ -2130,7 +2130,7 @@ the run stops as it does for documents that break the schema. Only a run whose s
   report's `extensions`, or `{}` when the harness has none. `outputs` is the outputs of the
   work item's stage, or `[]` for none and for a run with no run API (see [The outputs of a
   session](#the-outputs-of-a-session)). `start_commits` has, for each repository of the
-  run's branch, `{"path": <the repository's folder, absolute>, "commit": <the commit the
+  run's branch that the run may push, `{"path": <the repository's folder, absolute>, "commit": <the commit the
   session starts at>}`, `[]` for a run with no branch; and `start_artifacts` is the folder
   of the session's launch snapshot, `<in>/start-artifacts` (see [The scope check before the
   push](#the-scope-check-before-the-push)). Session 1 writes the file after the branch
@@ -6349,7 +6349,7 @@ push step.
 #### The scope check before the push
 
 Before the first `git push` after a session of a write run from a run code, qory checks the
-commits of each repository whose head is past the session's start: `Start` for session 1,
+commits of each repository whose head is past the session's start, other than a read target: `Start` for session 1,
 and the commit that the last push landed for a later session. A failure in one repository
 stops the push of every repository, and the commits stay local.
 

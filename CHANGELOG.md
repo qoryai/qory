@@ -33,7 +33,7 @@ release may change what an existing document does, and states it under Upgrading
   other type, in the run directory and in `start-artifacts/` of the read-only inputs
   folder. A fetch that fails stops the session with `run_api_failed`. `inputs.json` has
   the snapshot's folder in `qory.start_artifacts` and the start commit of each repository
-  in `qory.start_commits`. Session 1 writes `inputs.json` after the branch switch and the
+  the run may push, not a read target, in `qory.start_commits`. Session 1 writes `inputs.json` after the branch switch and the
   setup.
 - A walled session whose `--mount` or `wall.mounts` is at or inside the read-only inputs
   folder stops before its setup: a run from a run code with `machine_setup_invalid`.

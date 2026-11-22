@@ -1371,7 +1371,7 @@ of the run's `inputs.json` read-only at the file's path, mode 0644 in a folder o
 command's arguments, before the pushed files' paths, such as `checks.js push spec --inputs
 <in>/inputs.json /qory-push-check/files/spec.md`. Its member `qory.harness_extensions` is
 the report's `extensions` (docs/run.md, §The run key from a run code). `qory.start_commits` has
-the folder and the start commit of each repository of the session, and
+the folder and the start commit of each repository that the session may push, and
 `qory.start_artifacts` the folder of the session's launch snapshot, read-only. The file of a run
 key has only the member `qory`, since that run has no run documents. The home of such a
 run also contains `inputs.json` with the same bytes, mode 0644, which a hook reads as
