@@ -27,7 +27,8 @@ import (
 )
 
 // sharedPushRepo is a [pushRepo] whose documents set shared_run, with a harness document
-// that defines a stack of the module hello of acme/site and its workflow hello, write; the
+// that defines a stack of the module hello of acme/site and its workflow hello, write, with
+// the plan type build-plan, whose fake scope check passes; the
 // module has the skill workflow-hello, by which Codex starts the workflow. The
 // next-session request after session n gets answers[n-1], or the end once answers run out;
 // requests counts the requests.
@@ -42,7 +43,7 @@ func sharedPushRepo(t *testing.T, answers ...string) (p *pushRepo, requests func
 		d["shared_run"] = true
 		d["harness"] = map[string]any{"harness": map[string]any{
 			"modules":   []map[string]any{{"name": "hello", "source": map[string]any{"git": url, "ref": "main", "path": "modules/hello"}}},
-			"workflows": map[string]any{"hello": map[string]any{"access": "write"}},
+			"workflows": map[string]any{"hello": map[string]any{"access": "write", "plan": "build-plan"}},
 		}}
 	}
 	var mu sync.Mutex
@@ -141,6 +142,56 @@ func TestTheNextSessionStartsAfterThePushOfTheSessionBefore(t *testing.T) {
 		}
 		if n != want {
 			t.Errorf("the run made the call %q %d times, want %d: %q", call, n, want, r.calls)
+		}
+	}
+}
+
+// TestEachSessionsInputsHaveItsStartCommit is a write run of two sessions: session 1's
+// inputs.json has the commit the run starts at, written after the branch switch, and
+// session 2's has the commit that session 1 pushed. Each names its launch snapshot in the
+// inputs folder, which has an index.json.
+func TestEachSessionsInputsHaveItsStartCommit(t *testing.T) {
+	p, _ := sharedPushRepo(t, laterAnswer(2, "claude", "example-provider-2", 30))
+	p.noOutput = true
+	type start struct {
+		StartCommits []struct {
+			Path, Commit string
+		} `json:"start_commits"`
+		StartArtifacts string `json:"start_artifacts"`
+	}
+	var starts []start
+	p.mountsOf = func(spec session.SessionSpec) {
+		for _, m := range spec.Mounts {
+			data, err := os.ReadFile(filepath.Join(m.Path, "inputs.json"))
+			if !m.ReadOnly || filepath.Base(m.Path) != "in" || err != nil {
+				continue
+			}
+			var inputs struct{ Qory start }
+			if err := json.Unmarshal(data, &inputs); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(inputs.Qory.StartArtifacts, "index.json")); err != nil {
+				t.Errorf("session %d has no launch snapshot: %v", len(starts)+1, err)
+			}
+			starts = append(starts, inputs.Qory)
+		}
+	}
+	var first string
+	r := p.run(t, func(d string) {
+		if first == "" {
+			writeFile(t, filepath.Join(d, "first.txt"), "first\n")
+			commitAll(t, d, "Add a first file")
+			first = gitHead(t, d)
+		}
+	}, numbered())
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if len(starts) != 2 {
+		t.Fatalf("%d sessions read inputs.json, want 2\n%s", len(starts), r.out)
+	}
+	for i, want := range []string{p.first, first} {
+		got := starts[i]
+		if len(got.StartCommits) != 1 || got.StartCommits[0].Commit != want || !filepath.IsAbs(got.StartCommits[0].Path) {
+			t.Errorf("session %d starts at %+v, want %s", i+1, got.StartCommits, want)
 		}
 	}
 }

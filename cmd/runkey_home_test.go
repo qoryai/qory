@@ -225,8 +225,9 @@ func TestARunKeyGetsInputsWithTheQoryMemberAlone(t *testing.T) {
 			if checkErr != nil || refusal != nil {
 				t.Fatalf("the push of spec got %+v, %v, want it to pass\n%s", refusal, checkErr, checkLog(t, log))
 			}
-			const want = `{"qory":{"harness_extensions":{"software-factory":{"command_limits_minutes":{"test":10}}},"outputs":[]}}` + "\n"
-			if string(in.written) != want || string(in.copied) != want {
+			// The start artifacts are in the run's inputs folder, a new temporary folder.
+			want := regexp.MustCompile(`^\{"qory":\{"harness_extensions":\{"software-factory":\{"command_limits_minutes":\{"test":10\}\}\},"outputs":\[\],"start_commits":\[\],"start_artifacts":"/[^"]*/in/start-artifacts"\}\}\n$`)
+			if !want.Match(in.written) || string(in.copied) != string(in.written) {
 				t.Errorf("inputs.json is %q and its copy in the home %q, want %q", in.written, in.copied, want)
 			}
 			created := ""

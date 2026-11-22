@@ -1331,3 +1331,27 @@ func SetGOOS(name string) func() {
 	goos = name
 	return func() { goos = before }
 }
+
+// SetScopeCheckLimit makes d the limit of a scope check in place of 30 seconds, and returns
+// what restores it.
+func SetScopeCheckLimit(d time.Duration) func() {
+	before := scopeCheckLimit
+	scopeCheckLimit = d
+	return func() { scopeCheckLimit = before }
+}
+
+// SetScopeClone makes err the error of each clone of a scope check, and returns what
+// restores the clone.
+func SetScopeClone(err error) func() {
+	before := scopeClone
+	scopeClone = func(context.Context, []string, string, string, preparation.WorkRepository, string) error { return err }
+	return func() { scopeClone = before }
+}
+
+// SetNoScopeChecks has each home read as one with no scope-checks.json, and returns what
+// restores the read.
+func SetNoScopeChecks() func() {
+	before := loadScopeChecks
+	loadScopeChecks = func(string) (map[string]compose.ScopeCheck, error) { return nil, nil }
+	return func() { loadScopeChecks = before }
+}

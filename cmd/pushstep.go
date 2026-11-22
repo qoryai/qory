@@ -290,12 +290,13 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		}
 		end := failedEnd(out)
 		if branch != nil {
-			// A session that did not succeed stores nothing, so its push checks no output.
-			var check func([]preparation.Repository) error
-			if end == "" {
-				check = func(version []preparation.Repository) error {
-					return outputsBeforePush(outputs, ctx, client, runID, branch.Ref, version)
+			// Every push passes the scope check first. A session that did not succeed
+			// stores nothing, so its push checks no output.
+			check := func(version []preparation.Repository) error {
+				if err := checks.scopeCheck(ctx, branch, dir, version); err != nil || end != "" {
+					return err
 				}
+				return outputsBeforePush(outputs, ctx, client, runID, branch.Ref, version)
 			}
 			runEnded, err := pushWorkBranch(ctx, run, w, branch, dir, runNumber, end, agentStopped, check)
 			*ended = runEnded

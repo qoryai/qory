@@ -478,19 +478,37 @@ func newPushRepo(t *testing.T, access string) *pushRepo {
 	return newPushRepoWith(t, access, nil)
 }
 
-// newPushRepoWith is [newPushRepo] with the files extra in the repository.
+// helloPlan is the plan line of a write workflow of [newPushRepoWith], whose module hello
+// declares the scope check [helloScope] for it: the fake docker's container of the check
+// exits 0, so the push step pushes what the session left.
+const helloPlan = "    plan: change-plan\n"
+
+// helloScope is the lines of the manifest of the module hello that declare the scope check
+// of the plan types build-plan and change-plan, with its program [helloScopeProgram].
+const (
+	helloScope        = "scope_checks:\n  build-plan: [checks/scope.sh]\n  change-plan: [checks/scope.sh]\n"
+	helloScopeProgram = "checks/scope.sh"
+)
+
+// newPushRepoWith is [newPushRepo] with the files extra in the repository. A workflow with
+// write access has the plan [helloPlan].
 func newPushRepoWith(t *testing.T, access string, extra map[string]string) *pushRepo {
 	t.Helper()
 	hello := helloFiles(t)
 	h := newHostFetch(t, "", "main")
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	stack := "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n"
+	workflow := "workflows:\n  hello:\n    access: " + access + "\n"
+	if access == "write" {
+		workflow += helloPlan
+	}
 	files := map[string]string{
-		"qory.yaml":                       ownStack(stack + "workflows:\n  hello:\n    access: " + access + "\n"),
-		"README.md":                       "acme/site\n",
-		"modules/hello/qory-module.yaml":  hello["examples/hello/modules/hello/qory-module.yaml"],
-		"modules/hello/commands/hello.md": hello["examples/hello/modules/hello/commands/hello.md"],
-		"modules/hello/process.yaml":      pullRequestProcess,
+		"qory.yaml":                          ownStack(stack + workflow),
+		"README.md":                          "acme/site\n",
+		"modules/hello/qory-module.yaml":     hello["examples/hello/modules/hello/qory-module.yaml"] + helloScope,
+		"modules/hello/commands/hello.md":    hello["examples/hello/modules/hello/commands/hello.md"],
+		"modules/hello/process.yaml":         pullRequestProcess,
+		"modules/hello/" + helloScopeProgram: "#!/bin/sh\n",
 	}
 	maps.Copy(files, extra)
 	first := h.server.Repository(t, "acme/site", "main", files)
@@ -772,8 +790,8 @@ func TestARunWithNoNewCommitsPushesNothing(t *testing.T) {
 	if head := p.branchHead(t); head != "" {
 		t.Errorf("the forge has the branch at %s", head)
 	}
-	if posts, reads, _ := p.api.counts(); posts != 0 || reads != 1 {
-		t.Errorf("%d POST and %d reads of the index, want 0 and the read of the fetch", posts, reads)
+	if posts, reads, _ := p.api.counts(); posts != 0 || reads != 2 {
+		t.Errorf("%d POST and %d reads of the index, want 0, and the reads of the fetch and of the launch snapshot", posts, reads)
 	}
 	wants(t, r.log(), "qory run: no new commits to push")
 }
@@ -814,10 +832,13 @@ func TestAReadRunPushesNothing(t *testing.T) {
 // harness document and whose inputs list destinations: qory fetches its target at the
 // target version before the session, and the push step pushes what the agent left to the
 // work item's branch, as for a run whose inputs list none. The harness defines pull-request,
-// which the documents deliver.
+// which the documents deliver, and the plan [helloPlan].
 func TestAWriteRunWhoseInputsListDestinationsPushes(t *testing.T) {
 	files := harnessFiles(t, "write")
 	files["examples/hello/modules/hello/process.yaml"] = pullRequestProcess
+	files["examples/hello/qory-stack.yaml"] += helloPlan
+	files["examples/hello/modules/hello/qory-module.yaml"] += helloScope
+	files["examples/hello/modules/hello/"+helloScopeProgram] = "#!/bin/sh\n"
 	p := newPushRepo(t, "write")
 	harness := servedHarness(t, p.h, files)
 	p.change = func(d map[string]any) {
@@ -1805,8 +1826,8 @@ func TestARateLimitedPostWaitsAndSendsAgain(t *testing.T) {
 	}
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
-	if posts, reads, stored := p.api.counts(); posts != 3 || stored != 1 || reads != 1 {
-		t.Errorf("%d POST, %d reads, %d stored, want 3, the read of the fetch, 1", posts, reads, stored)
+	if posts, reads, stored := p.api.counts(); posts != 3 || stored != 1 || reads != 2 {
+		t.Errorf("%d POST, %d reads, %d stored, want 3, the reads of the fetch and the launch snapshot, 1", posts, reads, stored)
 	}
 	if want := []time.Duration{2 * time.Second, 2 * time.Second}; !slices.Equal(p.waits, want) {
 		t.Errorf("the waits are %v, want %v", p.waits, want)
@@ -1854,8 +1875,8 @@ func TestNoResponseToAStoredVersionSendsNothingAgain(t *testing.T) {
 			}
 			r := p.run(t, writesAndCommits(t), nil)
 			r.wantsClose(t, event.StateSucceeded, 0)
-			if posts, reads, stored := p.api.counts(); posts != 1 || stored != 1 || reads != 2 {
-				t.Errorf("%d POST, %d reads, %d stored, want 1, 2 and 1", posts, reads, stored)
+			if posts, reads, stored := p.api.counts(); posts != 1 || stored != 1 || reads != 3 {
+				t.Errorf("%d POST, %d reads, %d stored, want 1, 3 and 1", posts, reads, stored)
 			}
 		})
 	}
@@ -1874,8 +1895,8 @@ func TestNoResponseWithNoVersionSendsAgain(t *testing.T) {
 	}
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
-	if posts, reads, stored := p.api.counts(); posts != 2 || stored != 1 || reads != 2 {
-		t.Errorf("%d POST, %d reads, %d stored, want 2, 2 and 1", posts, reads, stored)
+	if posts, reads, stored := p.api.counts(); posts != 2 || stored != 1 || reads != 3 {
+		t.Errorf("%d POST, %d reads, %d stored, want 2, 3 and 1", posts, reads, stored)
 	}
 }
 
@@ -1888,7 +1909,7 @@ func TestNoResponseThatTheIndexDoesNotSettleFails(t *testing.T) {
 		return true, false
 	}
 	p.api.index = func(n int, w http.ResponseWriter) bool {
-		if n == 1 {
+		if n <= 2 {
 			return false
 		}
 		failing(w, http.StatusServiceUnavailable, "unavailable", "")
@@ -1896,8 +1917,8 @@ func TestNoResponseThatTheIndexDoesNotSettleFails(t *testing.T) {
 	}
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 6 {
-		t.Errorf("%d POST, %d reads, want 1, and the read of the fetch and 5", posts, reads)
+	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 7 {
+		t.Errorf("%d POST, %d reads, want 1, and the reads of the fetch, the launch snapshot and 5", posts, reads)
 	}
 	wants(t, r.out, "qory run: check the artifact pull-request of the work item in Qory Apiary; with no version of this run, "+deleteBranch+"; then take the work item in again: qory pushed qory/"+workItem+
 		", and the request that stores its version ended with no response, so the version may or may not be stored: ")
@@ -1921,7 +1942,7 @@ func TestAnOutputThatIsNotStoredStaysInTheOutbox(t *testing.T) {
 				return true, false
 			},
 			index: func(n int, w http.ResponseWriter) bool {
-				if n == 1 {
+				if n <= 2 {
 					return false
 				}
 				failing(w, http.StatusServiceUnavailable, "unavailable", "")
@@ -1961,8 +1982,8 @@ func TestAWorkspaceWithoutTheTypeFailsTheStep(t *testing.T) {
 	}
 	wants(t, r.out, "qory run: "+noType+"\n")
 	wants(t, r.log(), "qory run: "+noType+"\n")
-	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 1 {
-		t.Errorf("%d POST, %d reads, want 1 and the read of the fetch", posts, reads)
+	if posts, reads, _ := p.api.counts(); posts != 1 || reads != 2 {
+		t.Errorf("%d POST, %d reads, want 1 and the reads of the fetch and the launch snapshot", posts, reads)
 	}
 	if p.branchHead(t) == "" {
 		t.Error("the forge has no branch: the push comes before the POST")
@@ -1992,7 +2013,7 @@ func TestAFailedStoreAfterThePushClosesRunAPIFailed(t *testing.T) {
 				return true, false
 			},
 			index: func(n int, w http.ResponseWriter) bool {
-				if n == 1 {
+				if n <= 2 {
 					return false
 				}
 				failing(w, http.StatusServiceUnavailable, "unavailable", "")

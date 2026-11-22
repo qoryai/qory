@@ -899,6 +899,24 @@ func (r *Result) PushChecksFor(home string) []PushCheck {
 	return out
 }
 
+// ScopeChecksFor is a copy of the scope checks rendered for a home, with every
+// $QORY_HARNESS_HOME in a command replaced the way [Result.PushChecksFor] replaces it; nil
+// when there is none.
+func (r *Result) ScopeChecksFor(home string) map[string]ScopeCheck {
+	if len(r.ScopeChecks) == 0 {
+		return nil
+	}
+	out := make(map[string]ScopeCheck, len(r.ScopeChecks))
+	for typ, c := range r.ScopeChecks {
+		command := make([]string, len(c.Command))
+		for i, word := range c.Command {
+			command[i] = ForHome(word, home).(string)
+		}
+		out[typ] = ScopeCheck{Module: c.Module, Command: command}
+	}
+	return out
+}
+
 // workflowsShipped checks that each workflow of p is a skill or command that composed
 // contains, under either name of [stack.WorkflowEntries], the entries of the modules of
 // the stack that lists the workflows, after their exclude or only blocks: base's modules

@@ -678,7 +678,8 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 // directory as modules/<name>, links the shared skills and hooks for the bare address and
 // writes AGENTS.md at the staging root with its references resolved the same way, since
 // every checkout link reads them, push-checks.json beside it when a module declares a
-// push check, [PushChecksFile], hooks.json when the checkout lists a workflow hook,
+// push check, [PushChecksFile], scope-checks.json when a module declares a scope check,
+// [ScopeChecksFile], hooks.json when the checkout lists a workflow hook,
 // [HooksFile], roles.json when the harness has a role, [RolesFile], and role-notes.json,
 // [RoleNotesFile], then calls each runtime's Render for the subdirectory named after it and
 // links the runtime's files entries into that subdirectory. The links
@@ -710,6 +711,9 @@ func BuildAt(res *compose.Result, stage, home string, runtimes ...Runtime) error
 		}
 	}
 	if err := writePushChecks(res, stage, home); err != nil {
+		return err
+	}
+	if err := writeScopeChecks(res, stage, home); err != nil {
 		return err
 	}
 	if err := writeHooks(res, stage); err != nil {
@@ -766,6 +770,30 @@ func writePushChecks(res *compose.Result, stage, home string) error {
 		return err
 	}
 	return WriteFile(stage, PushChecksFile, append(data, '\n'))
+}
+
+// ScopeChecksFile is the file at the root of a home with the scope checks the modules
+// declare, written only when a module declares one.
+const ScopeChecksFile = "scope-checks.json"
+
+// ScopeChecks is the content of [ScopeChecksFile]: the check of each plan type, with its
+// program's absolute path in the home.
+type ScopeChecks struct {
+	ScopeChecks map[string]compose.ScopeCheck `json:"scope_checks"`
+}
+
+// writeScopeChecks writes [ScopeChecksFile] into stage, with each program's path in home;
+// nothing when no module declares a scope check.
+func writeScopeChecks(res *compose.Result, stage, home string) error {
+	checks := res.ScopeChecksFor(home)
+	if len(checks) == 0 {
+		return nil
+	}
+	data, err := json.MarshalIndent(ScopeChecks{ScopeChecks: checks}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return WriteFile(stage, ScopeChecksFile, append(data, '\n'))
 }
 
 // HooksFile is the file at the root of a home with the workflow hooks of the checkout's
