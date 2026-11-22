@@ -247,13 +247,8 @@ func TestDestinationCloneStopsOnMalformedDestinations(t *testing.T) {
 	}
 }
 
-// TestDestinationCloneCountsAtMost100 is a session that cloned 100 destinations: a call
-// that would make clone 101 stops before it clones, exit 2, and a call for a destination
-// cloned before still prints its line.
-// TestDestinationCloneMatchesEachMemberByItsExactName is an entry in which each member
-// is followed by one whose name differs only in case: an id that the call does not name,
-// an empty target, an empty collection, no address, a system that is no host name, and
-// the path of another repository. The clone uses the lower-case members alone.
+// TestDestinationCloneMatchesEachMemberByItsExactName checks that a member whose name
+// differs only in case, after each member of an entry, changes nothing in the clone.
 func TestDestinationCloneMatchesEachMemberByItsExactName(t *testing.T) {
 	c := destinationSession(t)
 	writeFile(t, filepath.Join(c.home, "inputs.json"), `{"destinations": [{"id": "`+webID+`", "ID": "`+backID+`",
@@ -274,6 +269,9 @@ func TestDestinationCloneMatchesEachMemberByItsExactName(t *testing.T) {
 	}
 }
 
+// TestDestinationCloneCountsAtMost100 is a session that cloned 100 destinations: a call
+// that would make clone 101 stops before it clones, exit 2, and a call for a destination
+// cloned before still prints its line.
 func TestDestinationCloneCountsAtMost100(t *testing.T) {
 	c := destinationSession(t)
 	if _, err := run(t, "destination", "clone", webID); err != nil {
