@@ -419,7 +419,8 @@ func recordOf(branch *preparation.WorkBranch, target *contracts.Target) *pushRec
 // ready reads, fills and checks each output of the stage that the outbox has, before any
 // version is stored, so an output that breaks its schema stores nothing. A type that marks
 // pushed-commits, or any member that qory fills from the push ([marksPushFill]), of a run that
-// pushed nothing to the target gets no version, and a line on w. missing is each required output that the outbox does not have.
+// pushed nothing to the target gets no version, and a line on w. missing is each required
+// output that the outbox does not have.
 func (o *runOutputs) ready(w io.Writer, branch *preparation.WorkBranch, note string) (out []readyOutput, missing []string, err error) {
 	rec := recordOf(branch, o.target)
 	for _, stage := range o.stage {
