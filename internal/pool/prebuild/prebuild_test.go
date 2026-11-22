@@ -68,6 +68,9 @@ type script struct {
 	// of 50 ms. HostProxy "fail" makes the host proxy fail to open.
 	Fetch     string
 	HostProxy string
+	// NoSystem makes the run's host of its repositories "", as for a run configuration
+	// that sets no QORY_RUN_SYSTEM.
+	NoSystem bool
 	// Head is what the fetch leaves in work/.git: "branch", a loose ref, "packed", a
 	// packed ref, "detached", or "garbage"; Commit is the id it leaves.
 	Head   string
@@ -374,7 +377,12 @@ func (r *fakeRun) StartStep(string, string) (*session.Step, error) {
 	return nil, errors.New("the run is closed")
 }
 
-func (r *fakeRun) System() string { return "github.com" }
+func (r *fakeRun) System() string {
+	if r.e.script.NoSystem {
+		return ""
+	}
+	return "github.com"
+}
 
 func (r *fakeRun) Close(_ context.Context, out session.Outcome) (*session.Closed, error) {
 	r.closed = append(r.closed, out)
@@ -956,6 +964,7 @@ func TestLaunchFetchErrors(t *testing.T) {
 		{func(e *env) { e.script.Open, e.script.Record = "fail", false }, "check that this machine reaches the run's gateway: the run did not open there: the gateway refused the run request: run_not_found"},
 		{func(e *env) { e.script.HostProxy = "fail" }, "check that qory run can listen on a port of 127.0.0.1: the run's host proxy, through which qory run fetches the run's code, did not open: listen tcp 127.0.0.1:0: no port"},
 		{func(e *env) { e.script.Fetch = "none" }, "The run's target is not a repository, so the prebuild did not start\n  The target has no address on github.com, the host of the run's repositories, and a prebuild builds a repository."},
+		{func(e *env) { e.script.Fetch, e.script.NoSystem = "none", true }, "The run's target is not a repository, so the prebuild did not start\n  The run has no host for its repositories, and a prebuild builds a repository."},
 		{func(e *env) { e.script.Close = "fail" }, "update qory: the run could not be closed: the run is closed already"},
 		{func(e *env) { e.script.Close = "gateway" }, "check the run's record in Qory Apiary: the gateway closed the run as failed before qory run closed it"},
 	} {

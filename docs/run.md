@@ -2247,6 +2247,10 @@ run code. The read targets follow these rules:
 - A run with no `QORY_RUN_SYSTEM`, such as one of a workspace that is not a software
   factory, fetches no read target: its read targets are places in another system, and the
   run goes on.
+- The setup container gets the list in `QORY_RUN_REPOSITORIES`: the target first, then
+  the read targets. `qory run prepare` takes a list of up to 4220 bytes, a target and 20
+  read targets of 200 characters each. A longer list stops the setup with `The run's
+  repository list is longer than 4220 bytes, so the setup did not start`.
 
 The documents of a run with a target may set `target_version`: the version at which Qory
 Apiary checked the target for a harness file. When the `system` of the target's address
@@ -2302,8 +2306,9 @@ commit of the work item's earlier runs, ordered by run number and then by push o
 marks the commits of cancelled runs. A commit of a cancelled run, and a commit that does not descend from the start
 commit, moves the run nowhere.
 
-qory composes the harness at `target_version`, with the read targets at their start
-commits, before it checks out the work item's branch. When the documents contain
+qory composes the harness at `target_version`, with the read targets at the heads of their
+default branches, before it checks out the work item's branch. A read target whose version
+lists a commit moves to that commit then. When the documents contain
 no harness document, the compose reads the checkout's `qory.yaml` or `harness.yaml`, the
 modules it lists by a path and every file of those modules as `target_version` has them.
 It reads `harness.extensions`, such as `command_limits_minutes`, the `qory` version
@@ -2373,6 +2378,9 @@ run as failed with no session. `<commit>` is the commit's first 12 characters:
   any fetch, on github.com
 - `A read target is inside another, so the run did not start; the code is used`, before
   any fetch
+- `The working folder has .qory/repositories, so the run did not start; the code is used`,
+  and `The working folder's .qory is not a folder, so the run did not start; the code is
+  used`, before the fetch of the read targets
 - `A target is not a repository path, so the run did not start; the code is used`, and the
   same for a read target, before any fetch, with the path on line 2; on github.com, `A
   target is not owner/name, so the run did not start; the code is used`
@@ -2399,9 +2407,14 @@ is set to, with no agent:
    `set a run configuration for the run's workspace in Qory Apiary: a prebuild runs under
    its policy alone, and the run's policy is <source>`, where `<source>` is `the gateway's
    machine's`, `none` or `not recorded`.
-2. qory fetches the run's repositories through the run's host proxy into an empty working
-   folder under `pool/runs/<run id>` in qory's state directory. git runs on this machine
-   for the fetch, outside the wall.
+2. qory fetches the repository of the documents' target through the run's host proxy into
+   an empty working folder under `pool/runs/<run id>` in qory's state directory. git runs
+   on this machine for the fetch, outside the wall. A target that is not a repository on
+   the run's host stops the prebuild with `The run's target is not a repository, so the
+   prebuild did not start`, then `The target has no address on <host>, the host of the
+   run's repositories, and a prebuild builds a repository.` indented by two spaces. With
+   no `QORY_RUN_SYSTEM`, line 2 is `The run has no host for its repositories, and a
+   prebuild builds a repository.`
 3. One session joins the run, with qory's helper, `qory run prebuild-step`, as its
    command, the working folder as its folder and a writable `out` folder beside it. The
    session gets none of this machine's variables and no model key.
@@ -3233,9 +3246,6 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   again. The store had no response: <error>; the code is used`
 - the lines of [The outputs of a session](#the-outputs-of-a-session), when an output of the
   outbox cannot be read, filled or checked, or a required output is missing
-- `delete branch qory/<work item id> of <path> on <system>`, then a line indented by two
-  spaces: `qory pushed <path> and stored no version, because the push of the next
-  repository failed: <line of that failure>`
 
 #### The head check
 

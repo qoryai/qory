@@ -848,9 +848,9 @@ release may change what an existing document does, and states it under Upgrading
   `QORY_RUN_REPOSITORIES` lists after another repository, or does not list, are gone.
 - `qory destination clone` checks `destinations` against the explore contract's schema,
   `inputs.schema.json`, and reads each entry as the contract's destination. It also stops
-  on a `{` or `}` in a path, U+0000 in a collection, two equal entries and more than 250
-  entries. Line 2 of the error has the entry and the place in it that does not match the
-  schema, such as `entry 1 does not match the schema of a destination at /id`.
+  on a `{` or `}` in a path and on U+0000 in a collection. Line 2 of the error has the
+  entry and the place in it that does not match the schema, such as `entry 1 does not
+  match the schema of a destination at /id`.
 - `qory destination clone` states the cause on line 1 of a failure that a member cannot fix
   in the session, such as `qory destination clone: The machine cannot store <id>, so nothing
   was cloned.`, in place of a line that starts with `Ask the instance admin of Qory Apiary`.

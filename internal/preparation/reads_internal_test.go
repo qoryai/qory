@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/qoryai/integrations/contracts"
 )
 
 // readOn is a read target on git.example.com at path.
@@ -357,11 +359,11 @@ func TestAFolderWithFilesStopsReadTargetsAlone(t *testing.T) {
 // characters: the check passes. A list one byte longer stops, with the bound in the line.
 func TestTheSetupTakesTheLongestListOfARunCode(t *testing.T) {
 	at := Target{FromCode: true, System: "git.example.com", Path: longPath('z')}
-	for i := range maxReads {
+	for i := range contracts.MaxReadTargets {
 		at.Reads = append(at.Reads, readOn(longPath(rune('a'+i))))
 	}
 	paths, target, err := at.Repositories("git.example.com")
-	if err != nil || !target || len(paths) != maxReads+1 {
+	if err != nil || !target || len(paths) != contracts.MaxReadTargets+1 {
 		t.Fatalf("the list is %d paths, target %v: %v", len(paths), target, err)
 	}
 	list := strings.Join(paths, ",")

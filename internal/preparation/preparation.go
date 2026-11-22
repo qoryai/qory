@@ -39,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/qoryai/integrations/contracts"
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/hostgit"
@@ -186,13 +187,11 @@ const (
 	// maxList is the most bytes [EnvRepositories] may hold where a run configuration sets
 	// it.
 	maxList = 256
-	// maxReads is the most read targets the run documents list, as documents.schema.json
-	// of the run contract has it.
-	maxReads = 20
 	// maxSetupList is the most bytes of [EnvRepositories] that [Prepare] takes: the list
-	// that qory builds from the documents of a run code, a target and [maxReads] read
-	// targets of [maxPath] characters each, with a comma between two.
-	maxSetupList = (maxReads+1)*(maxPath+1) - 1
+	// that qory builds from the documents of a run code, a target and
+	// [contracts.MaxReadTargets] read targets of [maxPath] characters each, with a comma
+	// between two.
+	maxSetupList = (contracts.MaxReadTargets+1)*(maxPath+1) - 1
 	// maxPath is the most characters one repository path may have.
 	maxPath = 200
 )
@@ -456,12 +455,14 @@ func runList(getenv func(string) string, at Target) (paths []string, target bool
 // read target in t.Reads, in its order. target reports whether the first is the target's.
 // A read target whose repository the list has already, under another collection or as the
 // target, is listed once. A list with no target's repository has no working repository:
-// each entry is a read target. A target on another system is not listed, and a read
-// target on another system, or, on github.com, of another owner than the first entry,
-// stops the list, and with system "" the list is empty, as does a path that is not a repository path, as [Check] has it, and a
-// read target inside another. The list has no bound on its bytes, which [Check] sets for
-// [EnvRepositories]. A system that is not a host name stops a list with an entry. Each
-// error is a line of a dispatched run: the cause alone.
+// each entry is a read target. With system "" the list is empty: the read targets are
+// places in another system. A target on another system is not listed. A read target on
+// another system, or, on github.com, of another owner than the first entry, stops the
+// list, as do a path that is not a repository path, as [Check] has it, and a read target
+// inside another. Each of these stops is a line of a dispatched run: the cause alone. A
+// system that is not a host name stops a list with an entry, with the fix [textNotHost],
+// since the run configuration sets the system. The list has no bound on its bytes, which
+// [Check] sets for [EnvRepositories].
 func (t Target) Repositories(system string) (paths []string, target bool, err error) {
 	if system == "" {
 		// A run with no host for its repositories, such as one of a workspace that is not
@@ -470,7 +471,7 @@ func (t Target) Repositories(system string) (paths []string, target bool, err er
 		return nil, false, nil
 	}
 	github := system == ForgeGitHub
-	if system != "" && t.System == system {
+	if t.System == system {
 		if t.Path == "" || !repositoryPath(t.Path) {
 			return nil, false, fmt.Errorf(textListNotPath, "target", shownPath(t.Path))
 		}
@@ -532,11 +533,12 @@ func seconds(d time.Duration) string {
 // every entry is owner/name, and of the first entry's owner. A list Check returns is
 // one the URLs and the folders are built from.
 func Check(system, list string) ([]string, error) {
-	return checkList(system, list, maxList)
+	return checkList(system, list, maxList, fmt.Sprintf(textTooLong, EnvRepositories, maxList))
 }
 
-// checkList is [Check] with limit in place of [maxList].
-func checkList(system, list string, limit int) ([]string, error) {
+// checkList is [Check] with limit in place of [maxList], and tooLong the line of a list
+// over it.
+func checkList(system, list string, limit int, tooLong string) ([]string, error) {
 	if system == "" {
 		return nil, fmt.Errorf(textNoSystem, EnvRepositories, EnvSystem)
 	}
@@ -544,7 +546,7 @@ func checkList(system, list string, limit int) ([]string, error) {
 		return nil, fmt.Errorf(textNotHost, EnvSystem)
 	}
 	if len(list) > limit {
-		return nil, fmt.Errorf(textTooLong, EnvRepositories, limit)
+		return nil, errors.New(tooLong)
 	}
 	paths := strings.Split(list, ",")
 	github := system == ForgeGitHub

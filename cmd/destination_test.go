@@ -240,8 +240,8 @@ func TestDestinationCloneStopsOnMalformedDestinations(t *testing.T) {
 		{[]any{map[string]any{"id": webID, "target": map[string]any{}}}, "entry 1 does not match the schema of a destination at /target"},
 		{[]any{map[string]any{"id": webID, "target": map[string]any{"collection": "c", "address": map[string]any{"system": "Git.test", "path": "acme/web"}}}}, "entry 1 does not match the schema of a destination at /target/address/system"},
 		{[]any{destinationOf(webID, "acme/\x00web")}, "entry 1 does not match the schema of a destination at /target/address/path"},
-		// The schema stops what the earlier checks of qory let through: a { in a path,
-		// U+0000 in a collection, two equal entries, and more than 250 entries.
+		// The schema stops what the earlier checks of qory let through: a { in a path and
+		// U+0000 in a collection. It stops two equal entries and more than 250 entries too.
 		{[]any{destinationOf(backID, "acme/back"), destinationOf(webID, "acme/{web}")}, "entry 2 does not match the schema of a destination at /target/address/path"},
 		{[]any{map[string]any{"id": webID, "target": map[string]any{"collection": "c\x00"}}}, "entry 1 does not match the schema of a destination at /target/collection"},
 		{[]any{destinationOf(webID, "acme/web"), destinationOf(webID, "acme/web")}, "destinations does not match explore/v1 inputs.schema.json#/properties/destinations"},

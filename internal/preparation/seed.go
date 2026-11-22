@@ -54,10 +54,7 @@ func Prepare(ctx context.Context, dir, seed string, getenv func(string) string, 
 		return false, nil
 	}
 	system := getenv(EnvSystem)
-	if len(list) > maxSetupList {
-		return false, fmt.Errorf(textSetupTooLong, maxSetupList)
-	}
-	paths, err := checkList(system, list, maxSetupList)
+	paths, err := checkList(system, list, maxSetupList, fmt.Sprintf(textSetupTooLong, maxSetupList))
 	if err != nil {
 		return false, err
 	}
