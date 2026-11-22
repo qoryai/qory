@@ -215,7 +215,7 @@ func TestTheDocumentsTargetIsTheRunsRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "qory run: fetched acme/shop at " + first[:12] + " and 1 further repository in Xs"; line != want {
+	if want := "qory run: fetched acme/shop at " + first[:12] + " and 1 read-only repository in Xs"; line != want {
 		t.Errorf("the line is %q, want %q", line, want)
 	}
 	if got := run(t, dir, "rev-parse", "HEAD"); got != first {

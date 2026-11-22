@@ -99,13 +99,17 @@ var fromCodeLines = map[string]string{
 
 // The words of the fetch qory run does. Each is one format string.
 const (
-	textNoSystem       = "qory run: set %[2]s beside %[1]s in the run configuration: %[2]s is the host of the repositories %[1]s lists, and it is not set"
-	textNotHost        = "qory run: set %s to a host name, such as github.com"
-	textNotPath        = "qory run: make entry %[2]d of %[1]s a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"
-	textNested         = "qory run: remove entry %[2]d, %[3]s, or entry %[4]d, %[5]s, from %[1]s: the first is inside the second, and a repository is not cloned inside another"
-	textTwice          = "qory run: list %[2]s once in %[1]s, which lists it twice"
-	textTooLong        = "qory run: shorten %s to 256 bytes or fewer"
-	textNotEmpty       = "qory run: start the run in an empty git working tree: the working folder contains files already, and the run's repository is fetched only into an empty one"
+	textNoSystem = "qory run: set %[2]s beside %[1]s in the run configuration: %[2]s is the host of the repositories %[1]s lists, and it is not set"
+	textNotHost  = "qory run: set %s to a host name, such as github.com"
+	textNotPath  = "qory run: make entry %[2]d of %[1]s a repository path: segments of A-Z, a-z, 0-9, dot, underscore and dash, with no ., .. or .git segment, 1 to 200 characters"
+	textNested   = "qory run: remove entry %[2]d, %[3]s, or entry %[4]d, %[5]s, from %[1]s: the first is inside the second, and a repository is not cloned inside another"
+	textTwice    = "qory run: list %[2]s once in %[1]s, which lists it twice"
+	textTooLong  = "qory run: shorten %s to %d bytes or fewer"
+	textNotEmpty = "qory run: start the run in an empty git working tree: the working folder contains files already, and the run's repository is fetched only into an empty one"
+	// textNotEmptyReads and textNotTreeReads are textNotEmpty and textNotTree of a run
+	// with read targets and no repository in the working folder.
+	textNotEmptyReads  = "qory run: start the run in an empty git working tree: the working folder contains files already\n  qory fetches the read-only repositories only into an empty one."
+	textNotTreeReads   = "qory run: start the run in an empty folder or an empty git working tree\n  The working folder is neither, and qory fetches the read-only repositories only into one of these."
 	textNotFetched     = "qory run: add a credential for %s that reads %s to the run configuration, then run again. The fetch of %s through the run's gateway failed: %s"
 	textNotReached     = "qory run: check that the run's policy allows %[1]s and that %[1]s is reachable, then run again. The fetch of %[2]s through the run's gateway failed: %[3]s"
 	textNoBranch       = "qory run: give %s on %s a default branch with a commit, then run again. The fetch through the run's gateway failed: %s"
@@ -132,31 +136,32 @@ const (
 	textGrafts         = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has info/grafts, which gives commits other parents"
 	textCommonDir      = "qory run: start the run in a new empty git working tree, then run again: the working folder's .git has a commondir file, which can point git at another repository"
 	// The cause of each of these lines alone, for the line after the agent exited.
-	causeConfigKey     = "it has %s in %s, and the check stops on each key that neither git init nor the fetch writes, because a key such as a filter, a proxy or http.sslVerify changes what git on this machine does"
-	causeConfigNotFile = "its %s is not a regular file"
-	causeAlternates    = "its .git has %s, which makes git read objects from outside the working folder"
-	causeGitLink       = "it has the link %s, and git would read and write through that link"
-	causeHardLink      = "it has the hard link %s, and a write to it would change another file"
-	causeCommonDir     = "its .git has a commondir file, which can point git at another repository"
-	causeGrafts        = "its .git has info/grafts, which gives commits other parents, so a push that overwrites a branch would pass as a fast-forward"
-	causeGitFailed     = "git failed: %s"
-	causeLocal         = "the read of its files failed: %s"
-	causeNoGitPart     = "its .git has no %s, so git would take a folder above it for the repository"
-	textFetched        = "qory run: fetched %s at %s in %s"
-	textFetchedOne     = "qory run: fetched %s at %s and 1 further repository in %s"
-	textFetchedMany    = "qory run: fetched %s at %s and %d further repositories in %s"
-	textFetchedReadOne = "qory run: fetched 1 read-only repository in %s"
-	textFetchedReads   = "qory run: fetched %d read-only repositories in %s"
-	textNoCommit       = "qory run: take the work item in again in Qory Apiary: the commit %[1]s that the run's documents set is not on %[2]s on %[3]s. The fetch through the run's gateway failed: %[4]s; the code is used"
-	textNoFetchByID    = "qory run: let %[3]s serve a fetch of a commit by its id, such as with git's uploadpack.allowReachableSHA1InWant, then take the work item in again in Qory Apiary: %[3]s does not serve the commit %[1]s of %[2]s by its id, or does not have it. The fetch through the run's gateway failed: %[4]s; the code is used"
-	textNotCommitID    = "qory run: ask Qory Apiary's instance admin to check the adapter of the target: the run's documents set the target version %s, and qory fetches a target at a version only when the version is a commit id of 40 or 64 hex digits; the code is used"
+	causeConfigKey      = "it has %s in %s, and the check stops on each key that neither git init nor the fetch writes, because a key such as a filter, a proxy or http.sslVerify changes what git on this machine does"
+	causeConfigNotFile  = "its %s is not a regular file"
+	causeAlternates     = "its .git has %s, which makes git read objects from outside the working folder"
+	causeGitLink        = "it has the link %s, and git would read and write through that link"
+	causeHardLink       = "it has the hard link %s, and a write to it would change another file"
+	causeCommonDir      = "its .git has a commondir file, which can point git at another repository"
+	causeGrafts         = "its .git has info/grafts, which gives commits other parents, so a push that overwrites a branch would pass as a fast-forward"
+	causeGitFailed      = "git failed: %s"
+	causeLocal          = "the read of its files failed: %s"
+	causeNoGitPart      = "its .git has no %s, so git would take a folder above it for the repository"
+	textFetched         = "qory run: fetched %s at %s in %s"
+	textFetchedOne      = "qory run: fetched %s at %s and 1 further repository in %s"
+	textFetchedMany     = "qory run: fetched %s at %s and %d further repositories in %s"
+	textFetchedReadOne  = "qory run: fetched 1 read-only repository in %s"
+	textFetchedReads    = "qory run: fetched %d read-only repositories in %s"
+	textFetchedAndRead  = "qory run: fetched %s at %s and 1 read-only repository in %s"
+	textFetchedAndReads = "qory run: fetched %s at %s and %d read-only repositories in %s"
+	textNoCommit        = "qory run: take the work item in again in Qory Apiary: the commit %[1]s that the run's documents set is not on %[2]s on %[3]s. The fetch through the run's gateway failed: %[4]s; the code is used"
+	textNoFetchByID     = "qory run: let %[3]s serve a fetch of a commit by its id, such as with git's uploadpack.allowReachableSHA1InWant, then take the work item in again in Qory Apiary: %[3]s does not serve the commit %[1]s of %[2]s by its id, or does not have it. The fetch through the run's gateway failed: %[4]s; the code is used"
+	textNotCommitID     = "qory run: ask Qory Apiary's instance admin to check the adapter of the target: the run's documents set the target version %s, and qory fetches a target at a version only when the version is a commit id of 40 or 64 hex digits; the code is used"
 	// The lines of a list of a run from a run code that [Target.Repositories] stops on: the
 	// cause alone, since the run is a dispatched one. The first %s of textListNotPath and
 	// textListNotGitHub is "target" or "read target".
 	textListNotPath     = "qory run: A %s is not a repository path, so the run did not start; the code is used\n  The path is %s. A repository path is segments of A-Z, a-z, 0-9, dot, underscore and dash, 1 to 200 characters, with no ., .. or .git segment."
 	textListNotGitHub   = "qory run: A %s is not owner/name, so the run did not start; the code is used\n  The path is %s, and a repository on github.com has a path of the form owner/name."
 	textReadOtherSystem = "qory run: A read target is on another host, so the run did not start; the code is used\n  The read target %[1]s is on %[2]s, and the run's repositories are on %[3]s."
-	textReadNoSystem    = "qory run: A read target is on another host, so the run did not start; the code is used\n  The read target %[1]s is on %[2]s, and the run has no host for its repositories: %[3]s is not set."
 	textReadOtherOwner  = "qory run: A read target is of another owner, so the run did not start; the code is used\n  The read target %[1]s is of owner %[2]s, and on github.com the repositories of a run are of one owner, %[3]s."
 	textReadNested      = "qory run: A read target is inside another, so the run did not start; the code is used\n  The read target %[1]s is inside the read target %[2]s, and qory clones no repository inside another."
 	textKeptNoTarget    = "qory run: The working folder has .qory/repositories, so the run did not start; the code is used\n  qory clones the read-only repositories there, and nothing is cloned over it."
@@ -174,8 +179,16 @@ const (
 )
 
 const (
-	// maxList is the most bytes [EnvRepositories] may hold.
+	// maxList is the most bytes [EnvRepositories] may hold where a run configuration sets
+	// it.
 	maxList = 256
+	// maxReads is the most read targets the run documents list, as documents.schema.json
+	// of the run contract has it.
+	maxReads = 20
+	// maxSetupList is the most bytes of [EnvRepositories] that [Prepare] takes: the list
+	// that qory builds from the documents of a run code, a target and [maxReads] read
+	// targets of [maxPath] characters each, with a comma between two.
+	maxSetupList = (maxReads+1)*(maxPath+1) - 1
 	// maxPath is the most characters one repository path may have.
 	maxPath = 200
 )
@@ -337,7 +350,7 @@ func fetchRepositories(ctx context.Context, dir string, base []string, getenv fu
 	}
 	g := hostRunner(&p)
 	// LC_ALL=C keeps the line [initFolder] reads from git in English.
-	if err := emptyTree(ctx, hostRunnerWith(&p, "", "LC_ALL=C"), dir); err != nil {
+	if err := emptyTree(ctx, hostRunnerWith(&p, "", "LC_ALL=C"), dir, target); err != nil {
 		return false, err
 	}
 	start := time.Now()
@@ -403,6 +416,10 @@ func fetchRepositories(ctx context.Context, dir string, base []string, getenv fu
 		fmt.Fprintf(report, textFetchedReads+"\n", len(further), took)
 	case len(further) == 0:
 		fmt.Fprintf(report, textFetched+"\n", first, shown, took)
+	case len(further) == 1 && at.FromCode:
+		fmt.Fprintf(report, textFetchedAndRead+"\n", first, shown, took)
+	case at.FromCode:
+		fmt.Fprintf(report, textFetchedAndReads+"\n", first, shown, len(further), took)
 	case len(further) == 1:
 		fmt.Fprintf(report, textFetchedOne+"\n", first, shown, took)
 	default:
@@ -437,11 +454,17 @@ func runList(getenv func(string) string, at Target) (paths []string, target bool
 // target, is listed once. A list with no target's repository has no working repository:
 // each entry is a read target. A target on another system is not listed, and a read
 // target on another system, or, on github.com, of another owner than the first entry,
-// stops the list, as does a path that is not a repository path, as [Check] has it, and a
+// stops the list, and with system "" the list is empty, as does a path that is not a repository path, as [Check] has it, and a
 // read target inside another. The list has no bound on its bytes, which [Check] sets for
 // [EnvRepositories]. A system that is not a host name stops a list with an entry. Each
 // error is a line of a dispatched run: the cause alone.
 func (t Target) Repositories(system string) (paths []string, target bool, err error) {
+	if system == "" {
+		// A run with no host for its repositories, such as one of a workspace that is not
+		// a software factory, has no repository: its read targets are places in another
+		// system, and nothing is fetched.
+		return nil, false, nil
+	}
 	github := system == ForgeGitHub
 	if system != "" && t.System == system {
 		if t.Path == "" || !repositoryPath(t.Path) {
@@ -454,8 +477,6 @@ func (t Target) Repositories(system string) (paths []string, target bool, err er
 	}
 	for _, r := range t.Reads {
 		switch {
-		case r.System != system && system == "":
-			return nil, false, fmt.Errorf(textReadNoSystem, shownPath(r.Path), shownPath(r.System), EnvSystem)
 		case r.System != system:
 			return nil, false, fmt.Errorf(textReadOtherSystem, shownPath(r.Path), shownPath(r.System), shownPath(system))
 		case !repositoryPath(r.Path):
@@ -507,14 +528,19 @@ func seconds(d time.Duration) string {
 // every entry is owner/name, and of the first entry's owner. A list Check returns is
 // one the URLs and the folders are built from.
 func Check(system, list string) ([]string, error) {
+	return checkList(system, list, maxList)
+}
+
+// checkList is [Check] with limit in place of [maxList].
+func checkList(system, list string, limit int) ([]string, error) {
 	if system == "" {
 		return nil, fmt.Errorf(textNoSystem, EnvRepositories, EnvSystem)
 	}
 	if !hostName.MatchString(system) || strings.HasSuffix(system, ".") {
 		return nil, fmt.Errorf(textNotHost, EnvSystem)
 	}
-	if len(list) > maxList {
-		return nil, fmt.Errorf(textTooLong, EnvRepositories)
+	if len(list) > limit {
+		return nil, fmt.Errorf(textTooLong, EnvRepositories, limit)
 	}
 	paths := strings.Split(list, ",")
 	github := system == ForgeGitHub
@@ -603,8 +629,9 @@ func repoURL(system, path string) string {
 // one that is not the top of its working tree, whose repository has a commit, or has a
 // remote. A git that fails to find the top of the working tree is [textTreeFailed]: the cause
 // can be in the folder's .git or in one above it, and git can print the same line for both. Any
-// later failure of git is [textGitFailed].
-func emptyTree(ctx context.Context, git gitRunner, dir string) error {
+// later failure of git is [textGitFailed]. With target false, a list of read targets
+// alone, the first two stops are [textNotEmptyReads] and [textNotTreeReads].
+func emptyTree(ctx context.Context, git gitRunner, dir string, target bool) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return local(err)
@@ -623,9 +650,15 @@ func emptyTree(ctx context.Context, git gitRunner, dir string) error {
 		}
 	}
 	if other && hasGit {
+		if !target {
+			return errors.New(textNotEmptyReads)
+		}
 		return errors.New(textNotEmpty)
 	}
 	if !hasGit {
+		if len(entries) > 0 && !target {
+			return errors.New(textNotTreeReads)
+		}
 		if len(entries) > 0 {
 			return errors.New(textNotTree)
 		}

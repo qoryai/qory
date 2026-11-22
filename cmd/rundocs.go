@@ -606,6 +606,9 @@ type runList struct {
 	target bool
 	// err is the stop of the list's check, which the fetch stops on too.
 	err error
+	// code is whether the list is of a run code's documents, whose entries after the
+	// target are read targets.
+	code bool
 }
 
 // fetchList is the [runList] of run, from the run code r or from none.
@@ -613,6 +616,7 @@ func (r *codeRun) fetchList(run openedRun) runList {
 	l := runList{system: run.System()}
 	switch {
 	case r != nil:
+		l.code = true
 		l.paths, l.target, l.err = r.fetchTarget().Repositories(l.system)
 	case run.Repositories() != "":
 		l.paths, l.err = preparation.Check(l.system, run.Repositories())

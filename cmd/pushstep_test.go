@@ -2094,6 +2094,15 @@ func TestAWalledRunPushesItsTargetAlone(t *testing.T) {
 		t.Errorf("the read target has the branch: %s\n%s", refs, r.out)
 	}
 	lacks(t, r.out, " to acme/lib at ")
+	fetch := ""
+	for _, e := range r.steps {
+		if e.Type == "step_started" && e.Kind == event.StepFetch {
+			fetch = e.Name
+		}
+	}
+	if !strings.HasPrefix(fetch, "fetch "+proxygittest.Host+"/acme/site and 1 read-only repository") {
+		t.Errorf("the fetch step is %q, want it with and 1 read-only repository", fetch)
+	}
 	if posts, _, _ := p.api.counts(); posts != 1 {
 		t.Fatalf("%d POST, want 1\n%s", posts, r.out)
 	}

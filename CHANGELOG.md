@@ -836,12 +836,16 @@ release may change what an existing document does, and states it under Upgrading
   checks, commits and pushes the target alone, and the version it stores has no entry of a
   read target. A read target with no address is not fetched, and the run goes on. A
   repository listed twice is fetched once. A read target on another host, of another owner
-  on github.com, or inside another, stops the run before any fetch. Documents with read
-  targets and no target fetch each read target and push nothing. A read target for which
-  the version of the work item's branch lists a commit is fetched at that commit. The
-  setup container's `QORY_RUN_REPOSITORIES` is the target, then the read targets. A
-  prebuild fetches the repository of its documents' target alone. The stops for a target
-  that `QORY_RUN_REPOSITORIES` lists after another repository, or does not list, are gone.
+  on github.com, or inside another, stops the run before any fetch. A run with no
+  `QORY_RUN_SYSTEM` fetches no read target. Documents with read targets and no target
+  fetch each read target and push nothing. A read target for which the version of the work
+  item's branch lists a commit is fetched at that commit. The fetch line and the fetch
+  step say `and 1 read-only repository` in place of `and 1 further repository`. The setup
+  container's `QORY_RUN_REPOSITORIES` is the target, then the read targets, and `qory run
+  prepare` takes such a list up to 4220 bytes, a target and 20 read targets of 200
+  characters; a list that a run configuration sets stays at 256 bytes. A prebuild fetches
+  the repository of its documents' target alone. The stops for a target that
+  `QORY_RUN_REPOSITORIES` lists after another repository, or does not list, are gone.
 - `qory destination clone` checks `destinations` against the explore contract's schema,
   `inputs.schema.json`, and reads each entry as the contract's destination. It also stops
   on a `{` or `}` in a path, U+0000 in a collection, two equal entries and more than 250

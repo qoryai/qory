@@ -2,6 +2,7 @@ package preparation
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -36,6 +37,10 @@ func TestTheDocumentsListTheTargetThenTheReadTargets(t *testing.T) {
 		{"one address twice", "git.example.com", withReads(shop, readOn("acme/api"), readOn("acme/shop"), readOn("acme/api")), []string{"acme/shop", "acme/api"}, true},
 		{"one repository in two cases on github.com", ForgeGitHub, withReads(Target{System: ForgeGitHub, Path: "acme/shop"}, Read{System: ForgeGitHub, Path: "Acme/Shop"}, Read{System: ForgeGitHub, Path: "acme/api"}), []string{"acme/shop", "acme/api"}, true},
 		{"neither", "git.example.com", Target{}, nil, false},
+		// With no host for the run's repositories, the read targets are places in another
+		// system: none is listed, and the list does not stop.
+		{"reads and no system", "", withReads(Target{}, readOn("acme/api")), nil, false},
+		{"a target, reads and no system", "", withReads(shop, readOn("acme/api")), nil, false},
 	} {
 		paths, target, err := c.at.Repositories(c.system)
 		if err != nil || !slices.Equal(paths, c.want) || target != c.target {
@@ -57,8 +62,6 @@ func TestTheDocumentsListTheTargetThenTheReadTargets(t *testing.T) {
 	}{
 		{"another system", "git.example.com", withReads(shop, Read{System: "other.example.com", Path: "acme/api"}),
 			"qory run: A read target is on another host, so the run did not start; the code is used\n  The read target acme/api is on other.example.com, and the run's repositories are on git.example.com."},
-		{"no system", "", withReads(shop, readOn("acme/api")),
-			"qory run: A read target is on another host, so the run did not start; the code is used\n  The read target acme/api is on git.example.com, and the run has no host for its repositories: QORY_RUN_SYSTEM is not set."},
 		{"another owner", ForgeGitHub, withReads(Target{System: ForgeGitHub, Path: "acme/shop"}, Read{System: ForgeGitHub, Path: "other/api"}),
 			"qory run: A read target is of another owner, so the run did not start; the code is used\n  The read target other/api is of owner other, and on github.com the repositories of a run are of one owner, acme."},
 		{"inside another", "git.example.com", withReads(shop, readOn("acme/api"), readOn("acme/api/docs")),
@@ -146,7 +149,7 @@ func TestOneAddressInTwoCollectionsIsFetchedOnce(t *testing.T) {
 		remote(t, base, path, "main", nil)
 	}
 	dir, line := fetchReads(t, Target{System: "git.example.com", Path: "acme/shop", Reads: []Read{readOn("acme/api"), readOn("acme/shop"), readOn("acme/api")}})
-	if !strings.HasSuffix(line, " and 1 further repository in Xs") {
+	if !strings.HasSuffix(line, " and 1 read-only repository in Xs") {
 		t.Errorf("the line is %q", line)
 	}
 	if !readFetched(t, dir, "acme/api") || readFetched(t, dir, "acme/shop") {
@@ -318,4 +321,67 @@ func TestAReadTargetsStartStaysOutOfTheVersion(t *testing.T) {
 	if len(got.Repositories) != 1 || got.Repositories[0].Path != "acme/shop" {
 		t.Errorf("the version is %+v, want acme/shop alone", got.Repositories)
 	}
+}
+
+// TestAFolderWithFilesStopsReadTargetsAlone is documents with read targets and no target,
+// in a working folder that is not empty: with a .git and a file, and with a file alone. The
+// stop is about the read-only repositories, and nothing is fetched.
+func TestAFolderWithFilesStopsReadTargetsAlone(t *testing.T) {
+	needGit(t)
+	remote(t, t.TempDir(), "acme/api", "main", nil)
+	at := Target{FromCode: true, Reads: []Read{readOn("acme/api")}}
+	for name, c := range map[string]struct {
+		dir  func() string
+		want string
+	}{
+		"a git working tree with a file": {func() string { return emptyFolder(t) }, textNotEmptyReads},
+		"a folder with a file":           {t.TempDir, textNotTreeReads},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := c.dir()
+			write(t, filepath.Join(dir, "notes.txt"), "notes\n")
+			_, err := fetchListAt(dir, "", at)
+			if err == nil || err.Error() != c.want {
+				t.Fatalf("the error is %v, want %q", err, c.want)
+			}
+			if readFetched(t, dir, "acme/api") {
+				t.Error("acme/api is fetched")
+			}
+		})
+	}
+}
+
+// TestTheSetupTakesTheLongestListOfARunCode is [Prepare] with the list qory gives the
+// setup container of a run code with a target and 20 read targets, each path of 200
+// characters: the check passes. A list one byte longer stops, with the bound in the line.
+func TestTheSetupTakesTheLongestListOfARunCode(t *testing.T) {
+	at := Target{FromCode: true, System: "git.example.com", Path: longPath('z')}
+	for i := range maxReads {
+		at.Reads = append(at.Reads, readOn(longPath(rune('a'+i))))
+	}
+	paths, target, err := at.Repositories("git.example.com")
+	if err != nil || !target || len(paths) != maxReads+1 {
+		t.Fatalf("the list is %d paths, target %v: %v", len(paths), target, err)
+	}
+	list := strings.Join(paths, ",")
+	if len(list) != maxSetupList {
+		t.Fatalf("the list has %d bytes, want %d", len(list), maxSetupList)
+	}
+	listed, err := Prepare(t.Context(), t.TempDir(), "", env("git.example.com", list), io.Discard)
+	if err != nil || !listed {
+		t.Errorf("Prepare returned %v, %v; want the list taken", listed, err)
+	}
+	_, err = Prepare(t.Context(), t.TempDir(), "", env("git.example.com", list+"x"), io.Discard)
+	if want := "qory run: shorten QORY_RUN_REPOSITORIES to 4220 bytes or fewer"; err == nil || err.Error() != want {
+		t.Errorf("one byte more gave %v, want %q", err, want)
+	}
+	// A run configuration's list keeps the bound of 256 bytes at the fetch.
+	if _, err := Check("git.example.com", list); err == nil || err.Error() != "qory run: shorten QORY_RUN_REPOSITORIES to 256 bytes or fewer" {
+		t.Errorf("Check of %d bytes gave %v", len(list), err)
+	}
+}
+
+// longPath is acme/ and a name of c, a repository path of [maxPath] characters.
+func longPath(c rune) string {
+	return "acme/" + strings.Repeat(string(c), maxPath-len("acme/"))
 }

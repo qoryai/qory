@@ -355,6 +355,26 @@ func TestARunCodeWithReadTargetsAndNoTargetFetchesThemReadOnly(t *testing.T) {
 	}
 }
 
+// TestARunCodeWithNoSystemSkipsItsReadTargets is a run from a run code with no
+// QORY_RUN_SYSTEM, as of a workspace that is not a software factory, whose documents set a
+// target with no address and the read target acme/site on git.test: the read target is a
+// place in another system, so qory run fetches nothing and the run goes on.
+func TestARunCodeWithNoSystemSkipsItsReadTargets(t *testing.T) {
+	h, first, _, files := versionRepository(t)
+	for name, content := range files {
+		writeFile(t, filepath.Join(h.dir, filepath.FromSlash(name)), content)
+	}
+	out, err, n, _ := runAtTarget(t, h, "", "acme/site", first, map[string]any{"collection": "profile-7"})
+	if !n.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, "qory run: composed ")
+	lacks(t, out, "qory run: fetched ", "another host")
+	if n := h.server.Tunnels(); n != 0 {
+		t.Errorf("the host proxy led %d connections", n)
+	}
+}
+
 // harnessFiles is the files of examples/hello, whose workflow hello declares access. It
 // reads them from the repository, so a test calls it before it changes the working folder.
 func harnessFiles(t *testing.T, access string) map[string]string {
@@ -451,7 +471,7 @@ func TestARunCodeFetchesItsTargetUnlessItClonesDestinations(t *testing.T) {
 			if !n.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
 			}
-			fetched := "qory run: fetched acme/site at " + first[:12] + " and 1 further repository in "
+			fetched := "qory run: fetched acme/site at " + first[:12] + " and 1 read-only repository in "
 			if c.alone {
 				fetched = "qory run: fetched acme/site at " + first[:12] + " in "
 			}

@@ -27,16 +27,18 @@ type hostStep interface {
 // The names of the steps of qory run's host work, as the run's record and the run page
 // show them. Each is one format string.
 const (
-	textFetchStep        = "fetch %s"
-	textFetchStepOne     = "fetch %s and 1 further repository"
-	textFetchStepMany    = "fetch %s and %d further repositories"
-	textFetchStepUnnamed = "fetch the run's repositories"
-	textFetchStepReadOne = "fetch 1 read-only repository"
-	textFetchStepReads   = "fetch %d read-only repositories"
-	textFetchStepBranch  = "%s at %s %s"
-	textComposeStep      = "compose the harness for %s"
-	textComposeStepAny   = "compose the harness"
-	textCopyStep         = "copy work out"
+	textFetchStep         = "fetch %s"
+	textFetchStepOne      = "fetch %s and 1 further repository"
+	textFetchStepMany     = "fetch %s and %d further repositories"
+	textFetchStepUnnamed  = "fetch the run's repositories"
+	textFetchStepReadOne  = "fetch 1 read-only repository"
+	textFetchStepReads    = "fetch %d read-only repositories"
+	textFetchStepAndRead  = "fetch %s and 1 read-only repository"
+	textFetchStepAndReads = "fetch %s and %d read-only repositories"
+	textFetchStepBranch   = "%s at %s %s"
+	textComposeStep       = "compose the harness for %s"
+	textComposeStepAny    = "compose the harness"
+	textCopyStep          = "copy work out"
 )
 
 // fetchStepName is the name of the fetch step of a run whose list is l: the run's
@@ -54,10 +56,14 @@ func fetchStepName(l runList) string {
 		return fmt.Sprintf(textFetchStepReads, len(l.paths))
 	}
 	first := integration.Printable(exports.Value(l.system+"/"+l.paths[0], false))
-	switch n := len(l.paths) - 1; n {
-	case 0:
+	switch n := len(l.paths) - 1; {
+	case n == 0:
 		return fmt.Sprintf(textFetchStep, first)
-	case 1:
+	case n == 1 && l.code:
+		return fmt.Sprintf(textFetchStepAndRead, first)
+	case l.code:
+		return fmt.Sprintf(textFetchStepAndReads, first, n)
+	case n == 1:
 		return fmt.Sprintf(textFetchStepOne, first)
 	default:
 		return fmt.Sprintf(textFetchStepMany, first, n)

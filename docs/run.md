@@ -205,7 +205,8 @@ host, with git's hooks off and no credential helper, so no token is on this mach
 closes the host proxy once the repositories are fetched. The compose then fetches the harness's git
 sources through the run's stack proxy, which gets none of those credentials. `qory run`
 prints one line for the repositories, with `and 1 further repository` when there are
-two, and then one line for each git source of the compose:
+two, or `and 1 read-only repository` in a run from a run code, and then one line for each
+git source of the compose:
 
 ```text
 qory run: fetched example-org/shop at 0d62793fbf11 in 3.2s
@@ -587,8 +588,8 @@ how it ended:
    other than U+200C and U+200D, and U+2028 and U+2029, and is cut to 100 characters.
 2. When the run has repositories, the fetch, named after the run's repository, such as
    `fetch github.com/example-org/shop`, with `and 1 further repository` when there are
-   two. A run from a run code with read targets and no target gets `fetch 2 read-only
-   repositories`.
+   two. A run from a run code has `and 1 read-only repository` in its place, and with read
+   targets and no target, the step is `fetch 2 read-only repositories`.
 3. The compose, `compose the harness for claude`, or `compose the harness` when you name
    no runtime. The step ends once `qory run` has read the agent's launch from the
    composed home.
@@ -2239,7 +2240,13 @@ run code. The read targets follow these rules:
   inside another.
 - With read targets and no target on `QORY_RUN_SYSTEM`, the working folder gets no
   repository: each read target goes under `.qory/repositories`, the working folder stays an
-  empty repository, and the run pushes nothing.
+  empty repository, and the run pushes nothing. A working folder with files stops the run
+  with `start the run in an empty git working tree: the working folder contains files
+  already`, or `start the run in an empty folder or an empty git working tree` when it has
+  no `.git`.
+- A run with no `QORY_RUN_SYSTEM`, such as one of a workspace that is not a software
+  factory, fetches no read target: its read targets are places in another system, and the
+  run goes on.
 
 The documents of a run with a target may set `target_version`: the version at which Qory
 Apiary checked the target for a harness file. When the `system` of the target's address
