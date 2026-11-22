@@ -63,10 +63,10 @@ const (
 	textNotRepository   = "Clone only a repository: the address of %s is not a repository path."
 	textConnection      = "Give the integration access to %s in Qory Apiary, then click Run Explore again.\n  The host returned %s to the clone."
 	textCloneAgain      = "Run Explore again later: the clone of %s failed: %s."
-	textMachine         = "Ask the instance admin of Qory Apiary to check the machine: it cannot store %s.\n  %s"
-	textBadDestinations = "Ask the instance admin of Qory Apiary to fix the destinations of this run: they are malformed.\n  %s"
-	textNest            = "Ask the instance admin of Qory Apiary to separate destination %s from another.\n  %s and %s nest: one path lies inside the other."
-	textProxyBlocks     = "Ask the instance admin of Qory Apiary to let the proxy reach the host of %s."
+	textMachine         = "qory destination clone: The machine cannot store %s, so nothing was cloned.\n  %s"
+	textBadDestinations = "qory destination clone: The run's destinations do not match their schema, so nothing was cloned.\n  %s"
+	textNest            = "qory destination clone: Destination %s is inside another, so nothing was cloned.\n  %s and %s nest: one path lies inside the other."
+	textProxyBlocks     = "qory destination clone: The proxy cannot reach the host of %s, so nothing was cloned."
 )
 
 // allClones is the word of [textMachine] for a record that is not a list of ids,

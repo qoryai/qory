@@ -229,7 +229,7 @@ func TestDestinationCloneStopsOnMalformedDestinations(t *testing.T) {
 	_, err := run(t, "destination", "clone", webID)
 	wantLine(t, err, cmd.ExitInput, none)
 
-	const fix = "Ask the instance admin of Qory Apiary to fix the destinations of this run: they are malformed.\n  "
+	const fix = "qory destination clone: The run's destinations do not match their schema, so nothing was cloned.\n  "
 	for _, k := range []struct {
 		destinations any
 		cause        string
@@ -313,7 +313,7 @@ func TestDestinationCloneStopsOnAFailedClone(t *testing.T) {
 	connection := func(id, status string) string {
 		return "Give the integration access to " + id + " in Qory Apiary, then click Run Explore again.\n  The host returned " + status + " to the clone."
 	}
-	blocks := "Ask the instance admin of Qory Apiary to let the proxy reach the host of " + webID + "."
+	blocks := "qory destination clone: The proxy cannot reach the host of " + webID + ", so nothing was cloned."
 	t.Run("403", func(t *testing.T) {
 		c := destinationSession(t)
 		c.s.Refuse("/acme/web.git/info/refs")
@@ -448,7 +448,7 @@ func TestDestinationCloneClonesIntoAFolderOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := run(t, "destination", "clone", webID)
-	wantLine(t, err, 1, "Ask the instance admin of Qory Apiary to check the machine: it cannot store "+webID+".\n  "+c.root+": lstat: a link or a file, and qory clones only into folders")
+	wantLine(t, err, 1, "qory destination clone: The machine cannot store "+webID+", so nothing was cloned.\n  "+c.root+": lstat: a link or a file, and qory clones only into folders")
 	if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
 		t.Errorf("the link's folder has %d entries", len(entries))
 	}
@@ -464,7 +464,7 @@ func TestDestinationCloneStopsAtACorruptRecord(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(c.root, "_cloned"), "not an id\n")
 	_, err := run(t, "destination", "clone", webID)
-	wantLine(t, err, 1, "Ask the instance admin of Qory Apiary to check the machine: it cannot store the clones.\n  "+c.root+": _cloned has a line that is not an id")
+	wantLine(t, err, 1, "qory destination clone: The machine cannot store the clones, so nothing was cloned.\n  "+c.root+": _cloned has a line that is not an id")
 	if n := c.s.Tunnels(); n != 0 {
 		t.Errorf("the call opened %d tunnels", n)
 	}
@@ -491,7 +491,7 @@ func TestDestinationCloneFollowsNoLinkBelowTheFolder(t *testing.T) {
 				t.Fatal(err)
 			}
 			out, err := run(t, "destination", "clone", webID)
-			wantLine(t, err, 1, "Ask the instance admin of Qory Apiary to check the machine: it cannot store "+webID+".\n  "+link+": lstat: a link or a file, and qory clones only into folders")
+			wantLine(t, err, 1, "qory destination clone: The machine cannot store "+webID+", so nothing was cloned.\n  "+link+": lstat: a link or a file, and qory clones only into folders")
 			if out != "" {
 				t.Errorf("printed %q", out)
 			}
@@ -517,7 +517,7 @@ func TestDestinationCloneStopsAtAFolderThatIsNoClone(t *testing.T) {
 	dir := filepath.Join(c.root, proxygittest.Host, "acme", "web")
 	writeFile(t, filepath.Join(dir, "notes.txt"), "notes\n")
 	_, err := run(t, "destination", "clone", webID)
-	wantLine(t, err, 1, "Ask the instance admin of Qory Apiary to check the machine: it cannot store "+webID+".\n  "+dir+": readdir: a folder with files and no clone")
+	wantLine(t, err, 1, "qory destination clone: The machine cannot store "+webID+", so nothing was cloned.\n  "+dir+": readdir: a folder with files and no clone")
 	if n := c.s.Tunnels(); n != 0 {
 		t.Errorf("the call opened %d tunnels", n)
 	}
@@ -548,7 +548,7 @@ func TestDestinationCloneNeedsGitOnPath(t *testing.T) {
 	c := destinationSession(t)
 	t.Setenv("PATH", tempDir(t))
 	_, err := run(t, "destination", "clone", webID)
-	wantLine(t, err, 1, "Ask the instance admin of Qory Apiary to check the machine: it cannot store "+webID+".\n  git is not on PATH")
+	wantLine(t, err, 1, "qory destination clone: The machine cannot store "+webID+", so nothing was cloned.\n  git is not on PATH")
 	if n := c.s.Tunnels(); n != 0 {
 		t.Errorf("the call opened %d tunnels", n)
 	}
@@ -562,7 +562,7 @@ func TestDestinationCloneNeedsGitOnPath(t *testing.T) {
 func TestDestinationCloneStopsAtNestedDestinations(t *testing.T) {
 	const outerID, subID, deep2ID = "tg_deep000000000000", "tg_deepsb0000000000", "tg_deep200000000000"
 	nested := func(id, other string) string {
-		return "Ask the instance admin of Qory Apiary to separate destination " + id + " from another.\n  " + id + " and " + other + " nest: one path lies inside the other."
+		return "qory destination clone: Destination " + id + " is inside another, so nothing was cloned.\n  " + id + " and " + other + " nest: one path lies inside the other."
 	}
 	for name, order := range map[string][]string{"outer first": {outerID, subID}, "inner first": {subID, outerID}} {
 		t.Run(name, func(t *testing.T) {

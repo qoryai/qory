@@ -119,8 +119,8 @@ const (
 	textNoBranch       = "qory run: give %s on %s a default branch with a commit, then run again. The fetch through the run's gateway failed: %s"
 	textKept           = "qory run: remove .qory/repositories from the working folder of %s: qory clones the further repositories there, and nothing is cloned over it"
 	textQoryNotDir     = "qory run: remove .qory from the working folder of %s: it is a file or a link, where qory clones the further repositories into a folder, and nothing is cloned over it"
-	textOtherOwner     = "qory run: list in %[1]s only repositories of owner %[4]s: entry %[2]d is of owner %[3]s, and on github.com the repositories of a run are of one owner"
-	textNotGitHub      = "qory run: write entry %[2]d of %[1]s as owner/name, the form of a repository on github.com"
+	textOtherOwner     = "qory run: list in %[1]s only repositories of owner %[4]s: entry %[2]d is of owner %[3]s, and on %[5]s the repositories of a run are of one owner"
+	textNotGitHub      = "qory run: write entry %[2]d of %[1]s as owner/name, the form of a repository on %[3]s"
 	textNotTree        = "qory run: start the run in an empty folder outside any git repository, or at the top of a git working tree without commits: the working folder is neither, and qory fetches the run's repository only into one of these"
 	textDirLink        = "qory run: start the run in the folder that the link leads to: the working folder is a link, and qory runs git init only in a folder"
 	textNoGitPart      = "qory run: start the run in a new empty folder or a new empty git working tree: the working folder's .git has no %s, so git does not take that folder for a repository"
@@ -164,9 +164,9 @@ const (
 	// cause alone, since the run is a dispatched one. The first %s of textListNotPath and
 	// textListNotGitHub is "target" or "read target".
 	textListNotPath     = "qory run: A %s is not a repository path, so the run did not start; the code is used\n  The path is %s. A repository path is segments of A-Z, a-z, 0-9, dot, underscore and dash, 1 to 200 characters, with no ., .. or .git segment."
-	textListNotGitHub   = "qory run: A %s is not owner/name, so the run did not start; the code is used\n  The path is %s, and a repository on github.com has a path of the form owner/name."
+	textListNotGitHub   = "qory run: A %[1]s is not owner/name, so the run did not start; the code is used\n  The path is %[2]s, and a repository on %[3]s has a path of the form owner/name."
 	textReadOtherSystem = "qory run: A read target is on another host, so the run did not start; the code is used\n  The read target %[1]s is on %[2]s, and the run's repositories are on %[3]s."
-	textReadOtherOwner  = "qory run: A read target is of another owner, so the run did not start; the code is used\n  The read target %[1]s is of owner %[2]s, and on github.com the repositories of a run are of one owner, %[3]s."
+	textReadOtherOwner  = "qory run: A read target is of another owner, so the run did not start; the code is used\n  The read target %[1]s is of owner %[2]s, and on %[4]s the repositories of a run are of one owner, %[3]s."
 	textReadNested      = "qory run: A read target is inside another, so the run did not start; the code is used\n  The read target %[1]s is inside the read target %[2]s, and qory clones no repository inside another."
 	textKeptReads       = "qory run: The working folder has .qory/repositories, so the run did not start; the code is used\n  qory clones the read-only repositories there, and nothing is cloned over it."
 	textQoryReads       = "qory run: The working folder's .qory is not a folder, so the run did not start; the code is used\n  qory clones the read-only repositories into a folder there, and nothing is cloned over a file or a link."
@@ -475,7 +475,7 @@ func (t Target) Repositories(system string) (paths []string, target bool, err er
 			return nil, false, fmt.Errorf(textListNotPath, "target", shownPath(t.Path))
 		}
 		if github && strings.Count(t.Path, "/") != 1 {
-			return nil, false, fmt.Errorf(textListNotGitHub, "target", shownPath(t.Path))
+			return nil, false, fmt.Errorf(textListNotGitHub, "target", shownPath(t.Path), shownPath(system))
 		}
 		paths, target = []string{t.Path}, true
 	}
@@ -486,14 +486,14 @@ func (t Target) Repositories(system string) (paths []string, target bool, err er
 		case !repositoryPath(r.Path):
 			return nil, false, fmt.Errorf(textListNotPath, "read target", shownPath(r.Path))
 		case github && strings.Count(r.Path, "/") != 1:
-			return nil, false, fmt.Errorf(textListNotGitHub, "read target", shownPath(r.Path))
+			return nil, false, fmt.Errorf(textListNotGitHub, "read target", shownPath(r.Path), shownPath(system))
 		case slices.ContainsFunc(paths, func(p string) bool { return sameRepository(github, p, r.Path) }):
 			continue
 		}
 		if github && len(paths) > 0 {
 			owner, _, _ := strings.Cut(r.Path, "/")
 			if first, _, _ := strings.Cut(paths[0], "/"); !strings.EqualFold(owner, first) {
-				return nil, false, fmt.Errorf(textReadOtherOwner, shownPath(r.Path), shownPath(owner), shownPath(first))
+				return nil, false, fmt.Errorf(textReadOtherOwner, shownPath(r.Path), shownPath(owner), shownPath(first), shownPath(system))
 			}
 		}
 		// The target's repository goes into the working folder, not under [Repositories],
@@ -558,10 +558,10 @@ func checkList(system, list string, limit int) ([]string, error) {
 		if github {
 			owner, _, ok := strings.Cut(p, "/")
 			if !ok || strings.Count(p, "/") != 1 {
-				return nil, fmt.Errorf(textNotGitHub, EnvRepositories, i+1)
+				return nil, fmt.Errorf(textNotGitHub, EnvRepositories, i+1, integration.Printable(exports.Value(system, false)))
 			}
 			if first, _, _ := strings.Cut(paths[0], "/"); !strings.EqualFold(owner, first) {
-				return nil, fmt.Errorf(textOtherOwner, EnvRepositories, i+1, integration.Printable(exports.Value(owner, false)), integration.Printable(exports.Value(first, false)))
+				return nil, fmt.Errorf(textOtherOwner, EnvRepositories, i+1, integration.Printable(exports.Value(owner, false)), integration.Printable(exports.Value(first, false)), integration.Printable(exports.Value(system, false)))
 			}
 		}
 		// The run's repository goes into the working folder, not under

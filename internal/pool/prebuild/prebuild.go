@@ -102,7 +102,10 @@ const (
 
 // The words of the fetch and of the close. Each is one format string.
 const (
-	textNoTarget     = "The run's target is not a repository on %s; a prebuild builds a repository"
+	// textNoTarget and textNoSystem are the cause alone, since a prebuild is a dispatched
+	// run.
+	textNoTarget     = "The run's target is not a repository, so the prebuild did not start\n  The target has no address on %s, the host of the run's repositories, and a prebuild builds a repository."
+	textNoSystem     = "The run's target is not a repository, so the prebuild did not start\n  The run has no host for its repositories, and a prebuild builds a repository."
 	textNoKey        = "give the prebuild its run key: it has none"
 	textNotOpened    = "check that this machine reaches the run's gateway: the run did not open there: %s"
 	textNoHostProxy  = "check that qory run can listen on a port of 127.0.0.1: the run's host proxy, through which qory run fetches the run's code, did not open: %s"
@@ -596,6 +599,8 @@ func (s Settings) fetchThrough(ctx context.Context, run Opened, r Run, work, sta
 	switch {
 	case err != nil:
 		return errors.New(proxygit.Hide(strings.TrimPrefix(err.Error(), fetchPrefix), &p))
+	case !fetched && run.System() == "":
+		return errors.New(textNoSystem)
 	case !fetched:
 		return fmt.Errorf(textNoTarget, integration.Printable(exports.Value(run.System(), false)))
 	}
