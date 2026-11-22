@@ -2,6 +2,7 @@ package cmd_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,10 +40,31 @@ func TestAPersonsUnwalledRunGetsNoInputs(t *testing.T) {
 
 // TestAPersonsWalledRunsPushChecksGetNoInputs is a walled run against a server with no run
 // key and no run code, which has a control plane, whose harness declares a push check for spec: it composes into a home for that run
-// under qory/homes in the cache, which has no inputs.json, and its check's container
-// starts with the pushed files and no --inputs, and mounts no inputs.json.
+// under qory/homes in the cache, and its check's container starts with the pushed files and
+// no --inputs, and mounts no inputs.json. The home has no inputs.json, unless the harness has
+// a submit program: then it has the file with the member qory alone, and the check still gets
+// no --inputs.
 func TestAPersonsWalledRunsPushChecksGetNoInputs(t *testing.T) {
+	for _, program := range []bool{false, true} {
+		t.Run(fmt.Sprintf("submit program %v", program), func(t *testing.T) {
+			personsWalledRunsPushCheck(t, program)
+		})
+	}
+}
+
+// personsWalledRunsPushCheck is [TestAPersonsWalledRunsPushChecksGetNoInputs] with a harness
+// that has a submit program, or none.
+func personsWalledRunsPushCheck(t *testing.T, program bool) {
 	root := checksCheckout(t, "")
+	if program {
+		for name, content := range programModule() {
+			writeFile(t, filepath.Join(root, name), content)
+		}
+		stack := filepath.Join(root, "qory.yaml")
+		writeFile(t, stack, strings.Replace(readText(t, stack), "    - name: checks\n", "    - name: forge\n      source: {path: modules/forge}\n    - name: checks\n", 1))
+		runGit(t, root, "add", "-A")
+		runGit(t, root, "commit", "--quiet", "-m", "third")
+	}
 	docker, log := checkDocker(t, 0, "")
 	srv := newFakeServer(t, `{"version":1,"egress":{"mode":"observe"}}`)
 	serverFile(t, srv, "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
@@ -82,7 +104,10 @@ func TestAPersonsWalledRunsPushChecksGetNoInputs(t *testing.T) {
 		t.Fatalf("the push of spec got %+v, %v, want it to pass\n%s", refusal, checkErr, checkLog(t, log))
 	}
 	sameFolder(t, "the home's folder", filepath.Dir(home), runHomesFolder(t, root))
-	if !os.IsNotExist(copied) {
+	if program && copied != nil {
+		t.Errorf("the home had no inputs.json while the agent ran: %v", copied)
+	}
+	if !program && !os.IsNotExist(copied) {
 		t.Errorf("the home had inputs.json while the agent ran: %v", copied)
 	}
 	created := ""

@@ -149,7 +149,7 @@ func TestTheNextSessionStartsAfterThePushOfTheSessionBefore(t *testing.T) {
 // TestEachSessionsInputsHaveItsStartCommit is a write run of two sessions: session 1's
 // inputs.json has the commit the run starts at, written after the branch switch, and
 // session 2's has the commit that session 1 pushed. Each names its launch snapshot in the
-// inputs folder, which has an index.json.
+// inputs folder, which has an index.json, and has the checkout's outbox.
 func TestEachSessionsInputsHaveItsStartCommit(t *testing.T) {
 	p, _ := sharedPushRepo(t, laterAnswer(2, "claude", "example-provider-2", 30))
 	p.noOutput = true
@@ -158,9 +158,12 @@ func TestEachSessionsInputsHaveItsStartCommit(t *testing.T) {
 			Path, Commit string
 		} `json:"start_commits"`
 		StartArtifacts string `json:"start_artifacts"`
+		Outbox         string `json:"outbox"`
 	}
 	var starts []start
+	var outboxes []string
 	p.mountsOf = func(spec session.SessionSpec) {
+		outboxes = append(outboxes, filepath.Join(spec.Dir, ".qory", "outbox"))
 		for _, m := range spec.Mounts {
 			data, err := os.ReadFile(filepath.Join(m.Path, "inputs.json"))
 			if !m.ReadOnly || filepath.Base(m.Path) != "in" || err != nil {
@@ -192,6 +195,9 @@ func TestEachSessionsInputsHaveItsStartCommit(t *testing.T) {
 		got := starts[i]
 		if len(got.StartCommits) != 1 || got.StartCommits[0].Commit != want || !filepath.IsAbs(got.StartCommits[0].Path) {
 			t.Errorf("session %d starts at %+v, want %s", i+1, got.StartCommits, want)
+		}
+		if got.Outbox != outboxes[i] {
+			t.Errorf("session %d has the outbox %q, want %s", i+1, got.Outbox, outboxes[i])
 		}
 	}
 }
