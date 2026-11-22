@@ -95,3 +95,44 @@ func TestChangedPathFindsTheFirstChange(t *testing.T) {
 		t.Errorf("got %q, %q, %v, want %s, src.go", c, p, err, first)
 	}
 }
+
+// TestChangedPathSeesEveryParentOfAMerge is a session that takes a.txt back to its version
+// before the start: X has the tree of the start's parent, and the merge M of X and the
+// start has the same tree. M changes no path from X, but changes a.txt from the start.
+func TestChangedPathSeesEveryParentOfAMerge(t *testing.T) {
+	dir := emptyFolder(t)
+	before := commitIn(t, dir, "a.txt", "1\n")
+	start := commitIn(t, dir, "a.txt", "2\n")
+	id := []string{"-c", "user.name=t", "-c", "user.email=t@example.com"}
+	tree := run(t, dir, "rev-parse", before+"^{tree}")
+	x := run(t, dir, append(id, "commit-tree", tree, "-p", before, "-m", "x")...)
+	m := run(t, dir, append(id, "commit-tree", tree, "-p", x, "-p", start, "-m", "m")...)
+	if c, p, err := ChangedPath(t.Context(), os.Environ(), dir, start, m); c != m || p != "a.txt" || err != nil {
+		t.Errorf("got %q, %q, %v, want %s, a.txt", c, p, err, m)
+	}
+}
+
+// TestChangedPathReadsEachPathWhole is a path whose bytes look like the start of a commit
+// in git's list: it is still a path outside .qory/.
+func TestChangedPathReadsEachPathWhole(t *testing.T) {
+	dir := emptyFolder(t)
+	start := commitIn(t, dir, "a.txt", "a\n")
+	name := "\x01" + start + "\x02" + start
+	head := commitIn(t, dir, name, "x\n")
+	if c, p, err := ChangedPath(t.Context(), os.Environ(), dir, start, head); c != head || p != name || err != nil {
+		t.Errorf("got %q, %q, %v, want %s, %q", c, p, err, head, name)
+	}
+}
+
+// TestChangedPathStopsOnACommitWithNoParent is a merge that brings in a history of its own
+// root commit, which has no parent to diff against: an error.
+func TestChangedPathStopsOnACommitWithNoParent(t *testing.T) {
+	dir := emptyFolder(t)
+	start := commitIn(t, dir, "a.txt", "a\n")
+	id := []string{"-c", "user.name=t", "-c", "user.email=t@example.com"}
+	root := run(t, dir, append(id, "commit-tree", run(t, dir, "rev-parse", start+"^{tree}"), "-m", "root")...)
+	m := run(t, dir, append(id, "commit-tree", run(t, dir, "rev-parse", start+"^{tree}"), "-p", start, "-p", root, "-m", "m")...)
+	if _, _, err := ChangedPath(t.Context(), os.Environ(), dir, start, m); err == nil || !strings.Contains(err.Error(), "has no parent") {
+		t.Errorf("got %v, want an error on the commit with no parent", err)
+	}
+}

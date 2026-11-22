@@ -6314,7 +6314,7 @@ stops the push of every repository, and the commits stay local.
    a checkout of it, detached. The clone has no branch, remote branch or hook that the
    agent wrote. A head that does not descend from the session's start stops the push.
 2. A workflow with no `plan` may commit no file outside `.qory/`: the first commit that
-   changes another file stops the push.
+   changes another file stops the push. A merge counts by its change from each parent.
 3. Otherwise qory runs the scope check of the plan type, from `scope-checks.json` in the
    home, as `<command> --base <session start> --artifacts /qory-push-check/files`. It
    runs in a container from the wall's default image, as a push check does: no network,
