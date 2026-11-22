@@ -452,7 +452,7 @@ func checkOutputVersion(ctx context.Context, checks *runPushChecks, branch *prep
 	}
 	failed, err := checks.check(ctx, push.Type, files)
 	if err != nil {
-		return notStored(branch, push.Type, shownError(err))
+		return withCause(notStored(branch, push.Type, shownError(err)), err)
 	}
 	if failed == nil {
 		return nil

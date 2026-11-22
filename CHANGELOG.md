@@ -50,7 +50,11 @@ release may change what an existing document does, and states it under Upgrading
   run closes `failed` with `next_session_failed`. An output check before the push, or
   before any version is stored in a run with no repository, that finds a required output
   missing, or an output that fails its read, fill, schema or size check, closes the run
-  `failed` with `outputs_invalid`; the same failure after the push has no end code.
+  `failed` with `outputs_invalid`; the same failure after the push has no end code. A call
+  from qory to the run API that fails closes the run `failed` with `run_api_failed`: the read
+  of the work item or of its versions, the store of an output, the fetch of a push check,
+  and the post of the suite's verdict. Any other end code of the failure comes first, and a
+  call that a stop or a time limit cuts closes the run as before.
 - `qory destination clone <id>...` clones destinations of a run inside its session: each
   id from `destinations` in `$QORY_HARNESS_HOME/inputs.json`, at depth 1, through the
   wall's proxy, into `/tmp/qory-destinations/<system>/<path>`. It prints one line per id,
@@ -82,12 +86,11 @@ release may change what an existing document does, and states it under Upgrading
   `next_session_failed` and the cause alone: `qory run: The next-session request after
   session <n> failed.`, then the status and the message of Qory Apiary or the gateway. The
   steps before a later session need a wall and no container of the run kept, and past the
-  setup's limit they close the run
-  `cancelled` with `timeout`, exit 124. In such a walled run with a run API, Forager's
-  forwarder checks the POSTs from behind the wall to the run API from session 1 on, also
-  before any session has push checks: the forwarder then passes one request per connection
-  through the wall, and a POST to the run API with a body needs one `Content-Length` and no
-  `Transfer-Encoding`: a chunked body gets a 400.
+  setup's limit they close the run `cancelled` with `timeout`, exit 124. In such a walled
+  run with a run API, Forager's forwarder checks the POSTs from behind the wall to the run
+  API from session 1 on, also before any session has push checks: the forwarder then passes
+  one request per connection through the wall, and a POST to the run API with a body needs
+  one `Content-Length` and no `Transfer-Encoding`: a chunked body gets a 400.
 - The agent of a walled run gets `QORY_SESSION`, the session's number from 1, which Forager
   sets at each join: `qory run agent-env` keeps the name, as it keeps `QORY_RUN_ID`.
 - In a home composed for codex alone, a Codex agent with a tier gets the tier's model as
@@ -384,12 +387,12 @@ release may change what an existing document does, and states it under Upgrading
   ones, before the push with the local head, so an output that fails pushes nothing and
   closes the run `failed` with `outputs_invalid`, and again after the push. qory removes
   the outbox before each session, so an output that a failed session or an earlier run
-  left is never stored; a `.qory` that is a link stops the
-  run with `Remove .qory/outbox, then start the run again: a session starts with no
-  outbox.` A type of the outputs or of `deliver` whose `json_schema` does not convert
-  to JSON stops the run: `Report the run to the instance admin of Qory Apiary: an output's
-  schema does not convert.` A run with no repository stores its outputs alone, in the step `store
-  the outputs`. See The outputs of a session in `docs/run.md`.
+  left is never stored; a `.qory` that is a link stops the run with `Remove .qory/outbox,
+  then start the run again: a session starts with no outbox.` A type of the outputs or of
+  `deliver` whose `json_schema` does not convert to JSON stops the run: `Report the run to
+  the instance admin of Qory Apiary: an output's schema does not convert.` A run with no
+  repository stores its outputs alone, in the step `store the outputs`. See The outputs of
+  a session in `docs/run.md`.
 - A module can declare checks for the files of an artifact type with `push_checks` in
   `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
   arguments, and optional `reads`, the other artifact types the check reads. The checks

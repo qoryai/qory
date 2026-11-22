@@ -372,25 +372,66 @@ func (e *noPushCredential) EndCode() contracts.EndCode { return contracts.EndCod
 // endCoder is an error that says which end code a run that fails with it closes with.
 type endCoder interface{ EndCode() contracts.EndCode }
 
-// endCodeOf is the end code of the first error in err's tree that has one, "" for none. An
+// endCodeOf is the end code of the first error in err's tree that has one, as [codeInTree]
+// finds it. A tree with no such error and a failed call to the run API, a
+// [*runapi.CallError], gives run_api_failed, so every other code comes first. "" for none.
+func endCodeOf(err error) contracts.EndCode {
+	if code := codeInTree(err); code != "" {
+		return code
+	}
+	if callFailed(err) {
+		return contracts.EndCodeRunAPIFailed
+	}
+	return ""
+}
+
+// codeInTree is the end code of the first error in err's tree that has one, "" for none. An
 // error that joins several errors gives the code of the first that has one, in the order
 // they were joined.
-func endCodeOf(err error) contracts.EndCode {
+func codeInTree(err error) contracts.EndCode {
 	if c, ok := err.(endCoder); ok {
 		return c.EndCode()
 	}
 	switch u := err.(type) {
 	case interface{ Unwrap() []error }:
 		for _, e := range u.Unwrap() {
-			if code := endCodeOf(e); code != "" {
+			if code := codeInTree(e); code != "" {
 				return code
 			}
 		}
 	case interface{ Unwrap() error }:
-		return endCodeOf(u.Unwrap())
+		return codeInTree(u.Unwrap())
 	}
 	return ""
 }
+
+// callFailed reports whether err's tree has a [*runapi.CallError], also as the cause of a
+// [*shownCause].
+func callFailed(err error) bool {
+	switch u := err.(type) {
+	case nil:
+		return false
+	case *runapi.CallError:
+		return true
+	case *shownCause:
+		return callFailed(u.cause)
+	case interface{ Unwrap() []error }:
+		return slices.ContainsFunc(u.Unwrap(), callFailed)
+	case interface{ Unwrap() error }:
+		return callFailed(u.Unwrap())
+	}
+	return false
+}
+
+// shownCause is an error whose line shows its cause as [shownError] does, with the cause kept
+// for [endCodeOf], which reads a failed call to the run API in it. It has no Unwrap, so no
+// other check, such as the exit status of [ExitCode], reads the cause: as for the line alone.
+type shownCause struct{ line, cause error }
+
+func (e *shownCause) Error() string { return e.line.Error() }
+
+// withCause is line, the error that shows cause, with cause kept for [endCodeOf].
+func withCause(line, cause error) error { return &shownCause{line, cause} }
 
 // pushProxyError is the push step's error for err, the error of PushProxy: a
 // [*noPushCredential] for a run with no push credential, [textPushNoProxy] with Forager's
@@ -438,8 +479,9 @@ func (o *runOutputs) store(ctx context.Context, w io.Writer, client *runapi.Clie
 	}
 	// The check before the push passed on the version the push leaves, so an error here is
 	// of a pushed head that differs from the local head: the branch has no version, and the
-	// run closes with no end code. A run with no branch pushes nothing, so its outputs that
-	// fail here close it outputs_invalid, as before a push.
+	// run closes with no end code, or run_api_failed for a failed read of the run's versions.
+	// A run with no branch pushes nothing, so its outputs that fail here close it
+	// outputs_invalid, as before a push.
 	ready, err := o.checked(ctx, w, client, runID, recordOf(branch, o.target), note)
 	if err != nil {
 		if branch == nil {
@@ -476,7 +518,7 @@ func missingOutput(ctx context.Context, client *runapi.Client, runID string, typ
 	index, err := client.Artifacts(read)
 	cancel()
 	if err != nil {
-		return fmt.Errorf(textOutputNotStored, provisioner.ShownType(missing[0]), shownError(err))
+		return withCause(fmt.Errorf(textOutputNotStored, provisioner.ShownType(missing[0]), shownError(err)), err)
 	}
 	for _, typ := range missing {
 		if !hasRunVersion(index, typ, runID) {
@@ -530,7 +572,8 @@ func (o *runOutputs) beforePush(ctx context.Context, client *runapi.Client, runI
 
 // checked is [runOutputs.ready] for rec and note, with the check of [missingOutput] on the
 // required outputs that the outbox does not have. An output that fails, or is missing, is an
-// [*outputsInvalid]; a failed read of the run's versions is not.
+// [*outputsInvalid]; a failed read of the run's versions is not, and closes the run
+// run_api_failed.
 func (o *runOutputs) checked(ctx context.Context, w io.Writer, client *runapi.Client, runID string, rec *pushRecord, note string) ([]readyOutput, error) {
 	ready, missing, err := o.ready(w, rec, note)
 	if err != nil {
@@ -585,7 +628,8 @@ func notStored(branch *preparation.WorkBranch, typ, cause string) error {
 // POST, sends it again after Retry-After; a POST with no response sends it again only when
 // [versionStored] reads that no version of this run has the files. At most
 // [maxSubmissionTries] POST go out, and unknown_type is [textNoOutputType]. Every failure
-// has the fix of [preparation.WorkBranch.DeleteBranch] when the push landed.
+// has the fix of [preparation.WorkBranch.DeleteBranch] when the push landed, and keeps the
+// error of a failed call for [endCodeOf], see [withCause].
 func storeVersion(ctx context.Context, client *runapi.Client, runID string, branch *preparation.WorkBranch, push runapi.Push) error {
 	var last error
 	for try := 1; try <= maxSubmissionTries; try++ {
@@ -605,7 +649,7 @@ func storeVersion(ctx context.Context, client *runapi.Client, runID string, bran
 			if branch != nil && branch.PushedPaths() != "" {
 				fix = "\n  Before the round, " + branch.DeleteBranch() + "."
 			}
-			return fmt.Errorf(textNoOutputType, provisioner.ShownType(push.Type), fix)
+			return withCause(fmt.Errorf(textNoOutputType, provisioner.ShownType(push.Type), fix), last)
 		case runapi.HasCode(last, runapi.CodeRateLimited):
 		case noResponse(last):
 			stored, err := versionStored(ctx, client, runID, push)
@@ -613,17 +657,17 @@ func storeVersion(ctx context.Context, client *runapi.Client, runID string, bran
 			case err != nil && ctx.Err() != nil:
 				return err
 			case err != nil && (branch == nil || branch.PushedPaths() == ""):
-				return fmt.Errorf(textOutputUnknown, provisioner.ShownType(push.Type), shownError(err))
+				return withCause(fmt.Errorf(textOutputUnknown, provisioner.ShownType(push.Type), shownError(err)), err)
 			case err != nil:
-				return fmt.Errorf(textStoreUnknown, provisioner.ShownType(push.Type), branch.DeleteBranch(), branch.Ref, shownError(err))
+				return withCause(fmt.Errorf(textStoreUnknown, provisioner.ShownType(push.Type), branch.DeleteBranch(), branch.Ref, shownError(err)), err)
 			case stored:
 				return nil
 			}
 		default:
-			return notStored(branch, push.Type, shownError(last))
+			return withCause(notStored(branch, push.Type, shownError(last)), last)
 		}
 	}
-	return notStored(branch, push.Type, shownError(last))
+	return withCause(notStored(branch, push.Type, shownError(last)), last)
 }
 
 // postOnce sends push once, within the limit of one request.
@@ -764,8 +808,8 @@ func (e *pushEnding) settle(now stopRead) {
 // succeed keeps the session's end, whatever the step did. After a session that succeeded, a cut
 // step with no refusal closes the run as a stop does, and a failed one closes it failed with the
 // status of err, and with the end code of err as the reason when err has one:
-// push_credential_missing, push_refused, push_not_recorded or outputs_invalid, see
-// [endCodeOf].
+// push_credential_missing, push_refused, push_not_recorded, outputs_invalid or
+// run_api_failed, see [endCodeOf].
 func (e pushEnding) outcome(err error) session.Outcome {
 	changed := errors.As(err, new(*preparation.HeadChanged))
 	switch {

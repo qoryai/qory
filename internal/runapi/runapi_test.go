@@ -1165,3 +1165,92 @@ func TestSplitPushedCommitsKeepsABodyOfExactlyTheLimitInOneCall(t *testing.T) {
 		t.Errorf("a body of %d bytes gives %d calls, want 2 calls of 1 repository", runapi.MaxPushedCommitsBytes+1, len(got))
 	}
 }
+
+// isCall reports whether err is a [runapi.CallError].
+func isCall(err error) bool { return errors.As(err, new(*runapi.CallError)) }
+
+// TestASentRequestThatFailsIsACallError is every failure of a request that the client sent: an
+// error status, a gateway it cannot reach, a response it cannot read, and the bytes of a
+// download that differ from the index. Each is a CallError, with the text of its cause.
+func TestASentRequestThatFailsIsACallError(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	gone, err := runapi.New(server.URL+"/v1/runs/run-1", http.DefaultClient)
+	server.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("the bytes")
+	for name, call := range map[string]func() error{
+		"error status": func() error {
+			_, err := serve(t, respond(http.StatusInternalServerError, `{"error":"unavailable"}`)).Artifacts(context.Background())
+			return err
+		},
+		"no response": func() error { _, err := gone.WorkItem(context.Background()); return err },
+		"no JSON": func() error {
+			_, err := serve(t, respond(http.StatusOK, `<html>`)).WorkItem(context.Background())
+			return err
+		},
+		"post answered 422": func() error {
+			_, err := serve(t, respond(http.StatusUnprocessableEntity, `{"error":"unknown_type"}`)).
+				PushArtifact(context.Background(), runapi.Push{Type: "demo-video"})
+			return err
+		},
+		"download status": func() error {
+			return serve(t, respond(http.StatusNotFound, `{"error":"not_found"}`)).
+				Download(context.Background(), "av_1", file("a", nil), io.Discard)
+		},
+		"download bytes": func() error {
+			client := serve(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(content) })
+			entry := runapi.File{Filename: "a", Size: int64(len(content)), SHA256: strings.Repeat("0", 64)}
+			return client.Download(context.Background(), "av_1", entry, io.Discard)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			if !isCall(err) {
+				t.Fatalf("err = %v (%T), want a CallError", err, err)
+			}
+			var called *runapi.CallError
+			errors.As(err, &called)
+			if called.Error() != errors.Unwrap(called).Error() {
+				t.Errorf("the CallError says %q, its cause %q", called, errors.Unwrap(called))
+			}
+		})
+	}
+}
+
+// TestARequestNeverSentIsNoCallError is a failure before or apart from the request: a path that
+// cannot be one, a version or a verdict over its limit, and a download whose write fails. None
+// is a CallError.
+func TestARequestNeverSentIsNoCallError(t *testing.T) {
+	content := []byte("the bytes")
+	sends := func(t *testing.T) *runapi.Client {
+		return serve(t, func(_ http.ResponseWriter, r *http.Request) { t.Errorf("request sent: %s", r.RequestURI) })
+	}
+	for name, call := range map[string]func(t *testing.T) error{
+		"no path segment": func(t *testing.T) error {
+			return sends(t).Download(context.Background(), "..", runapi.File{Filename: "a"}, io.Discard)
+		},
+		"version over the limit": func(t *testing.T) error {
+			_, err := sends(t).PushArtifact(context.Background(), runapi.Push{
+				Type:  "demo-video",
+				Files: []runapi.PushFile{{Filename: "a.mp4", Content: make([]byte, runapi.MaxBody/4*3+3)}},
+			})
+			return err
+		},
+		"verdict over the limit": func(t *testing.T) error {
+			_, err := sends(t).PushVerdict(context.Background(), runapi.VerdictEscalate, verdictOfBytes(t, 64<<10+1), nil)
+			return err
+		},
+		"failed write": func(t *testing.T) error {
+			client := serve(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(content) })
+			return client.Download(context.Background(), "av_1", file("a", content), failingWriter{})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := call(t); err == nil || isCall(err) {
+				t.Errorf("err = %v (%T), want an error that is no CallError", err, err)
+			}
+		})
+	}
+}
