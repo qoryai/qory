@@ -3265,7 +3265,14 @@ code is used` indented by two spaces.
 
 After a session that succeeded, after the push, qory stores one version of each output of
 the stage that the outbox has. A session that failed, timed out, was cancelled or paused
-stores nothing, and its outputs stay in the outbox.
+stores nothing.
+
+Before each session starts, session 1 and each later session of a shared run, qory removes
+the outbox, `.qory/outbox` with all it has, and nothing else: an output that an earlier
+session or run left there is never stored. A `.qory` that is a link, or an outbox that qory
+cannot remove, stops the run before the session, exit 1: `qory run: Remove .qory/outbox,
+then take the work item in again: a session starts with no outbox.`, then `Emptying the
+outbox in <folder> failed: <cause>; the code is used` indented by two spaces.
 
 A type has `deliver` when `deliver` of the run documents lists it, with the `send` from
 there. The composed `process.yaml` sets no `deliver` of a run from a run code: where it
@@ -3293,7 +3300,7 @@ A type that marks a member gets no version when the run pushed nothing to the ta
 repository, as a run with no repository does, and a type that marks `pushed-commits` gets
 none when the run pushed no commit to it. qory then prints `qory run: stored no <type>
 output: the run pushed no commits to the target.`, then `Target: <system>/<path>` indented
-by two spaces, and the output stays in the outbox.
+by two spaces, and the output stays in the outbox until the next session starts.
 
 Then qory checks that the outbox has each output that the stage requires. An output that the
 outbox does not have counts as written when the work item has a version of that type that

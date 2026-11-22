@@ -56,6 +56,7 @@ const (
 	textOutputUnread    = "Fix the %s output so that qory can read it.\n  %s"
 	textOutputNoPush    = "qory run: stored the %s output; the run has no repository to push."
 	textOutputNoCommits = "qory run: stored no %s output: the run pushed no commits to the target.\n  Target: %s"
+	textOutboxNotEmpty  = "Remove .qory/outbox, then take the work item in again: a session starts with no outbox.\n  Emptying the outbox in %s failed: %s" + codeUsed
 )
 
 // maxShownPlace is the most characters of a place in a schema that a line shows: with a type
@@ -64,6 +65,33 @@ const maxShownPlace = 29
 
 // outboxPath is the outbox of the checkout, or working folder, at root.
 func outboxPath(root string) string { return filepath.Join(root, filepath.FromSlash(outboxRel)) }
+
+// clearOutbox removes the outbox under root, the checkout or working folder, before a
+// session starts, so that no output which an earlier session left is stored after this one.
+// It removes nothing else: the removal stays inside root, .qory has to be a folder and no
+// link, and an outbox that is a link is removed as the link. An error is [textOutboxNotEmpty].
+func clearOutbox(root string) error {
+	failed := func(err error) error { return fmt.Errorf(textOutboxNotEmpty, shownText(root), shownError(err)) }
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return failed(err)
+	}
+	defer dir.Close()
+	info, err := dir.Lstat(".qory")
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return failed(err)
+	}
+	if !info.IsDir() {
+		return failed(errors.New(".qory is not a folder"))
+	}
+	if err := dir.RemoveAll(outboxRel); err != nil {
+		return failed(err)
+	}
+	return nil
+}
 
 // outputPath is the outbox entry of the type typ, relative to the root that has the outbox: the
 // file <typ>/<typ>.json for a structured type, the folder <typ> for any other.

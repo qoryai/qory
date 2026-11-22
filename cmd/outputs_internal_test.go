@@ -274,3 +274,65 @@ func TestTheRecordMatchesARepositoryOnGitHubInAnyCase(t *testing.T) {
 		}
 	}
 }
+
+// TestClearOutboxRemovesTheOutboxAlone is a checkout whose outbox has a file and a link to a
+// folder outside, beside a file in .qory: the outbox goes, and the file beside it and the
+// folder outside stay. An outbox that is a link goes as the link. A checkout with no .qory
+// has nothing to clear, and a .qory that is a link is an error that removes nothing.
+func TestClearOutboxRemovesTheOutboxAlone(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "keep.txt"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mkdir := func(p string) {
+		t.Helper()
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(p string) {
+		t.Helper()
+		mkdir(filepath.Dir(p))
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := func(target, p string) {
+		t.Helper()
+		if err := os.Symlink(target, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exists := func(p string) bool { _, err := os.Lstat(p); return err == nil }
+
+	root := t.TempDir()
+	write(filepath.Join(root, ".qory", "outbox", "reply", "reply.json"))
+	link(outside, filepath.Join(root, ".qory", "outbox", "out"))
+	write(filepath.Join(root, ".qory", "kept.txt"))
+	if err := clearOutbox(root); err != nil || exists(filepath.Join(root, ".qory", "outbox")) {
+		t.Errorf("the outbox: %v, still there: %v", err, exists(filepath.Join(root, ".qory", "outbox")))
+	}
+	if !exists(filepath.Join(root, ".qory", "kept.txt")) || !exists(filepath.Join(outside, "keep.txt")) {
+		t.Error("a file beside the outbox or outside is gone")
+	}
+
+	linked := t.TempDir()
+	mkdir(filepath.Join(linked, ".qory"))
+	link(outside, filepath.Join(linked, ".qory", "outbox"))
+	if err := clearOutbox(linked); err != nil || exists(filepath.Join(linked, ".qory", "outbox")) || !exists(filepath.Join(outside, "keep.txt")) {
+		t.Errorf("an outbox that is a link: %v", err)
+	}
+
+	if err := clearOutbox(t.TempDir()); err != nil {
+		t.Errorf("no .qory: %v", err)
+	}
+
+	qoryLink := t.TempDir()
+	mkdir(filepath.Join(outside, "outbox"))
+	write(filepath.Join(outside, "outbox", "reply.json"))
+	link(outside, filepath.Join(qoryLink, ".qory"))
+	err := clearOutbox(qoryLink)
+	if err == nil || !strings.HasPrefix(err.Error(), "Remove .qory/outbox, then take the work item in again: ") || !exists(filepath.Join(outside, "outbox", "reply.json")) {
+		t.Errorf("a .qory that is a link: %v", err)
+	}
+}

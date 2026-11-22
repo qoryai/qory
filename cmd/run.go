@@ -884,6 +884,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 							return false, err
 						}
 					}
+					// Each session starts with an empty outbox: an output that a session before
+					// left, such as one that failed, is never stored after this session.
+					if err := clearOutbox(at.root); err != nil {
+						return false, err
+					}
 					outputs = &runOutputs{root: at.root, stage: fromCode.snapshot.Outputs, types: fromCode.deliveredTypes(types), target: fromCode.targetRef}
 					spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{outboxEnv: outboxPath(at.root)})
 				}

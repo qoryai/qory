@@ -1527,6 +1527,58 @@ func TestACommitThatNoVersionConfirmsIsReplacedWithALease(t *testing.T) {
 	}
 }
 
+// TestTheOutboxIsEmptiedBeforeTheSession is a run from a run code with no repository, in a
+// person's checkout whose outbox has a reply output and a folder that an earlier run left,
+// beside a file in .qory and one at the top. The session writes no reply: it starts with no
+// outbox, no version is stored, and the two other files stay.
+func TestTheOutboxIsEmptiedBeforeTheSession(t *testing.T) {
+	p, _ := replyRepo(t)
+	p.api.outputs = `[{"type":"reply","required":false,"version":null,"check":"missing"}]`
+	left := true
+	p.mountsOf = func(spec session.SessionSpec) {
+		_, err := os.Lstat(outboxOf(spec))
+		left = err == nil
+	}
+	writeFile(t, filepath.Join(p.h.dir, ".qory", "outbox", "reply", "reply.json"), `{"text":"Left by an earlier run."}`)
+	writeFile(t, filepath.Join(p.h.dir, ".qory", "outbox", "notes", "a.md"), "# A\n")
+	writeFile(t, filepath.Join(p.h.dir, ".qory", "kept.txt"), "kept\n")
+	writeFile(t, filepath.Join(p.h.dir, "kept.txt"), "kept\n")
+	r := p.run(t, nil, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if left {
+		t.Error("the session starts with the outbox of an earlier run")
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST, want 0", posts)
+	}
+	for _, kept := range []string{filepath.Join(".qory", "kept.txt"), "kept.txt"} {
+		if _, err := os.Stat(filepath.Join(p.h.dir, kept)); err != nil {
+			t.Errorf("%s is gone: %v", kept, err)
+		}
+	}
+}
+
+// TestAQoryLinkStopsTheRunBeforeTheSession is the run of [TestTheOutboxIsEmptiedBeforeTheSession]
+// whose .qory is a link to a folder outside with an outbox: the run stops before the session,
+// exit 1, with the fix, and the outbox outside stays.
+func TestAQoryLinkStopsTheRunBeforeTheSession(t *testing.T) {
+	p, outbox := replyRepo(t)
+	outside := tempDir(t)
+	writeFile(t, filepath.Join(outside, "outbox", "reply", "reply.json"), `{"text":"Outside."}`)
+	if err := os.Symlink(outside, filepath.Join(p.h.dir, ".qory")); err != nil {
+		t.Fatal(err)
+	}
+	r := p.run(t, nil, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if *outbox != "" || r.err == nil {
+		t.Fatalf("%v, the session's outbox %q, want the run to stop before the session", r.err, *outbox)
+	}
+	wants(t, r.err.Error(), "Remove .qory/outbox, then take the work item in again: a session starts with no outbox.\n  Emptying the outbox in ", " failed: .qory is not a folder; the code is used")
+	if _, err := os.Stat(filepath.Join(outside, "outbox", "reply", "reply.json")); err != nil {
+		t.Errorf("the outbox outside is gone: %v", err)
+	}
+}
+
 // TestOnlyAWriteRunHasTheOutboxVariable is the variable QORY_OUTBOX in the session of a run
 // at write, with the path of the checkout's .qory/outbox, and its absence in a run the
 // workflow lowers to write-no-push: that run stores no outputs.

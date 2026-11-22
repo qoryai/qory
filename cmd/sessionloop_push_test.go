@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -247,6 +248,47 @@ func TestAFailedPushStartsNoNextSession(t *testing.T) {
 	r.wantsClose(t, event.StateFailed, 1)
 	if joins != 1 || requests() != 0 {
 		t.Errorf("%d joins and %d next-session requests, want 1 and 0", joins, requests())
+	}
+}
+
+// TestAFailedSessionsOutputIsNotStoredByTheNextSession is a write run of two sessions whose
+// session 1 writes its pull-request output and fails, and whose session 2 commits, succeeds
+// and writes no output: session 2 starts with an empty outbox, and no version is stored.
+func TestAFailedSessionsOutputIsNotStoredByTheNextSession(t *testing.T) {
+	p, requests := sharedPushRepo(t, laterAnswer(2, "claude", "example-provider-2", 30))
+	p.noOutput = true
+	joins := 0
+	left := true
+	r := p.run(t, func(d string) {
+		joins++
+		outbox := filepath.Join(d, ".qory", "outbox")
+		if joins == 1 {
+			writeFile(t, filepath.Join(outbox, "pull-request", "pull-request.json"), `{"title":"Left by a failed session"}`)
+			return
+		}
+		_, err := os.Lstat(outbox)
+		left = err == nil
+		writeFile(t, filepath.Join(d, "second.txt"), "second\n")
+		commitAll(t, d, "Add a second file")
+	}, func() func() (*session.Result, error) {
+		n := 0
+		return func() (*session.Result, error) {
+			n++
+			if n == 1 {
+				return &session.Result{State: event.StateFailed, Session: 1}, nil
+			}
+			return &session.Result{State: event.StateSucceeded, Session: n}, nil
+		}
+	}())
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if joins != 2 || requests() != 2 {
+		t.Fatalf("%d joins and %d next-session requests, want 2 and 2\n%s", joins, requests(), r.out)
+	}
+	if left {
+		t.Error("session 2 starts with the outbox of session 1")
+	}
+	if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
+		t.Errorf("%d POST and %d versions, want none", posts, stored)
 	}
 }
 

@@ -327,7 +327,10 @@ release may change what an existing document does, and states it under Upgrading
   delivered type goes to the artifact `t-` and the first 32 hexadecimal digits of the SHA-256 of the target's `collection`; any other
   type's to `main`. A required output that the session did not write, and that no version of
   the run has, fails the step: `Write <type> to the outbox: the stage requires it and the
-  session wrote none.` A run with no repository stores its outputs alone, in the step `store
+  session wrote none.` qory removes the outbox before each session, so an output that a
+  failed session or an earlier run left is never stored; a `.qory` that is a link stops the
+  run with `Remove .qory/outbox, then take the work item in again: a session starts with no
+  outbox.` A run with no repository stores its outputs alone, in the step `store
   the outputs`. See The outputs of a session in `docs/run.md`.
 - A module can declare checks for the files of an artifact type with `push_checks` in
   `qory-module.yaml`: each item has `type`, `command`, a program in the module and its
