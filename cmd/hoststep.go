@@ -13,7 +13,6 @@ import (
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
-	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/statusfd"
 )
@@ -32,24 +31,30 @@ const (
 	textFetchStepOne     = "fetch %s and 1 further repository"
 	textFetchStepMany    = "fetch %s and %d further repositories"
 	textFetchStepUnnamed = "fetch the run's repositories"
+	textFetchStepReadOne = "fetch 1 read-only repository"
+	textFetchStepReads   = "fetch %d read-only repositories"
 	textFetchStepBranch  = "%s at %s %s"
 	textComposeStep      = "compose the harness for %s"
 	textComposeStepAny   = "compose the harness"
 	textCopyStep         = "copy work out"
 )
 
-// fetchStepName is the name of the fetch step of a run whose server's values getenv
-// returns: the run's repository as <system>/<path>, and how many further repositories
-// the run lists. A list that does not pass [preparation.Check] has the name without a
-// repository; the fetch then fails on that list's line.
-func fetchStepName(getenv func(string) string) string {
-	system := getenv(preparation.EnvSystem)
-	paths, err := preparation.Check(system, getenv(preparation.EnvRepositories))
-	if err != nil || len(paths) == 0 {
+// fetchStepName is the name of the fetch step of a run whose list is l: the run's
+// repository as <system>/<path>, and how many further repositories the run lists; for a
+// list of read targets alone, how many. A list that does not pass its check has the name
+// without a repository; the fetch then fails on that list's line.
+func fetchStepName(l runList) string {
+	if l.err != nil || len(l.paths) == 0 {
 		return textFetchStepUnnamed
 	}
-	first := integration.Printable(exports.Value(system+"/"+paths[0], false))
-	switch n := len(paths) - 1; n {
+	if !l.target {
+		if len(l.paths) == 1 {
+			return textFetchStepReadOne
+		}
+		return fmt.Sprintf(textFetchStepReads, len(l.paths))
+	}
+	first := integration.Printable(exports.Value(l.system+"/"+l.paths[0], false))
+	switch n := len(l.paths) - 1; n {
 	case 0:
 		return fmt.Sprintf(textFetchStep, first)
 	case 1:

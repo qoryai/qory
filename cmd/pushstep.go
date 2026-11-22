@@ -449,14 +449,21 @@ func shownError(err error) string {
 }
 
 // pushStepName is the name of the push step of branch on system: the branch, the first
-// repository as <system>/<path>, and how many further repositories it has; for a run with no
-// branch, [textStoreStep].
+// repository as <system>/<path>, and how many further repositories the push may move, a
+// read target not among them, see [preparation.WorkRepository.ReadOnly]; for a run with
+// no branch, [textStoreStep].
 func pushStepName(branch *preparation.WorkBranch, system string) string {
 	if branch == nil {
 		return textStoreStep
 	}
 	first := integration.Printable(exports.Value(system+"/"+branch.Repositories[0].Path, false))
-	switch n := len(branch.Repositories) - 1; n {
+	n := 0
+	for _, r := range branch.Repositories[1:] {
+		if !r.ReadOnly {
+			n++
+		}
+	}
+	switch n {
 	case 0:
 		return fmt.Sprintf(textPushStep, branch.Ref, first)
 	case 1:

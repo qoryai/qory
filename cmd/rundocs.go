@@ -97,7 +97,8 @@ func fromAnswerOnly(cmd *cobra.Command, runtime string, extra []string) error {
 // harness_hidden. named is set when harness_hidden is true: no text of the run shows
 // the address of a harness source.
 // target is the address of the documents' target and target_version, which the fetch
-// uses for the target's repository, and empty for a target with no address. workItem is
+// uses for the target's repository, and empty for a target with no address, with the
+// address of each read target that has one, see [preparation.Target.Reads]. workItem is
 // the id of the documents' subject when the subject is a work item, and "" for a subject
 // of another kind or none.
 type codeRun struct {
@@ -225,11 +226,17 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The fetch reads the target's address alone: a target with no address, such as a
-	// place that is not on a host, is not fetched, and its target_version is not used.
+	// The fetch reads the addresses alone: a target with no address, such as a place that
+	// is not on a host, is not fetched, and its target_version is not used; a read target
+	// with no address is not fetched, and the run goes on.
 	target := preparation.Target{FromCode: true}
 	if doc.Target != nil && doc.Target.Address != nil {
 		target.System, target.Path, target.Version = doc.Target.Address.System, doc.Target.Address.Path, doc.TargetVersion
+	}
+	for _, read := range doc.ReadTargets {
+		if read.Address != nil {
+			target.Reads = append(target.Reads, preparation.Read{System: read.Address.System, Path: read.Address.Path})
+		}
 	}
 	r := &codeRun{targetRef: doc.Target, runtime: runtime, settings: settings, harness: harness, harnessDoc: doc.Harness, runSettings: doc.RunSettings, shared: doc.SharedRun, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: fullSuiteIn(doc.TypeSettings), hidden: hidden, target: target, access: doc.Access}
 	if doc.Subject != nil && doc.Subject.Kind == provisioner.SubjectWorkItem {
@@ -565,32 +572,70 @@ func (r *codeRun) clonesDestinations() bool {
 }
 
 // fetchesTargetAlone reports whether the run from the run code r fetches its target and no
-// further repository of the run configuration: a read run whose inputs list destinations
-// and whose documents contain no harness document, which fetches its target only for the
-// harness of the target's repository, see [codeRun.clonesDestinations]. The agent clones
-// any other destination with qory destination clone.
+// read target: a read run whose inputs list destinations and whose documents contain no
+// harness document, which fetches its target only for the harness of the target's
+// repository, see [codeRun.clonesDestinations]. The agent clones any other destination with
+// qory destination clone.
 func (r *codeRun) fetchesTargetAlone() bool {
 	return r != nil && r.access == stack.AccessRead && r.harness == nil && hasDestinations(r.inputs)
 }
 
-// fetchValues is [runValues] for the fetch of the run from the run code r: with
-// [codeRun.fetchesTargetAlone], [preparation.EnvRepositories] is cut to the target, as
-// [preparation.TargetAlone] cuts it.
-func (r *codeRun) fetchValues(run openedRun) func(string) string {
-	if !r.fetchesTargetAlone() {
-		return runValues(run)
-	}
-	return preparation.TargetAlone(runValues(run), r.fetchTarget())
-}
-
 // fetchTarget is the target the fetch of the run's repositories takes, as
-// [preparation.RunAt] uses it: r's target and target_version, and none for a nil r, a
-// run not from a run code.
+// [preparation.RunAt] uses it: r's target and target_version, and its read targets but with
+// [codeRun.fetchesTargetAlone]; none for a nil r, a run not from a run code.
 func (r *codeRun) fetchTarget() preparation.Target {
 	if r == nil {
 		return preparation.Target{}
 	}
-	return r.target
+	t := r.target
+	if r.fetchesTargetAlone() {
+		t.Reads = nil
+	}
+	return t
+}
+
+// runList is the list of repositories that the fetch of run takes on its system, see
+// [preparation.RunAt]: for a run from the run code r, the documents' target and read
+// targets, as [preparation.Target.Repositories] lists them; for a run from no run code, the
+// run configuration's [preparation.EnvRepositories], as [preparation.Check] reads it.
+type runList struct {
+	system string
+	paths  []string
+	// target is whether paths[0] is the run's repository, which goes into the working
+	// folder: false for a list of read targets alone.
+	target bool
+	// err is the stop of the list's check, which the fetch stops on too.
+	err error
+}
+
+// fetchList is the [runList] of run, from the run code r or from none.
+func (r *codeRun) fetchList(run openedRun) runList {
+	l := runList{system: run.System()}
+	switch {
+	case r != nil:
+		l.paths, l.target, l.err = r.fetchTarget().Repositories(l.system)
+	case run.Repositories() != "":
+		l.paths, l.err = preparation.Check(l.system, run.Repositories())
+		l.target = l.err == nil
+	}
+	return l
+}
+
+// fetches reports whether the list has a repository to fetch, or a stop that the fetch
+// reports.
+func (l runList) fetches() bool { return len(l.paths) > 0 || l.err != nil }
+
+// working reports whether the fetch of the list puts a repository into the working folder.
+func (l runList) working() bool { return l.err == nil && l.target }
+
+// setupValue is the value of [preparation.EnvRepositories] in the setup container: the
+// list, target first, which qory run prepare reads, and "" for a list with no target's
+// repository, since qory run prepare takes the first entry for the working folder's.
+func (l runList) setupValue() string {
+	if !l.working() {
+		return ""
+	}
+	return strings.Join(l.paths, ",")
 }
 
 // sessionDeadline is the time at which a session whose clock starts at start reaches its

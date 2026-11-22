@@ -2,6 +2,8 @@ package preparation
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -197,35 +199,33 @@ func TestFetchesAtACommitThroughTheHostProxy(t *testing.T) {
 	t.Logf("the line of a commit the server lacks: %v", err)
 }
 
-// TestStopsOnATargetThatIsNotTheFirstEntry is a target on the list's system whose path
-// is a later entry, one whose path the list does not contain, and one with an empty
-// list: each stops with its line before any fetch, whatever the version, so the working
-// folder has no remote and no commit.
-func TestStopsOnATargetThatIsNotTheFirstEntry(t *testing.T) {
+// TestTheDocumentsTargetIsTheRunsRepository is a run from a run code whose variable lists
+// another repository first, and one the documents do not list: the target's repository is
+// in the working folder at the documents' version, the read target under
+// .qory/repositories, and the repository that only the variable lists is not fetched.
+func TestTheDocumentsTargetIsTheRunsRepository(t *testing.T) {
 	needGit(t)
 	base := t.TempDir()
 	first, _ := movedRemote(t, base, "acme/shop")
 	remote(t, base, "acme/lib", "main", nil)
-	later := "qory run: report this run to the instance admin of Qory Apiary: the run's documents set the target acme/shop, but the run configuration lists it after another repository; the target must be the first repository of the run configuration; the code is used"
-	missing := "qory run: report this run to the instance admin of Qory Apiary: the run's documents set the target acme/shop, but the run configuration does not list it; the target must be the first repository of the run configuration; the code is used"
-	for _, c := range []struct{ list, version, want string }{
-		{"acme/lib,acme/shop", first, later},
-		{"acme/lib,acme/shop", "main", later},
-		{"acme/lib", first, missing},
-		{"acme/lib", "main", missing},
-		{"", first, missing},
-	} {
-		dir := emptyFolder(t)
-		_, err := fetchListAt(dir, c.list, Target{System: "git.example.com", Path: "acme/shop", Version: c.version})
-		if err == nil || err.Error() != c.want {
-			t.Errorf("%s at %s: %v\nwant %s", c.list, c.version, err, c.want)
-		}
-		if got := run(t, dir, "remote"); got != "" {
-			t.Errorf("%s at %s: the working folder has the remote %s", c.list, c.version, got)
-		}
-		if got := run(t, dir, "rev-list", "-n", "1", "--all"); got != "" {
-			t.Errorf("%s at %s: the working folder has the commit %s", c.list, c.version, got)
-		}
+	remote(t, base, "acme/extra", "main", nil)
+	dir := emptyFolder(t)
+	at := Target{System: "git.example.com", Path: "acme/shop", Version: first, Reads: []Read{{System: "git.example.com", Path: "acme/lib"}}, FromCode: true}
+	line, err := fetchListAt(dir, "acme/lib,acme/extra,acme/shop", at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "qory run: fetched acme/shop at " + first[:12] + " and 1 further repository in Xs"; line != want {
+		t.Errorf("the line is %q, want %q", line, want)
+	}
+	if got := run(t, dir, "rev-parse", "HEAD"); got != first {
+		t.Errorf("the working folder is at %s, want %s", got, first)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".qory", "repositories", "acme", "lib", ".git")); err != nil {
+		t.Errorf("the read target is not fetched: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".qory", "repositories", "acme", "extra")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the repository the documents do not list is fetched: %v", err)
 	}
 }
 
@@ -246,82 +246,6 @@ func TestUsesNoVersionOfATargetOnAnotherSystem(t *testing.T) {
 		}
 		if got := run(t, dir, "rev-parse", "HEAD"); got != head {
 			t.Errorf("%+v: the working folder is at %s, want the head %s", at, got, head)
-		}
-	}
-}
-
-// TestUnlistedStopsOnlyATargetOnTheSystem is [Unlisted]: an empty list stops a target
-// on the list's system that sets a version, and nothing else.
-func TestUnlistedStopsOnlyATargetOnTheSystem(t *testing.T) {
-	at := Target{System: "git.example.com", Path: "acme/shop", Version: "0123456789abcdef0123456789abcdef01234567"}
-	missing := "qory run: report this run to the instance admin of Qory Apiary: the run's documents set the target acme/shop, but the run configuration does not list it; the target must be the first repository of the run configuration; the code is used"
-	if err := Unlisted(env("git.example.com", ""), at); err == nil || err.Error() != missing {
-		t.Errorf("an empty list: %v, want %s", err, missing)
-	}
-	for _, c := range []struct {
-		system, list string
-		at           Target
-	}{
-		{"", "", at},
-		{"ads.example.com", "", at},
-		{"git.example.com", "", Target{System: "git.example.com", Path: "acme/shop"}},
-		{"git.example.com", "acme/shop", at},
-	} {
-		if err := Unlisted(env(c.system, c.list), c.at); err != nil {
-			t.Errorf("%q %q %+v: %v, want nil", c.system, c.list, c.at, err)
-		}
-	}
-}
-
-// TestTheTargetIsTheEntryOfItsPath is [targetIn]: the entry that is the target's path,
-// in any case on github.com alone, and -1 for a path the list lacks.
-func TestTheTargetIsTheEntryOfItsPath(t *testing.T) {
-	for _, c := range []struct {
-		system string
-		paths  []string
-		path   string
-		want   int
-	}{
-		{"git.example.com", []string{"acme/shop", "acme/lib"}, "acme/shop", 0},
-		{"git.example.com", []string{"acme/lib", "acme/shop"}, "acme/shop", 1},
-		{"git.example.com", []string{"acme/shop"}, "Acme/Shop", -1},
-		{"github.com", []string{"acme/shop"}, "Acme/Shop", 0},
-		{"git.example.com", []string{"acme/lib"}, "acme/shop", -1},
-	} {
-		if got := targetIn(c.system, c.paths, c.path); got != c.want {
-			t.Errorf("%s %v %s: %d, want %d", c.system, c.paths, c.path, got, c.want)
-		}
-	}
-}
-
-// TestTargetAloneCutsTheListToTheTarget is the list of a run that fetches its target
-// alone: cut to the target when the target is its first entry on the run's system, and as
-// it came when the target is a later entry, not in the list, on another system, or alone,
-// or the list does not pass Check. Other names keep their values.
-func TestTargetAloneCutsTheListToTheTarget(t *testing.T) {
-	site := Target{System: "git.test", Path: "acme/site"}
-	for _, c := range []struct {
-		system, list string
-		at           Target
-		want         string
-	}{
-		{"git.test", "acme/site,acme/shop,acme/tools", site, "acme/site"},
-		{"git.test", "acme/shop,acme/site", site, "acme/shop,acme/site"},
-		{"git.test", "acme/shop,acme/tools", site, "acme/shop,acme/tools"},
-		{"git.test", "acme/site", site, "acme/site"},
-		{"other.test", "acme/site,acme/shop", site, "acme/site,acme/shop"},
-		{"git.test", "acme/site,acme/site", site, "acme/site,acme/site"},
-		{ForgeGitHub, "Acme/Site,acme/shop", Target{System: ForgeGitHub, Path: "acme/site"}, "Acme/Site"},
-	} {
-		getenv := func(name string) string {
-			return map[string]string{EnvSystem: c.system, EnvRepositories: c.list, "OTHER": "o"}[name]
-		}
-		alone := TargetAlone(getenv, c.at)
-		if got := alone(EnvRepositories); got != c.want {
-			t.Errorf("%s on %s for %s: %q, want %q", c.list, c.system, c.at.Path, got, c.want)
-		}
-		if alone("OTHER") != "o" || alone(EnvSystem) != c.system {
-			t.Errorf("%s: another name changed", c.list)
 		}
 	}
 }

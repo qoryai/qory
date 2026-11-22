@@ -2,6 +2,7 @@ package cmd_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -44,36 +45,57 @@ func versionRepository(t *testing.T) (h *hostFetch, first, head string, files ma
 }
 
 // runAtVersion runs qory run from a run code whose documents set the workflow hello, the
-// target acme/site on git.test and target_version version, its run opened nowhere on
-// git.test with the repositories given, through h's host proxy, and returns the output,
+// target acme/site on git.test, target_version version and the read targets reads, a
+// comma-separated list of paths on git.test, "" for none. The run is opened nowhere on
+// git.test, through h's host proxy, and the run configuration lists [decoyRepositories],
+// which the run does not read. It returns the output,
 // the error, what the run came to and the arguments of the session that joined. The run
 // has a home outside the checkout, as a walled run of [versionRepository] needs. An empty
 // version leaves target_version out and adds a harness document, as the schema of the
 // documents requires.
-func runAtVersion(t *testing.T, h *hostFetch, repositories, version string) (string, error, keyRun, []string) {
+func runAtVersion(t *testing.T, h *hostFetch, reads, version string) (string, error, keyRun, []string) {
 	t.Helper()
-	return runAtVersionOn(t, h, proxygittest.Host, repositories, version)
+	return runAtVersionOn(t, h, proxygittest.Host, reads, version)
 }
 
 // runAtVersionOn is [runAtVersion] with the run opened on system, "" for none.
-func runAtVersionOn(t *testing.T, h *hostFetch, system, repositories, version string) (string, error, keyRun, []string) {
+func runAtVersionOn(t *testing.T, h *hostFetch, system, reads, version string) (string, error, keyRun, []string) {
 	t.Helper()
 	target := map[string]any{"collection": "R_1001", "address": map[string]any{"system": proxygittest.Host, "path": "acme/site"}}
-	return runAtTarget(t, h, system, repositories, version, target)
+	return runAtTarget(t, h, system, reads, version, target)
 }
 
 // runAtTarget is [runAtVersionOn] with the documents' target, target.
-func runAtTarget(t *testing.T, h *hostFetch, system, repositories, version string, target map[string]any) (string, error, keyRun, []string) {
+func runAtTarget(t *testing.T, h *hostFetch, system, reads, version string, target map[string]any) (string, error, keyRun, []string) {
 	t.Helper()
-	return runAtTargetWith(t, h, system, repositories, version, target, nil)
+	return runAtTargetWith(t, h, system, reads, version, target, nil)
+}
+
+// decoyRepositories is the run configuration's QORY_RUN_REPOSITORIES of a run from a run
+// code in these tests: a repository that the server does not have, so a fetch of it fails
+// the test. The run fetches its documents' target and read targets.
+const decoyRepositories = "acme/decoy"
+
+// readTargets is the documents' read_targets of reads, a comma-separated list of paths on
+// git.test, each with a collection of its own: none for "".
+func readTargets(reads string) []any {
+	list := []any{}
+	if reads == "" {
+		return list
+	}
+	for i, path := range strings.Split(reads, ",") {
+		list = append(list, map[string]any{"collection": fmt.Sprintf("R_2%03d", i), "address": map[string]any{"system": proxygittest.Host, "path": path}})
+	}
+	return list
 }
 
 // runAtTargetWith is [runAtTarget] with change applied to the documents last.
-func runAtTargetWith(t *testing.T, h *hostFetch, system, repositories, version string, target map[string]any, change func(map[string]any)) (string, error, keyRun, []string) {
+func runAtTargetWith(t *testing.T, h *hostFetch, system, reads, version string, target map[string]any, change func(map[string]any)) (string, error, keyRun, []string) {
 	t.Helper()
 	g := newCodeRelay(t)
 	g.documents = codeDocuments(t, func(d map[string]any) {
 		d["target"], d["inputs"].(map[string]any)["target"] = target, target
+		d["read_targets"] = readTargets(reads)
 		d["target_version"] = version
 		if version == "" {
 			delete(d, "target_version")
@@ -89,7 +111,7 @@ func runAtTargetWith(t *testing.T, h *hostFetch, system, repositories, version s
 	t.Cleanup(cmd.SetJoinSession(func(s session.SessionSpec) { args = s.Args }))
 	t.Setenv("QORY_RUN_KEY", "")
 	closes, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{
-		System: system, Repositories: repositories,
+		System: system, Repositories: decoyRepositories,
 		Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
 		StackProxy: h.server.Stack.URL, StackCABundle: h.server.Stack.CABundle,
 	})
@@ -105,7 +127,7 @@ func runAtTargetWith(t *testing.T, h *hostFetch, system, repositories, version s
 // has no command hello, is not composed.
 func TestARunCodeWorksAtItsTargetVersion(t *testing.T) {
 	h, first, head, _ := versionRepository(t)
-	out, err, n, args := runAtVersion(t, h, "acme/site", first)
+	out, err, n, args := runAtVersion(t, h, "", first)
 	if !n.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
 	}
@@ -129,7 +151,7 @@ func TestARunCodeFetchesIntoAnEmptyFolder(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(h.dir, ".git")); err != nil {
 		t.Fatal(err)
 	}
-	out, err, n, _ := runAtVersion(t, h, "acme/site", first)
+	out, err, n, _ := runAtVersion(t, h, "", first)
 	if !n.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
 	}
@@ -158,7 +180,7 @@ func TestARunCodeInAFolderWithAFileStops(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(h.dir, "notes.txt"), "notes\n")
-	out, err, n, _ := runAtVersion(t, h, "acme/site", first)
+	out, err, n, _ := runAtVersion(t, h, "", first)
 	if cmd.ExitCode(err) != 1 || n.joined {
 		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", err, cmd.ExitCode(err), out)
 	}
@@ -175,7 +197,7 @@ func TestARunCodeInAFolderWithAFileStops(t *testing.T) {
 // harness in the target's repository.
 func TestARunCodeAtItsBranchHeadComposesTheHead(t *testing.T) {
 	h, _, head, _ := versionRepository(t)
-	out, err, n, _ := runAtVersion(t, h, "acme/site", head)
+	out, err, n, _ := runAtVersion(t, h, "", head)
 	if cmd.ExitCode(err) != 1 || n.joined {
 		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", err, cmd.ExitCode(err), out)
 	}
@@ -191,7 +213,7 @@ func TestARunCodeAtItsBranchHeadComposesTheHead(t *testing.T) {
 // 1, with the line that starts with taking the work item in again, and no password.
 func TestARunCodeAtACommitTheServerLacksStops(t *testing.T) {
 	h, _, _, _ := versionRepository(t)
-	out, err, n, _ := runAtVersion(t, h, "acme/site", "0123456789abcdef0123456789abcdef01234567")
+	out, err, n, _ := runAtVersion(t, h, "", "0123456789abcdef0123456789abcdef01234567")
 	if cmd.ExitCode(err) != 1 || !n.stoppedBeforeJoin() {
 		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", err, cmd.ExitCode(err), out)
 	}
@@ -212,7 +234,7 @@ func TestARunCodeWhoseFetchFailsSendsThePersonToANewTakeIn(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			h, first, _, _ := versionRepository(t)
-			out, err, n, _ := runAtVersion(t, h, "acme/site,acme/missing", version(first))
+			out, err, n, _ := runAtVersion(t, h, "acme/missing", version(first))
 			if cmd.ExitCode(err) != 1 || !n.stoppedBeforeJoin() {
 				t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", err, cmd.ExitCode(err), out)
 			}
@@ -253,10 +275,9 @@ func TestARunCodeAtATargetVersionWithNoRepositoryRunsOn(t *testing.T) {
 // first commit of acme/site:
 //   - with no QORY_RUN_SYSTEM and no repository, as for a place that is not on a host,
 //     qory run fetches nothing and composes the qory.yaml in the working folder;
-//   - with QORY_RUN_SYSTEM git.test and the repository acme/site, whose path is also the
-//     collection's ref, qory run fetches acme/site at the head of its default branch and
-//     does not use the version. The head has no workflow hello, so the run stops with
-//     workflow_not_in_harness, and the line shows the checkout's harness with no path.
+//   - with QORY_RUN_SYSTEM git.test and the run configuration's repository acme/site, whose
+//     path is also the collection's ref, qory run fetches nothing too: a run from a run code
+//     fetches its documents' target and read targets alone.
 func TestARunCodeWhoseTargetHasNoAddressUsesNoVersion(t *testing.T) {
 	t.Run("no repositories", func(t *testing.T) {
 		h, first, _, files := versionRepository(t)
@@ -279,19 +300,59 @@ func TestARunCodeWhoseTargetHasNoAddressUsesNoVersion(t *testing.T) {
 			}
 		}
 	})
-	t.Run("the listed repository is fetched at its head, not at the version", func(t *testing.T) {
-		h, first, head, _ := versionRepository(t)
-		out, err, n, _ := runAtTarget(t, h, proxygittest.Host, "acme/site", first, map[string]any{"collection": "acme/site"})
-		if cmd.ExitCode(err) != 1 || n.joined {
-			t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", err, cmd.ExitCode(err), out)
+	t.Run("the run configuration's repository is not fetched", func(t *testing.T) {
+		h, first, _, files := versionRepository(t)
+		for name, content := range files {
+			writeFile(t, filepath.Join(h.dir, filepath.FromSlash(name)), content)
 		}
-		wants(t, out, "qory run: fetched acme/site at "+head[:12]+" in ")
-		lacks(t, out, first[:12])
-		if got := gitOut(t, h.dir, "rev-parse", "HEAD"); got != head {
-			t.Errorf("the working folder is at %s, want the head %s", got, head)
+		g := newCodeRelay(t)
+		g.documents = codeDocuments(t, func(d map[string]any) {
+			target := map[string]any{"collection": "acme/site"}
+			d["target"], d["inputs"].(map[string]any)["target"] = target, target
+			d["target_version"], d["harness_hidden"] = first, false
+			d["run_settings"] = map[string]any{"runtime": "claude"}
+		})
+		t.Setenv("QORY_RUN_KEY", "")
+		closes, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{
+			System: proxygittest.Host, Repositories: "acme/site",
+			Proxy: h.server.Proxy.URL, CABundle: h.server.Proxy.CABundle, Dir: h.runDir,
+			StackProxy: h.server.Stack.URL, StackCABundle: h.server.Stack.CABundle,
+		})
+		defer restore()
+		out, err := run(t, "run", "--run-code-file", codeFile(t, g.code()), "--gateway", g.URL, "--home", filepath.Join(tempDir(t), "home"))
+		closes()
+		if !errors.Is(err, cmd.ErrJoinedNowhere) {
+			t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
 		}
-		wants(t, out+err.Error(), "add a skill workflow-hello to the checkout's harness, or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-hello or hello (workflow_not_in_harness); the code is used")
+		wants(t, out, "qory run: composed ")
+		lacks(t, out, "qory run: fetched ", first[:12])
+		if n := h.server.Tunnels(); n != 0 {
+			t.Errorf("the host proxy led %d connections", n)
+		}
 	})
+}
+
+// TestARunCodeWithReadTargetsAndNoTargetFetchesThemReadOnly is a run from a run code whose
+// documents set a target with no address, the read target acme/site and a harness
+// document: qory run fetches acme/site under .qory/repositories, read-only, leaves the
+// working folder an empty repository, and composes the harness document.
+func TestARunCodeWithReadTargetsAndNoTargetFetchesThemReadOnly(t *testing.T) {
+	files := harnessFiles(t, "write")
+	h, first, _, _ := versionRepository(t)
+	out, err, n, _ := runAtTargetWith(t, h, proxygittest.Host, "acme/site", first, map[string]any{"collection": "profile-7"}, func(d map[string]any) {
+		d["harness"] = servedHarness(t, h, files)
+	})
+	if !n.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
+	}
+	wants(t, out, "qory run: fetched 1 read-only repository in ", "qory run: composed ")
+	lacks(t, out, "qory run: fetched acme/site")
+	if got := gitOut(t, filepath.Join(h.dir, ".qory", "repositories", "acme", "site"), "rev-parse", "HEAD"); got == "" {
+		t.Error("the read target acme/site is not fetched")
+	}
+	if _, err := os.Stat(filepath.Join(h.dir, "qory.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the working folder has a qory.yaml: %v", err)
+	}
 }
 
 // harnessFiles is the files of examples/hello, whose workflow hello declares access. It
@@ -323,16 +384,16 @@ var (
 // git.test at a commit of acme/site, its target, whose documents contain a harness
 // document and whose inputs list destinations, as an Explore run's do: qory run fetches
 // nothing through the host proxy and reads no branch before the session, composes the
-// harness document's stack, fetched through the stack proxy, and joins, whether the run
-// configuration lists acme/site or no repository. The agent clones what it needs with
+// harness document's stack, fetched through the stack proxy, and joins, with a read
+// target acme/shop or none. The agent clones what it needs with
 // qory destination clone.
 func TestARunCodeWhoseInputsListDestinationsFetchesNothing(t *testing.T) {
-	for name, repositories := range map[string]string{"listed": "acme/site", "none listed": ""} {
+	for name, reads := range map[string]string{"a read target": "acme/shop", "no read target": ""} {
 		t.Run(name, func(t *testing.T) {
 			files := harnessFiles(t, "read")
 			h, first, _, _ := versionRepository(t)
 			harness := servedHarness(t, h, files)
-			out, err, n, _ := runAtTargetWith(t, h, proxygittest.Host, repositories, first, siteTarget, func(d map[string]any) {
+			out, err, n, _ := runAtTargetWith(t, h, proxygittest.Host, reads, first, siteTarget, func(d map[string]any) {
 				d["inputs"].(map[string]any)["destinations"] = siteDestinations
 				d["access"] = "read"
 				d["harness"] = harness
@@ -356,8 +417,8 @@ func TestARunCodeWhoseInputsListDestinationsFetchesNothing(t *testing.T) {
 }
 
 // TestARunCodeFetchesItsTargetUnlessItClonesDestinations is a run from a run code on
-// git.test at a commit of acme/site, its target, whose run configuration lists acme/site
-// and then acme/shop. Each fetches the target at the commit before the session and joins:
+// git.test at a commit of acme/site, its target, whose documents list the read target
+// acme/shop. Each fetches the target at the commit before the session and joins:
 //   - a read run whose inputs list destinations and whose documents contain no harness
 //     document composes the qory.yaml of the fetched commit, and fetches acme/site alone:
 //     the agent clones any other destination it needs;
@@ -378,7 +439,7 @@ func TestARunCodeFetchesItsTargetUnlessItClonesDestinations(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			files := harnessFiles(t, c.access)
 			h, first, _, _ := versionRepository(t)
-			out, err, n, _ := runAtTargetWith(t, h, proxygittest.Host, "acme/site,acme/shop", first, siteTarget, func(d map[string]any) {
+			out, err, n, _ := runAtTargetWith(t, h, proxygittest.Host, "acme/shop", first, siteTarget, func(d map[string]any) {
 				if c.destinations {
 					d["inputs"].(map[string]any)["destinations"] = siteDestinations
 				}
@@ -414,32 +475,6 @@ func TestARunCodeFetchesItsTargetUnlessItClonesDestinations(t *testing.T) {
 			}
 			if c.alone && strings.Contains(out, "acme/shop") {
 				t.Errorf("the run's lines show acme/shop:\n%s", out)
-			}
-		})
-	}
-}
-
-// TestARunCodeWhoseTargetIsNotTheFirstRepositoryStops is a run from a run code whose
-// documents set the target acme/site on the run configuration's system, at a commit,
-// while the run configuration lists acme/site after another repository, lists only
-// another, or lists no repository: the run stops before any fetch, exit 1, with the
-// line for each.
-func TestARunCodeWhoseTargetIsNotTheFirstRepositoryStops(t *testing.T) {
-	for _, c := range []struct{ repositories, want string }{
-		{"acme/shop,acme/site", "the run's documents set the target acme/site, but the run configuration lists it after another repository; the target must be the first repository of the run configuration; the code is used\n"},
-		{"acme/shop", "the run's documents set the target acme/site, but the run configuration does not list it; the target must be the first repository of the run configuration; the code is used\n"},
-		{"", "the run's documents set the target acme/site, but the run configuration does not list it; the target must be the first repository of the run configuration; the code is used\n"},
-	} {
-		t.Run(c.repositories, func(t *testing.T) {
-			h, first, _, _ := versionRepository(t)
-			out, err, n, _ := runAtVersion(t, h, c.repositories, first)
-			if cmd.ExitCode(err) != 1 || !n.stoppedBeforeJoin() {
-				t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", err, cmd.ExitCode(err), out)
-			}
-			wants(t, out, "\nqory run: report this run to the instance admin of Qory Apiary: "+c.want)
-			lacks(t, out, "qory run: fetched ", "qory run: composed ")
-			if h.server.Tunnels() != 0 {
-				t.Errorf("%d fetches went through the host proxy, want none", h.server.Tunnels())
 			}
 		})
 	}

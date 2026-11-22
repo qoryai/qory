@@ -1,7 +1,8 @@
 // Package preparation fetches the code of a run into its working folder, and prepares
-// the working folder inside the wall before the agent starts. Two variables say where
-// the code is: [EnvSystem], the host, and [EnvRepositories], the repositories, the run's
-// repository first.
+// the working folder inside the wall before the agent starts. [EnvSystem] says the host
+// of the code. A run from a run code takes its repositories from its documents, the
+// target's first and then the read targets', see [Target.Repositories]; any other run
+// takes them from [EnvRepositories], the run's repository first.
 //
 // [RunAt] fetches on this machine, as qory run does once the run is open: the run's
 // repository into the working folder, an empty folder, in which it runs git init, or an
@@ -51,7 +52,7 @@ const (
 	// EnvSystem names the host the repositories are on, such as github.com.
 	EnvSystem = "QORY_RUN_SYSTEM"
 	// EnvRepositories names the repositories, comma-separated with no space, the run's
-	// repository first.
+	// repository first. A run from a run code does not read it, see [Target.Repositories].
 	EnvRepositories = "QORY_RUN_REPOSITORIES"
 )
 
@@ -144,11 +145,22 @@ const (
 	textFetched        = "qory run: fetched %s at %s in %s"
 	textFetchedOne     = "qory run: fetched %s at %s and 1 further repository in %s"
 	textFetchedMany    = "qory run: fetched %s at %s and %d further repositories in %s"
+	textFetchedReadOne = "qory run: fetched 1 read-only repository in %s"
+	textFetchedReads   = "qory run: fetched %d read-only repositories in %s"
 	textNoCommit       = "qory run: take the work item in again in Qory Apiary: the commit %[1]s that the run's documents set is not on %[2]s on %[3]s. The fetch through the run's gateway failed: %[4]s; the code is used"
 	textNoFetchByID    = "qory run: let %[3]s serve a fetch of a commit by its id, such as with git's uploadpack.allowReachableSHA1InWant, then take the work item in again in Qory Apiary: %[3]s does not serve the commit %[1]s of %[2]s by its id, or does not have it. The fetch through the run's gateway failed: %[4]s; the code is used"
-	textTargetLater    = "qory run: report this run to the instance admin of Qory Apiary: the run's documents set the target %s, but the run configuration lists it after another repository; the target must be the first repository of the run configuration; the code is used"
-	textTargetMissing  = "qory run: report this run to the instance admin of Qory Apiary: the run's documents set the target %s, but the run configuration does not list it; the target must be the first repository of the run configuration; the code is used"
 	textNotCommitID    = "qory run: ask Qory Apiary's instance admin to check the adapter of the target: the run's documents set the target version %s, and qory fetches a target at a version only when the version is a commit id of 40 or 64 hex digits; the code is used"
+	// The lines of a list of a run from a run code that [Target.Repositories] stops on: the
+	// cause alone, since the run is a dispatched one. The first %s of textListNotPath and
+	// textListNotGitHub is "target" or "read target".
+	textListNotPath     = "qory run: A %s is not a repository path, so the run did not start; the code is used\n  The path is %s. A repository path is segments of A-Z, a-z, 0-9, dot, underscore and dash, 1 to 200 characters, with no ., .. or .git segment."
+	textListNotGitHub   = "qory run: A %s is not owner/name, so the run did not start; the code is used\n  The path is %s, and a repository on github.com has a path of the form owner/name."
+	textReadOtherSystem = "qory run: A read target is on another host, so the run did not start; the code is used\n  The read target %[1]s is on %[2]s, and the run's repositories are on %[3]s."
+	textReadNoSystem    = "qory run: A read target is on another host, so the run did not start; the code is used\n  The read target %[1]s is on %[2]s, and the run has no host for its repositories: %[3]s is not set."
+	textReadOtherOwner  = "qory run: A read target is of another owner, so the run did not start; the code is used\n  The read target %[1]s is of owner %[2]s, and on github.com the repositories of a run are of one owner, %[3]s."
+	textReadNested      = "qory run: A read target is inside another, so the run did not start; the code is used\n  The read target %[1]s is inside the read target %[2]s, and qory clones no repository inside another."
+	textKeptNoTarget    = "qory run: The working folder has .qory/repositories, so the run did not start; the code is used\n  qory clones the read-only repositories there, and nothing is cloned over it."
+	textQoryNoTarget    = "qory run: The working folder's .qory is not a folder, so the run did not start; the code is used\n  qory clones the read-only repositories into a folder there, and nothing is cloned over a file or a link."
 	// textNoDefault, textNoCommits, textNotBranch, textStopped and textCut stand for
 	// git's line in [textNotFetched] and [textGitFailed]: a remote with refs that names
 	// no default branch, a remote with no refs at all, a default branch that is no
@@ -201,15 +213,26 @@ var baseURL = ""
 // target.address.path and target_version.
 type Target struct {
 	System, Path, Version string
+	// Reads is the address of each read target of the documents that has one, in their
+	// order: the places the run only reads. [Target.Repositories] lists them after the
+	// target.
+	Reads []Read
 	// Branch is the branch of the run's work item, nil for none. It is used only when
 	// the fetch uses Version.
 	Branch *WorkBranch
 	// FromCode is a run from a run code, with or without a target: its one-use code is
 	// redeemed before the fetch, so a stop of the fetch has the line of [fromCodeLines].
+	// The fetch takes its list from the documents, see [Target.Repositories], never from
+	// [EnvRepositories].
 	FromCode bool
 	// Prebuild is a prebuild from a run code: with FromCode, a stop has the line that
 	// [prebuildLine] makes, since a prebuild has no work item to take in again.
 	Prebuild bool
+}
+
+// Read is the address of a read target of a run's documents: a host name and a path.
+type Read struct {
+	System, Path string
 }
 
 // runLine is a stop whose line is text with args, for a run from no run code. [Target.stop]
@@ -251,31 +274,34 @@ func prebuildLine(text string) string {
 	).Replace(text)
 }
 
-// RunAt fetches the repositories getenv names into dir, the working folder, on this
-// machine through the run's host proxy p, and reports whether it fetched them, the run's
-// repository at the head of its default branch. With [EnvRepositories] unset or empty it
-// does nothing and returns false. The list is checked whole before any fetch. Once every
-// repository is fetched, it prints on report the line with what it fetched, the run's
-// repository's commit, and how long the fetch took. Every error's text is one line, ready
-// for stderr, with no password of p's URL in it. Every git it runs starts from base, as
-// [hostgit.WithBase] has it: qory run gives this process's environment, and a pool the
-// environment of its commands.
+// RunAt fetches the run's repositories into dir, the working folder, on this machine
+// through the run's host proxy p, and reports whether it fetched any. The host is the
+// one [EnvSystem] names. A run from a run code, at.FromCode, fetches the list of
+// [Target.Repositories], from its documents; any other run fetches the list
+// [EnvRepositories] names, which [Check] checks. With an empty list it does nothing and
+// returns false. The list is checked whole before any fetch. The run's repository, the
+// first of the list, goes into the working folder at the head of its default branch, and
+// each further one under [Repositories]; a list with no target's repository, see
+// [Target.Repositories], puts each one under [Repositories], into a working folder that
+// stays an empty repository. Once every repository is fetched, it prints on report the
+// line with what it fetched, the run's repository's commit, and how long the fetch took.
+// Every error's text is one line, ready for stderr, with no password of p's URL in it.
+// Every git it runs starts from base, as [hostgit.WithBase] has it: qory run gives this
+// process's environment, and a pool the environment of its commands.
 //
 // The target's repository is fetched at at.Version, when at sets a version and at.System
-// is [EnvSystem]. The version is the commit at which Qory Apiary
-// checked the target for a harness file. A control plane lists the target's path first,
-// so the target is the run's repository: an at.Path that is a later entry of the list,
-// as [targetIn] finds it, stops RunAt with [textTargetLater], one the list does not
-// contain, or an empty list as [Unlisted] checks it, with [textTargetMissing], and a
-// version that is not a full commit id, as [CommitID] checks it, with
-// [textNotCommitID], each before any fetch. The commit is fetched by its id, at depth
-// one, and checked out as a local branch with the name of the remote's default branch,
-// with no upstream, so the working folder is at the commit. A remote that does not have
-// the commit, or serves no fetch of a commit by its id, stops the fetch with
+// is [EnvSystem]. The version is the commit at which Qory Apiary checked the target for a
+// harness file. A version that is not a full commit id, as [CommitID] checks it, stops
+// RunAt with [textNotCommitID] before any fetch. The commit is fetched by its id, at
+// depth one, and checked out as a local branch with the name of the remote's default
+// branch, with no upstream, so the working folder is at the commit. A remote that does
+// not have the commit, or serves no fetch of a commit by its id, stops the fetch with
 // [textNoCommit] or [textNoFetchByID]. The further repositories are fetched at the head
 // of their default branches. A version of a target on another system, which is not one
 // of the run's repositories, is not used. With at.Branch set, the commit of the branch in
-// each repository is fetched too, and [Switch] checks it out after the compose.
+// each repository is fetched too, and [Switch] checks it out after the compose; each
+// further repository is a read target of the documents, and [WorkRepository.ReadOnly]
+// marks it, so [Push] pushes the target's repository alone.
 //
 // A stop of a run with at.FromCode set has the line of [Target.stop]: its run code is used.
 func RunAt(ctx context.Context, dir string, base []string, getenv func(string) string, at Target, p proxygit.Proxy, report io.Writer) (bool, error) {
@@ -283,34 +309,24 @@ func RunAt(ctx context.Context, dir string, base []string, getenv func(string) s
 	return fetched, at.stop(err)
 }
 
-// RunPrebuild is [RunAt] for the prebuild from a run code, at the head of each default
-// branch: a stop has the line of
-// [Target.stop] for a prebuild.
-func RunPrebuild(ctx context.Context, dir string, base []string, getenv func(string) string, p proxygit.Proxy, report io.Writer) (bool, error) {
-	return RunAt(ctx, dir, base, getenv, Target{FromCode: true, Prebuild: true}, p, report)
+// RunPrebuild is [RunAt] for the prebuild from a run code, of the target at, at the head
+// of its default branch: the prebuild fetches the target's repository alone, and a stop
+// has the line of [Target.stop] for a prebuild.
+func RunPrebuild(ctx context.Context, dir string, base []string, getenv func(string) string, at Target, p proxygit.Proxy, report io.Writer) (bool, error) {
+	at.Version, at.Reads, at.Branch, at.FromCode, at.Prebuild = "", nil, nil, true, true
+	return RunAt(ctx, dir, base, getenv, at, p, report)
 }
 
 // fetchRepositories is [RunAt] with the lines of a run from no run code.
 func fetchRepositories(ctx context.Context, dir string, base []string, getenv func(string) string, at Target, p proxygit.Proxy, report io.Writer) (bool, error) {
 	ctx = hostgit.WithBase(ctx, base)
-	list := getenv(EnvRepositories)
-	if list == "" {
-		return false, Unlisted(getenv, at)
-	}
 	system := getenv(EnvSystem)
-	paths, err := Check(system, list)
-	if err != nil {
+	paths, target, err := runList(getenv, at)
+	if err != nil || len(paths) == 0 {
 		return false, err
 	}
 	commit := ""
-	if at.Version != "" && at.System == system {
-		shown := integration.Printable(exports.Value(at.Path, false))
-		switch i := targetIn(system, paths, at.Path); {
-		case i < 0:
-			return false, fmt.Errorf(textTargetMissing, shown)
-		case i > 0:
-			return false, fmt.Errorf(textTargetLater, shown)
-		}
+	if at.Version != "" && target && at.System == system && sameRepository(system == ForgeGitHub, paths[0], at.Path) {
 		if !CommitID(at.Version) {
 			return false, fmt.Errorf(textNotCommitID, integration.Printable(exports.Value(at.Version, false)))
 		}
@@ -325,34 +341,36 @@ func fetchRepositories(ctx context.Context, dir string, base []string, getenv fu
 		return false, err
 	}
 	start := time.Now()
-	first := integration.Printable(exports.Value(paths[0], false))
-	defaultName, err := fetchRun(ctx, g, dir, system, paths[0], commit)
-	if err != nil {
-		return false, err
-	}
-	head, err := g(ctx, dir, "rev-parse", "HEAD")
-	if err != nil {
-		return false, notFetched(paths[0], system, err)
-	}
+	further := paths
 	branch := at.Branch
 	if commit == "" {
 		branch = nil
 	}
-	if branch != nil {
-		branch.system = system
-		branch.Repositories = []WorkRepository{{Path: paths[0], Dir: ".", Commit: strings.TrimSpace(head), DefaultBranch: defaultName}}
-		if err := fetchBranchCommit(ctx, g, dir, system, paths[0], branch); err != nil {
+	working, first, shown := "", "", ""
+	if target {
+		working = paths[0]
+		further = paths[1:]
+		first = integration.Printable(exports.Value(paths[0], false))
+		defaultName, err := fetchRun(ctx, g, dir, system, paths[0], commit)
+		if err != nil {
 			return false, err
 		}
+		head, err := g(ctx, dir, "rev-parse", "HEAD")
+		if err != nil {
+			return false, notFetched(paths[0], system, err)
+		}
+		if branch != nil {
+			branch.system = system
+			branch.Repositories = []WorkRepository{{Path: paths[0], Dir: ".", Commit: strings.TrimSpace(head), DefaultBranch: defaultName}}
+			if err := fetchBranchCommit(ctx, g, dir, system, paths[0], branch); err != nil {
+				return false, err
+			}
+		}
+		// The line shows the commit HEAD is at, which is commit when it is set.
+		shown = shortCommit(strings.TrimSpace(head))
 	}
-	// The line shows the commit HEAD is at, which is commit when it is set.
-	shown := strings.TrimSpace(head)
-	if len(shown) > 12 {
-		shown = shown[:12]
-	}
-	further := paths[1:]
 	if len(further) > 0 {
-		if err := keepRepositories(dir, paths[0]); err != nil {
+		if err := keepRepositories(dir, working); err != nil {
 			return false, err
 		}
 		if err := exclude(ctx, g, dir); err != nil {
@@ -371,16 +389,21 @@ func fetchRepositories(ctx context.Context, dir string, base []string, getenv fu
 				if err != nil {
 					return false, notFetched(path, system, err)
 				}
-				at := filepath.ToSlash(filepath.Join(filepath.FromSlash(Repositories), filepath.FromSlash(path)))
-				branch.Repositories = append(branch.Repositories, WorkRepository{Path: path, Dir: at, Commit: strings.TrimSpace(head), DefaultBranch: cloneBranch(ctx, g, dest)})
+				rel := filepath.ToSlash(filepath.Join(filepath.FromSlash(Repositories), filepath.FromSlash(path)))
+				// The further repositories of a run from a run code are its read targets.
+				branch.Repositories = append(branch.Repositories, WorkRepository{Path: path, Dir: rel, Commit: strings.TrimSpace(head), DefaultBranch: cloneBranch(ctx, g, dest), ReadOnly: at.FromCode})
 			}
 		}
 	}
 	took := seconds(time.Since(start))
-	switch len(further) {
-	case 0:
+	switch {
+	case !target && len(further) == 1:
+		fmt.Fprintf(report, textFetchedReadOne+"\n", took)
+	case !target:
+		fmt.Fprintf(report, textFetchedReads+"\n", len(further), took)
+	case len(further) == 0:
 		fmt.Fprintf(report, textFetched+"\n", first, shown, took)
-	case 1:
+	case len(further) == 1:
 		fmt.Fprintf(report, textFetchedOne+"\n", first, shown, took)
 	default:
 		fmt.Fprintf(report, textFetchedMany+"\n", first, shown, len(further), took)
@@ -388,45 +411,86 @@ func fetchRepositories(ctx context.Context, dir string, base []string, getenv fu
 	return true, nil
 }
 
-// Unlisted stops a run whose [EnvRepositories] is unset or empty while at sets a version
-// of a target on [EnvSystem]: a control plane lists that target first, so the list does
-// not contain it, and the error is [textTargetMissing]. It returns nil for a list that is
-// set, for no version, and for a target on another system or with [EnvSystem] unset.
-func Unlisted(getenv func(string) string, at Target) error {
-	if getenv(EnvRepositories) != "" || at.Version == "" {
-		return nil
+// runList is the list that the run fetches, from the host [EnvSystem] names: for a run
+// from a run code, at.FromCode, the list of [Target.Repositories]; for any other, the
+// list [EnvRepositories] names, as [Check] checks it, whose first entry is the run's
+// repository. target reports whether the first entry is the run's repository, which goes
+// into the working folder.
+func runList(getenv func(string) string, at Target) (paths []string, target bool, err error) {
+	system := getenv(EnvSystem)
+	if at.FromCode {
+		return at.Repositories(system)
 	}
-	if system := getenv(EnvSystem); system == "" || at.System != system {
-		return nil
+	list := getenv(EnvRepositories)
+	if list == "" {
+		return nil, false, nil
 	}
-	return fmt.Errorf(textTargetMissing, integration.Printable(exports.Value(at.Path, false)))
+	paths, err = Check(system, list)
+	return paths, err == nil, err
 }
 
-// TargetAlone is getenv with [EnvRepositories] cut to its first entry when that entry is
-// at's repository on [EnvSystem] and further entries follow: the list of a run that fetches
-// its target and no further repository. Any other list stays as it is, so [RunAt] stops
-// on it with the line it has for that list.
-func TargetAlone(getenv func(string) string, at Target) func(string) string {
-	return func(name string) string {
-		value := getenv(name)
-		system := getenv(EnvSystem)
-		if name != EnvRepositories || at.System != system {
-			return value
-		}
-		paths, err := Check(system, value)
-		if err != nil || len(paths) < 2 || targetIn(system, paths, at.Path) != 0 {
-			return value
-		}
-		return paths[0]
-	}
-}
-
-// targetIn is the index in paths, the entries of [EnvRepositories] on system, of path,
-// the target's path in a run's documents, and -1 when no entry is path. The entries and
-// the path compare as [sameRepository] compares them: on github.com in any case.
-func targetIn(system string, paths []string, path string) int {
+// Repositories is the list of repositories that the run from a run code with the
+// documents' target t fetches from system, the host of the run's repositories: the
+// target's repository first, when the target is on system, then the repository of each
+// read target in t.Reads, in its order. target reports whether the first is the target's.
+// A read target whose repository the list has already, under another collection or as the
+// target, is listed once. A list with no target's repository has no working repository:
+// each entry is a read target. A target on another system is not listed, and a read
+// target on another system, or, on github.com, of another owner than the first entry,
+// stops the list, as does a path that is not a repository path, as [Check] has it, and a
+// read target inside another. The list has no bound on its bytes, which [Check] sets for
+// [EnvRepositories]. A system that is not a host name stops a list with an entry. Each
+// error is a line of a dispatched run: the cause alone.
+func (t Target) Repositories(system string) (paths []string, target bool, err error) {
 	github := system == ForgeGitHub
-	return slices.IndexFunc(paths, func(p string) bool { return sameRepository(github, p, path) })
+	if system != "" && t.System == system {
+		if t.Path == "" || !repositoryPath(t.Path) {
+			return nil, false, fmt.Errorf(textListNotPath, "target", shownPath(t.Path))
+		}
+		if github && strings.Count(t.Path, "/") != 1 {
+			return nil, false, fmt.Errorf(textListNotGitHub, "target", shownPath(t.Path))
+		}
+		paths, target = []string{t.Path}, true
+	}
+	for _, r := range t.Reads {
+		switch {
+		case r.System != system && system == "":
+			return nil, false, fmt.Errorf(textReadNoSystem, shownPath(r.Path), shownPath(r.System), EnvSystem)
+		case r.System != system:
+			return nil, false, fmt.Errorf(textReadOtherSystem, shownPath(r.Path), shownPath(r.System), shownPath(system))
+		case !repositoryPath(r.Path):
+			return nil, false, fmt.Errorf(textListNotPath, "read target", shownPath(r.Path))
+		case github && strings.Count(r.Path, "/") != 1:
+			return nil, false, fmt.Errorf(textListNotGitHub, "read target", shownPath(r.Path))
+		case slices.ContainsFunc(paths, func(p string) bool { return sameRepository(github, p, r.Path) }):
+			continue
+		}
+		if github && len(paths) > 0 {
+			owner, _, _ := strings.Cut(r.Path, "/")
+			if first, _, _ := strings.Cut(paths[0], "/"); !strings.EqualFold(owner, first) {
+				return nil, false, fmt.Errorf(textReadOtherOwner, shownPath(r.Path), shownPath(owner), shownPath(first))
+			}
+		}
+		// The target's repository goes into the working folder, not under [Repositories],
+		// so a read target is compared with the read targets alone.
+		reads := paths
+		if target {
+			reads = paths[1:]
+		}
+		for _, q := range reads {
+			switch {
+			case inside(github, r.Path, q):
+				return nil, false, fmt.Errorf(textReadNested, shownPath(r.Path), shownPath(q))
+			case inside(github, q, r.Path):
+				return nil, false, fmt.Errorf(textReadNested, shownPath(q), shownPath(r.Path))
+			}
+		}
+		paths = append(paths, r.Path)
+	}
+	if len(paths) > 0 && (!hostName.MatchString(system) || strings.HasSuffix(system, ".")) {
+		return nil, false, fmt.Errorf(textNotHost, EnvSystem)
+	}
+	return paths, target, nil
 }
 
 // seconds is d as the lines of the preparation give a time: seconds with one decimal
@@ -737,17 +801,25 @@ func defaultBranch(out string) string {
 	return ""
 }
 
-// keepRepositories refuses a run repository that has a .qory that is not a directory,
-// a file or a link a clone would follow, and one that has anything at [Repositories],
-// tracked or not.
+// keepRepositories refuses a run repository, path, that has a .qory that is not a
+// directory, a file or a link a clone would follow, and one that has anything at
+// [Repositories], tracked or not. With path "", a list with no target's repository, see
+// [Target.Repositories], it refuses the same in the working folder.
 func keepRepositories(dir, path string) error {
+	shown := integration.Printable(exports.Value(path, false))
 	if fi, err := os.Lstat(filepath.Join(dir, checkout.Dir)); err == nil && !fi.IsDir() {
-		return fmt.Errorf(textQoryNotDir, integration.Printable(exports.Value(path, false)))
+		if path == "" {
+			return errors.New(textQoryNoTarget)
+		}
+		return fmt.Errorf(textQoryNotDir, shown)
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return local(err)
 	}
 	if _, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(Repositories))); err == nil {
-		return fmt.Errorf(textKept, integration.Printable(exports.Value(path, false)))
+		if path == "" {
+			return errors.New(textKeptNoTarget)
+		}
+		return fmt.Errorf(textKept, shown)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return local(err)
 	}

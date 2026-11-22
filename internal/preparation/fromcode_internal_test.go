@@ -130,10 +130,12 @@ func TestAFetchFromARunCodeStopsWithTheLineOfAUsedCode(t *testing.T) {
 	shop := Target{System: "git.example.com", Path: "acme/shop"}
 	code := shop
 	code.FromCode = true
+	code.Reads = []Read{{System: "git.example.com", Path: "acme/gone"}}
 	atCommit := code
 	atCommit.Version = first
 	for name, at := range map[string]Target{"no version": code, "a version": atCommit} {
-		err := fetch(at, "acme/shop,acme/gone", emptyFolder(t))
+		// The variable lists no repository: a run from a run code fetches the documents' list.
+		err := fetch(at, "", emptyFolder(t))
 		if err == nil || !strings.HasPrefix(err.Error(), "qory run: "+noRepository+"take the work item in again in Qory Apiary"+fetchEnd) || !strings.HasSuffix(err.Error(), "; the code is used") {
 			t.Errorf("%s: %v", name, err)
 		}

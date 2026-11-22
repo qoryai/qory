@@ -570,17 +570,14 @@ release may change what an existing document does, and states it under Upgrading
   `qory run`, `qory run pool`, `qory run register` and `qory run end` stop with an error
   when the setting is there.
 - A run from a run code whose documents set `target_version` fetches the repository at
-  the target's `address`, its `system` and `path`, the first entry of
-  `QORY_RUN_REPOSITORIES`, at that commit, by its id, in place of the head of its default
-  branch, onto a local branch with the default branch's name and no upstream. When the
-  documents contain no harness document, the compose reads the checkout's `qory.yaml` or
-  `harness.yaml` as Qory Apiary checked it. Each of these
-  stops the run before the compose, exit 1: a target on the run's system that is a later
-  entry of `QORY_RUN_REPOSITORIES`, that the list does not contain, or with an empty
-  list; a version that is not a commit id; and a commit that the server does not have or
-  does not serve by its id. A target with no address, only an adapter's `collection`,
-  is not fetched and does not use `target_version`, nor does a target on another system
-  or a run with no `QORY_RUN_SYSTEM`.
+  the target's `address`, its `system` and `path`, at that commit, by its id, in place of
+  the head of its default branch, onto a local branch with the default branch's name and
+  no upstream. When the documents contain no harness document, the compose reads the
+  checkout's `qory.yaml` or `harness.yaml` as Qory Apiary checked it. Each of these stops
+  the run before the compose, exit 1: a version that is not a commit id, and a commit that
+  the server does not have or does not serve by its id. A target with no address, only an
+  adapter's `collection`, is not fetched and does not use `target_version`, nor does a
+  target on another system or a run with no `QORY_RUN_SYSTEM`.
 - The harness section of a `qory.yaml` that defines a stack, without `extends`, may list
   `workflows`, with the keys and checks of a `qory-stack.yaml`, such as `access`. A
   section that extends a stack takes the base's workflows, and one that also
@@ -833,6 +830,18 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A run from a run code takes its repositories from its documents, and no longer from
+  `QORY_RUN_REPOSITORIES`: the repository of `target` goes into the working folder, and
+  the repository of each entry of `read_targets` under `.qory/repositories`. The push step
+  checks, commits and pushes the target alone, and the version it stores has no entry of a
+  read target. A read target with no address is not fetched, and the run goes on. A
+  repository listed twice is fetched once. A read target on another host, of another owner
+  on github.com, or inside another, stops the run before any fetch. Documents with read
+  targets and no target fetch each read target and push nothing. A read target for which
+  the version of the work item's branch lists a commit is fetched at that commit. The
+  setup container's `QORY_RUN_REPOSITORIES` is the target, then the read targets. A
+  prebuild fetches the repository of its documents' target alone. The stops for a target
+  that `QORY_RUN_REPOSITORIES` lists after another repository, or does not list, are gone.
 - `qory destination clone` checks `destinations` against the explore contract's schema,
   `inputs.schema.json`, and reads each entry as the contract's destination. It also stops
   on a `{` or `}` in a path, U+0000 in a collection, two equal entries and more than 250

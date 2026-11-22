@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
 )
 
@@ -36,10 +37,10 @@ func TestLaunchWritesTheMachineStepBeforeTheFetch(t *testing.T) {
 	e.settings.MachineSteps = machineFile(t, machineSteps)
 	var atFetch string
 	fetch := e.settings.Fetch
-	e.settings.Fetch = func(ctx context.Context, dir string, base []string, getenv func(string) string, p proxygit.Proxy, out io.Writer) (bool, error) {
+	e.settings.Fetch = func(ctx context.Context, dir string, base []string, getenv func(string) string, at preparation.Target, p proxygit.Proxy, out io.Writer) (bool, error) {
 		b, _ := os.ReadFile(filepath.Join(opened().Dir(), "session.jsonl"))
 		atFetch = string(b)
-		return fetch(ctx, dir, base, getenv, p, out)
+		return fetch(ctx, dir, base, getenv, at, p, out)
 	}
 	if _, err := e.launch(t, false); err != nil {
 		t.Fatal(err)

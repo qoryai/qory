@@ -113,8 +113,10 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 // later session, pushes only the commits past it, and pushes nothing when there are none.
 // [WorkBranch.PushedPaths] lists the repositories of the last Push alone.
 //
-// Before any git writes, [safeAfterRun] checks the target and [safeFurther] each further
-// repository, since the agent could write each .git. Every git runs with the environment
+// A read target, [WorkRepository.ReadOnly], is skipped in each step: it is not checked,
+// committed or pushed, and the version has no entry of it. Before any git writes,
+// [safeAfterRun] checks the target and [safeFurther] each further repository the push may
+// move, since the agent could write each .git. Every git runs with the environment
 // [proxygit.Env] makes, so it reads no system or global configuration file, and with
 // [proxygit.Hardened], which turns off the hooks in .git, fsmonitor and credential
 // helpers. No option turns a filter off: the check stops on each key that git init and
@@ -138,8 +140,17 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 	if err != nil {
 		return nil, local(err)
 	}
-	folders := make([]string, len(b.Repositories))
+	// work is the index in b.Repositories of each repository the push may move: a read
+	// target is checked, committed and pushed in no step here.
+	var work []int
 	for i, r := range b.Repositories {
+		if !r.ReadOnly {
+			work = append(work, i)
+		}
+	}
+	folders := make([]string, len(b.Repositories))
+	for _, i := range work {
+		r := b.Repositories[i]
 		folders[i] = filepath.Join(dir, filepath.FromSlash(r.Dir))
 		if i > 0 {
 			if err := safeFurther(ctx, dir, folders[i], true); err != nil {
@@ -151,11 +162,16 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			return nil, notSafe(r, err)
 		}
 	}
-	if err := clearIndexLocks(b.Repositories, folders, agentStopped, report); err != nil {
+	repositories, workFolders := make([]WorkRepository, len(work)), make([]string, len(work))
+	for n, i := range work {
+		repositories[n], workFolders[n] = b.Repositories[i], folders[i]
+	}
+	if err := clearIndexLocks(repositories, workFolders, agentStopped, report); err != nil {
 		return nil, err
 	}
 	heads := make([]string, len(b.Repositories))
-	for i, r := range b.Repositories {
+	for _, i := range work {
+		r := b.Repositories[i]
 		if err := commitLeft(ctx, folders[i], r, b.setupChanges[r.Dir], message, report); err != nil {
 			return nil, fmt.Errorf(textNoCommitLeft, shownPath(r.Path), integration.Printable(exports.HideURLError(err).Error()))
 		}
@@ -175,7 +191,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 	// The commits of each repository are listed before the first push, so a list that
 	// fails pushes nothing.
 	commits := make([][]Commit, len(b.Repositories))
-	version := slices.Clone(b.Version)
+	version := b.withoutReads(b.Version)
 	for i, r := range b.Repositories {
 		if heads[i] == "" {
 			continue
@@ -223,7 +239,18 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 		fmt.Fprintln(report, textNoNewCommits)
 		return nil, nil
 	}
-	return slices.Clone(b.Version), nil
+	return b.withoutReads(b.Version), nil
+}
+
+// withoutReads is a copy of version with no entry of a repository of b that is a read
+// target, [WorkRepository.ReadOnly]: the version that [Push] leaves covers the
+// repositories it may push alone.
+func (b *WorkBranch) withoutReads(version []Repository) []Repository {
+	return slices.DeleteFunc(slices.Clone(version), func(v Repository) bool {
+		return v.System == b.system && slices.ContainsFunc(b.Repositories, func(r WorkRepository) bool {
+			return r.ReadOnly && sameRepository(b.system == ForgeGitHub, r.Path, v.Path)
+		})
+	})
 }
 
 // pushedNoVersion is the error of a push that failed after an earlier repository landed: its
