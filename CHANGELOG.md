@@ -34,7 +34,8 @@ release may change what an existing document does, and states it under Upgrading
   `failed` with `outputs_invalid`; the same failure after the push has no end code. A call
   from qory to the run API that fails closes the run `failed` with `run_api_failed`: the read
   of the work item or of its versions, the store of an output, the fetch of a push check,
-  and the post of the suite's verdict. Any other end code of the failure comes first.
+  and the post of the suite's verdict. Any other end code of the failure comes first, and a
+  call that a stop or a time limit cuts closes the run as before.
 - `qory destination clone <id>...` clones destinations of a run inside its session: each
   id from `destinations` in `$QORY_HARNESS_HOME/inputs.json`, at depth 1, through the
   wall's proxy, into `/tmp/qory-destinations/<system>/<path>`. It prints one line per id,

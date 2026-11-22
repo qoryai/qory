@@ -1190,7 +1190,7 @@ func TestASentRequestThatFailsIsACallError(t *testing.T) {
 			_, err := serve(t, respond(http.StatusOK, `<html>`)).WorkItem(context.Background())
 			return err
 		},
-		"post refused": func() error {
+		"post answered 422": func() error {
 			_, err := serve(t, respond(http.StatusUnprocessableEntity, `{"error":"unknown_type"}`)).
 				PushArtifact(context.Background(), runapi.Push{Type: "demo-video"})
 			return err
