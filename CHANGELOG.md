@@ -833,6 +833,11 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- `qory destination clone` checks `destinations` against the explore contract's schema,
+  `inputs.schema.json`, and reads each entry as the contract's destination. It also stops
+  on a `{` or `}` in a path, U+0000 in a collection, two equal entries and more than 250
+  entries. Line 2 of the error has the entry and the place in it that breaks the schema,
+  such as `entry 1 breaks the schema of a destination at /id`.
 - An artifact type and an artifact name start with a letter: the rule is
   `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most 64 bytes. A name that starts with a digit, such as `1abc`, fails each check of a type or a name: in `process.yaml`,
   in `push_checks` and `scope_checks` of a module, in `plan` of a workflow, in `qory
