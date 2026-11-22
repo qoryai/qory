@@ -45,20 +45,20 @@
 // follows. A release of an entry left at claimed after a dispatched that succeeded
 // returns 409 machine_exists, and the pool sends gone for it. A release that fails with
 // no response, an unsigned response, a fourth signed 429, a server error or another
-// refusal than a signed 400, 403 or 404 leaves the entry at claimed, and is sent again
-// beside the claim loop after a wait, as gone is, until it is settled; no qory run
-// starts for that dispatch, and it takes none of the pool's Runs. The dispatch's folder
-// is removed before its first gone: once qory run ended, after the upload of its
-// machine log, or at once when no qory run started. The entry is removed once the
-// dispatch ends; an ended entry once its gone got a signed 204, 400, 403 or 404. When
-// the program starts, before its first claim, it runs the check of [Probe]: when a
-// container on the engine's default bridge network connects to the cloud metadata
-// service, or the check cannot run, Run returns its error and claims nothing. Then each
-// claimed entry it finds is released, with its folder, and each dispatched entry is
-// written at ended. Each ended entry, each dispatched one, and each claimed one whose
-// release returns 409 machine_exists, gets gone, sent as above in a separate goroutine
-// beside the claim loop, so the first claim does not wait for it; a release that fails
-// is sent again there too.
+// refusal than a signed 400 or 404, or a 403 that reads as forbidden, leaves the entry
+// at claimed, and is sent again beside the claim loop after a wait, as gone is, until
+// it is settled; no qory run starts for that dispatch, and it takes none of the pool's
+// Runs. The dispatch's folder is removed before its first gone: once qory run ended,
+// after the upload of its machine log, or at once when no qory run started. The entry
+// is removed once the dispatch ends; an ended entry once its gone got a signed 204,
+// 400, 403 or 404. When the program starts, before its first claim, it runs the check
+// of [Probe]: when a container on the engine's default bridge network connects to the
+// cloud metadata service, or the check cannot run, Run returns its error and claims
+// nothing. Then each claimed entry it finds is released, with its folder, and each
+// dispatched entry is written at ended. Each ended entry, each dispatched one, and each
+// claimed one whose release returns 409 machine_exists, gets gone, sent as above in a
+// separate goroutine beside the claim loop, so the first claim does not wait for it; a
+// release that fails is sent again there too.
 //
 // qory run, and each program it starts that inherits descriptor 4, hold the lock of
 // run.lock until they end, so the lock outlasts a crash of the pool, and the pool
@@ -1030,7 +1030,7 @@ const (
 	// while the pool runs; the next start releases what is left.
 	releaseKept releaseEnd = iota
 	// releaseOver is a dispatch released, over already, or one Qory Apiary does not
-	// release for a signed 400, 403 or 404: the entry goes.
+	// release for a signed 400 or 404, or a 403 that reads as forbidden: the entry goes.
 	releaseOver
 	// releaseMachine is a release that returned 409 machine_exists: Qory Apiary took
 	// dispatched for the dispatch, or the machine redeemed its run code, so the
@@ -1040,9 +1040,10 @@ const (
 
 // release gives the dispatch id back, for reason, and reports how that ended, with the
 // error of a release kept. A signed 429 is waited out up to [maxRateLimited] times. A
-// 409 lease_expired or a 410 gone is the dispatch over already; a signed 400, 403 or 404
-// is one Qory Apiary does not release, and a 409 machine_exists one that gets gone;
-// neither is sent again, and each is logged. A release kept is logged by its caller.
+// 409 lease_expired or a 410 gone is the dispatch over already; a signed 400 or 404, or
+// a 403 that reads as forbidden, is one Qory Apiary does not release, and a 409
+// machine_exists one that gets gone; neither is sent again, and each is logged. A
+// release kept is logged by its caller.
 func (p *Pool) release(work context.Context, id, reason string) (releaseEnd, error) {
 	ids := slog.String("dispatch_id", id)
 	for limited := 0; ; limited++ {
