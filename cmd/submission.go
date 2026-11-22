@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/preparation"
+	"github.com/qoryai/qory/internal/primitives"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/submission"
@@ -127,6 +128,7 @@ const (
 	textDroppedControl     = "Title: has a control character at character %d. qory dropped the text."
 	textDroppedNUL         = "Description: has a NUL character at character %d. qory dropped the text."
 	textDroppedMarker      = "Description: line %d is a marker line of the draft's block. qory dropped the text."
+	textDroppedChar        = "Remove the character %U at character %d of the description. qory dropped the text."
 	textDroppedStepControl = "Step of commit %s: has a control, invisible, direction or separator character. qory dropped the step."
 	textDroppedFurtherCtl  = "%d further steps have a control, invisible, direction or separator character. qory dropped them."
 	textDroppedKeys        = "%d step keys are not a full commit id of 40 or 64 lower-case hexadecimal digits. qory dropped them."
@@ -205,6 +207,11 @@ func (h *handoff) limit() {
 			at := nulAt(h.Text.Description)
 			h.Text = nil
 			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedNUL, at))
+		case stoppedAt(h.Text.Description) > 0:
+			at := stoppedAt(h.Text.Description)
+			r := []rune(h.Text.Description)[at-1]
+			h.Text = nil
+			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedChar, r, at))
 		case markerLineAt(h.Text.Description) > 0:
 			at := markerLineAt(h.Text.Description)
 			h.Text = nil
@@ -285,6 +292,22 @@ func nulAt(text string) int {
 	for _, r := range text {
 		i++
 		if r == 0 {
+			return i
+		}
+	}
+	return 0
+}
+
+// stoppedAt is the 1-based position of the first character of description that the text
+// rule of the contract stops, 0 for none: a control character other than tab, line feed
+// and carriage return, U+2028, U+2029, or a Cf character other than U+200C and U+200D.
+// The description is Markdown, so the rule is [primitives.StopsText], not the rule of a
+// title.
+func stoppedAt(description string) int {
+	i := 0
+	for _, r := range description {
+		i++
+		if primitives.StopsText(r) {
 			return i
 		}
 	}
