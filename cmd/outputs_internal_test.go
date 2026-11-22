@@ -388,7 +388,7 @@ func TestDeliveredTypesTakeTheSendOfTheDocuments(t *testing.T) {
 	long := strings.Repeat("abcdefgh-", 7) + "x"
 	r.deliver = append(r.deliver, contracts.Deliver{Type: long, Send: "after_gate"})
 	want := "Define " + long[:19] + " in the harness's process.yaml: the run documents deliver it.\n" +
-		"  The composed process.yaml has no artifact type " + long[:19] + ", so qory cannot check or fill its output. The run code is used up."
+		"  The composed harness defines no artifact type " + long[:19] + ", so qory cannot check or fill its output. The run code is used up."
 	if got, err := r.deliveredTypes(types); err == nil || err.Error() != want || got != nil {
 		t.Errorf("an undefined type: %+v, %v, want %q", got, err, want)
 	}

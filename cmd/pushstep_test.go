@@ -804,9 +804,11 @@ func TestAReadRunPushesNothing(t *testing.T) {
 // TestAWriteRunWhoseInputsListDestinationsPushes is a write run whose documents contain a
 // harness document and whose inputs list destinations: qory fetches its target at the
 // target version before the session, and the push step pushes what the agent left to the
-// work item's branch, as for a run whose inputs list none.
+// work item's branch, as for a run whose inputs list none. The harness defines pull-request,
+// which the documents deliver.
 func TestAWriteRunWhoseInputsListDestinationsPushes(t *testing.T) {
 	files := harnessFiles(t, "write")
+	files["examples/hello/modules/hello/process.yaml"] = pullRequestProcess
 	p := newPushRepo(t, "write")
 	harness := servedHarness(t, p.h, files)
 	p.change = func(d map[string]any) {
@@ -1617,7 +1619,7 @@ func TestADeliveredTypeThatTheHarnessDoesNotDefineStopsTheRun(t *testing.T) {
 	if joined || r.err == nil {
 		t.Fatalf("%v, joined %v, want the run to stop before the session\n%s", r.err, joined, r.out)
 	}
-	wants(t, r.err.Error(), "Define notes in the harness's process.yaml: the run documents deliver it.\n  The composed process.yaml has no artifact type notes, so qory cannot check or fill its output. The run code is used up.")
+	wants(t, r.err.Error(), "Define notes in the harness's process.yaml: the run documents deliver it.\n  The composed harness defines no artifact type notes, so qory cannot check or fill its output. The run code is used up.")
 	if posts, _, _ := p.api.counts(); posts != 0 || p.branchHead(t) != "" {
 		t.Errorf("%d POST and the branch at %q, want neither", posts, p.branchHead(t))
 	}
@@ -3073,6 +3075,27 @@ func TestAStageOutputTypeThatIsNoNameStopsTheRun(t *testing.T) {
 	wants(t, r.out, "qory run: Report the run to the instance admin of Qory Apiary: an output type is no name.\n  The stage lists the output type ../x, not a name")
 }
 
+// TestAnOutputSchemaThatDoesNotConvertStopsTheRun is the run of
+// [TestARunWithNoRepositoryStoresItsReply] whose process.yaml gives reply a json_schema with
+// the key 1, a number, which JSON does not have: the run stops before its session, exit 1,
+// with the accepted text, and stores nothing.
+func TestAnOutputSchemaThatDoesNotConvertStopsTheRun(t *testing.T) {
+	p, outbox := replyRepoWith(t, replyProcess+"        1: {type: string}\n")
+	r := p.run(t, nil, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if r.err == nil || *outbox != "" {
+		t.Fatalf("%v, the session's outbox %q, want the run to stop before the session\n%s", r.err, *outbox, r.out)
+	}
+	want := "Report the run to the instance admin of Qory Apiary: an output's schema does not convert.\n" +
+		"  The json_schema of artifact type reply is not a JSON Schema that qory can read: A JSON key is a string. The run code is used up."
+	if r.err.Error() != want {
+		t.Errorf("the error is %q, want %q", r.err, want)
+	}
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST, want 0", posts)
+	}
+}
+
 // replyRepo is a [pushRepo] of a run from a run code whose run configuration lists no
 // repository, whose target C_2002 has no address, whose documents deliver reply after the
 // gate, and whose stage requires reply. The harness is the stack examples/hello of the
@@ -3080,9 +3103,15 @@ func TestAStageOutputTypeThatIsNoNameStopsTheRun(t *testing.T) {
 // writes reply to its outbox, whose path the second result is set to.
 func replyRepo(t *testing.T) (*pushRepo, *string) {
 	t.Helper()
+	return replyRepoWith(t, replyProcess)
+}
+
+// replyRepoWith is [replyRepo] with process as the module's process.yaml.
+func replyRepoWith(t *testing.T, process string) (*pushRepo, *string) {
+	t.Helper()
 	stackFiles := helloFiles(t)
 	stackFiles["examples/hello/qory-stack.yaml"] = withExtendable(stackFiles["examples/hello/qory-stack.yaml"]) + "workflows:\n  hello:\n    access: write\n"
-	stackFiles["examples/hello/modules/hello/process.yaml"] = replyProcess
+	stackFiles["examples/hello/modules/hello/process.yaml"] = process
 	p := newPushRepoWith(t, "write", stackFiles)
 	p.repositories = ""
 	p.stackProxy = true

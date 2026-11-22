@@ -57,7 +57,7 @@ const (
 	textOutputNoPush    = "qory run: stored the %s output; the run has no repository to push."
 	textOutputNoCommits = "qory run: stored no %s output: the run pushed no commits to the target.\n  Target: %s"
 	textSchemaUnread    = "Report the run to the instance admin of Qory Apiary: an output's schema does not convert.\n  The json_schema of artifact type %s is not a JSON Schema that qory can read: %s. The run code is used up."
-	textDeliverNoType   = "Define %s in the harness's process.yaml: the run documents deliver it.\n  The composed process.yaml has no artifact type %s, so qory cannot check or fill its output. The run code is used up."
+	textDeliverNoType   = "Define %s in the harness's process.yaml: the run documents deliver it.\n  The composed harness defines no artifact type %s, so qory cannot check or fill its output. The run code is used up."
 	textOutputTooBig    = "Cut the %s output to at most %d bytes: the next run starts from it.\n  With target and the members that qory fills, %s has %d bytes."
 	textOutboxNotEmpty  = "Remove .qory/outbox, then take the work item in again: a session starts with no outbox.\n  Emptying the outbox in %s failed: %s" + codeUsed
 )

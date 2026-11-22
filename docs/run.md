@@ -3203,9 +3203,10 @@ credential alone. The result of each repository is one of these:
   pushed before) and has not pushed yet: qory pushes with no lease and creates the branch.
 - The head is past the start commit, the run has not pushed yet, and the head is one that a
   run which a person cancelled pushed, as the work item's record lists it (one head for each
-  push), and it descends from the start commit. qory fetches the history of the branch head
-  only when a cancelled run recorded that head, and then checks that it descends from the
-  start commit. A head below, above or beside a recorded head, or one that the record does
+  push), or one that the run which wrote the start's version pushed after the start, with no
+  version of that run to confirm it, and it descends from the start commit. qory fetches the
+  history of the branch head only when the record lists that head as one of these, and then
+  checks that it descends from the start commit. A head below, above or beside a recorded head, or one that the record does
   not list, is any other head, and the push stops with no fetch. qory pushes with
   `--force-with-lease=refs/heads/qory/<work item id>:<head>`, so the push replaces
   those commits only while the branch is still at the head qory read.
@@ -3263,8 +3264,6 @@ A type that the stage's outputs or `deliver` of the run documents list, and whos
 before its session, exit 1: `qory run: Report the run to the instance admin of Qory Apiary: an
 output's schema does not convert.`, then `The json_schema of artifact type <type> is not a
 JSON Schema that qory can read: <cause>. The run code is used up.` indented by two spaces.
-The compose checks each `json_schema` first, so a harness that passes the compose does not
-stop here.
 
 | Type | The session writes |
 |---|---|
@@ -3288,8 +3287,9 @@ differs, the compose step prints a line (see [What the run takes from the
 response](#what-the-run-takes-from-the-response)). A type that `deliver` lists and the
 composed `process.yaml` does not define stops the run before its session, exit 1: `qory run:
 Define <type> in the harness's process.yaml: the run documents deliver it.`, then `The
-composed process.yaml has no artifact type <type>, so qory cannot check or fill its output.
-The run code is used up.` indented by two spaces.
+composed harness defines no artifact type <type>, so qory cannot check or fill its output.
+The run code is used up.` indented by two spaces. A harness with no `process.yaml` defines
+no type, so a write run of a work item stops on any type that `deliver` lists.
 
 First, qory reads each output, and fills and checks each output of a type with a
 `json_schema`. An output that fails one of these stops the step before any version is

@@ -899,10 +899,11 @@ release may change what an existing document does, and states it under Upgrading
   The step checks the head of the branch on the forge before it pushes. A head that is not
   the commit the run expected ends the run `failed` with the code `push_head_changed`, after a
   session that passed, failed or timed out. The push replaces the branch only when its head
-  is a head that the work item's record has for a cancelled run (one head for each push)
-  and that descends from the start commit, with a lease on that head. qory fetches
-  the history of the branch head only when a cancelled run recorded that head, and then
-  checks that it descends from the start commit. qory stops on a head below, above or
+  is a head that the work item's record has for a cancelled run (one head for each push),
+  or for the start's run after the start with no version to confirm it, and that descends
+  from the start commit, with a lease on that head. qory fetches the history of the branch
+  head only when the record lists that head as one of these, and then checks that it
+  descends from the start commit. qory stops on a head below, above or
   beside a recorded head, with no fetch. A run starts at the newest commit that an earlier run
   pushed and a person did not cancel.
 - A delivered output's member that `pushed-base-branch` marks has the name of the target
