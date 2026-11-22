@@ -61,12 +61,12 @@ func notSent(t *testing.T) error {
 // a step that failed with no end code, a cut step, and a session that did not succeed close
 // with no end code. A failed call to the run API, also under the line that shows it, closes
 // with run_api_failed, and any other code in the error comes first. A request that was not
-// sent has no end code.
+// sent has no end code, and a step whose context ended closes as a stop or a time limit does.
 func TestAFailedPushStepClosesWithItsEndCode(t *testing.T) {
 	noCredential := &runLineError{pushProxyError(errors.New(errNowhereNoPush))}
 	call := failedCall(t, http.StatusInternalServerError, "")
 	shown := withCause(notStored(nil, "pull-request", shownError(call)), call)
-	// A refusal that qory artifact push exits with its status for keeps exit status 1 here.
+	// A 422 unknown_type answer, which gives qory artifact push its exit status, gives exit 1 here.
 	unknownType := failedCall(t, http.StatusUnprocessableEntity, `{"error":"unknown_type"}`)
 	refused := &runLineError{&preparation.PushRefusedError{}}
 	notRecorded := &runLineError{recordFailed("qory/w-1", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", errors.New("the link closed"))}
@@ -85,9 +85,11 @@ func TestAFailedPushStepClosesWithItsEndCode(t *testing.T) {
 		"run API call failed":        {pushEnding{session: succeeded}, &runLineError{shown}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodeRunAPIFailed), ExitCode: 1}},
 		"run API, then push refused": {pushEnding{session: succeeded}, &runLineError{errors.Join(shown, refused)}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePushRefused), ExitCode: 1}},
 		"run API under outputs":      {pushEnding{session: succeeded}, &outputsInvalid{call}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodeOutputsInvalid), ExitCode: 1}},
-		"refused call":               {pushEnding{session: succeeded}, &runLineError{withCause(errors.New("no type"), unknownType)}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodeRunAPIFailed), ExitCode: 1}},
+		"a 4xx answer":               {pushEnding{session: succeeded}, &runLineError{withCause(errors.New("no type"), unknownType)}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodeRunAPIFailed), ExitCode: 1}},
 		"request not sent":           {pushEnding{session: succeeded}, &runLineError{withCause(errors.New("not stored"), notSent(t))}, session.Outcome{State: event.StateFailed, ExitCode: 1}},
 		"cut at the time limit":      {pushEnding{session: succeeded, cut: true}, refused, session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}},
+		"run API, cut at the limit":  {pushEnding{session: succeeded, cut: true}, &runLineError{shown}, session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}},
+		"run API, cut by a stop":     {pushEnding{session: succeeded, cut: true, stopped: true}, &runLineError{shown}, session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}},
 		"session failed":             {pushEnding{session: session.Outcome{State: event.StateFailed, ExitCode: 3}}, refused, session.Outcome{State: event.StateFailed, ExitCode: 3}},
 	} {
 		if got := c.ending.outcome(c.err); got != c.want {

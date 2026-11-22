@@ -298,7 +298,8 @@ func readPlan(ctx context.Context, client *runapi.Client, plan string) (string, 
 
 // after judges the suite, writes its result, and posts the verdict of a suite that did not pass
 // when no result file is named, before the push step. A red suite leaves the run's outcome. A
-// post that fails closes the run failed, with the end code of its error, see [endCodeOf].
+// post that fails closes the run failed, with the end code of its error, see [endCodeOf], and
+// with no end code when a stop or a limit cut it.
 func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *session.Result, out session.Outcome) (session.Outcome, error) {
 	if r == nil {
 		return out, nil
@@ -373,7 +374,13 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 	posted, err := r.post(postCtx, *point, kind, maxSubmissionTries)
 	if err != nil {
 		r.said(fmt.Sprintf(textSuiteNoPost, shownError(err)))
-		return session.Outcome{State: event.StateFailed, Reason: string(endCodeOf(err)), ExitCode: 1}, &exitError{code: 1}
+		failed := session.Outcome{State: event.StateFailed, ExitCode: 1}
+		// A stop or a limit that ended postCtx cut the post: no call failed, so there is no
+		// end code.
+		if postCtx.Err() == nil {
+			failed.Reason = string(endCodeOf(err))
+		}
+		return failed, &exitError{code: 1}
 	}
 	if posted != "" {
 		r.said(posted)
