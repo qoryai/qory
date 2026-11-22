@@ -225,7 +225,8 @@ func (rec *pushRecord) commitReference(commit string) map[string]any {
 // fillOutput is content, an outbox file of the type t, with target set to target when t is
 // delivered and each member that t marks filled from rec. A file that has target or a marked
 // member is an error that starts with its fix. rec is nil for a run that pushed nothing to
-// the target; a marked member then is an error, as there is nothing to fill it from.
+// the target; a member that qory fills from the push, see [pushFill], then is an error, as
+// there is nothing to fill it from. A member with another mark is left as it is.
 func fillOutput(content []byte, t exports.ProcessType, target *contracts.Target, rec *pushRecord) ([]byte, error) {
 	shown := provisioner.ShownType(t.Name)
 	var members map[string]json.RawMessage
@@ -261,7 +262,7 @@ func fillOutput(content []byte, t exports.ProcessType, target *contracts.Target,
 	}
 	for _, name := range marked {
 		mark := t.Marks[name]
-		if mark == fillCommitsLeft {
+		if !pushFill(mark) {
 			continue
 		}
 		if rec == nil {
@@ -283,8 +284,6 @@ func fillOutput(content []byte, t exports.ProcessType, target *contracts.Target,
 			v = rec.Branch
 		case fillBaseBranch:
 			v = rec.BaseBranch
-		default:
-			continue
 		}
 		if err := set(name, v); err != nil {
 			return nil, err
@@ -313,6 +312,26 @@ func checkOutput(content []byte, t exports.ProcessType) error {
 		return fmt.Errorf(textOutputBroken, shown, string(place))
 	}
 	return nil
+}
+
+// pushFill reports whether qory fills a member that has mark from the push: not for
+// [fillCommitsLeft], which Qory Apiary sets, nor for a mark that qory does not know.
+func pushFill(mark string) bool {
+	switch mark {
+	case fillCommits, fillHead, fillBase, fillBranch, fillBaseBranch:
+		return true
+	}
+	return false
+}
+
+// marksPushFill reports whether t marks a member that qory fills from the push, see [pushFill].
+func marksPushFill(t exports.ProcessType) bool {
+	for _, mark := range t.Marks {
+		if pushFill(mark) {
+			return true
+		}
+	}
+	return false
 }
 
 // marksCommits reports whether t marks a member with [fillCommits]: such a type gets a version
@@ -394,8 +413,8 @@ func recordOf(branch *preparation.WorkBranch, target *contracts.Target) *pushRec
 
 // ready reads, fills and checks each output of the stage that the outbox has, before any
 // version is stored, so an output that breaks its schema stores nothing. A type that marks
-// pushed-commits, or any member, of a run that pushed nothing to the target gets no version,
-// and a line on w. missing is each required output that the outbox does not have.
+// pushed-commits, or any member that qory fills from the push ([marksPushFill]), of a run that
+// pushed nothing to the target gets no version, and a line on w. missing is each required output that the outbox does not have.
 func (o *runOutputs) ready(w io.Writer, branch *preparation.WorkBranch, note string) (out []readyOutput, missing []string, err error) {
 	rec := recordOf(branch, o.target)
 	for _, stage := range o.stage {
@@ -412,7 +431,7 @@ func (o *runOutputs) ready(w io.Writer, branch *preparation.WorkBranch, note str
 			continue
 		}
 		if t.Schema != nil {
-			if len(t.Marks) > 0 && (rec == nil || marksCommits(t) && len(rec.Commits) == 0) {
+			if marksPushFill(t) && (rec == nil || marksCommits(t) && len(rec.Commits) == 0) {
 				fmt.Fprintf(w, textOutputNoCommits+"\n", shown, targetShown(o.target))
 				continue
 			}

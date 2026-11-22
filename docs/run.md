@@ -3310,9 +3310,11 @@ stored:
 4. For a type with `deliver`, qory checks that each file has at most 786432 bytes once
    filled: the next run of the work item reads the file to find its start commit.
 
-A type that marks a member gets no version when the run pushed nothing to the target's
-repository, as a run with no repository does, and a type that marks `pushed-commits` gets
-none when the run pushed no commit to it. qory then prints `qory run: stored no <type>
+A type that marks a member that qory fills, with any mark but `pushed-commits-left-out`,
+gets no version when the run pushed nothing to the target's repository, as a run with no
+repository does, and a type that marks `pushed-commits` gets none when the run pushed no
+commit to it. A type whose only mark is `pushed-commits-left-out`, which Qory Apiary sets,
+gets its version either way. qory then prints `qory run: stored no <type>
 output: the run pushed no commits to the target.`, then `Target: <system>/<path>` indented
 by two spaces, and the output stays in the outbox until the next session starts.
 

@@ -500,3 +500,30 @@ func TestOnlyARunWithNoRepositorySaysSo(t *testing.T) {
 		}
 	}
 }
+
+// TestATypeThatMarksNothingQoryFillsIsStoredWithNoPush is a run that pushed nothing to the
+// target: a type whose one mark is pushed-commits-left-out, which Qory Apiary sets, or a mark
+// that qory does not know, gets its version, with the member left out; a type that marks
+// pushed-head gets none, and the line.
+func TestATypeThatMarksNothingQoryFillsIsStoredWithNoPush(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","properties":{"earlier":{"type":"integer"}}}`)
+	for mark, stored := range map[string]bool{"pushed-commits-left-out": true, "pushed-elsewhere": true, "pushed-head": false} {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, ".qory", "outbox", "summary"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, ".qory", "outbox", "summary", "summary.json"), []byte(`{"title":"a"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		typ := exports.ProcessType{Name: "summary", Send: "after_gate", Schema: schema, Marks: map[string]string{"earlier": mark}}
+		o := &runOutputs{root: root, stage: []runapi.Output{{Type: "summary"}}, types: []exports.ProcessType{typ}, target: shopTarget}
+		var lines strings.Builder
+		out, _, err := o.ready(&lines, nil, "")
+		if err != nil || (len(out) == 1) != stored || (lines.Len() == 0) != stored {
+			t.Errorf("%s: %d ready, %v, lines %q; want stored %v", mark, len(out), err, lines.String(), stored)
+		}
+		if stored && strings.Contains(string(out[0].push.Files[0].Content), "earlier") {
+			t.Errorf("%s: the member is filled: %s", mark, out[0].push.Files[0].Content)
+		}
+	}
+}
