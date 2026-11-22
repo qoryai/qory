@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -26,6 +27,8 @@ type ProcessType struct {
 	// Marks is each top-level member of Schema that has [fillKey], with its value; nil for
 	// none.
 	Marks map[string]string
+	// SizeLimit is size_limit, the most bytes of a version's files, 0 when the entry has none.
+	SizeLimit int64
 }
 
 // ProcessTypes returns artifact_types of the process.yaml at the root of the module folder
@@ -58,6 +61,9 @@ func ProcessTypes(dir string) (types []ProcessType, ok bool) {
 			continue
 		}
 		t := ProcessType{Name: name.Value}
+		if limit := value(entry, "size_limit"); limit != nil && limit.Kind == yaml.ScalarNode && limit.Tag == "!!int" {
+			t.SizeLimit, _ = strconv.ParseInt(limit.Value, 10, 64)
+		}
 		if send := value(value(entry, "deliver"), "send"); send != nil && send.Kind == yaml.ScalarNode && send.Tag == "!!str" {
 			t.Send = send.Value
 		}

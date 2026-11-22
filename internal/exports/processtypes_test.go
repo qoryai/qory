@@ -97,9 +97,9 @@ func mustJSON(t *testing.T, v any) string {
 }
 
 // TestProcessTypesReadsEachTypeWithItsDeliverSchemaAndMarks is a process.yaml with a
-// delivered structured type with marks, a type with no deliver and no schema, and an entry
-// with no name: the two types are read in order, the first with its send, its schema with
-// the primitives written out, and its marks; the entry with no name is left out. A folder
+// delivered structured type with marks and a size limit, a type with no deliver, schema or
+// size limit, and an entry with no name: the two types are read in order, the first with its
+// send, its size limit, its schema with the primitives written out, and its marks; the entry with no name is left out. A folder
 // with no process.yaml is not ok.
 func TestProcessTypesReadsEachTypeWithItsDeliverSchemaAndMarks(t *testing.T) {
 	dir := t.TempDir()
@@ -109,6 +109,7 @@ func TestProcessTypesReadsEachTypeWithItsDeliverSchemaAndMarks(t *testing.T) {
 	body := `artifact_types:
   - name: reply
     base_view: structured
+    size_limit: 65536
     deliver: {send: end_of_run}
     json_schema:
       type: object
@@ -129,13 +130,13 @@ func TestProcessTypesReadsEachTypeWithItsDeliverSchemaAndMarks(t *testing.T) {
 		t.Fatalf("ok %v, types %+v", ok, types)
 	}
 	reply, notes := types[0], types[1]
-	if reply.Name != "reply" || reply.Send != "end_of_run" || strings.Contains(string(reply.Schema), primitives.URL) {
+	if reply.Name != "reply" || reply.Send != "end_of_run" || reply.SizeLimit != 65536 || strings.Contains(string(reply.Schema), primitives.URL) {
 		t.Errorf("reply is %+v", reply)
 	}
 	if !reflect.DeepEqual(reply.Marks, map[string]string{"head": "pushed-head", "commits": "pushed-commits"}) {
 		t.Errorf("the marks are %v", reply.Marks)
 	}
-	if notes.Name != "notes" || notes.Send != "" || notes.Schema != nil || notes.Marks != nil {
+	if notes.Name != "notes" || notes.Send != "" || notes.Schema != nil || notes.Marks != nil || notes.SizeLimit != 0 {
 		t.Errorf("notes is %+v", notes)
 	}
 }
