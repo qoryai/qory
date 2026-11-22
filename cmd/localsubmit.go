@@ -18,7 +18,6 @@ import (
 	"github.com/qoryai/integrations/contracts"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runcopy"
-	"github.com/qoryai/qory/internal/submission"
 )
 
 // The words of the local submit step. Line 1 is the fix, and the cause and the values follow on
@@ -137,7 +136,7 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 			fmt.Fprintf(w, textLocalNoHistory+"\n", shownText(branch), shownError(err))
 			return nil
 		}
-		if err := preparation.HandoffCommitted(ctx, repo.Dir, repo.System, repo.Path, repo.Start, repo.Head); err != nil {
+		if err := preparation.OutboxCommitted(ctx, repo.Dir, repo.System, repo.Path, repo.Start, repo.Head); err != nil {
 			// The text is a line with its cause and the values on indented lines.
 			for line := range strings.SplitSeq(err.Error(), "\n") {
 				fmt.Fprintln(w, shownErrorText(line))
@@ -160,9 +159,9 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 		}
 		pushed = append(pushed, repo)
 	}
-	verdict := submission.VerdictNone
+	verdict := verdictNone
 	if passed {
-		verdict = submission.VerdictPassed
+		verdict = verdictPassed
 	}
 	for _, repo := range pushed {
 		document, err := localSubmission(ctx, repo, given, verdict)
@@ -185,7 +184,7 @@ func (c *runCopy) submitLocal(ctx context.Context, w io.Writer, program *submitP
 // document, "" for none: a draft of none, a program that failed, or one whose lines were not all
 // valid. The address is the value that [contracts.ParseSubmitLines] accepted: https, on the
 // repository's system, of the characters that RFC 3986 allows, so it has no control character.
-func draftAddress(document *submission.Submission) string {
+func draftAddress(document *draftDocument) string {
 	if len(document.Repositories) != 1 {
 		return ""
 	}
@@ -238,25 +237,26 @@ func (c *runCopy) localRepository(ctx context.Context, r runcopy.Repository, bra
 	return repo, nil
 }
 
-// localSubmission is the submission of one repository for the program: the branch, the verdict,
-// the hand-off's text, and the repository with its commits, each with the hand-off's step. Its
+// localSubmission is the draft document of one repository for the program: the branch, the verdict,
+// the pull-request output's text, and the repository with its commits, each with the output's
+// step. Its
 // draft is the placeholder for a passed session with a text, and none with the reason otherwise.
 // The base branch is the branch that the repository's checkout is on, unset for a detached HEAD.
-func localSubmission(ctx context.Context, repo localRepository, given *handoff, verdict string) (*submission.Submission, error) {
+func localSubmission(ctx context.Context, repo localRepository, given *handoff, verdict string) (*draftDocument, error) {
 	out, err := localGit(ctx, repo.Dir, "rev-list", "--reverse", repo.Start+".."+repo.Head)
 	if err != nil {
 		return nil, err
 	}
-	base := &submission.Base{Commit: repo.Start}
+	base := &draftBase{Commit: repo.Start}
 	if branch, err := localGit(ctx, repo.Dir, "symbolic-ref", "--short", "-q", "HEAD"); err == nil {
 		base.Branch = strings.TrimSpace(branch)
 	}
 	text := given.text()
-	entry := submission.Repository{System: repo.System, Path: repo.Path, Commit: repo.Head, Base: base, Draft: submission.None(noDraftReason(verdict, text), 0)}
+	entry := draftRepository{System: repo.System, Path: repo.Path, Commit: repo.Head, Base: base, Draft: noDraft(noDraftReason(verdict, text), 0)}
 	for commit := range strings.FieldsSeq(out) {
-		entry.Commits = append(entry.Commits, submission.Commit{Commit: commit, Step: given.stepOf(commit)})
+		entry.Commits = append(entry.Commits, draftCommit{Commit: commit, Step: given.stepOf(commit)})
 	}
-	return &submission.Submission{Ref: repo.Branch, Verdict: verdict, Text: text, Repositories: []submission.Repository{entry}}, nil
+	return &draftDocument{Ref: repo.Branch, Text: text, Repositories: []draftRepository{entry}}, nil
 }
 
 // pushArgs is the arguments of the git push of repo: the checked commit, not the branch name that

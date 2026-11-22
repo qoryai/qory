@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// TestAPipeAsTheHandoffFileIsNotWaitedFor is a named pipe at the path of the hand-off file: the
-// read ends with an error and no hand-off, with no wait for a writer of the pipe.
+// TestAPipeAsTheHandoffFileIsNotWaitedFor is a named pipe at the path of the pull-request
+// output: the read ends with an error and no output, with no wait for a writer of the pipe.
 func TestAPipeAsTheHandoffFileIsNotWaitedFor(t *testing.T) {
 	root := handoffIn(t, "{}")
 	if err := os.Remove(handoffPath(root)); err != nil {

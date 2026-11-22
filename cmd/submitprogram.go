@@ -16,7 +16,6 @@ import (
 
 	"github.com/qoryai/integrations/contracts"
 	"github.com/qoryai/qory/internal/secretmask"
-	"github.com/qoryai/qory/internal/submission"
 )
 
 // The words of the submit program's run. Each states the cause only: line 1 has at most 100
@@ -53,9 +52,9 @@ var submitLimit time.Duration
 
 // submitProgram is the submit program of a run with no run code: the module's command, with the
 // home's path in it, which runs on the person's machine, outside the wall, once for each
-// repository of the submission. The program uses the login of the forge's command line that the
+// repository of the draft document. The program uses the login of the forge's command line that the
 // person has, and gets no credential from qory. A run with a run code has none: the forge's
-// adapter opens its draft from the stored submission.
+// adapter opens its draft from the stored pull-request output.
 type submitProgram struct {
 	command []string
 	limit   time.Duration
@@ -71,10 +70,10 @@ type programEnd struct {
 }
 
 // apply runs the program on document, once for each repository that the run pushed, and returns
-// the document to store: each repository with the addresses of its commits and its draft, as
-// the program's lines give them, or with the reason it has none. Each line that the program
+// the document with each repository's draft, as the program's lines give it, or with the
+// reason it has none; qory checks the commit_url lines and keeps none. Each line that the program
 // printed on its standard error goes to w. An error is a ctx that ended, which cuts the step.
-func (p *submitProgram) apply(ctx context.Context, w io.Writer, document *submission.Submission) (*submission.Submission, error) {
+func (p *submitProgram) apply(ctx context.Context, w io.Writer, document *draftDocument) (*draftDocument, error) {
 	out := *document
 	out.Repositories = slices.Clone(document.Repositories)
 	for i, r := range document.Repositories {
@@ -92,13 +91,13 @@ func (p *submitProgram) apply(ctx context.Context, w io.Writer, document *submis
 
 // placeholder is the draft of a repository that the program may fill: the verdict is passed,
 // the session wrote text, and no program has run yet.
-var placeholder = submission.None(submission.NoneNoProgram, 0)
+var placeholder = noDraft(noneNoProgram, 0)
 
 // applyTo runs the program for repository r of document and returns r with its results.
-func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *submission.Submission, r submission.Repository) (submission.Repository, error) {
-	fail := func(reason string, exit int) submission.Repository {
+func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *draftDocument, r draftRepository) (draftRepository, error) {
+	fail := func(reason string, exit int) draftRepository {
 		if bytes.Equal(r.Draft, placeholder) {
-			r.Draft = submission.None(reason, exit)
+			r.Draft = noDraft(reason, exit)
 		}
 		return r
 	}
@@ -110,44 +109,32 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 		fmt.Fprintf(w, textProgramTooMany+"\n", len(commits), maxSubmitCommits)
 		// The program did not run, so its exit is 1, as the contract has it for a program that
 		// did not start.
-		return fail(submission.NoneProgramFailed, contracts.SubmitExitForge), nil
+		return fail(noneProgramFailed, contracts.SubmitExitForge), nil
 	}
 	dir, err := os.MkdirTemp("", "qory-submit-")
 	if err != nil {
 		fmt.Fprintf(w, textProgramNoFolder+"\n", shownError(err))
-		return fail(submission.NoneProgramFailed, contracts.SubmitExitForge), nil
+		return fail(noneProgramFailed, contracts.SubmitExitForge), nil
 	}
 	defer os.RemoveAll(dir)
 	input, err := p.input(document, r, commits, dir)
 	if err != nil {
 		fmt.Fprintf(w, textProgramNoFolder+"\n", shownError(err))
-		return fail(submission.NoneProgramFailed, contracts.SubmitExitForge), nil
+		return fail(noneProgramFailed, contracts.SubmitExitForge), nil
 	}
 	end := p.run(ctx, input, dir)
 	if ctx.Err() != nil {
 		return r, ctx.Err()
 	}
 	printProgramLines(w, end.stderr)
-	stdout, unusable := withoutUnusableTitle(end.stdout, input.Draft)
 	rec := contracts.ReadSubmitRun(contracts.SubmitEnd{Started: end.startErr == "", TimedOut: end.timedOut, Exit: end.exit},
-		stdout, r.System, input.Draft, append([]string{r.Base.Commit}, commits...))
-	// The reader ignores the output after a timeout, a program that did not start and an
-	// exit status other than 0, 1 or 2, so those runs list no line.
-	if end.startErr == "" && !end.timedOut && end.exit >= contracts.SubmitExitDone && end.exit < contracts.SubmitExitLogin {
-		rec.Invalid = append(rec.Invalid, unusable...)
-	}
+		end.stdout, r.System, input.Draft, append([]string{r.Base.Commit}, commits...))
 	slices.SortFunc(rec.Invalid, func(a, b contracts.SubmitLineError) int { return a.Line - b.Line })
 	for i, bad := range rec.Invalid {
 		if i == maxLeftOut {
 			break
 		}
 		fmt.Fprintf(w, textProgramLeftOut+"\n", bad.Line, bad.Reason)
-	}
-	r.CommitURL = rec.CommitURLs[r.Commit]
-	r.Base = &submission.Base{Commit: r.Base.Commit, Branch: r.Base.Branch, CommitURL: rec.CommitURLs[r.Base.Commit]}
-	r.Commits = slices.Clone(r.Commits)
-	for i, c := range r.Commits {
-		r.Commits[i].CommitURL = rec.CommitURLs[c.Commit]
 	}
 	if !bytes.Equal(r.Draft, placeholder) {
 		return r, nil
@@ -179,15 +166,15 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 	default:
 		fmt.Fprintf(w, textProgramFailed+"\n", end.exit)
 	}
-	r.Draft = submission.None(rec.Failed.Reason, exit)
+	r.Draft = noDraft(rec.Failed.Reason, exit)
 	return r, nil
 }
 
 // input is the inputs for repository r of document, with its description in a file in dir.
 // The draft is none for a repository whose draft is not the [placeholder], as after a session
-// that did not pass. A run with no run code has no earlier submission, so a draft is never an
-// update.
-func (p *submitProgram) input(document *submission.Submission, r submission.Repository, commits []string, dir string) (submitInput, error) {
+// that did not pass. A run with no run code has no earlier draft document, so a draft is never
+// an update.
+func (p *submitProgram) input(document *draftDocument, r draftRepository, commits []string, dir string) (submitInput, error) {
 	in := submitInput{
 		System: r.System, Path: r.Path, Branch: document.Ref, BaseBranch: r.Base.Branch, BaseCommit: r.Base.Commit,
 		Commits: commits, Draft: contracts.SubmitDraftNone,
@@ -292,49 +279,3 @@ func shownText(line string) string {
 
 // shownErrorText is s as [shownError] shows an error.
 func shownErrorText(s string) string { return shownError(errors.New(s)) }
-
-// The reasons for a draft_title line that qory leaves out, as [textProgramLeftOut]
-// lists them.
-const (
-	reasonTitleChar  = "the title has the character %U, which a title does not have, at character %d"
-	reasonTitleBlank = "the title has no character that is not a space, U+200C or U+200D"
-)
-
-// withoutUnusableTitle is stdout, the lines of a submit program, with each draft_title
-// line blanked out whose title is not one that the submission format stores: the title
-// of the contract is a line with a character that shows. It also returns each such
-// line as a line that qory cannot use, with its number. A blank line keeps the numbers
-// of the others, and the contract's reader then finds the draft incomplete and records
-// program-failed, as for any draft line it leaves out. A draft of none has no draft
-// lines to read, so nothing is left out. The checks that the reader makes of the
-// title, such as its length, stay with the reader. Every line is tested, because the
-// reader uses the first title that passes its checks, and that may come after a line
-// that passes qory's test and fails the reader's.
-// shortcut: qory tests the title beside the reader, until the integrations module has the
-// change that moves the title rule into its shared reader and qory pins that version;
-// then delete this function. withoutUnusableTitle and visibleTitle repeat
-// primitives.ShowsInTitle until then.
-func withoutUnusableTitle(stdout, draft string) (string, []contracts.SubmitLineError) {
-	if draft == contracts.SubmitDraftNone {
-		return stdout, nil
-	}
-	lines := strings.Split(stdout, "\n")
-	var unusable []contracts.SubmitLineError
-	for i, line := range lines[:len(lines)-1] {
-		key, title, ok := strings.Cut(strings.TrimSuffix(line, "\r"), " ")
-		if !ok || title == "" || key != contracts.SubmitKeyDraftTitle || strings.ContainsFunc(title, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
-			continue
-		}
-		var reason string
-		if at := controlAt(title); at > 0 {
-			reason = fmt.Sprintf(reasonTitleChar, []rune(title)[at-1], at)
-		} else if !visibleTitle(title) {
-			reason = reasonTitleBlank
-		} else {
-			continue
-		}
-		lines[i] = ""
-		unusable = append(unusable, contracts.SubmitLineError{Line: i + 1, Reason: reason})
-	}
-	return strings.Join(lines, "\n"), unusable
-}

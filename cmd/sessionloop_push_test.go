@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"maps"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -80,11 +80,12 @@ func numbered() func() (*session.Result, error) {
 // claude, each of which commits: session 1's commit is on the forge's branch, with its
 // version stored, before session 2 joins; session 2's commit follows it, with a second
 // version; and the run closes succeeded after two push steps and two next-session requests.
-// The checkout's setup, the image's fetch and the stack proxy are once for the run. Session
-// 1 writes the hand-off file and session 2 does not: session 2's version has session 1's
-// text, its step for session 1's commit, and unreviewed for session 2's commit.
+// The checkout's setup, the image's fetch and the stack proxy are once for the run. Each
+// session writes its pull-request output: session 2's version has session 2's title and the
+// commits of both sessions.
 func TestTheNextSessionStartsAfterThePushOfTheSessionBefore(t *testing.T) {
 	p, requests := sharedPushRepo(t, laterAnswer(2, "claude", "example-provider-2", 30))
+	p.noOutput = true
 	joins := 0
 	var beforeSecond, first, second string
 	var postsBeforeSecond int
@@ -94,7 +95,7 @@ func TestTheNextSessionStartsAfterThePushOfTheSessionBefore(t *testing.T) {
 			writeFile(t, filepath.Join(d, "first.txt"), "first\n")
 			commitAll(t, d, "Add a first file")
 			first = gitHead(t, d)
-			writeFile(t, filepath.Join(d, ".qory", "handoff", "submission.json"), `{"text":{"title":"Add a first file","description":"A file."},"steps":{"`+first+`":"implement"}}`)
+			writeFile(t, filepath.Join(d, ".qory", "outbox", "pull-request", "pull-request.json"), `{"title":"Add a first file"}`)
 			return
 		}
 		beforeSecond = p.branchHead(t)
@@ -102,6 +103,7 @@ func TestTheNextSessionStartsAfterThePushOfTheSessionBefore(t *testing.T) {
 		writeFile(t, filepath.Join(d, "second.txt"), "second\n")
 		commitAll(t, d, "Add a second file")
 		second = gitHead(t, d)
+		writeFile(t, filepath.Join(d, ".qory", "outbox", "pull-request", "pull-request.json"), `{"title":"Add a second file"}`)
 	}, numbered())
 	r.wantsClose(t, event.StateSucceeded, 0)
 	if joins != 2 || requests() != 2 {
@@ -120,16 +122,15 @@ func TestTheNextSessionStartsAfterThePushOfTheSessionBefore(t *testing.T) {
 	if got := r.pushSteps(); len(got) != 2 || got[0] != event.StateSucceeded || got[1] != event.StateSucceeded {
 		t.Errorf("the push steps exited %v, want two succeeded", got)
 	}
+	if doc := p.api.document(t, 1); doc["title"] != "Add a first file" || headOf(doc) != first {
+		t.Errorf("session 1's version is %+v, want its title at %s", doc, first)
+	}
 	doc := p.api.document(t, 2)
-	if doc.Text == nil || doc.Text.Title != "Add a first file" {
-		t.Errorf("session 2's version has the text %+v, want session 1's", doc.Text)
+	if doc["title"] != "Add a second file" || headOf(doc) != second {
+		t.Errorf("session 2's version is %+v, want its title at %s", doc, second)
 	}
-	steps := map[string]string{}
-	for _, c := range doc.Repositories[0].Commits {
-		steps[c.Commit] = c.Step
-	}
-	if want := map[string]string{first: "implement", second: stepUnreviewedName}; !maps.Equal(steps, want) {
-		t.Errorf("session 2's version has the steps %q, want %q", steps, want)
+	if got := commitsOf(doc); !slices.Equal(got, []string{first, second}) {
+		t.Errorf("session 2's version has the commits %v, want %s then %s", got, first, second)
 	}
 	for call, want := range map[string]int{"setup": 1, "fetch image": 1, "stack proxy": 1} {
 		n := 0
@@ -145,7 +146,7 @@ func TestTheNextSessionStartsAfterThePushOfTheSessionBefore(t *testing.T) {
 }
 
 // TestALaterSessionTurnsOnPushChecksThatSession1DidNotHave is a walled write run of two
-// sessions whose home has no push check for session 1 and a check of submission for session
+// sessions whose home has no push check for session 1 and a check of pull-request for session
 // 2. As Forager does, the run takes the check only before a join: the run sets it once,
 // before session 1, session 1's push runs no check, and session 2's push runs its check and
 // stores the version.
@@ -162,7 +163,7 @@ func TestALaterSessionTurnsOnPushChecksThatSession1DidNotHave(t *testing.T) {
 		if loads == 1 {
 			return nil, nil
 		}
-		return []compose.PushCheck{{Type: "submission", Module: "hello", Command: []string{"bin/check"}}}, nil
+		return []compose.PushCheck{{Type: "pull-request", Module: "hello", Command: []string{"bin/check"}}}, nil
 	}))
 	p.onSetCheck = func(func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error {
 		mu.Lock()
@@ -192,8 +193,8 @@ func TestALaterSessionTurnsOnPushChecksThatSession1DidNotHave(t *testing.T) {
 	if checkedBeforeSecond != "" {
 		t.Errorf("session 1's push ran a check:\n%s", checkedBeforeSecond)
 	}
-	if !strings.Contains(checkLog(t, log), "/qory-push-check/files/submission.json") {
-		t.Errorf("session 2's push ran no check of submission:\n%s", checkLog(t, log))
+	if !strings.Contains(checkLog(t, log), "/qory-push-check/files/pull-request.json") {
+		t.Errorf("session 2's push ran no check of pull-request:\n%s", checkLog(t, log))
 	}
 	if posts, _, stored := p.api.counts(); posts != 2 || stored != 2 {
 		t.Errorf("%d POST and %d versions, want 2 and 2\n%s", posts, stored, r.out)
@@ -247,6 +248,47 @@ func TestAFailedPushStartsNoNextSession(t *testing.T) {
 	r.wantsClose(t, event.StateFailed, 1)
 	if joins != 1 || requests() != 0 {
 		t.Errorf("%d joins and %d next-session requests, want 1 and 0", joins, requests())
+	}
+}
+
+// TestAFailedSessionsOutputIsNotStoredByTheNextSession is a write run of two sessions whose
+// session 1 writes its pull-request output and fails, and whose session 2 commits, succeeds
+// and writes no output: session 2 starts with an empty outbox, and no version is stored.
+func TestAFailedSessionsOutputIsNotStoredByTheNextSession(t *testing.T) {
+	p, requests := sharedPushRepo(t, laterAnswer(2, "claude", "example-provider-2", 30))
+	p.noOutput = true
+	joins := 0
+	left := true
+	r := p.run(t, func(d string) {
+		joins++
+		outbox := filepath.Join(d, ".qory", "outbox")
+		if joins == 1 {
+			writeFile(t, filepath.Join(outbox, "pull-request", "pull-request.json"), `{"title":"Left by a failed session"}`)
+			return
+		}
+		_, err := os.Lstat(outbox)
+		left = err == nil
+		writeFile(t, filepath.Join(d, "second.txt"), "second\n")
+		commitAll(t, d, "Add a second file")
+	}, func() func() (*session.Result, error) {
+		n := 0
+		return func() (*session.Result, error) {
+			n++
+			if n == 1 {
+				return &session.Result{State: event.StateFailed, Session: 1}, nil
+			}
+			return &session.Result{State: event.StateSucceeded, Session: n}, nil
+		}
+	}())
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if joins != 2 || requests() != 2 {
+		t.Fatalf("%d joins and %d next-session requests, want 2 and 2\n%s", joins, requests(), r.out)
+	}
+	if left {
+		t.Error("session 2 starts with the outbox of session 1")
+	}
+	if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
+		t.Errorf("%d POST and %d versions, want none", posts, stored)
 	}
 }
 

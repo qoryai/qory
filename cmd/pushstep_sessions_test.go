@@ -39,6 +39,8 @@ func TestTheCommitsOfASessionAreOnTheBranchBeforeTheNextSession(t *testing.T) {
 		postsBeforeSecond, _, _ = p.api.counts()
 		writeFile(t, filepath.Join(dir, "second.txt"), "second\n")
 		commitAll(t, dir, "Add a second file")
+		// Session 2 writes its output too: the push step of session 1 removed that of session 1.
+		writeFile(t, filepath.Join(dir, ".qory", "outbox", "pull-request", "pull-request.json"), `{"title":"Add a second page"}`)
 	}))
 	r := p.run(t, func(d string) {
 		dir = d
@@ -56,10 +58,10 @@ func TestTheCommitsOfASessionAreOnTheBranchBeforeTheNextSession(t *testing.T) {
 	if got := proxygittest.Git(t, p.bare, "log", "--format=%s", p.first+".."+head); got != "Add a second file\nAdd a first file" {
 		t.Errorf("the branch's new commits are:\n%s", got)
 	}
-	if got := p.api.document(t, 1).Repositories[0].Commit; got != beforeSecond {
+	if got := headOf(p.api.document(t, 1)); got != beforeSecond {
 		t.Errorf("version 1 is at %s, want session 1's %s", got, beforeSecond)
 	}
-	if got := p.api.document(t, 2).Repositories[0].Commit; got != head {
+	if got := headOf(p.api.document(t, 2)); got != head {
 		t.Errorf("version 2 is at %s, want session 2's %s", got, head)
 	}
 	if got := r.pushSteps(); len(got) != 2 || got[0] != event.StateSucceeded || got[1] != event.StateSucceeded {

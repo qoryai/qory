@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
-
-	"github.com/qoryai/qory/internal/submission"
 )
 
 // bareCommit makes a commit on top of parent in the bare repository bare, with the tree of
@@ -269,7 +267,7 @@ func TestARunStartsAtTheNewestPushedCommitThatDescends(t *testing.T) {
 			pushed := bareCommit(t, bare, "qory/wi_1", parent, "an earlier run")
 			b := &WorkBranch{Ref: testRef, Pushed: []Landed{{System: "git.example.com", Path: "acme/shop", Commit: pushed}}}
 			if c.version {
-				b.Version = []submission.Repository{{System: "git.example.com", Path: "acme/shop", Commit: target}}
+				b.Version = []Repository{{System: "git.example.com", Path: "acme/shop", Commit: target}}
 			}
 			if _, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: target, Branch: b}); err != nil {
 				t.Fatal(err)
@@ -451,10 +449,12 @@ func TestSeveralRecordedHeadsOfCancelledRuns(t *testing.T) {
 func TestTheTextsOfTheHeadCheckStartWithTheFix(t *testing.T) {
 	branch := "qory/wi_" + strings.Repeat("a", 64)
 	for name, c := range map[string]struct{ text, start string }{
-		"textHeadChanged":   {(&HeadChanged{Branch: branch, System: "git.example.com", Path: "acme/shop", Head: strings.Repeat("a", 40), Expected: strings.Repeat("b", 40)}).Error(), "qory run: Set "},
-		"textHeadMissing":   {(&HeadChanged{Branch: branch, System: "git.example.com", Path: "acme/shop", Expected: strings.Repeat("b", 40)}).Error(), "qory run: Create "},
-		"textHeadNoRead":    {fmt.Sprintf(textHeadNoRead, "acme/shop", "git.example.com", "cause"), "qory run: Take "},
-		"textHandoffCommit": {fmt.Sprintf(textHandoffCommitted, "git.example.com/acme/shop", strings.Repeat("a", 40), ".qory/handoff/submission.json"), "qory run: Keep "},
+		"textHeadChanged":  {(&HeadChanged{Branch: branch, System: "git.example.com", Path: "acme/shop", Head: strings.Repeat("a", 40), Expected: strings.Repeat("b", 40)}).Error(), "qory run: Set "},
+		"textHeadMissing":  {(&HeadChanged{Branch: branch, System: "git.example.com", Path: "acme/shop", Expected: strings.Repeat("b", 40)}).Error(), "qory run: Create "},
+		"textHeadNoRead":   {fmt.Sprintf(textHeadNoRead, "acme/shop", "git.example.com", "cause"), "qory run: Take "},
+		"textOutboxCommit": {fmt.Sprintf(textOutboxCommitted, "git.example.com/acme/shop", strings.Repeat("a", 40), ".qory/outbox/pull-request/pull-request.json"), "qory run: Keep "},
+		"textListFailed":   {listFailed(false, WorkRepository{Path: "acme/shop"}, strings.Repeat("a", 40), strings.Repeat("b", 40), errors.New("cause")).Error(), "qory run: Start "},
+		"textListFromCode": {listFailed(true, WorkRepository{Path: "acme/shop"}, strings.Repeat("a", 40), strings.Repeat("b", 40), errors.New("cause")).Error(), "qory run: Start "},
 	} {
 		line, _, _ := strings.Cut(c.text, "\n")
 		if n := utf8.RuneCountInString(line); n > 100 {

@@ -176,7 +176,7 @@ func TestLoadRefusesAPlanThatIsNoArtifactType(t *testing.T) {
 		path := write(t, withWorkflows("  hello:\n    access: write\n    plan: \""+value+"\"\n"))
 		_, err := Load(path)
 		want := "Set workflows.hello.plan to an artifact type.\n" +
-			"  An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n" +
+			"  An artifact type is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n" +
 			"  The value is \"" + value + "\".\n  workflows.hello is in " + path + "."
 		if err == nil || err.Error() != want {
 			t.Errorf("%q:\n%v\nwant:\n%s", value, err, want)

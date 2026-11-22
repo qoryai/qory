@@ -111,14 +111,14 @@ func makeProgramRunnable(t *testing.T) {
 	}
 }
 
-// handsOffText is an agent that commits a file and writes a hand-off with a title.
+// handsOffText is an agent that commits a file and writes a pull-request output with a title.
 func handsOffText(t *testing.T) func(spec session.SessionSpec) {
 	return func(spec session.SessionSpec) {
 		makeProgramRunnable(t)
 		writeFile(t, filepath.Join(spec.Dir, "committed.txt"), "committed\n")
 		gitOutput(t, spec.Dir, "add", "committed.txt")
 		gitOutput(t, spec.Dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "Add a file")
-		writeFile(t, filepath.Join(spec.Dir, ".qory", "handoff", "submission.json"), `{"text":{"title":"Add a file","description":"A file."}}`)
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "outbox", "pull-request", "pull-request.json"), `{"title":"Add a file","text":"A file."}`)
 	}
 }
 
@@ -201,15 +201,15 @@ func TestALocalRunWithARefusingCheckPushesNothing(t *testing.T) {
 }
 
 // TestALocalRunWithNoCheckPushesNothing is a local run with no push check
-// registered and a hand-off file that is not usable: the step fails closed. The output has the
+// registered and a pull-request output that is not usable: the step fails closed. The output has the
 // line that says so, of at most 100 characters, and one line after it, and nothing else, and
 // nothing is pushed or started.
 func TestALocalRunWithNoCheckPushesNothing(t *testing.T) {
 	root, bare, started := localProgramCheckout(t)
 	agentInCopy(t, func(spec session.SessionSpec) {
 		handsOffText(t)(spec)
-		// A hand-off file that is not usable would print its warning line if the step read it.
-		writeFile(t, filepath.Join(spec.Dir, ".qory", "handoff", "submission.json"), "{")
+		// An output that is not usable would print its warning line if the step read it.
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "outbox", "pull-request", "pull-request.json"), "{")
 	})
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
 	if err != nil {
@@ -692,7 +692,7 @@ func TestALocalRunThatCannotListItsCommitsAfterThePushSaysThePushLanded(t *testi
 	}
 }
 
-// TestALocalRunWithAMarkerLineInItsDescriptionGivesTheProgramNoDraft is a hand-off whose description
+// TestALocalRunWithAMarkerLineInItsDescriptionGivesTheProgramNoDraft is an output whose text
 // has the end marker of the block on a line: qory drops the text with a line, pushes, and starts the
 // program with the draft none, so the program never gets a description with a marker line.
 func TestALocalRunWithAMarkerLineInItsDescriptionGivesTheProgramNoDraft(t *testing.T) {
@@ -700,7 +700,7 @@ func TestALocalRunWithAMarkerLineInItsDescriptionGivesTheProgramNoDraft(t *testi
 	passingCheck(t)
 	out := runLocal(t, func(spec session.SessionSpec) {
 		handsOffText(t)(spec)
-		writeFile(t, filepath.Join(spec.Dir, ".qory", "handoff", "submission.json"), `{"text":{"title":"Add a file","description":"A\n<!-- qory:end -->\nB"}}`)
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "outbox", "pull-request", "pull-request.json"), `{"title":"Add a file","text":"A\n<!-- qory:end -->\nB"}`)
 	})
 	branch := runBranchOf(t, out)
 	wants(t, out, "Description: line 2 is a marker line of the draft's block. qory dropped the text.")
@@ -712,7 +712,7 @@ func TestALocalRunWithAMarkerLineInItsDescriptionGivesTheProgramNoDraft(t *testi
 	}
 }
 
-// TestALocalRunWithACommittedHandoffPushesNothing is an agent that force-adds the hand-off file to
+// TestALocalRunWithACommittedHandoffPushesNothing is an agent that force-adds its output file to
 // a commit: the commit would send the file to the remote, so qory pushes nothing, runs no program,
 // and the line says which commit and path.
 func TestALocalRunWithACommittedHandoffPushesNothing(t *testing.T) {
@@ -720,19 +720,19 @@ func TestALocalRunWithACommittedHandoffPushesNothing(t *testing.T) {
 	calls := passingCheck(t)
 	out := runLocal(t, func(spec session.SessionSpec) {
 		handsOffText(t)(spec)
-		gitOutput(t, spec.Dir, "add", "-f", ".qory/handoff/submission.json")
-		gitOutput(t, spec.Dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "Add the hand-off")
+		gitOutput(t, spec.Dir, "add", "-f", ".qory/outbox/pull-request/pull-request.json")
+		gitOutput(t, spec.Dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "Add the output")
 	})
-	wants(t, out, "qory run: Keep .qory/handoff/ out of the commits of this run; qory pushed nothing.\n  A commit of this run has a path under .qory/handoff/.")
+	wants(t, out, "qory run: Keep .qory/outbox/ out of the commits of this run; qory pushed nothing.\n  A commit of this run has a path under .qory/outbox/.")
 	wants(t, out, "\n  Repository git.example.com/acme/app.\n  Commit ")
-	wants(t, out, "\n  Path .qory/handoff/submission.json.")
+	wants(t, out, "\n  Path .qory/outbox/pull-request/pull-request.json.")
 	if got := pushedBranches(t, bare); got != "" || timesStarted(t, started) != 0 || *calls != 0 {
 		t.Errorf("pushed %q, started %d programs and ran %d checks, want none", got, timesStarted(t, started), *calls)
 	}
 }
 
 // TestAGitAddAllOfTheAgentLeavesTheHandoffOut is an agent that stages everything with git add -A
-// and commits with git commit -a after it wrote the hand-off: the file is in no commit, so the run
+// and commits with git commit -a after it wrote its output: the file is in no commit, so the run
 // pushes and the program starts with the draft open.
 func TestAGitAddAllOfTheAgentLeavesTheHandoffOut(t *testing.T) {
 	_, bare, started := localProgramCheckout(t)
@@ -740,9 +740,9 @@ func TestAGitAddAllOfTheAgentLeavesTheHandoffOut(t *testing.T) {
 	var excluded string
 	out := runLocal(t, func(spec session.SessionSpec) {
 		makeProgramRunnable(t)
-		writeFile(t, filepath.Join(spec.Dir, ".qory", "handoff", "submission.json"), `{"text":{"title":"Add a file","description":"A file."}}`)
-		// The copy's .qory is ignored as a whole already; the line for the hand-off folder is the
-		// one that qory adds for this file.
+		writeFile(t, filepath.Join(spec.Dir, ".qory", "outbox", "pull-request", "pull-request.json"), `{"title":"Add a file","text":"A file."}`)
+		// The copy's .qory is ignored as a whole already; the line for the outbox is the one that
+		// qory adds for this file.
 		path := gitOutput(t, spec.Dir, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude")
 		excluded = readText(t, strings.TrimSpace(path))
 		writeFile(t, filepath.Join(spec.Dir, "committed.txt"), "committed\n")
@@ -750,8 +750,8 @@ func TestAGitAddAllOfTheAgentLeavesTheHandoffOut(t *testing.T) {
 		gitOutput(t, spec.Dir, "-c", "user.name=agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-a", "-m", "Add a file")
 	})
 	branch := runBranchOf(t, out)
-	if !slices.Contains(strings.Split(excluded, "\n"), "/.qory/handoff/") {
-		t.Errorf("the copy's info/exclude is %q, want the line /.qory/handoff/", excluded)
+	if !slices.Contains(strings.Split(excluded, "\n"), "/.qory/outbox/") {
+		t.Errorf("the copy's info/exclude is %q, want the line /.qory/outbox/", excluded)
 	}
 	if files := gitOutput(t, bare, "ls-tree", "-r", "--name-only", branch); strings.Contains(files, ".qory") || !strings.Contains(files, "committed.txt") {
 		t.Errorf("the pushed branch has the files %q, want committed.txt and nothing under .qory", files)

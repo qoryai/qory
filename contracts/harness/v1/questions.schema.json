@@ -101,7 +101,7 @@
       "required": ["type", "name"],
       "additionalProperties": false,
       "properties": {
-        "type": {"description": "The artifact type's name, such as proposal: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+        "type": {"description": "The artifact type's name, such as proposal: lowercase letters and digits in groups joined by single hyphens, starting with a letter, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"},
         "name": {"description": "The artifact's name, such as main: 1 to 64 characters on one line. A JSON Schema cannot check that the work item has that artifact.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 64},
         "item": {
           "description": "The id of the entry of the artifact that the question concerns: 1 to 32 characters on one line. When type is acceptance-criteria, it is a criterion id: ac- and a number from 1 to 9999 with no leading zero, such as ac-3. A JSON Schema cannot check that the artifact has that entry.",

@@ -99,7 +99,7 @@ type Manifest struct {
 // PushCheck is one check a module declares for the files of one artifact type.
 type PushCheck struct {
 	// Type is the artifact type: lowercase letters and digits in groups joined by single
-	// hyphens, at most 64 bytes.
+	// hyphens, starting with a letter, at most 64 bytes.
 	Type string
 	// Command is the program and its arguments. The program is a path inside the module,
 	// relative to its root, cleaned.
@@ -109,8 +109,8 @@ type PushCheck struct {
 	Reads []string
 }
 
-// SubmitProgram is the program a module ships for the submit step: it reads the
-// submission and writes the forge's links and draft into it. A composed harness has at
+// SubmitProgram is the program a module ships for the submit step of a local run: it reads
+// the draft document and writes the forge's links and draft into it. A composed harness has at
 // most one.
 type SubmitProgram struct {
 	// Command is the program and its arguments. The program is a path inside the module,
@@ -582,7 +582,7 @@ func readPushChecks(path string, items []rawPushCheck) ([]PushCheck, error) {
 	refuse := func(fix string, lines ...string) error {
 		return exports.Refuse(fix, append(lines, "The manifest is "+path+".")...)
 	}
-	const typeRule = "An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes."
+	const typeRule = "An artifact type is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes."
 	for i, item := range items {
 		if !runapi.ArtifactName(item.Type) {
 			return nil, refuse(fmt.Sprintf("Set push_checks[%d].type to an artifact type.", i), typeRule, "The value is "+exports.Value(item.Type, true)+".")
@@ -661,7 +661,7 @@ func readScopeChecks(path string, node *yaml.Node) (map[string][]string, error) 
 	refuse := func(fix string, lines ...string) error {
 		return exports.Refuse(fix, append(lines, "The manifest is "+path+".")...)
 	}
-	const typeRule = "An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes."
+	const typeRule = "An artifact type is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes."
 	if node.Kind != yaml.MappingNode {
 		return nil, refuse("Set scope_checks to a map from an artifact type to a command.", "The value is not a map.")
 	}

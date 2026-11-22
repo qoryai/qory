@@ -36,7 +36,7 @@ func TestReadManifestReadsPushChecks(t *testing.T) {
 func TestReadManifestFailsOnPushChecks(t *testing.T) {
 	head := "apiVersion: qory.dev/v1alpha1\nname: core\npush_checks:\n"
 	for _, c := range []struct{ name, items, want string }{
-		{"upper case", "  - type: Spec\n    command: [c.js]\n", "Set push_checks[0].type to an artifact type.\n  An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The value is \"Spec\"."},
+		{"upper case", "  - type: Spec\n    command: [c.js]\n", "Set push_checks[0].type to an artifact type.\n  An artifact type is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The value is \"Spec\"."},
 		{"an empty type", "  - type: \"\"\n    command: [c.js]\n", "Set push_checks[0].type to an artifact type."},
 		{"no type", "  - command: [c.js]\n", "Set push_checks[0].type to an artifact type."},
 		{"a long type", "  - type: " + strings.Repeat("a", 65) + "\n    command: [c.js]\n", "Set push_checks[0].type to an artifact type."},
@@ -51,7 +51,7 @@ func TestReadManifestFailsOnPushChecks(t *testing.T) {
 		{"a command as a string", "  - type: spec\n    command: c.js\n", "cannot unmarshal"},
 		{"a number", "  - type: spec\n    command: [c.js, 3]\n", "Set push_checks[0].command[1] to a string, quoted when it reads as a number or a boolean."},
 		{"a list", "  - type: spec\n    command: [[c.js]]\n", "Set push_checks[0].command[0] to a string"},
-		{"a read that is not a type", "  - type: spec\n    command: [c.js]\n    reads: [questions, Spec]\n", "Set push_checks[0].reads[1] to an artifact type.\n  An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The value is \"Spec\"."},
+		{"a read that is not a type", "  - type: spec\n    command: [c.js]\n    reads: [questions, Spec]\n", "Set push_checks[0].reads[1] to an artifact type.\n  An artifact type is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The value is \"Spec\"."},
 		{"a read as a number", "  - type: spec\n    command: [c.js]\n    reads: [3]\n", "Set push_checks[0].reads[0] to an artifact type."},
 		{"one read twice", "  - type: spec\n    command: [c.js]\n    reads: [questions, questions]\n", "Remove one of the two items questions from push_checks[0].reads.\n  A type is listed once."},
 	} {

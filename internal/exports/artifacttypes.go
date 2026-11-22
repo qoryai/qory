@@ -154,10 +154,10 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 		return "", fmt.Sprintf("Set the name of %s to a quoted string.\n  YAML reads %s as a value that is not a string.\n  The entry is in %s.", label, scalarText(n), FilePlace)
 	}
 	if n.Kind != yaml.ScalarNode || n.Tag != "!!str" {
-		return "", fmt.Sprintf("Set the name of %s to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, and the name is %s.\n  The entry is in %s.", label, nodeKind(n), FilePlace)
+		return "", fmt.Sprintf("Set the name of %s to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, and the name is %s.\n  The entry is in %s.", label, nodeKind(n), FilePlace)
 	}
 	if !runapi.ArtifactName(n.Value) {
-		return "", fmt.Sprintf("Rename %s.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most %d bytes.\n  The name is %s.\n  The entry is in %s.", label, runapi.MaxArtifactName, scalarText(n), FilePlace)
+		return "", fmt.Sprintf("Rename %s.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most %d bytes.\n  The name is %s.\n  The entry is in %s.", label, runapi.MaxArtifactName, scalarText(n), FilePlace)
 	}
 	name = n.Value
 	label = "artifact type " + name

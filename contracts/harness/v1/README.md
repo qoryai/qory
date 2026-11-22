@@ -8,10 +8,10 @@ What `qory harness compose` reads and what it writes.
 |---|---|---|
 | `qory-stack.yaml` | a directory that `extends` or `-f` selects; an ancestor directory covering several repositories; the root of the harness repository that delivers it | a stack delivered to be extended: the ordered modules, the excludes, what a checkout extending it may add and the runtimes and models it is written for |
 | `qory-module.yaml` | the root of a module | the module: its name, its variants per runtime, the variables it exports |
-| `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use, the schema of a run's type settings and the submit step of a run. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
+| `process.yaml` | optional; the folder root of a module that `exports.modules` lists, which makes the module a factory | a process template: its name, summary and description, the workspace type, the exported stack its workflows run on, its `qory.process/v1` process, and optionally the artifact types its workspaces use and the schema of a run's type settings. Every command that reads the configuration checks it; the compose does not read it (§Exports) |
 | a role contract | optional; a file of a module that declares an agents role, at the path that `roles.agents.<role>.contract` in the module's `qory-module.yaml` is set to | the parts an agent needs to fill the role: level-2 headings, front-matter keys, tools, a tier, and the form of its report (§The role contract). The compose checks every agent that fills the role against it; the harness's checks read the report's form |
 | `qory.yaml`, or `harness.yaml` | the repository root, committed; the user's configuration directory and the checkout's ancestor directories, for the machine | the repository's document and the machine's: under `harness`, this repository's stack, its target and modules, or the stack it extends, the target it composes it for, the modules it appends and the workflow hooks it adds, and the runtime and model this machine composes for; under `worktree`, what a worktree of the repository needs and where the machine puts one; under `exports`, the stacks and modules this repository publishes for others, by name (§Exports); `git` and `env` (§The configuration) |
-| a submission document | the file of a version of the structured artifact type `submission` | what a run submits for a work item: its branch, the commits in each repository, the verdict and the draft pull request (§The submission format). No compose reads it |
+| an output | `.qory/outbox/<type>/` of the checkout, or of the working folder of a run with no repository | what a session writes for a type of its stage's outputs, which qory stores as a version of the type (§Outputs). No compose reads it |
 | an acceptance criteria document | the file of a version of a structured artifact type for a work item's acceptance criteria | a summary of what the work item must achieve and the criteria that say when it is achieved, each with its check (§The acceptance criteria format). No compose reads it |
 | a verification document | the file of a version of a structured artifact type for a work item's verification | the result of checking the criteria against one version of the work (§The verification format). No compose reads it |
 | a questions document | the file of a version of the artifact type `questions` | a work item's questions, their answers and the decisions of its runs (§The questions format). No compose reads it |
@@ -214,9 +214,9 @@ schema is [config.schema.json](config.schema.json).
 | `extensions` | no | a map of keys the author chooses, each a value of any shape, a scalar, a list or a map of any depth; written into the report as it is and printed by `qory harness inspect`; qory reads nothing in it. A run from Qory Apiary, from a run code or a run key, writes the report's `extensions` into the run's `inputs.json` as `qory.harness_extensions` (docs/run.md, §The run key from a run code) |
 | `workflows` | no | the settings of each workflow of the stack, by its name: a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most, so `workflow-<name>` has at most 64 characters. A run that Qory Apiary dispatches from a run code starts the first of these that the runtime can start: the skill `workflow-<name>`, the command `workflow-<name>`, the skill `<name>`, the command `<name>` (docs/run.md, §The run key from a run code). A plain name works, and when a harness ships both names, the prefixed one runs. The compose fails with status 2 for each workflow that no module of the stack composes as a skill or command under either name, after the modules' `exclude` and `only`: `Add skill or command workflow-<name> to a module of <stack>, or remove workflow <name>.`, then `The base stack <stack> declares the workflow <name> in its qory-stack.yaml.` and `No module of <stack> ships a skill or command workflow-<name> or <name>.` on the next two lines, or, for a stack that extends none, `Add skill or command workflow-<name> to a module of the stack in <file>, or remove workflow <name>.`, then `The stack in <file> declares the workflow <name>.` and `No module of the stack in <file> ships …`, where `<file>` is the `qory-stack.yaml` or the `qory.yaml` that defines the stack. For a stack that the harness document of a run from a run code defines, the line has `the workspace's harness in Qory Apiary` in place of `the stack in <file>`. A module that a checkout adds to the stack it extends does not count, and neither does a checkout's exclude: the compose checks what the stack's modules ship before it applies that exclude. The harness section of a `qory.yaml` that defines a stack lists them with the same keys and checks; a section that extends a stack takes the base's and lists none |
 | `workflows.<name>.hook_points` | no | the points of the workflow where a checkout extending the stack may add workflow hooks, by the point's name: `{at: end, kinds: [check, review]}`. `at` is where the point sits in the workflow's session, `end`, `start` or `inside`; `kinds` is one or more of `check`, `review` and `enrich`, each once. A point's name has the form of a workflow's name, and is unique in the stack, since a hook selects a point by its name alone. Only a `qory-stack.yaml` declares points: a `qory.yaml` that defines a stack, which nothing extends, is refused with `Remove hook_points from the workflows in qory.yaml.` (§Workflow hooks) |
-| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on: `read`, `write-no-push`, or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access to a valid level.` with `The levels are read, write-no-push, and write.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. A run takes the lower of this access and `access` in the run's documents, in the order `read`, `write-no-push`, `write`; documents with no target have no `access`, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A `write-no-push` run has a writable checkout, no push step, no submit, and no version of the artifact `submission`. At `write` the checkout is writable and qory pushes what the agent left |
+| `workflows.<name>.access` | no | the access level the workflow declares for what a dispatched run of it works on: `read`, `write-no-push`, or `write`, and `read` when left out; qory stops with an error on any other value: `Set workflows.<name>.access to a valid level.` with `The levels are read, write-no-push, and write.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. A run takes the lower of this access and `access` in the run's documents, in the order `read`, `write-no-push`, `write`; documents with no target have no `access`, and this access applies alone. A dispatched run from a run code sees the checkout read-only when that level is `read`, and on Claude Code its settings deny `Edit`, `Write` and `NotebookEdit`; such a run with no wall, with `wall.setup: inside`, or whose image chosen at the run's open has nested Docker, whichever way it was selected, stops before the agent starts (docs/run.md, §Read workflows). A `write-no-push` run has a writable checkout, no push step, no outbox, and stores no output. At `write` the checkout is writable and qory pushes what the agent left |
 | `workflows.<name>.tier` | no | the tier that names the main session's model and effort for a dispatched run of the workflow: `light`, `balanced`, or `thinking`; none when left out. qory stops with an error on any other value: `Set workflows.<name>.tier to a valid tier.` with `The tiers are light, balanced, and thinking.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines. qory passes nothing new to the run: Qory Apiary resolves the session's model and effort from the tier, and sends them as it sends the session's model. `qory run` does not read it |
-| `workflows.<name>.plan` | no | the artifact type whose launch version sets what a dispatched run of the workflow may push, such as `build-plan`: lowercase letters and digits in groups joined by single hyphens, 64 bytes at most; none when left out. Only a workflow with `access: write` names one. qory stops with an error on a value that is no artifact type: `Set workflows.<name>.plan to an artifact type.` with `An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines; and on a `plan` in a workflow whose access is `read`, `write-no-push` or left out: `` Remove `plan` from <name>, or set its access to write. `` with `Only a workflow with access write has a plan, and the access of <name> is <access>.` and `workflows.<name> is in <file>.` on the next two lines. The compose stops when no module of the stack declares the scope check for the type in `scope_checks` (§The module manifest): `Add a scope check for <type> to a module's scope_checks.` with `` You can also remove `plan: <type>` from <name> in the stack. `` on the next line, or both on one line when the first line has at most 98 characters, then `No module of the stack declares a scope check for <type>.` and `workflows.<name> is in <file>.` on the next lines. `qory run` does not read `plan` |
+| `workflows.<name>.plan` | no | the artifact type whose launch version sets what a dispatched run of the workflow may push, such as `build-plan`: lowercase letters and digits in groups joined by single hyphens, starting with a letter, 64 bytes at most; none when left out. Only a workflow with `access: write` names one. qory stops with an error on a value that is no artifact type: `Set workflows.<name>.plan to an artifact type.` with `An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.`, `The value is <value>.` and `workflows.<name> is in <file>.` on the next three lines; and on a `plan` in a workflow whose access is `read`, `write-no-push` or left out: `` Remove `plan` from <name>, or set its access to write. `` with `Only a workflow with access write has a plan, and the access of <name> is <access>.` and `workflows.<name> is in <file>.` on the next two lines. The compose stops when no module of the stack declares the scope check for the type in `scope_checks` (§The module manifest): `Add a scope check for <type> to a module's scope_checks.` with `` You can also remove `plan: <type>` from <name> in the stack. `` on the next line, or both on one line when the first line has at most 98 characters, then `No module of the stack declares a scope check for <type>.` and `workflows.<name> is in <file>.` on the next lines. `qory run` does not read `plan` |
 | `runtimes` | no | the version `qory run` installs of each runtime, by the runtime's name, `claude` or `codex`: `runtimes: {codex: {version: 0.167.2}}`. A runtime that no layer pins installs its latest version (docs/run.md, §The runtime's program). The harness section of a checkout's `qory.yaml` takes the same key, beside `extends` or in a stack it defines, and its pin of a runtime wins over the base's; a runtime only the base pins keeps the base's pin. qory stops with `Remove <name> from runtimes.` on another runtime's name, then `qory installs and pins only claude and codex.` and `runtimes is in <file>.` on the next two lines. qory stops with an error on `harness.runtimes` in the user's file, and in an ancestor's file that discovery or `-f` selects to compose; in another ancestor's file, qory leaves the pin unread (§The configuration) |
 | `runtimes.<runtime>.version` | yes, in an entry | an exact version, as a string: a digit, then up to 31 letters, digits, `.` or `-`, 32 characters at most, such as `2.1.320` or `0.167.2`; `latest` is not one. qory stops with an error on any other value: `Set runtimes.<runtime>.version to an exact version, or remove runtimes.<runtime>.` with `An exact version starts with a digit, followed by up to 31 letters, digits, . or -. A runtime with no pin installs its latest version.`, `The value is <value>.` and `runtimes.<runtime> is in <file>.` on the next three lines. A version that YAML reads as a number or a date, such as an unquoted `2.1` or `2024-01-01`, stops with `Put runtimes.<runtime>.version in quotes, such as version: "2.1.320".`, then `Without quotes, YAML reads the version as a number or a date, and an exact version is a string.` and the same value and file lines. A version that npm, or the registry's runtime cache, does not have stops the run before its session (docs/run.md, §The runtime's program) |
 | `extending` | no | what a module of a checkout extending this stack may ship: `kinds`, `instructions`, `settings`, `files` (§Extending a stack). A base without the block cannot be extended |
@@ -604,8 +604,7 @@ A module that `exports.modules` lists and that has a `process.yaml` at its folde
 a factory. The file is a process template: the texts, the workspace type, the stack and
 the process that a workspace made from it starts with
 ([process.schema.json](process.schema.json)). It may also list the artifact types its
-workspaces use, register the schema of a run's type settings, and declare the submit step
-of a run. Every command that reads the
+workspaces use and register the schema of a run's type settings. Every command that reads the
 configuration checks the file, once it finds each export. A module without the file is
 not checked for it.
 
@@ -662,12 +661,11 @@ type_settings:                   # optional; the schema of a run's type settings
 | `description` | how such a workspace works, at most 1200 characters and at most 80 words |
 | `type` | the workspace type of a workspace made from the template: a workspace type key, such as `qory.software` |
 | `stack` | the stack the workspace's workflows run on, one that `exports.stacks` of the same repository lists |
-| `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`; that each `workflow` of a stage's `sequence`, a loop's `body` included, is a non-empty string of one line of text that the stack's `qory-stack.yaml` declares under `workflows`; and that each stage `name` is one line of text. A stage may have `outputs`, a list of objects with `type`, the name of an entry of `artifact_types`, which qory checks with the stage and the type in the message, and that the stage lists each type once, and `required`, `true` or `false`, and `false` when left out; an output has no other key. qory checks nothing else in it |
+| `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`; that each `workflow` of a stage's `sequence`, a loop's `body` included, is a non-empty string of one line of text that the stack's `qory-stack.yaml` declares under `workflows`; and that each stage `name` is one line of text. A stage may have `outputs`, a list of objects with `type`, the name of an entry of `artifact_types`, which qory checks with the stage and the type in the message, and that the stage lists each type once, and `required`, `true` or `false`, and `false` when left out. An output may also have `when` and `unless`, each a condition, and `check`, as [process.schema.json](process.schema.json) defines them after the process schema of Qory Apiary; qory checks no value of them, and an output has no other key. qory checks nothing else in it |
 | `artifact_types` | optional; the list of the artifact types the workspaces use, as [Artifact types](#artifact-types) has it. A list with no entries is valid |
 | `type_settings` | optional; the JSON Schema of a run's type settings, as [Type settings](#type-settings) has it |
-| `submit` | optional; the submit step of a run, as [The submit step](#the-submit-step) has it |
 
-Every key but `artifact_types`, `type_settings` and `submit` is required, and the file has no other key. A key left out, a text over its
+Every key but `artifact_types` and `type_settings` is required, and the file has no other key. A key left out, a text over its
 limit, a `stack` that `exports.stacks` does not list, and a `process` that is not such an
 object are refused with the file and the fix in the message: the fix is the first line, and the file is on the
 last line, so a long path never pushes the fix past 98 characters. Each
@@ -700,13 +698,13 @@ is a standard type, `name` alone or with `withdrawable`, or a custom type, with 
 
 | Key | Meaning |
 |---|---|
-| `name` | required: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes, such as `reply-draft`. Each name is listed once |
+| `name` | required: lowercase letters and digits in groups joined by single hyphens, starting with a letter, 1 to 64 bytes, such as `reply-draft`. Each name is listed once |
 | `base_view` | `document`, `image`, `video`, `file` or `structured`, how a version's files are shown |
 | `size_limit` | the most bytes of all files of one version, a whole number from 1 to the base view's most: 10 MiB for `document`, 50 MiB for `image`, 2 GiB for `video`, 1 GiB for `file` and 1 MiB for `structured`, and 786432 bytes for a type with `deliver` |
 | `max_files` | the most files of one version, a whole number from 1 to 20; exactly 1 for `structured` |
 | `json_schema` | the JSON Schema of the file, exactly when `base_view` is `structured` |
 | `withdrawable` | optional, `true` or `false`, and `true` when the entry has none: whether a run may withdraw a name of the type with `qory artifact push --withdraw`. A standard type and a custom type may both set it. qory refuses any other value, such as `"no"`, with the fix on the first line and the file on the last |
-| `deliver` | optional, an object with one required member `send`, `end_of_run` or `after_gate`. `deliver` marks a type that Apiary delivers to the target in the run documents: `end_of_run` at the end of the run, and `after_gate` after the gate of the run's stage passes, and until then qory stores the version. A type without `deliver` is stored and never delivered. Only a custom structured type has `deliver`, with a `size_limit` of at most 786432 bytes, and its `json_schema` has the root `type` `object`, so that no value but an object validates, and a top-level property `target` that is the primitive `reference`: a `$ref` to `https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference`, or a copy of that definition written out under `$defs`, where each definition that it refers to under `$defs` is the definition of that name in the primitives, each directly, in an `allOf`, or through a `$ref` to a definition under `$defs`. The `target` has no `type` beside the reference but `object`, on the property or in an `allOf` entry. Its name is in the `required` list of the root, and only the root list counts. A schema fails when `$id`, `$anchor` or `$dynamicAnchor` is a key anywhere in it, also as the name of a property or a definition, because `$id` changes where a `$ref` points. It fails when the root `$schema` is anything other than `https://json-schema.org/draft/2020-12/schema`, with or without a final `#`, because draft-07 ignores the keys next to a `$ref`; a `$schema` below the root is no draft and passes. It fails when the `$ref` that leads to the `target` goes through a `$defs` name with a character other than a letter, a digit, `_` or `-`, because the compiler decodes `%`, `~0` and `~1` and splits a name at `/`. A top-level property may have the keyword `x-qory-fill` with one of these values, each on one property at most: `pushed-commits` on a list whose `items` are the primitive `reference` (the commits qory pushed to the target, oldest first), `pushed-head` and `pushed-base` on a `reference` (the last pushed commit, and the commit the run started at), which a property with a mark takes through a `$ref`, to the primitives or to a local `$defs` `reference`, because a written-out copy with the mark is not the primitive `reference`, and with no `type` beside the `$ref` but `object`, `pushed-branch` and `pushed-base-branch` on a string, and `pushed-commits-left-out` on an integer. `x-qory-fill` fails on `target`, because `target` is the destination and qory fills only other members, and below the top level (the root, `$defs`, `items`, a nested property), on a property of another shape, with another value, and in a type without `deliver`, because qory fills a member only for a type that Apiary delivers. A nested property or a definition named `x-qory-fill` fails too, as does a property of that name in a type without `deliver`, because qory reads the name as the mark. qory checks the `target` and the marks, and nothing reads `deliver` yet |
+| `deliver` | optional, an object with one required member `send`, `end_of_run` or `after_gate`. `deliver` marks a type that Apiary delivers to the target in the run documents: `end_of_run` at the end of the run, and `after_gate` after the gate of the run's stage passes, and until then qory stores the version. A type without `deliver` is stored and never delivered. Only a custom structured type has `deliver`, with a `size_limit` of at most 786432 bytes, and its `json_schema` has the root `type` `object`, so that no value but an object validates, and a top-level property `target` that is the primitive `reference`: a `$ref` to `https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference`, or a copy of that definition written out under `$defs`, where each definition that it refers to under `$defs` is the definition of that name in the primitives, each directly, in an `allOf`, or through a `$ref` to a definition under `$defs`. The `target` has no `type` beside the reference but `object`, on the property or in an `allOf` entry. Its name is in the `required` list of the root, and only the root list counts. A schema fails when `$id`, `$anchor` or `$dynamicAnchor` is a key anywhere in it, also as the name of a property or a definition, because `$id` changes where a `$ref` points. It fails when the root `$schema` is anything other than `https://json-schema.org/draft/2020-12/schema`, with or without a final `#`, because draft-07 ignores the keys next to a `$ref`; a `$schema` below the root is no draft and passes. It fails when the `$ref` that leads to the `target` goes through a `$defs` name with a character other than a letter, a digit, `_` or `-`, because the compiler decodes `%`, `~0` and `~1` and splits a name at `/`. A top-level property may have the keyword `x-qory-fill` with one of these values, each on one property at most: `pushed-commits` on a list whose `items` are the primitive `reference` (the commits qory pushed to the target, oldest first), `pushed-head` and `pushed-base` on a `reference` (the last pushed commit, and the commit the run started at), which a property with a mark takes through a `$ref`, to the primitives or to a local `$defs` `reference`, because a written-out copy with the mark is not the primitive `reference`, and with no `type` beside the `$ref` but `object`, `pushed-branch` and `pushed-base-branch` on a string, and `pushed-commits-left-out` on an integer. `x-qory-fill` fails on `target`, because `target` is the destination and qory fills only other members, and below the top level (the root, `$defs`, `items`, a nested property), on a property of another shape, with another value, and in a type without `deliver`, because qory fills a member only for a type that Apiary delivers. A nested property or a definition named `x-qory-fill` fails too, as does a property of that name in a type without `deliver`, because qory reads the name as the mark. qory checks the `target` and the marks, and fills both when it stores an output (§Outputs) |
 
 A custom type has `base_view`, `size_limit` and `max_files`. qory has no list of standard
 types: a name alone, or a name with `withdrawable` alone, passes for any name of the right
@@ -779,32 +777,6 @@ Fix json_schema of type_settings so that it compiles as a JSON Schema.
   type_settings is in /src/acme-harness/harness/modules/support-desk/process.yaml.
 ```
 
-#### The submit step
-
-`submit` declares the submit step of a run of a workspace made from the template. A
-`process.yaml` has at most one `submit`, an object with `type` and `send` and no other
-key. Without `submit`, the step stores no submission.
-
-```yaml
-submit:
-  type: customer-facts           # a structured entry of artifact_types
-  send: after_gate               # or end_of_run
-```
-
-`type` is the artifact type of the submission: the name of a custom entry of
-`artifact_types` in the same file with `base_view: structured`. qory refuses a name that no
-entry has, a standard type (a name alone) and a custom type of another base view. `send`
-is when the step sends the submission: `end_of_run` sends it at the end of the run;
-`after_gate` sends it after the gate of the run's stage passes, and until then the step
-stores it and sends nothing. A `submit` that breaks a rule stops the command with a
-refusal that starts with the fix, then gives the cause and the file:
-
-```text
-Remove the key "command" from submit.
-  submit has only type and send.
-  submit is in /src/acme-harness/harness/modules/support-desk/process.yaml.
-```
-
 ## The primitives
 
 [primitives.schema.json](primitives.schema.json) defines the strings and objects that the
@@ -838,52 +810,47 @@ it has Markdown, a `$defs` `text` with the same pattern as here, so that each on
 check as the schema of a custom type without a loader. A test compares each pattern with
 the one in the primitives file.
 
-## The submission format
+## Outputs
 
-A submission document records what a run submits for a work item: the branch, the commits
-in each repository, the verdict, and the draft pull request. Only qory's submit step
-writes it, after the push. This is version 1 of the format
-([submission.schema.json](submission.schema.json)):
+A stage lists its outputs in the process (§A factory's process.yaml), each a type and
+whether the stage requires it. A session of a dispatched run at level `write` writes each
+output to the outbox, the folder whose absolute path is in `QORY_OUTBOX`: `.qory/outbox` at
+the top of the checkout, or in the working folder of a run with no repository. The outbox
+is in the checkout's `.git/info/exclude`, and a push whose commits have a path under it
+stops. `inputs.json` has the stage's outputs as `qory.outputs`: a list in the stage's
+order, each with `type`, `required` and `schema`, the type's `json_schema` with each
+`$ref` to the primitives written out, or `null` for a type that the composed
+`process.yaml` does not define, and `[]` for a stage with none.
 
-```json
-{"ref": "qory/wi_7k2m9pq4xt3a8b1c",
- "verdict": "passed",
- "text": {"title": "Add an orders page", "description": "The page lists open orders."},
- "repositories": [{
-   "system": "github.com", "path": "acme/web",
-   "commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",
-   "base": {"commit": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b", "branch": "main"},
-   "commits": [{"commit": "5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e", "step": "deliverable:d-1"}],
-   "draft": {"none": "no-program"}}]}
-```
-
-| Member | Meaning |
+| Type | The session writes |
 |---|---|
-| `ref` | the branch's name, the same in each repository: `qory/` followed by the work item's id |
-| `verdict` | the work item's newest verdict, when this run wrote it: `passed`, `changes-requested`, `escalate`, another kind in the form of the verdict format, or `none` |
-| `text` | the title and the description of the draft pull request, from the session's hand-off file. The title is a `title` of the primitives, 1 to 256 characters; the description is a `text` of the primitives, at most 20,000 characters. Absent when the session wrote none |
-| `repositories` | each repository with the commit of the branch in it, at least one |
-| `system` | the host the repository is on, a lower-case host name of at most 253 characters |
-| `path` | the repository's path on the host: at most 200 characters of segments joined by slashes, with no `.`, `..` or `.git` segment |
-| `commit` | the head of the branch: a full commit id, 40 or 64 lower-case hexadecimal digits. Each commit id of the format has this form |
-| `base` | the commit the run started at (`commit`), and the name of the repository's default branch when the run started (`branch`, optional, at most 255 characters, a name that git accepts after `refs/heads/`): the branch that a pull request of the run is based on |
-| `commits` | each commit from the base to the head, oldest first, with the ledger step that made it, at most 128 characters on one line (a `line` of the primitives): the id of a ledger row, such as `deliverable:d-1`, `fix:f1`, `plan`, `checks`, `small-change` or `script:scenario-2#3`. A commit that a step made gets that step. Any commit with no step gets `unreviewed` |
-| `draft` | the draft pull request (`number`, `url`, `title`, `state`, `action`; the `title` is a `line` with a character that is not a space, U+200C or U+200D, and the program reader limits it to 256 characters), or `{"none": <reason>}` with the reason `not-passed`, `no-text`, `escalated`, `no-program`, `program-failed` (with `exit`, 0, 1 or 2), `program-timeout` or `login-needed` (with `exit` 3). The `state` of a draft is `draft`, `open`, `closed` or `merged` |
-| `commit_url` | the forge's address of a commit, from the submit program of a run with no run code |
+| a type with a `json_schema` | one JSON object, `<type>/<type>.json`, such as `pull-request/pull-request.json`, with no `target` when the type is delivered, and no member that has `x-qory-fill` |
+| any other type | its files in the folder `<type>/` |
 
-A document has no other member. The schema writes the patterns of the primitives in its
-`$defs` `line`, `text` and `visible`, and a test compares them with the primitives file. A
-software factory can use the format as the JSON Schema
-of a custom artifact type in its `process.yaml`:
+At the end of each session, after the push, qory reads each output of the stage that the
+outbox has, within the type's `size_limit`. For a type that `deliver` of the run documents
+lists, it sets `target` to the run documents' target. For any type, it fills each marked
+member from the push to the target's repository, across the whole run: the commits from the start to the head, oldest first,
+the head, the start, the branch and the default branch. A commit is a `reference` with
+the target's `collection` and the commit id as `address.path`. A type that marks a member
+gets no version when the run pushed nothing to the target's repository, and a type that
+marks `pushed-commits` gets none when the run pushed no commit to it. qory then
+checks the file against the type's schema, and stores one version: for a delivered type
+in the artifact named `t-` and the first 32 lower-case hexadecimal digits of the
+SHA-256 of the target's `collection`, such as `t-e047707709a59e682f6b3df0e394d0bb` for
+`R_kgDOExample1`, and in `main` for any other type. Once its version is stored, the output
+goes from the outbox. A session that did not succeed stores nothing. A required output
+that the outbox does not have, and that no version of the run has, stops the step:
 
-```yaml
-artifact_types:
-  - name: submission
-    base_view: structured
-    size_limit: 262144
-    max_files: 1
-    json_schema: {…}             # the content of submission.schema.json
+```text
+Write pull-request to the outbox: the stage requires it and the session wrote none.
+  .qory/outbox/pull-request/pull-request.json
 ```
+
+The next run of the work item starts at the head of the version of the target's artifact
+that the stage wrote last, or the version that a gate approved: the newest commit that
+the run which wrote the version pushed to the target, which the version's file has as its
+one top-level `reference` to that commit.
 
 ## The acceptance criteria format
 
@@ -1276,7 +1243,7 @@ optional. `reads` lists the other artifact types the check reads. The program is
 the module, a relative path with no `..` part, such as an executable script with a
 `#!/usr/bin/env node` line. The checks are set per module, and a module without
 `push_checks` adds none: its pushes work as before. A type that does not match
-`^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 64 bytes, one type twice in one module, an
+`^[a-z][a-z0-9]*(-[a-z0-9]+)*$` or is longer than 64 bytes, one type twice in one module, an
 empty command, a word of the command that is not a string, and a value of `reads` that is
 not a type or is listed twice fail the compose, each with the manifest's path. The compose
 also fails for a check of the type `verdict`, `Remove the push check for verdict from
@@ -1311,7 +1278,7 @@ An empty command, a word that is not a string, and a program that is not a file 
 module, or is in an entry an `exclude` or an `only` of the module leaves out, fail the
 compose as they do for a push check, with `submit_program` in place of the push check.
 A run from a run code, or with a run key, runs no submit program: the forge's adapter opens the
-draft from the stored submission. A run with neither a run code nor a run key runs the program on
+draft from the stored pull-request output. A run with neither a run code nor a run key runs the program on
 the person's machine, outside the wall, once for each repository after the push, with the person's login of the forge's command
 line. The program gets the inputs `QORY_SUBMIT_*` and prints result lines on its standard output,
 as the submit program contract of the integrations repository lists them
@@ -1329,7 +1296,7 @@ repository under work cannot supply the check of its plan. A `scope_checks` in s
 effect: the compose reads its form, as for any manifest, and uses nothing from it. When the `harness`
 section of a `qory.yaml` defines the stack and extends none, every module of the section is a module of
 the stack. A key that does not
-match `^[a-z0-9]+(-[a-z0-9]+)*$` or is longer than 64 bytes, one type twice in one module, a
+match `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` or is longer than 64 bytes, one type twice in one module, a
 value that is not a list or is empty, a word of the command that is not a string, a list of lists
 (`Give each plan type of scope_checks one command, a list of strings, not a list of lists.`
 with `scope_checks.<type>[<n>] is a list.` on the next line), and a program that is empty,

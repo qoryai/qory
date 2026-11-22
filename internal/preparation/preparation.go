@@ -653,8 +653,8 @@ func initFolder(ctx context.Context, git gitRunner, dir string) error {
 }
 
 // cloneBranch is the name of the branch that the clone at dir has checked out, the remote's
-// default branch, or "" when git names none or the name is not a branch name: the submission
-// has it as base.branch, and a run does not stop for it.
+// default branch, or "" when git names none or the name is not a branch name: an output
+// has it as pushed-base-branch, and a run does not stop for it.
 func cloneBranch(ctx context.Context, git gitRunner, dir string) string {
 	out, err := git(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil {
@@ -1087,4 +1087,10 @@ func samePath(a, b string) bool {
 	ra, errA := filepath.EvalSymlinks(a)
 	rb, errB := filepath.EvalSymlinks(b)
 	return errA == nil && errB == nil && ra == rb
+}
+
+// SameRepository reports whether the paths a and b on system are one repository, by the
+// rule of [sameRepository].
+func SameRepository(system, a, b string) bool {
+	return sameRepository(system == ForgeGitHub, a, b)
 }
