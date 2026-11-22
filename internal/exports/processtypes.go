@@ -104,9 +104,10 @@ func fillMarks(schema any) map[string]string {
 // InlinePrimitives is node, a decoded JSON Schema, with each object whose $ref is a
 // definition of the primitives schema, [primitives.URL] then "#/$defs/" and a name, written
 // out: the object keeps its other keywords and gets the definition as one more entry of its
-// allOf, which validates as the $ref did under draft 2020-12. The definition's own $refs into
-// the primitives' $defs are written out the same way, so the result refers to nothing outside
-// itself. A $ref to a name that the primitives do not define stays. node is not changed.
+// allOf, which validates as the $ref did under draft 2020-12. The $refs inside that
+// definition that point into the primitives' $defs are written out the same way, so the
+// result refers to nothing outside itself. A $ref to a name that the primitives do not
+// define stays. node is not changed.
 func InlinePrimitives(node any) any {
 	return inline(node, primitives.URL+defsPrefix, nil)
 }

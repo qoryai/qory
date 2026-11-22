@@ -1967,13 +1967,6 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Removed
 
-- `submit` of a factory's `process.yaml`: a type that Qory Apiary delivers has `deliver` in
-  `artifact_types`. A `process.yaml` with `submit` stops every command that reads the
-  configuration.
-- The submission format, `contracts/harness/v1/submission.schema.json`, the artifact
-  `submission` that the push step stored, and the hand-off file at `QORY_SUBMISSION_HANDOFF`.
-  A session writes its outputs to the outbox at `QORY_OUTBOX`, and the push step stores one
-  version of each.
 - `--agent-image` of `qory run prebuild-step`, the helper that a prebuild runs behind its
   wall. The step uses no agent image. A prebuild also no longer stops with `the agent
   image is not pinned by digest`.
