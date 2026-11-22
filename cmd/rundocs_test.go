@@ -792,8 +792,8 @@ func TestARunCodeReadsThePlanTypeOfItsWorkflowFromTheComposedStack(t *testing.T)
 
 // TestARunWithFullSuiteAndAWorkflowThatCannotPlanStops: a run whose run documents set full_suite
 // true and whose workflow has write-no-push access stops after the compose, before the image's
-// fetch, the setup and the join, exit 1, with the cause as line 1 and the line that says the code is used, and closes
-// failed with no reason.
+// fetch, the setup and the join, exit 1, with the cause as line 1 and the line that says the code
+// is used, and closes failed with no reason.
 // A workflow with write access, a run with full_suite false, a workflow that has write-no-push
 // access and a run that only reads the checkout are not refused.
 func TestARunWithFullSuiteAndAWorkflowThatCannotPlanStops(t *testing.T) {

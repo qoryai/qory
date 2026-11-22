@@ -4349,8 +4349,8 @@ documents ask for the full suite in a write-no-push workflow.` and `The run did 
 has write-no-push access, so it has no plan to read the full suite from; the code is used`. For a
 session after session 1, whose next-session answer sets `full_suite` true, line 1 is `The
 next-session answer asks for the full suite in a write-no-push workflow.` and line 2 starts with
-`The session did not start:`. The run closes `failed` with `no_session` (exit code -1). A run that only
-reads the checkout runs no suite and is not refused.
+`The session did not start:`. The run closes `failed` with `no_session` (exit code -1). A run that
+only reads the checkout runs no suite and is not refused.
 
 **Where it runs.** After the agent's container is removed, Forager starts a new container of the run's
 image with the workspace mounted for writing, on the run's network, with the run's
