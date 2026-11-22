@@ -110,7 +110,7 @@ func TestMaskTheArtifactTypeAndName(t *testing.T) {
 	file := filepath.Join(root, "demo.md")
 	writeFile(t, file, "demo\n")
 
-	const line = "Set the %s to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is "
+	const line = "Set the %s to lowercase letters and digits in groups joined by single hyphens.\n  It starts with a letter and has at most 64 bytes. The value is "
 
 	for _, c := range []struct{ what, value string }{{"type", maskKey}, {"--name", maskKey}} {
 		args := []string{"artifact", "push", c.value, file}

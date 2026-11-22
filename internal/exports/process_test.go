@@ -556,7 +556,7 @@ func TestVerifyPassesArtifactTypes(t *testing.T) {
 		"\n  - name: mockup",
 		"\n  - {name: acceptance-lock, withdrawable: false}\n  - {name: build-ledger, withdrawable: true}",
 		custom("document", "size_limit: 10485760, max_files: 20, withdrawable: false"),
-		"\n  - name: \"123\"\n  - name: a-1-b",
+		"\n  - name: \"t-123\"\n  - name: a-1-b",
 		"\n  - name: " + strings.Repeat("a", 64),
 		custom("document", "size_limit: 10485760, max_files: 20"),
 		custom("image", "size_limit: 52428800, max_files: 1"),
@@ -593,16 +593,18 @@ func TestVerifyChecksArtifactTypes(t *testing.T) {
 		{"\n  - mockup", "Set entry 1 of artifact_types to an object with a name.\n  The entry is a string.\n  The entry is in {file}."},
 		{"\n  - ~", "Set entry 1 of artifact_types to an object with a name.\n  The entry is null.\n  The entry is in {file}."},
 		{"\n  - {base_view: file}", "Add name to entry 1 of artifact_types.\n  The entry has no name.\n  The entry is in {file}."},
-		{"\n  - {name: 3}", "Set the name of entry 1 of artifact_types to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, and the name is a number.\n  The entry is in {file}."},
-		{"\n  - {name: [a]}", "Set the name of entry 1 of artifact_types to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, and the name is a list.\n  The entry is in {file}."},
-		{"\n  - {name: ~}", "Set the name of entry 1 of artifact_types to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, and the name is null.\n  The entry is in {file}."},
+		{"\n  - {name: 3}", "Set the name of entry 1 of artifact_types to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, and the name is a number.\n  The entry is in {file}."},
+		{"\n  - {name: [a]}", "Set the name of entry 1 of artifact_types to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, and the name is a list.\n  The entry is in {file}."},
+		{"\n  - {name: ~}", "Set the name of entry 1 of artifact_types to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, and the name is null.\n  The entry is in {file}."},
 		{"\n  - {name: 2026-11-02}", "Set the name of entry 1 of artifact_types to a quoted string.\n  YAML reads \"2026-11-02\" as a value that is not a string.\n  The entry is in {file}."},
 		{"\n  - {name: !!binary aGk=}", "Set the name of entry 1 of artifact_types to a quoted string.\n  YAML reads \"aGk=\" as a value that is not a string.\n  The entry is in {file}."},
-		{"\n  - {name: \"\"}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `""` + ".\n  The entry is in {file}."},
-		{"\n  - {name: a--b}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"a--b"` + ".\n  The entry is in {file}."},
-		{"\n  - {name: -a}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"-a"` + ".\n  The entry is in {file}."},
-		{"\n  - {name: \"a\\n\"}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"a\n"` + ".\n  The entry is in {file}."},
-		{"\n  - {name: " + strings.Repeat("a", 65) + "}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.\n  The name is " + `"` + strings.Repeat("a", 65) + `"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: \"\"}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The name is " + `""` + ".\n  The entry is in {file}."},
+		{"\n  - {name: a--b}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The name is " + `"a--b"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: \"123\"}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The name is " + `"123"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: 1abc}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The name is " + `"1abc"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: -a}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The name is " + `"-a"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: \"a\\n\"}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The name is " + `"a\n"` + ".\n  The entry is in {file}."},
+		{"\n  - {name: " + strings.Repeat("a", 65) + "}", "Rename entry 1 of artifact_types.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n  The name is " + `"` + strings.Repeat("a", 65) + `"` + ".\n  The entry is in {file}."},
 		{"\n  - {name: mockup, owner: acme}", "Remove the key \"owner\" from entry 1 of artifact_types.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, withdrawable, and deliver.\n  The entry is in {file}."},
 		{"\n  - {name: mockup, [a]: b}", "Remove the key a list from entry 1 of artifact_types.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, withdrawable, and deliver.\n  The entry is in {file}."},
 		{"\n  - {name: mockup, withdrawable: \"no\"}", "Set withdrawable of artifact type mockup to true or false.\n  withdrawable is \"no\".\n  The type is in {file}."},
@@ -780,7 +782,7 @@ func TestVerifyPrintsOneRefusalForEachArtifactType(t *testing.T) {
 	file := filepath.Join(e.Root, "modules", "desk", exports.ProcessFileName)
 	want := strings.Join([]string{
 		"Rename entry 2 of artifact_types.",
-		"  A name is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes.",
+		"  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.",
 		`  The name is "Mockup".`,
 		"  The entry is in " + file + ".",
 		"Add base_view and max_files to artifact type a-type, or leave only its name.",
@@ -1516,9 +1518,10 @@ func schemaPasses(t *testing.T, body string) bool {
 }
 
 // TestVerifyChecksOutputs is outputs of a stage: a list of objects with type, the name
-// of an entry of artifact_types, and required, true or false. Each failure has the fix
-// first and names the stage. process.schema.json takes every shape here but a type that
-// artifact_types does not list, which a JSON Schema cannot state.
+// of an entry of artifact_types, required, true or false, and optional when, unless and
+// check. Each failure has the fix first and names the stage. process.schema.json takes
+// every shape here but a type that artifact_types does not list, which a JSON Schema
+// cannot state; qory takes any value of when, unless and check, which the schema checks.
 func TestVerifyChecksOutputs(t *testing.T) {
 	const place = "\n  The file is {file}."
 	const types = "\n  - name: mockup\n  - name: spec"
@@ -1541,9 +1544,18 @@ func TestVerifyChecksOutputs(t *testing.T) {
 		{"mockup", types, "Set outputs of the stage to a list, or remove it.\n  outputs of stage Check is a string." + place, false},
 		{"~", types, "Set outputs of the stage to a list, or remove it.\n  outputs of stage Check is null." + place, false},
 		{"[mockup]", types, "Set the entry of outputs to an object with type and required.\n  Entry 1 of outputs of stage Check is a string." + place, false},
-		{"[{type: mockup, extra: 1}]", types, "Remove the unknown key from the entry of outputs.\n  Entry 1 of outputs of stage Check has the key \"extra\", and an output has only type and required." + place, false},
+		{"[{type: mockup, extra: 1}]", types, "Remove the unknown key from the entry of outputs.\n  Entry 1 of outputs of stage Check has the key \"extra\", and an output has only type, required, when, unless and check." + place, false},
 		{"[{required: true}]", types, "Add type to the entry of outputs, the name of an entry of artifact_types.\n  Entry 1 of outputs of stage Check has no type." + place, false},
 		{"[{type: 5}]", types, "Set type of the entry of outputs to a quoted string, a name from artifact_types.\n  type of entry 1 of outputs of stage Check is a number." + place, false},
+		{"[{type: mockup, when: {input: spec}, unless: {track: fast-track}}]", types, "", true},
+		{"[{type: mockup, when: {track: fast-track}}, {type: spec, unless: {input: mockup}}]", types, "", true},
+		{"[{type: mockup, check: {exists: true}}, {type: spec, required: true, check: {reported: merged}}]", types, "", true},
+		{"[{type: mockup, when: {input: 1abc}}]", types, "", false},
+		{"[{type: mockup, unless: {track: Fast}}]", types, "", false},
+		{"[{type: mockup, when: spec}]", types, "", false},
+		{"[{type: mockup, check: {exists: false}}]", types, "", false},
+		{"[{type: mockup, check: {exists: true, reported: merged}}]", types, "", false},
+		{"[{type: 1abc}]", types, "Set type of the entry of outputs to a name such as reply-draft, at most 64 bytes.\n  type of entry 1 of outputs of stage Check is \"1abc\"." + place, false},
 		{"[{type: Bad_Name}]", types, "Set type of the entry of outputs to a name such as reply-draft, at most 64 bytes.\n  type of entry 1 of outputs of stage Check is \"Bad_Name\"." + place, false},
 		{"[{type: mockup}, {type: spec}, {type: mockup, required: true}]", types, "List each output type of stage Check once: mockup appears twice.\n  Entry 3 of outputs of stage Check has the type mockup, which an earlier entry has." + place, true},
 		{"[{type: mockup, required: maybe}]", types, "Set required of the entry of outputs to true or false.\n  required of entry 1 of outputs of stage Check is a string." + place, false},

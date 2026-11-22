@@ -1114,7 +1114,7 @@ func keepVerdict(c *cobra.Command, verdict string, points []runapi.Point, track 
 // has the run API's form. The form also makes value safe as a directory name.
 func artifactNameError(what, value string) error {
 	if !runapi.ArtifactName(value) {
-		return fmt.Errorf("Set the %s to lowercase letters and digits in groups joined by single hyphens, at most 64 bytes. The value is %s.", what, exports.Value(value, true))
+		return fmt.Errorf("Set the %s to lowercase letters and digits in groups joined by single hyphens.\n  It starts with a letter and has at most 64 bytes. The value is %s.", what, exports.Value(value, true))
 	}
 
 	return nil

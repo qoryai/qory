@@ -149,10 +149,10 @@
                 "enum": ["light", "balanced", "thinking"]
               },
               "plan": {
-                "description": "The artifact type whose launch version sets what the workflow's session may push: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes. Left out, the workflow names none. Only a workflow with access write names one, and qory harness compose ends with an error for a type that no module of the stack declares a scope check for in scope_checks.",
+                "description": "The artifact type whose launch version sets what the workflow's session may push: lowercase letters and digits in groups joined by single hyphens, starting with a letter, 1 to 64 bytes. Left out, the workflow names none. Only a workflow with access write names one, and qory harness compose ends with an error for a type that no module of the stack declares a scope check for in scope_checks.",
                 "type": "string",
                 "maxLength": 64,
-                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
               }
             }
           }

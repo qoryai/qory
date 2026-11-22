@@ -3248,10 +3248,11 @@ the compose adds. That file is local to the clone and no commit has it, so `git 
 step stops that push.
 
 Each type of the stage's outputs becomes a folder of the outbox. A type that is not a name of
-`a-z`, `0-9` and single hyphens, of at most 64 characters, stops the run before its session:
+`a-z`, `0-9` and single hyphens that starts with a letter, of at most 64 characters, stops the
+run before its session:
 `qory run: Report the run to the instance admin of Qory Apiary: an output type is no name.`,
-then `The stage lists the output type <type>, not a name of a-z, 0-9 and single hyphens; the
-code is used` indented by two spaces.
+then `The stage lists the output type <type>, not a name of a-z, 0-9 and single hyphens that
+starts with a letter and has at most 64 characters; the code is used` indented by two spaces.
 
 | Type | The session writes |
 |---|---|

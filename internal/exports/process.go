@@ -264,11 +264,15 @@ func stageLabel(i int, stage *yaml.Node) string {
 	return strconv.Itoa(i + 1)
 }
 
+// outputKeys are the keys of an entry of outputs.
+var outputKeys = map[string]bool{"type": true, "required": true, "when": true, "unless": true, "check": true}
+
 // checkOutputs checks outputs of each stage of stages, which [checkProcess] has checked
 // is a list, in the process.yaml shown: a list of objects with type, the name of an entry
-// of types, the artifact_types that [checkArtifactTypes] passed or nothing, and required,
-// true or false, left out for false, and no other key. A stage without outputs passes.
-// Any other key of a stage is left unchecked.
+// of types, the artifact_types that [checkArtifactTypes] passed or nothing, required,
+// true or false, left out for false, and optional when, unless and check, whose values
+// process.schema.json defines and qory does not check, and no other key. A stage without
+// outputs passes. Any other key of a stage is left unchecked.
 func checkOutputs(shown string, stages, types *yaml.Node) error {
 	listed := map[string]bool{}
 	for _, entry := range types.Content {
@@ -294,8 +298,8 @@ func checkOutputs(shown string, stages, types *yaml.Node) error {
 			seen := map[string]bool{}
 			for k := 0; k+1 < len(entry.Content); k += 2 {
 				key := entry.Content[k]
-				if key.Kind != yaml.ScalarNode || key.Value != "type" && key.Value != "required" {
-					return processRefusal(shown, "Remove the unknown key from the entry of outputs.", capital(at)+" has the key "+scalarText(key)+", and an output has only type and required.")
+				if key.Kind != yaml.ScalarNode || !outputKeys[key.Value] {
+					return processRefusal(shown, "Remove the unknown key from the entry of outputs.", capital(at)+" has the key "+scalarText(key)+", and an output has only type, required, when, unless and check.")
 				}
 				if seen[key.Value] {
 					return processRefusal(shown, "Remove the second "+key.Value+" from the entry of outputs.", capital(at)+" has the key "+key.Value+" twice.")

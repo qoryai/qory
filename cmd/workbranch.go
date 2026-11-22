@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -32,12 +31,8 @@ const (
 	textNoStartReference = "Version %d of the artifact %s has %d top-level references to commit %s of %s, not 1."
 	textNoStartFile      = "Version %d of the artifact %s has no one JSON file of at most %d bytes."
 	textNoApproved       = "The approved version of the artifact %s is not in the artifact's index."
-	textOutputTypeName   = "Report the run to the instance admin of Qory Apiary: an output type is no name.\n  The stage lists the output type %s, not a name of a-z, 0-9 and single hyphens" + codeUsed
+	textOutputTypeName   = "Report the run to the instance admin of Qory Apiary: an output type is no name.\n  The stage lists the output type %s, not a name of a-z, 0-9 and single hyphens that starts with a letter and has at most 64 characters" + codeUsed
 )
-
-// outputTypeName is the form of an artifact type's name, as process.schema.json defines it,
-// at most 64 characters: the stage's output types become paths of the outbox.
-var outputTypeName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // readWorkItem reads the work item that r's run is for, at the start of the run, with or
 // without a repository: it sets r.snapshot and r.runNumber from the work item snapshot of
@@ -64,7 +59,7 @@ func (r *codeRun) readWorkItem(ctx context.Context, run openedRun, deadline time
 		return fmt.Errorf("%w%s", err, codeUsed)
 	}
 	for _, o := range snapshot.Outputs {
-		if len(o.Type) > 64 || !outputTypeName.MatchString(o.Type) {
+		if !runapi.ArtifactName(o.Type) {
 			return fmt.Errorf(textOutputTypeName, shownText(provisioner.ShownType(o.Type)))
 		}
 	}

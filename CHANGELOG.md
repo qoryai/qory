@@ -772,13 +772,26 @@ release may change what an existing document does, and states it under Upgrading
   of another shape, a value that qory does not fill, or in a type without `deliver`.
 - A stage of the `process` of a `process.yaml` can have `outputs`, a list of objects
   with `type`, the name of an entry of `artifact_types`, and `required`, `true` or
-  `false`, `false` when left out. An output has no other key. qory stops the command
+  `false`, `false` when left out. qory stops the command
   with the fix on the first line when a stage has an output type that `artifact_types`
   does not list, or when a stage lists a type twice; the message has the stage and the
   type.
+- An output of a stage can also have `when` and `unless`, each a condition, and `check`,
+  as the process schema of Qory Apiary defines them. `process.schema.json` checks their
+  form, and qory checks no value of them. Any other key of an output stops the command
+  with `Remove the unknown key from the entry of outputs.` and, on the next line, `... and
+  an output has only type, required, when, unless and check.`
 
 ### Changed
 
+- An artifact type and an artifact name start with a letter: the rule is
+  `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, at most 64 bytes. A name that starts with a digit, such as `1abc`, fails each check of a type or a name: in `process.yaml`,
+  in `push_checks` and `scope_checks` of a module, in `plan` of a workflow, in `qory
+  artifact`, and in the output types of a stage at the start of a run. The contract
+  schemas and the messages state the rule. The message of `qory artifact` has the rule on
+  line 1, `Set the type to lowercase letters and digits in groups joined by single
+  hyphens.`, and `It starts with a letter and has at most 64 bytes. The value is <value>.`
+  on line 2.
 - A read run whose documents contain a harness document and whose inputs list
   `destinations`, such as an Explore run, fetches nothing before its session; the agent
   clones the destinations it needs with `qory destination clone`. A run with no
@@ -981,7 +994,8 @@ release may change what an existing document does, and states it under Upgrading
 - Every run of a work item from a run code with a run API reads the work item through `GET
   /work-item` at its start, with or without a repository, as the stage's outputs come from
   it. A setup past its limit in that read names the step `the read of the work item`. A stage
-  output type that is not a name of a-z, 0-9 and single hyphens stops the run: `Report the run
+  output type that is not a name of a-z, 0-9 and single hyphens that starts with a letter
+  and has at most 64 characters stops the run: `Report the run
   to the instance admin of Qory Apiary: an output type is no name.` Until this
   change, only a run on the work item's branch read it.
 - A run stops before the agent starts, with the line `Report this run to the instance admin of
