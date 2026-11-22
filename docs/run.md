@@ -4161,7 +4161,7 @@ These calls exit 2 and clone nothing, with the fix on line 1:
 | `Clone only a destination with an address: <id> has none, so it has no repository.` | The destination's target has no address. |
 | `Clone only a repository: the address of <id> is not a repository path.` | The address's path is not a path of a repository. |
 | `Run qory destination clone inside a run's session: <variable> is not set.` | `QORY_RUN_API` or `QORY_HARNESS_HOME` is not set. |
-| `Run qory destination clone only in a run whose inputs list destinations.` | `inputs.json` is missing or has no `destinations`. |
+| `Run qory destination clone only in a run whose inputs list destinations.` | `inputs.json` is missing, or has no `destinations` or an empty list. |
 
 These exit 1. Line 1 of each is the gap that a member reads in Qory Apiary, so it contains
 the id and no path of the machine:
@@ -4171,7 +4171,7 @@ the id and no path of the machine:
 | `Give the integration access to <id> in Qory Apiary, then click Run Explore again.` | The host returned 401, 403 or 404. Line 2 is `The host returned <status> to the clone.` |
 | `Ask the instance admin of Qory Apiary to let the proxy reach the host of <id>.` | The wall's proxy returned 403 or 407. |
 | `Run Explore again later: the clone of <id> failed: <cause>.` | Any other failed clone. The cause contains no URL. |
-| `Ask the instance admin of Qory Apiary to check the machine: it cannot store <id>.` | A folder of the clone is a link or a file, or qory cannot make it. Line 2 has the path and the cause. For `/tmp/qory-destinations` itself or its record, `the clones` stands in place of the id. |
+| `Ask the instance admin of Qory Apiary to check the machine: it cannot store <id>.` | A folder of the clone is a link or a file, or qory cannot make it. Line 2 has the path and the cause. The id is the call's first. For a record of the clones that is not a list of ids, `the clones` stands in place of the id. |
 | `Ask the instance admin of Qory Apiary to fix the destinations of this run: they are malformed.` | The destinations do not have the shape of the explore inputs. Line 2 has the cause. |
 | `Ask the instance admin of Qory Apiary to separate destination <id> from another.` | The path of `<id>` lies inside the path of another destination on the same system, or contains it. Line 2 has both ids. qory clones neither, so no clone lands in another one's folder. |
 

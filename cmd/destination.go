@@ -66,8 +66,8 @@ const (
 	textProxyBlocks     = "Ask the instance admin of Qory Apiary to let the proxy reach the host of %s."
 )
 
-// allClones is the word of [textClonesFolder] for a failure of [destinationsDir] or of its
-// record, which concerns no one id.
+// allClones is the word of [textClonesFolder] for a record that is not a list of ids,
+// which concerns no one id. Every other failure of the folder has the call's first id.
 const allClones = "the clones"
 
 // envHarnessHome is the variable that a run sets to the composed home, which contains
@@ -439,7 +439,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#clone-a-destination`,
 			}
 			record, r, err := openRecord(root)
 			if err != nil {
-				return clonesFolder(allClones, root, err)
+				return clonesFolder(wanted[0].id, root, err)
 			}
 			defer r.Close()
 			defer record.Close()

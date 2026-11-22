@@ -411,7 +411,8 @@ func wantNoClone(t *testing.T, c *clones) {
 }
 
 // TestDestinationCloneClonesIntoAFolderOnly is a folder of the clones that is a link:
-// the call stops, exit 1, and clones nothing through the link.
+// the call stops, exit 1, with the call's id on line 1, and clones nothing through the
+// link.
 func TestDestinationCloneClonesIntoAFolderOnly(t *testing.T) {
 	c := destinationSession(t)
 	elsewhere := tempDir(t)
@@ -419,9 +420,25 @@ func TestDestinationCloneClonesIntoAFolderOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := run(t, "destination", "clone", webID)
-	wantLine(t, err, 1, "Ask the instance admin of Qory Apiary to check the machine: it cannot store the clones.\n  "+c.root+": lstat: a link or a file, and qory clones only into folders")
+	wantLine(t, err, 1, "Ask the instance admin of Qory Apiary to check the machine: it cannot store "+webID+".\n  "+c.root+": lstat: a link or a file, and qory clones only into folders")
 	if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
 		t.Errorf("the link's folder has %d entries", len(entries))
+	}
+}
+
+// TestDestinationCloneStopsAtACorruptRecord is a record of the clones with a line that is
+// not an id: the call stops before it clones, exit 1, with the clones in place of an id on
+// line 1 and the cause on line 2.
+func TestDestinationCloneStopsAtACorruptRecord(t *testing.T) {
+	c := destinationSession(t)
+	if err := os.Mkdir(c.root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(c.root, "_cloned"), "not an id\n")
+	_, err := run(t, "destination", "clone", webID)
+	wantLine(t, err, 1, "Ask the instance admin of Qory Apiary to check the machine: it cannot store the clones.\n  "+c.root+": _cloned has a line that is not an id")
+	if n := c.s.Tunnels(); n != 0 {
+		t.Errorf("the call opened %d tunnels", n)
 	}
 }
 
