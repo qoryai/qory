@@ -125,7 +125,8 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 // the push leaves when every repository lands, [WorkBranch.Version] when none has new
 // commits. An error of check stops every push and is Push's error: the commits stay local.
 func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message string, read, p proxygit.Proxy, agentStopped bool, check func(version []Repository) error, report io.Writer) ([]Repository, error) {
-	b.landed = nil
+	// A Push that stops before its first push leaves no repository of an earlier Push listed.
+	b.landed, b.pushed = nil, nil
 	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
 	dir, err := filepath.Abs(dir)
 	if err != nil {
@@ -183,7 +184,6 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			return nil, err
 		}
 	}
-	b.pushed = nil
 	leases := make([]string, len(b.Repositories))
 	readGit := stepGit(&read, "")
 	for i, r := range b.Repositories {

@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -2604,6 +2605,52 @@ func TestAStopAfterThePushShowsBothWaysOut(t *testing.T) {
 			lacks(t, r.out, "may not have reached the branch")
 		})
 	}
+}
+
+// TestACutCheckOfALaterSessionSaysNothingWasPushed is a run of two sessions: session 1 pushes
+// and stores its pull-request, and session 2 commits and writes no output, so the check before
+// its push reads the artifacts, a read that gets no response until a second signal cuts the
+// step. Session 2 pushed nothing: the line says the commits may not have reached the branch,
+// and no line says that qory pushed or to delete the branch.
+func TestACutCheckOfALaterSessionSaysNothingWasPushed(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.api.outputs = `[{"type":"pull-request","required":true,"version":null,"check":"missing"}]`
+	defer cmd.SetPushTimes(200*time.Millisecond, 400*time.Millisecond)()
+	var hang atomic.Bool
+	p.api.index = func(_ int, w http.ResponseWriter) bool {
+		if !hang.Load() {
+			return false
+		}
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return true
+		}
+		t.Cleanup(func() { conn.Close() })
+		term(t)
+		term(t)
+		return true
+	}
+	var dir, afterFirst string
+	t.Cleanup(cmd.SetLaterSessions(func() {
+		afterFirst = p.branchHead(t)
+		writeFile(t, filepath.Join(dir, "second.txt"), "second\n")
+		commitAll(t, dir, "Add a second file")
+		hang.Store(true)
+	}))
+	r := p.run(t, func(d string) {
+		dir = d
+		writesAndCommits(t)(d)
+	}, nil)
+	r.wantsClose(t, event.StateCancelled, 1)
+	if afterFirst == "" || p.branchHead(t) != afterFirst {
+		t.Errorf("the branch is at %q after session 1 and %q at the end, want session 1's head\n%s", afterFirst, p.branchHead(t), r.out)
+	}
+	if !hang.Load() {
+		t.Fatalf("session 2 did not run\n%s", r.out)
+	}
+	wants(t, r.out, "qory run got a second signal during the push step, and the run's commits may not have reached the branch")
+	lacks(t, r.out, "qory pushed", "delete branch")
 }
 
 // TestThePushStepCountsTheLimitFromTheAgentsStart is a write run whose setup takes 1.5s,

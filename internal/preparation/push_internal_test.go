@@ -1218,6 +1218,25 @@ func TestACheckThatFailsPushesNothing(t *testing.T) {
 	}
 }
 
+// TestAPushThatStopsBeforeItsFirstPushListsNoEarlierPush is a branch that an earlier Push
+// pushed, and a Push whose check fails: the branch lists no repository as pushed, so no line
+// says to delete it.
+func TestAPushThatStopsBeforeItsFirstPushListsNoEarlierPush(t *testing.T) {
+	dir, b, _ := onBranchIn(t, "acme/shop")
+	write(t, filepath.Join(dir, "one.txt"), "one\n")
+	if _, lines, err := pushOf(dir, b); err != nil || b.PushedPaths() != "acme/shop" {
+		t.Fatalf("the first Push: %v, pushed %q\n%s", err, b.PushedPaths(), lines)
+	}
+	write(t, filepath.Join(dir, "two.txt"), "two\n")
+	stop := errors.New("qory run: the check failed")
+	if _, _, err := pushChecked(dir, b, true, func([]Repository) error { return stop }); !errors.Is(err, stop) {
+		t.Fatalf("the second Push: %v", err)
+	}
+	if got := b.PushedPaths(); got != "" {
+		t.Errorf("the branch lists %q as pushed, want none", got)
+	}
+}
+
 // TestTheCheckGetsTheVersionThePushLeaves is a check of [Push] that passes: the version it
 // got is the one that Push returns after the push.
 func TestTheCheckGetsTheVersionThePushLeaves(t *testing.T) {
