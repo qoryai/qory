@@ -70,8 +70,8 @@ type programEnd struct {
 }
 
 // apply runs the program on document, once for each repository that the run pushed, and returns
-// the document to store: each repository with the addresses of its commits and its draft, as
-// the program's lines give them, or with the reason it has none. Each line that the program
+// the document with each repository's draft, as the program's lines give it, or with the
+// reason it has none; qory checks the commit_url lines and keeps none. Each line that the program
 // printed on its standard error goes to w. An error is a ctx that ended, which cuts the step.
 func (p *submitProgram) apply(ctx context.Context, w io.Writer, document *draftDocument) (*draftDocument, error) {
 	out := *document
@@ -135,12 +135,6 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *draf
 			break
 		}
 		fmt.Fprintf(w, textProgramLeftOut+"\n", bad.Line, bad.Reason)
-	}
-	r.CommitURL = rec.CommitURLs[r.Commit]
-	r.Base = &draftBase{Commit: r.Base.Commit, Branch: r.Base.Branch, CommitURL: rec.CommitURLs[r.Base.Commit]}
-	r.Commits = slices.Clone(r.Commits)
-	for i, c := range r.Commits {
-		r.Commits[i].CommitURL = rec.CommitURLs[c.Commit]
 	}
 	if !bytes.Equal(r.Draft, placeholder) {
 		return r, nil

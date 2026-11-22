@@ -1,6 +1,11 @@
 package cmd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -220,5 +225,63 @@ func TestPushedStartsChecksEachCommit(t *testing.T) {
 	branch := &preparation.WorkBranch{}
 	if err := pushedStarts(branch, []runapi.PushedEntry{{System: "git.example.com", Path: "acme/shop", Commit: good}}); err != nil || len(branch.Pushed) != 1 || branch.Pushed[0].Commit != good {
 		t.Errorf("good id: err = %v, pushed = %v", err, branch.Pushed)
+	}
+}
+
+// TestStartCommitIsConfirmedByAnotherVersionOfTheSameRun is a run that stored notes, the
+// newest version, with no reference to its commit, and pull-request with one: the start is
+// confirmed by pull-request. With no other version, notes alone stops with 0 references.
+func TestStartCommitIsConfirmedByAnotherVersionOfTheSameRun(t *testing.T) {
+	commit := strings.Repeat("c", 40)
+	files := map[string]string{
+		"av_notes": `{"text":"No reference."}`,
+		"av_pr":    `{"target":{"collection":"R_1001"},"head":{"collection":"R_1001","address":{"system":"git.example.com","path":"` + commit + `"}}}`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for id, content := range files {
+			if strings.HasPrefix(r.URL.Path, "/v1/runs/r/artifacts/"+id+"/files/") {
+				io.WriteString(w, content)
+				return
+			}
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	client, err := runapi.New(server.URL+"/v1/runs/r", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := func(id, at string) runapi.Version {
+		sum := sha256.Sum256([]byte(files[id]))
+		return runapi.Version{ID: id, Number: 1, At: at, Writer: runapi.Writer{Kind: "run", RunID: "run_1"},
+			Files: []runapi.File{{Filename: "f.json", Size: int64(len(files[id])), SHA256: hex.EncodeToString(sum[:])}}}
+	}
+	index := &runapi.Index{Artifacts: []runapi.Artifact{
+		{Type: "notes", Name: startName, Versions: []runapi.Version{version("av_notes", "2026-11-02T10:00:00.5Z")}},
+		{Type: "pull-request", Name: startName, Versions: []runapi.Version{version("av_pr", "2026-11-02T10:00:00Z")}},
+		{Type: "pull-request", Name: "main", Versions: []runapi.Version{version("av_pr", "2026-11-02T09:00:00Z")}},
+	}}
+	pushed := []runapi.PushedEntry{{System: "git.example.com", Path: "acme/shop", Commit: commit, RunID: "run_1"}}
+	chosen := &index.Artifacts[0].Versions[0]
+	others := sameRunVersions(index, startTarget, chosen)
+	if len(others) != 1 || others[0].version.ID != "av_pr" {
+		t.Fatalf("the other versions are %+v, want av_pr alone", others)
+	}
+	if got, err := startCommit(t.Context(), client, chosen, "notes", others, pushed, startTarget); err != nil || got != commit {
+		t.Errorf("start %q, %v, want %s", got, err, commit)
+	}
+	if _, err := startCommit(t.Context(), client, chosen, "notes", nil, pushed, startTarget); err == nil || !strings.Contains(err.Error(), "has 0 top-level references") {
+		t.Errorf("notes alone: %v", err)
+	}
+}
+
+// TestCompareAtOrdersTimesWithAndWithoutFractions is two times of one second, one with a
+// fraction: the fraction is later, which a comparison of the strings gets wrong.
+func TestCompareAtOrdersTimesWithAndWithoutFractions(t *testing.T) {
+	if compareAt("2026-11-02T10:00:00.5Z", "2026-11-02T10:00:00Z") <= 0 || compareAt("2026-11-02T10:00:00Z", "2026-11-02T10:00:00.5Z") >= 0 {
+		t.Error("10:00:00.5 is not after 10:00:00")
+	}
+	if compareAt("not a time", "2026-11-02T10:00:00Z") >= 0 {
+		t.Error("a time that does not parse is not the earliest")
 	}
 }

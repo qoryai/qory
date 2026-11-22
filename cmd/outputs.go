@@ -91,6 +91,19 @@ func readOutput(root string, t exports.ProcessType) (files []runapi.PushFile, fo
 	}
 	defer dir.Close()
 	entry := outputPath(t.Name, t.Schema != nil)
+	// Each folder on the way is a folder and no link: os.Root follows a link that stays in root.
+	for _, folder := range []string{".qory", outboxRel, path.Join(outboxRel, t.Name)} {
+		info, err := dir.Lstat(folder)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, false, nil
+		}
+		if err != nil {
+			return nil, true, err
+		}
+		if !info.IsDir() {
+			return nil, true, fmt.Errorf("%s is not a folder", folder)
+		}
+	}
 	info, err := dir.Lstat(entry)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, false, nil
@@ -330,7 +343,7 @@ func recordOf(branch *preparation.WorkBranch, target *contracts.Target) *pushRec
 		return nil
 	}
 	for _, r := range branch.Version {
-		if r.Base == nil || r.System != target.Address.System || r.Path != target.Address.Path {
+		if r.Base == nil || r.System != target.Address.System || !preparation.SameRepository(r.System, r.Path, target.Address.Path) {
 			continue
 		}
 		rec := &pushRecord{

@@ -824,18 +824,19 @@ order, each with `type`, `required` and `schema`, the type's `json_schema` with 
 
 | Type | The session writes |
 |---|---|
-| a type with a `json_schema` | one JSON object, `<type>/<type>.json`, such as `pull-request/pull-request.json`, with no `target` when the type has `deliver`, and no member that has `x-qory-fill` |
+| a type with a `json_schema` | one JSON object, `<type>/<type>.json`, such as `pull-request/pull-request.json`, with no `target` when the type is delivered, and no member that has `x-qory-fill` |
 | any other type | its files in the folder `<type>/` |
 
 At the end of each session, after the push, qory reads each output of the stage that the
-outbox has, within the type's `size_limit`. For a type with `deliver` it sets `target` to
-the run documents' target, and fills each marked member from the push to the target's
-repository, across the whole run: the commits from the start to the head, oldest first,
+outbox has, within the type's `size_limit`. For a type that `deliver` of the run documents
+lists, it sets `target` to the run documents' target. For any type, it fills each marked
+member from the push to the target's repository, across the whole run: the commits from the start to the head, oldest first,
 the head, the start, the branch and the default branch. A commit is a `reference` with
-the target's `collection` and the commit id as `address.path`. A type that marks
-`pushed-commits` gets no version when the run pushed no commit to the target. qory then
-checks the file against the type's schema, and stores one version: for a type with
-`deliver` in the artifact named `t-` and the first 32 lower-case hexadecimal digits of the
+the target's `collection` and the commit id as `address.path`. A type that marks a member
+gets no version when the run pushed nothing to the target's repository, and a type that
+marks `pushed-commits` gets none when the run pushed no commit to it. qory then
+checks the file against the type's schema, and stores one version: for a delivered type
+in the artifact named `t-` and the first 32 lower-case hexadecimal digits of the
 SHA-256 of the target's `collection`, such as `t-e047707709a59e682f6b3df0e394d0bb` for
 `R_kgDOExample1`, and in `main` for any other type. Once its version is stored, the output
 goes from the outbox. A session that did not succeed stores nothing. A required output
@@ -843,7 +844,7 @@ that the outbox does not have, and that no version of the run has, stops the ste
 
 ```text
 Write pull-request to the outbox: the stage requires it, and the session wrote none.
-  .qory/outbox/pull-request/
+  .qory/outbox/pull-request/pull-request.json
 ```
 
 The next run of the work item starts at the head of the version of the target's artifact

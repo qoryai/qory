@@ -1033,3 +1033,9 @@ func samePath(a, b string) bool {
 	rb, errB := filepath.EvalSymlinks(b)
 	return errA == nil && errB == nil && ra == rb
 }
+
+// SameRepository reports whether the paths a and b on system are one repository, by the
+// rule of [sameRepository].
+func SameRepository(system, a, b string) bool {
+	return sameRepository(system == ForgeGitHub, a, b)
+}

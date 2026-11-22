@@ -24,7 +24,7 @@ func TestARunLoweredBelowWriteRunsNoSubmitStep(t *testing.T) {
 			p, log := newProgramRepo(t, c.access)
 			p.change = func(d map[string]any) {
 				d["access"] = "write"
-				d["deliver"] = []any{map[string]any{"type": "code-change", "send": "after_gate"}}
+				d["deliver"] = []any{map[string]any{"type": "code-change", "send": "after_gate"}, map[string]any{"type": "pull-request", "send": "after_gate"}}
 			}
 			var variables []string
 			p.mountsOf = func(spec session.SessionSpec) { variables = spec.Variables.Run }

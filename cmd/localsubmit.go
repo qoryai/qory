@@ -256,7 +256,7 @@ func localSubmission(ctx context.Context, repo localRepository, given *handoff, 
 	for commit := range strings.FieldsSeq(out) {
 		entry.Commits = append(entry.Commits, draftCommit{Commit: commit, Step: given.stepOf(commit)})
 	}
-	return &draftDocument{Ref: repo.Branch, Verdict: verdict, Text: text, Repositories: []draftRepository{entry}}, nil
+	return &draftDocument{Ref: repo.Branch, Text: text, Repositories: []draftRepository{entry}}, nil
 }
 
 // pushArgs is the arguments of the git push of repo: the checked commit, not the branch name that

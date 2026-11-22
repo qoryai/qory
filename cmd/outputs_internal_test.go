@@ -11,6 +11,7 @@ import (
 	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/primitives"
 )
 
@@ -244,11 +245,32 @@ func TestReadOutputReadsTheTypesEntry(t *testing.T) {
 	if _, _, err := readOutput(root, exports.ProcessType{Name: "linked", Schema: json.RawMessage(`{}`)}); err == nil {
 		t.Error("a link out of the checkout is read")
 	}
+	// A type folder that is a link inside the checkout, to the folder of reply, is not read.
+	if err := os.Symlink(filepath.Join(root, ".qory/outbox/reply"), filepath.Join(root, ".qory/outbox/answer")); err != nil {
+		t.Fatal(err)
+	}
+	write(".qory/outbox/reply/answer.json", `{}`)
+	if _, _, err := readOutput(root, exports.ProcessType{Name: "answer", Schema: json.RawMessage(`{}`)}); err == nil {
+		t.Error("a type folder that is a link is read")
+	}
 }
 
 // TestMarksCommitsFindsThePushedCommitsMark is a type with and one without pushed-commits.
 func TestMarksCommitsFindsThePushedCommitsMark(t *testing.T) {
 	if !marksCommits(pullRequestSchemaType(t)) || marksCommits(exports.ProcessType{Marks: map[string]string{"head": "pushed-head"}}) {
 		t.Error("marksCommits is wrong")
+	}
+}
+
+// TestTheRecordMatchesARepositoryOnGitHubInAnyCase is a push to Acme/Shop on github.com for
+// the target acme/shop: github.com names are not case-sensitive, so the record is the push's.
+// On another system the case differs, so there is no record.
+func TestTheRecordMatchesARepositoryOnGitHubInAnyCase(t *testing.T) {
+	for system, want := range map[string]bool{preparation.ForgeGitHub: true, "git.example.com": false} {
+		branch := &preparation.WorkBranch{Version: []preparation.Repository{{System: system, Path: "Acme/Shop", Commit: strings.Repeat("a", 40), Base: &preparation.Base{Commit: strings.Repeat("b", 40), Branch: "main"}}}}
+		target := &contracts.Target{Collection: "R_1", Address: &contracts.TargetAddress{System: system, Path: "acme/shop"}}
+		if got := recordOf(branch, target) != nil; got != want {
+			t.Errorf("%s: a record %v, want %v", system, got, want)
+		}
 	}
 }

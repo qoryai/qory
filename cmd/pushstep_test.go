@@ -533,6 +533,10 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 		if p.change != nil {
 			p.change(d)
 		}
+		// Documents have deliver only at access write, as documents.schema.json requires.
+		if d["access"] != "write" {
+			delete(d, "deliver")
+		}
 	})
 	if result == nil {
 		result = succeeded
@@ -1736,6 +1740,39 @@ func TestAWalledRunPushes(t *testing.T) {
 	}
 }
 
+// TestARunWithReadTargetsStoresOneVersionForItsTarget is a run whose documents list acme/lib
+// in read_targets: one version is stored, for the target R_1001 alone, with the commits, the
+// head, the base and both branches of the push to acme/site, and the outbox file is gone.
+func TestARunWithReadTargetsStoresOneVersionForItsTarget(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
+	p.repositories = "acme/site,acme/lib"
+	p.change = func(d map[string]any) {
+		d["read_targets"] = []any{map[string]any{"collection": "R_2002", "address": map[string]any{"system": proxygittest.Host, "path": "acme/lib"}}}
+	}
+	var outbox string
+	p.mountsOf = func(spec session.SessionSpec) { outbox = outboxOf(spec) }
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if posts, _, _ := p.api.counts(); posts != 1 {
+		t.Fatalf("%d POST, want 1\n%s", posts, r.out)
+	}
+	if kind := p.api.kinds[0]; kind.name != pullRequestName {
+		t.Errorf("the version is in %s, want %s, the artifact of R_1001", kind.name, pullRequestName)
+	}
+	doc := p.api.document(t, 1)
+	head := p.branchHead(t)
+	target, _ := doc["target"].(map[string]any)
+	commits := commitsOf(doc)
+	if target["collection"] != "R_1001" || headOf(doc) != head || pathOf(doc["base"]) != p.first ||
+		doc["branch"] != "qory/"+workItem || doc["base_branch"] != "main" || len(commits) == 0 || commits[len(commits)-1] != head {
+		t.Errorf("the version is %v, want R_1001 with head %s, base %s and both branches", doc, head, p.first)
+	}
+	if _, err := os.Lstat(filepath.Join(outbox, "pull-request", "pull-request.json")); outbox == "" || !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the outbox file %q is still there: %v", outbox, err)
+	}
+}
+
 // TestAWalledRunWithAnAddedKeyFailsTheStep is the settings check of a place a walled run
 // used, which comes first: the line has its words.
 func TestAWalledRunWithAnAddedKeyFailsTheStep(t *testing.T) {
@@ -2810,6 +2847,19 @@ func TestARunWithNoRepositoryStopsWhenItCannotReadItsWorkItem(t *testing.T) {
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST, want 0", posts)
 	}
+}
+
+// TestAStageOutputTypeThatIsNoNameStopsTheRun is the run of
+// [TestARunWithNoRepositoryStoresItsReply] whose stage lists the output type ../x: the run
+// stops before its session, as the type would be a path out of the outbox.
+func TestAStageOutputTypeThatIsNoNameStopsTheRun(t *testing.T) {
+	p, outbox := replyRepo(t)
+	p.api.outputs = `[{"type":"../x","required":true,"version":null,"check":"missing"}]`
+	r := p.run(t, nil, nil)
+	if r.err == nil || *outbox != "" {
+		t.Fatalf("%v, the session's outbox %q, want the run to stop before the session\n%s", r.err, *outbox, r.out)
+	}
+	wants(t, r.out, "qory run: Report the run to the instance admin of Qory Apiary: an output type is no name.\n  The stage lists the output type ../x, not a name")
 }
 
 // replyRepo is a [pushRepo] of a run from a run code whose run configuration lists no

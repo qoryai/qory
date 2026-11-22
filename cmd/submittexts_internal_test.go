@@ -28,6 +28,7 @@ func TestTheTextsOfTheSubmitStepHaveAShortLineOne(t *testing.T) {
 		"textOutputNotJSON":     "Write ",
 		"textOutputUnread":      "Fix ",
 		"textNoStart":           "Report ",
+		"textOutputTypeName":    "Report ",
 		"textNoOutputType":      "Define ",
 		"textPushNoRunAPI":      "take ",
 		"textOutputNotStored":   "take ",

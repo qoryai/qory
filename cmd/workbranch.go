@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
+	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/runapi"
 )
 
@@ -29,11 +32,17 @@ const (
 	textNoStartReference = "Version %d of the artifact %s has %d top-level references to commit %s of %s, not 1."
 	textNoStartFile      = "Version %d of the artifact %s has no one JSON file of at most %d bytes."
 	textNoApproved       = "The approved version of the artifact %s is not in the artifact's index."
+	textOutputTypeName   = "Report the run to the instance admin of Qory Apiary: an output type is no name.\n  The stage lists the output type %s, not a name of a-z, 0-9 and single hyphens" + codeUsed
 )
+
+// outputTypeName is the form of an artifact type's name, as process.schema.json defines it,
+// at most 64 characters: the stage's output types become paths of the outbox.
+var outputTypeName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // readWorkItem reads the work item that r's run is for, at the start of the run, with or
 // without a repository: it sets r.snapshot and r.runNumber from the work item snapshot of
-// GET /work-item. It reads nothing for a run that is not from a run code or has no work
+// GET /work-item, and stops on an output type that is not a name, as such a type becomes a
+// path of the outbox. It reads nothing for a run that is not from a run code or has no work
 // item, for a run with no run API, which has no control plane to store an output in, and
 // for a server with the feature workflow_model off. Each error ends with
 // [codeUsed]. The read ends at deadline, the end of the run's setup, and has no such end
@@ -53,6 +62,11 @@ func (r *codeRun) readWorkItem(ctx context.Context, run openedRun, deadline time
 	}
 	if err != nil {
 		return fmt.Errorf("%w%s", err, codeUsed)
+	}
+	for _, o := range snapshot.Outputs {
+		if len(o.Type) > 64 || !outputTypeName.MatchString(o.Type) {
+			return fmt.Errorf(textOutputTypeName, shownText(provisioner.ShownType(o.Type)))
+		}
 	}
 	r.snapshot, r.runNumber = snapshot, snapshot.Run.Number
 	return nil
@@ -106,7 +120,7 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, deadline time.T
 		return nil, fmt.Errorf(textNoStart, fmt.Sprintf(textNoApproved, shownText(artifact)))
 	}
 	if version != nil {
-		commit, err := startCommit(ctx, client, version, artifact, snapshot.PushedCommits, r.targetRef)
+		commit, err := startCommit(ctx, client, version, artifact, sameRunVersions(index, r.targetRef, version), snapshot.PushedCommits, r.targetRef)
 		if err != nil {
 			return nil, err
 		}
@@ -175,7 +189,8 @@ func featureOff(err error) bool {
 // is not in the index. When types of the run's outputs have such artifacts, the version with
 // the latest time of all wins.
 // shortcut: two delivered types of one stage written by different runs give the newest one;
-// replace it when the run API names the version a run starts from.
+// replace it when the run API names the version a run starts from. [startCommit] confirms the
+// start with another version of the same run when the newest one has no reference to it.
 func startVersion(snapshot *runapi.Snapshot, index *runapi.Index, target *contracts.Target) (version *runapi.Version, artifact string) {
 	if target == nil || target.Address == nil {
 		return nil, ""
@@ -200,39 +215,90 @@ func startVersion(snapshot *runapi.Snapshot, index *runapi.Index, target *contra
 				}
 			}
 		}
-		if pick != nil && (version == nil || pick.At > version.At) {
+		if pick != nil && (version == nil || compareAt(pick.At, version.At) > 0) {
 			version, artifact = pick, a.Type
 		}
 	}
 	return version, artifact
 }
 
+// startVersionOf is a version that a run may start from, and its artifact type.
+type startVersionOf struct {
+	version *runapi.Version
+	typ     string
+}
+
+// sameRunVersions are the versions in index, newest first, that the run which wrote chosen
+// stored in the artifacts of target other than chosen, cancelled ones left out: a stage can
+// store two delivered types for one target, and only one of them may confirm the start.
+func sameRunVersions(index *runapi.Index, target *contracts.Target, chosen *runapi.Version) []startVersionOf {
+	name := outputName(exports.ProcessType{Send: "delivered"}, target)
+	var out []startVersionOf
+	for _, a := range index.Artifacts {
+		if a.Name != name {
+			continue
+		}
+		for i := range a.Versions {
+			v := &a.Versions[i]
+			if v.ID != chosen.ID && !v.Cancelled && v.Writer.Kind == "run" && v.Writer.RunID == chosen.Writer.RunID {
+				out = append(out, startVersionOf{v, a.Type})
+			}
+		}
+	}
+	slices.SortStableFunc(out, func(a, b startVersionOf) int { return compareAt(b.version.At, a.version.At) })
+	return out
+}
+
 // startCommit is the commit a run starts at in the target's repository: the newest commit of
 // pushed, the work item's pushed commits, that the run which wrote version pushed to the
 // target's address, confirmed by the version's file, which has exactly one top-level reference
-// to that commit in the target's collection. typ is the version's artifact type.
-func startCommit(ctx context.Context, client *runapi.Client, version *runapi.Version, typ string, pushed []runapi.PushedEntry, target *contracts.Target) (string, error) {
+// to that commit in the target's collection. When the file of version does not confirm it,
+// the first of others, the other versions of that run, whose file does confirm it. typ is the
+// version's artifact type.
+func startCommit(ctx context.Context, client *runapi.Client, version *runapi.Version, typ string, others []startVersionOf, pushed []runapi.PushedEntry, target *contracts.Target) (string, error) {
 	shown := shownText(typ)
 	repository := shownText(target.Address.System + "/" + target.Address.Path)
 	commit := ""
 	for _, e := range pushed {
-		if e.RunID == version.Writer.RunID && e.System == target.Address.System && e.Path == target.Address.Path {
+		if e.RunID == version.Writer.RunID && e.System == target.Address.System && preparation.SameRepository(e.System, e.Path, target.Address.Path) {
 			commit = e.Commit
 		}
 	}
 	if commit == "" || version.Writer.Kind != "run" {
 		return "", fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartEntry, version.Number, shown, shownText(version.Writer.RunID), repository))
 	}
-	if len(version.Files) != 1 || version.Files[0].Size > maxStartFile {
+	found, err := references(ctx, client, version, commit, target)
+	if err != nil {
+		return "", err
+	}
+	if found == 1 {
+		return commit, nil
+	}
+	for _, o := range others {
+		if n, err := references(ctx, client, o.version, commit, target); err == nil && n == 1 {
+			return commit, nil
+		}
+	}
+	if found < 0 {
 		return "", fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartFile, version.Number, shown, maxStartFile))
+	}
+	return "", fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartReference, version.Number, shown, found, shownCommitID(commit), repository))
+}
+
+// references is the number of top-level references in the one file of version to commit in
+// target's collection; -1 for a version that has no one JSON file of at most [maxStartFile]
+// bytes. An error is that of the download, and ends with [codeUsed].
+func references(ctx context.Context, client *runapi.Client, version *runapi.Version, commit string, target *contracts.Target) (int, error) {
+	if len(version.Files) != 1 || version.Files[0].Size > maxStartFile {
+		return -1, nil
 	}
 	var content bytes.Buffer
 	if err := client.Download(ctx, version.ID, version.Files[0], &content); err != nil {
-		return "", fmt.Errorf("%w%s", err, codeUsed)
+		return 0, fmt.Errorf("%w%s", err, codeUsed)
 	}
 	var members map[string]json.RawMessage
 	if err := json.Unmarshal(content.Bytes(), &members); err != nil {
-		return "", fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartFile, version.Number, shown, maxStartFile))
+		return -1, nil
 	}
 	found := 0
 	for _, raw := range members {
@@ -247,10 +313,23 @@ func startCommit(ctx context.Context, client *runapi.Client, version *runapi.Ver
 			found++
 		}
 	}
-	if found != 1 {
-		return "", fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartReference, version.Number, shown, found, shownCommitID(commit), repository))
+	return found, nil
+}
+
+// compareAt compares the times a and b of the run API, RFC 3339 with or without fractional
+// seconds: negative when a is earlier. A time that does not parse is the earliest.
+func compareAt(a, b string) int {
+	ta, errA := time.Parse(time.RFC3339Nano, a)
+	tb, errB := time.Parse(time.RFC3339Nano, b)
+	switch {
+	case errA != nil && errB != nil:
+		return strings.Compare(a, b)
+	case errA != nil:
+		return -1
+	case errB != nil:
+		return 1
 	}
-	return commit, nil
+	return ta.Compare(tb)
 }
 
 // lowerCommitID reports whether v is a full commit id in lower case, the form that the run

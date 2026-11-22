@@ -208,8 +208,8 @@ type sessionPush struct {
 // after is the push step after a session that ended with out: [removeThenPush] under
 // [pushContext], so the step has the run's time limit, and at least [pushTimes] after the
 // limit or a signal. The step commits what the agent left, pushes the commits that the
-// session made past the branch's tip, and stores a new version; with no new commit, it
-// pushes and stores nothing. A later call of the same run pushes from the tip that the
+// session made past the branch's tip, and stores a version of each output in the outbox;
+// with no new commit, it pushes nothing and still stores the outputs. A later call of the same run pushes from the tip that the
 // earlier call left, see [preparation.Push]. after sets ending's state of the step, and
 // returns the outcome the run closes with: out, or [pushEnding.outcome] of the step's
 // error, with that error.

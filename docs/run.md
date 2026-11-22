@@ -419,7 +419,7 @@ When the run ends, qory says how, and its exit status goes with it:
 
   | `<step>` | Line 1 |
   |---|---|
-  | the read of the work item's branch | `check this machine's connection to the gateway, then start the run again` |
+  | the read of the work item | `check this machine's connection to the gateway, then start the run again` |
   | the fetch of the run's repositories | `check the gateway's connection to the repositories' host, then start the run again` |
   | the compose of the harness | `check the connection to the harness's git hosts, or use fewer or smaller modules` |
   | the install of the runtime | `set pool.registry in forager.yaml to a runtime cache, then start the run again` |
@@ -3246,6 +3246,12 @@ checkout's `.git/info/exclude` once before the session starts, with the line `/.
 the compose adds. That file is local to the clone and no commit has it, so `git add -A` and
 `git commit -a` leave the outbox out. `git add -f` can still stage it: step 4 of the push
 step stops that push.
+
+Each type of the stage's outputs becomes a folder of the outbox. A type that is not a name of
+`a-z`, `0-9` and single hyphens, of at most 64 characters, stops the run before its session:
+`qory run: Report the run to the instance admin of Qory Apiary: an output type is no name.`,
+then `The stage lists the output type <type>, not a name of a-z, 0-9 and single hyphens; the
+code is used` indented by two spaces.
 
 | Type | The session writes |
 |---|---|

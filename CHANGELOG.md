@@ -919,8 +919,8 @@ release may change what an existing document does, and states it under Upgrading
   run` prints
   `Draft: <address>` as its last lines. The program gets the inputs `QORY_SUBMIT_*` and
   prints plain lines: the five `draft_` lines and a `commit_url` line for each commit. qory
-  takes them as the draft and the commit addresses, checks each value, and leaves out a line
-  that it cannot use. A program that ends with status 3 means that the person has no login of
+  takes the draft from them, checks each line, and leaves out a line that it cannot use; it
+  keeps no commit address. A program that ends with status 3 means that the person has no login of
   the forge's command line: the draft is `{"none": "login-needed", "exit": 3}`, qory prints the
   login command that the program prints as the first line of its standard error, and the
   branch stays pushed. A program that runs past 120 seconds is `program-timeout`. In this
@@ -964,7 +964,9 @@ release may change what an existing document does, and states it under Upgrading
   <system>, so the run did not start; the code is used`.
 - Every run of a work item from a run code with a run API reads the work item through `GET
   /work-item` at its start, with or without a repository, as the stage's outputs come from
-  it. Until this
+  it. A setup past its limit in that read names the step `the read of the work item`. A stage
+  output type that is not a name of a-z, 0-9 and single hyphens stops the run: `Report the run
+  to the instance admin of Qory Apiary: an output type is no name.` Until this
   change, only a run on the work item's branch read it.
 - A run stops before the agent starts, with the line `Report this run to the instance admin of
   Qory Apiary.` and a second line `The list of pushed commits has <value>, which is not a

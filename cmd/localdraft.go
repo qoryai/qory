@@ -6,13 +6,11 @@ import (
 )
 
 // draftDocument is what the local submit step gives the submit program and reads back from
-// it, for one repository at a time: the branch, whether the session passed, the draft's text,
-// and the repository with its commits and its draft.
+// it, for one repository at a time: the branch, the draft's text, and the repository with its
+// commits and its draft.
 type draftDocument struct {
 	// Ref is the branch's name.
 	Ref string
-	// Verdict is [verdictPassed] or [verdictNone].
-	Verdict string
 	// Text is the draft's title and description, nil when the session wrote none.
 	Text *draftText
 	// Repositories has at least one entry.
@@ -22,9 +20,8 @@ type draftDocument struct {
 // draftRepository is one repository of a [draftDocument], with the head of the branch in it.
 type draftRepository struct {
 	System, Path string
-	// Commit is the head of the branch, and CommitURL the forge's address of it, written by
-	// the submit program.
-	Commit, CommitURL string
+	// Commit is the head of the branch.
+	Commit string
 	// Base is the commit the run started at, nil when the run pushed nothing.
 	Base *draftBase
 	// Commits are the commits from Base to Commit, oldest first.
@@ -33,15 +30,14 @@ type draftRepository struct {
 	Draft json.RawMessage
 }
 
-// draftBase is the commit a run started at, with the repository's default branch and the
-// forge's address of the commit.
+// draftBase is the commit a run started at, with the repository's default branch.
 type draftBase struct {
-	Commit, Branch, CommitURL string
+	Commit, Branch string
 }
 
-// draftCommit is one commit of a run, with the ledger step that made it and its address.
+// draftCommit is one commit of a run, with the ledger step that made it.
 type draftCommit struct {
-	Commit, Step, CommitURL string
+	Commit, Step string
 }
 
 // draftText is the title and the description of the draft pull request.
@@ -49,7 +45,7 @@ type draftText struct {
 	Title, Description string
 }
 
-// The verdicts of a [draftDocument]: whether the session ended with exit 0.
+// The verdicts of a local run's session: whether it ended with exit 0.
 const (
 	verdictPassed = "passed"
 	verdictNone   = "none"
