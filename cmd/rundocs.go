@@ -719,27 +719,28 @@ func (r *codeRun) checkOutputTypes(types []exports.ProcessType) error {
 }
 
 // deliveredTypes is types, the artifact types of the composed harness, with the send of each
-// from r's deliver, the documents' deliver: a type that deliver does not list has no send,
-// and a type that deliver lists and types do not define is added with its send alone. The
-// harness's process.yaml sends nothing on a run from a run code.
-func (r *codeRun) deliveredTypes(types []exports.ProcessType) []exports.ProcessType {
+// from r's deliver, the documents' deliver: a type that deliver does not list has no send. A
+// type that deliver lists and types do not define is [textDeliverNoType]: qory has no schema
+// to check its output against and no marks to fill. The harness's process.yaml sends nothing
+// on a run from a run code.
+func (r *codeRun) deliveredTypes(types []exports.ProcessType) ([]exports.ProcessType, error) {
 	out := make([]exports.ProcessType, 0, len(types))
 	for _, t := range types {
 		t.Send = ""
 		out = append(out, t)
 	}
 	if r == nil {
-		return out
+		return out, nil
 	}
 	for _, d := range r.deliver {
 		i := slices.IndexFunc(out, func(t exports.ProcessType) bool { return t.Name == d.Type })
 		if i < 0 {
-			out = append(out, exports.ProcessType{Name: d.Type, Send: d.Send})
-			continue
+			shown := shownText(provisioner.ShownType(d.Type))
+			return nil, fmt.Errorf(textDeliverNoType, shown, shown)
 		}
 		out[i].Send = d.Send
 	}
-	return out
+	return out, nil
 }
 
 // harnessTypes is the artifact types of the composed harness rep: those of the process.yaml

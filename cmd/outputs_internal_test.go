@@ -366,3 +366,26 @@ func TestATypeWhoseSchemaDoesNotConvertStopsTheRun(t *testing.T) {
 		t.Errorf("a run with no run code: %v", err)
 	}
 }
+
+// TestDeliveredTypesTakeTheSendOfTheDocuments is a harness that defines pull-request, with a
+// send that the run ignores, and notes: with the documents' deliver of pull-request, the types
+// are the harness's with the documents' send; a deliver of a type that the harness does not
+// define, cut to 19 characters on the line, is the fix-first error.
+func TestDeliveredTypesTakeTheSendOfTheDocuments(t *testing.T) {
+	types := []exports.ProcessType{{Name: "pull-request", Send: "end_of_run"}, {Name: "notes", Send: "send"}}
+	r := &codeRun{deliver: []contracts.Deliver{{Type: "pull-request", Send: "after_gate"}}}
+	got, err := r.deliveredTypes(types)
+	if err != nil || len(got) != 2 || got[0].Send != "after_gate" || got[1].Send != "" || types[0].Send != "end_of_run" {
+		t.Errorf("the types are %+v, %v", got, err)
+	}
+	if got, err := (*codeRun)(nil).deliveredTypes(types); err != nil || len(got) != 2 || got[0].Send != "" {
+		t.Errorf("no run code: %+v, %v", got, err)
+	}
+	long := strings.Repeat("abcdefgh-", 7) + "x"
+	r.deliver = append(r.deliver, contracts.Deliver{Type: long, Send: "after_gate"})
+	want := "Define " + long[:19] + " in the harness's process.yaml: the run documents deliver it.\n" +
+		"  The composed process.yaml has no artifact type " + long[:19] + ", so qory cannot check or fill its output. The run code is used up."
+	if got, err := r.deliveredTypes(types); err == nil || err.Error() != want || got != nil {
+		t.Errorf("an undefined type: %+v, %v, want %q", got, err, want)
+	}
+}

@@ -892,7 +892,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err := clearOutbox(at.root); err != nil {
 						return false, err
 					}
-					outputs = &runOutputs{root: at.root, stage: fromCode.snapshot.Outputs, types: fromCode.deliveredTypes(types), target: fromCode.targetRef}
+					delivered, err := fromCode.deliveredTypes(types)
+					if err != nil {
+						return false, err
+					}
+					outputs = &runOutputs{root: at.root, stage: fromCode.snapshot.Outputs, types: delivered, target: fromCode.targetRef}
 					spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{outboxEnv: outboxPath(at.root)})
 				}
 				// The composed harness's submit program runs on a run with neither a run code nor a

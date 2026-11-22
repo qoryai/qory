@@ -3285,7 +3285,11 @@ outbox in <folder> failed: <cause>; the code is used` indented by two spaces.
 A type has `deliver` when `deliver` of the run documents lists it, with the `send` from
 there. The composed `process.yaml` sets no `deliver` of a run from a run code: where it
 differs, the compose step prints a line (see [What the run takes from the
-response](#what-the-run-takes-from-the-response)).
+response](#what-the-run-takes-from-the-response)). A type that `deliver` lists and the
+composed `process.yaml` does not define stops the run before its session, exit 1: `qory run:
+Define <type> in the harness's process.yaml: the run documents deliver it.`, then `The
+composed process.yaml has no artifact type <type>, so qory cannot check or fill its output.
+The run code is used up.` indented by two spaces.
 
 First, qory reads each output, and fills and checks each output of a type with a
 `json_schema`. An output that fails one of these stops the step before any version is

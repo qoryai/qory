@@ -305,7 +305,10 @@ release may change what an existing document does, and states it under Upgrading
   configuration checks `deliver` and the marks. See Artifact types in
   `contracts/harness/v1/README.md`.
 - A run from a run code takes `deliver` from the run documents alone: a type that they list
-  is delivered with their `send`, whatever the composed harness's `process.yaml` has. At the
+  is delivered with their `send`, whatever the composed harness's `process.yaml` has. A
+  write run of a work item whose documents deliver a type that the composed `process.yaml`
+  does not define stops before its session: `Define <type> in the harness's process.yaml:
+  the run documents deliver it.` At the
   level `write`, the compose step prints one line for each type whose `send` differs from
   `deliver` of the composed harness's `process.yaml`, such as `qory run: deliver:
   pull-request at end_of_run from the documents; harness has after_gate`. Documents that

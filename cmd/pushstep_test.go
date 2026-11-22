@@ -1579,6 +1579,27 @@ func TestAQoryLinkStopsTheRunBeforeTheSession(t *testing.T) {
 	}
 }
 
+// TestADeliveredTypeThatTheHarnessDoesNotDefineStopsTheRun is documents that deliver notes,
+// which the composed process.yaml does not define, beside pull-request: the run stops before
+// the session, exit 1, with the fix, and nothing is pushed or stored.
+func TestADeliveredTypeThatTheHarnessDoesNotDefineStopsTheRun(t *testing.T) {
+	p := newPushRepo(t, "write")
+	p.change = func(d map[string]any) {
+		d["deliver"] = []any{map[string]any{"type": "pull-request", "send": "after_gate"}, map[string]any{"type": "notes", "send": "after_gate"}}
+	}
+	joined := false
+	p.mountsOf = func(session.SessionSpec) { joined = true }
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	if joined || r.err == nil {
+		t.Fatalf("%v, joined %v, want the run to stop before the session\n%s", r.err, joined, r.out)
+	}
+	wants(t, r.err.Error(), "Define notes in the harness's process.yaml: the run documents deliver it.\n  The composed process.yaml has no artifact type notes, so qory cannot check or fill its output. The run code is used up.")
+	if posts, _, _ := p.api.counts(); posts != 0 || p.branchHead(t) != "" {
+		t.Errorf("%d POST and the branch at %q, want neither", posts, p.branchHead(t))
+	}
+}
+
 // TestOnlyAWriteRunHasTheOutboxVariable is the variable QORY_OUTBOX in the session of a run
 // at write, with the path of the checkout's .qory/outbox, and its absence in a run the
 // workflow lowers to write-no-push: that run stores no outputs.

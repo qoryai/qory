@@ -13,8 +13,8 @@ import (
 // write-no-push or read: the run starts no program. Only the run at write sets the hand-off
 // variable, and the others have no step of kind or name submit and store no version. The levels
 // gate the run at "submitLevel == stack.AccessWrite" in the run's setup. The deliver line is not
-// checked here: this harness has no process.yaml, so the run prints none at any level, and
-// TestARunBelowWritePrintsNoDeliverLine checks it.
+// checked here: the documents deliver pull-request at the send of the harness's process.yaml,
+// so the run prints none at any level, and TestARunBelowWritePrintsNoDeliverLine checks it.
 func TestARunLoweredBelowWriteRunsNoSubmitStep(t *testing.T) {
 	for _, c := range []struct {
 		access string
@@ -24,7 +24,7 @@ func TestARunLoweredBelowWriteRunsNoSubmitStep(t *testing.T) {
 			p, log := newProgramRepo(t, c.access)
 			p.change = func(d map[string]any) {
 				d["access"] = "write"
-				d["deliver"] = []any{map[string]any{"type": "code-change", "send": "after_gate"}, map[string]any{"type": "pull-request", "send": "after_gate"}}
+				d["deliver"] = []any{map[string]any{"type": "pull-request", "send": "after_gate"}}
 			}
 			var variables []string
 			p.mountsOf = func(spec session.SessionSpec) { variables = spec.Variables.Run }
