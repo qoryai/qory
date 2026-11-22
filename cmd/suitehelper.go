@@ -189,20 +189,22 @@ var planOf = func(c *codeRun, workflows map[string]stack.Workflow) (workflow, pl
 	return c.workflow, workflows[c.workflow].Plan
 }
 
-// textFullSuiteNoPlan is the refusal of a run whose run documents set full_suite and whose workflow
-// has write-no-push access: that access allows no plan, see [stack.Workflow], so no plan type
-// could give the suite its full command. Line 1 is the cause and has no fix, since the reader
-// cannot change full_suite. The first %s is "The run documents ask" for session 1 and "The
-// next-session answer asks" for a later session, the second is "run" for session 1 and "session" for
-// a later session, the third is the workflow.
+// textFullSuiteNoPlan is the refusal of a session whose full_suite flag is set and whose workflow
+// has write-no-push access. The flag comes from the run documents for session 1 and from the
+// next-session answer for a later session. That access allows no plan, see [stack.Workflow], so
+// no plan type could give the suite its full command. Line 1 is the cause and has no fix, since
+// the reader cannot change full_suite. The first %s is "The run documents ask" for session 1 and
+// "The next-session answer asks" for a later session, the second is "run" for session 1 and
+// "session" for a later session, the third is the workflow.
 const textFullSuiteNoPlan = "%s for the full suite in a write-no-push workflow.\n  The %s did not start: %s has write-no-push access, so it has no plan to read the full suite from" + codeUsed
 
-// fullSuiteNoPlan is the error of a run from a run code whose run documents set full_suite and
-// whose workflow, in workflows, has write-no-push access, nil for any other run. A run that only
-// reads the checkout runs no suite and is not refused. The error is exit 1 and closes the run
-// failed before the join. Line 1 is the cause. later is whether the session is after the run's
-// first: line 1 then starts "The next-session answer asks", not "The run documents ask", and line 2
-// says "The session did not start", not "The run did not start".
+// fullSuiteNoPlan is the error of a run from a run code whose full_suite flag is set and whose
+// workflow, in workflows, has write-no-push access, nil for any other run. The flag comes from the
+// run documents for session 1 and from the next-session answer for a later session (later is
+// true). A run that only reads the checkout runs no suite and is not refused. The error is exit 1
+// and closes the run failed before the join. Line 1 is the cause. For a later session line 1
+// starts "The next-session answer asks", not "The run documents ask", and line 2 says "The
+// session did not start", not "The run did not start".
 func fullSuiteNoPlan(c *codeRun, workflows map[string]stack.Workflow, later bool) error {
 	declared := (&stack.Stack{Workflows: workflows}).AccessOf(c.workflow)
 	if !fullSuiteOf(c) || declared != stack.AccessWriteNoPush || readsOnly(c, workflows) {

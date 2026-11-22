@@ -342,12 +342,12 @@ func TestAnUnreadableStatusFileUnderTheCapIsNotStarted(t *testing.T) {
 	}
 }
 
-// TestTheFullSuiteRefusalIsCauseFirstAsPrinted: the refusal of full_suite on a write-no-push workflow,
-// as [ui.UI.Fail] prints it, has the cause as line 1 and, as line 2, the line that has the
-// workflow's name and ends with the code used. Line 1 has no name, so with its mark it has 71 characters for
-// session 1 ("The run documents ask") and 78 for a later session ("The next-session answer asks"),
-// for a workflow of 1, 24 and 64 characters. Line 2 says "The run did not start" for session 1 and
-// "The session did not start" for a later session.
+// TestTheFullSuiteRefusalIsCauseFirstAsPrinted: the refusal of full_suite on a write-no-push
+// workflow, as [ui.UI.Fail] prints it, has the cause as line 1 and, as line 2, the line that has
+// the workflow's name and ends with the code used. Line 1 has no name, so with its mark it has 71
+// characters for session 1 ("The run documents ask") and 78 for a later session ("The
+// next-session answer asks"), for a workflow of 1, 24 and 64 characters. Line 2 says "The run did
+// not start" for session 1 and "The session did not start" for a later session.
 func TestTheFullSuiteRefusalIsCauseFirstAsPrinted(t *testing.T) {
 	for _, name := range []string{"a", strings.Repeat("w", 24), strings.Repeat("w", 64)} {
 		for _, c := range []struct {
