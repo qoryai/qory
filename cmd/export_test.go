@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"net/http"
 	"os"
@@ -1229,13 +1230,20 @@ func SetInstallRuntimes(on bool) func() {
 
 // SetInstallStandIn makes a run of Claude Code that installs nothing start a copy of its
 // launch's program, from a new folder under root that others can read, as an install
-// makes one, and returns what restores the default. A launch whose Command is not the
-// absolute path of a file gets a program that exits 0.
+// makes one, and returns what restores the default. A launch whose Command is an absolute
+// path that is no file on this machine, such as the agent of a test's image, gets a program
+// that runs that path inside the session's container. Any other Command gets a program that
+// exits 0.
 func SetInstallStandIn(root string) func() {
 	before := installStandIn
 	installStandIn = func(command string) (*runtimeinstall.Installed, error) {
 		data, err := os.ReadFile(command)
-		if err != nil || !filepath.IsAbs(command) {
+		switch {
+		case !filepath.IsAbs(command):
+			data = []byte("#!/bin/sh\nexit 0\n")
+		case errors.Is(err, fs.ErrNotExist):
+			data = []byte("#!/bin/sh\nexec '" + command + "' \"$@\"\n")
+		case err != nil:
 			data = []byte("#!/bin/sh\nexit 0\n")
 		}
 		folder, err := os.MkdirTemp(root, "claude-")
