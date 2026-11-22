@@ -66,7 +66,7 @@ const (
 	textMachine         = "qory destination clone: The machine cannot store %s, so nothing was cloned.\n  %s"
 	textBadDestinations = "qory destination clone: The run's destinations do not match their schema, so nothing was cloned.\n  %s"
 	textNest            = "qory destination clone: Destination %s is inside another, so nothing was cloned.\n  %s and %s nest: one path lies inside the other."
-	textProxyBlocks     = "qory destination clone: The proxy cannot reach the host of %s, so nothing was cloned."
+	textProxyBlocks     = "qory destination clone: The proxy cannot reach %s's host, so nothing was cloned."
 )
 
 // allClones is the word of [textMachine] for a record that is not a list of ids,

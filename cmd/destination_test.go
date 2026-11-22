@@ -313,7 +313,7 @@ func TestDestinationCloneStopsOnAFailedClone(t *testing.T) {
 	connection := func(id, status string) string {
 		return "Give the integration access to " + id + " in Qory Apiary, then click Run Explore again.\n  The host returned " + status + " to the clone."
 	}
-	blocks := "qory destination clone: The proxy cannot reach the host of " + webID + ", so nothing was cloned."
+	blocks := "qory destination clone: The proxy cannot reach " + webID + "'s host, so nothing was cloned."
 	t.Run("403", func(t *testing.T) {
 		c := destinationSession(t)
 		c.s.Refuse("/acme/web.git/info/refs")

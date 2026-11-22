@@ -4468,7 +4468,7 @@ the id and no path of the machine:
 | Line 1 | When |
 | ------ | ---- |
 | `Give the integration access to <id> in Qory Apiary, then click Run Explore again.` | The host returned 401, 403 or 404. Line 2 is `The host returned <status> to the clone.` |
-| `qory destination clone: The proxy cannot reach the host of <id>, so nothing was cloned.` | The wall's proxy returned 403 or 407. |
+| `qory destination clone: The proxy cannot reach <id>'s host, so nothing was cloned.` | The wall's proxy returned 403 or 407. |
 | `Run Explore again later: the clone of <id> failed: <cause>.` | Any other failed clone. The cause contains no URL. |
 | `qory destination clone: The machine cannot store <id>, so nothing was cloned.` | A folder of the clone or its `.git` is a link or a file, the clone's folder has files and no clone, or qory cannot make a folder. Line 2 has the path and the cause. When `PATH` has no git, line 2 is `git is not on PATH`. The id is the call's first. For a record of the clones that is not a list of ids, `the clones` stands in place of the id. |
 | `qory destination clone: The run's destinations do not match their schema, so nothing was cloned.` | The destinations do not have the shape of the explore inputs. Line 2 has the cause. |

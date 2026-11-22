@@ -17,7 +17,7 @@ import (
 func TestCloneFailedNamesEachCause(t *testing.T) {
 	const id = "tg_web0000000000000"
 	const (
-		proxy  = "qory destination clone: The proxy cannot reach the host of " + id + ", so nothing was cloned."
+		proxy  = "qory destination clone: The proxy cannot reach " + id + "'s host, so nothing was cloned."
 		access = "Give the integration access to " + id + " in Qory Apiary, then click Run Explore again.\n  The host returned "
 		again  = "Run Explore again later: the clone of " + id + " failed: "
 	)
