@@ -3307,6 +3307,8 @@ stored:
    `address.path`. The session writes neither `target`, for a type with `deliver`, nor a
    marked member.
 3. qory checks the filled file against the type's schema.
+4. For a type with `deliver`, qory checks that each file has at most 786432 bytes once
+   filled: the next run of the work item reads the file to find its start commit.
 
 A type that marks a member gets no version when the run pushed nothing to the target's
 repository, as a run with no repository does, and a type that marks `pushed-commits` gets
@@ -3342,6 +3344,8 @@ output's type:
 - `Fix the <type> output: it breaks its schema at <place>.`, where `<place>` is the first
   place in the file that the schema does not allow, cut to 29 characters
 - `Write the <type> output as one JSON object: the file is not one.`
+- `Cut the <type> output to at most 786432 bytes: the next run starts from it.`, then `With
+  target and the members that qory fills, <file> has <n> bytes.` indented by two spaces
 - `Fix the <type> output so that qory can read it.`, then the cause indented by two spaces,
   such as `the output has more than <n> bytes`
 - `take the work item in again: the outbox keeps <type>; the code is used`, then `qory stored

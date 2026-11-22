@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -387,5 +388,46 @@ func TestDeliveredTypesTakeTheSendOfTheDocuments(t *testing.T) {
 		"  The composed process.yaml has no artifact type " + long[:19] + ", so qory cannot check or fill its output. The run code is used up."
 	if got, err := r.deliveredTypes(types); err == nil || err.Error() != want || got != nil {
 		t.Errorf("an undefined type: %+v, %v, want %q", got, err, want)
+	}
+}
+
+// TestADeliveredOutputOverTheStartLimitStops is a delivered reply whose file, once target is
+// filled, has 786432 bytes, which is stored, and one byte more, which stops with the fix. A
+// reply that is not delivered has no such limit.
+func TestADeliveredOutputOverTheStartLimitStops(t *testing.T) {
+	reply := exports.ProcessType{Name: "reply", Send: "after_gate", Schema: json.RawMessage(`{"type":"object"}`)}
+	file := func(n int) []byte { return []byte(`{"text":"` + strings.Repeat("a", n) + `"}`) }
+	filled, err := fillOutput(file(0), reply, shopTarget, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fits := maxStartFile - len(filled)
+	for name, c := range map[string]struct {
+		typ  exports.ProcessType
+		n    int
+		want string
+	}{
+		"at the limit":  {reply, fits, ""},
+		"one byte over": {reply, fits + 1, "Cut the reply output to at most 786432 bytes: the next run starts from it.\n  With target and the members that qory fills, reply.json has 786433 bytes."},
+		"not delivered": {exports.ProcessType{Name: "reply", Schema: reply.Schema}, maxStartFile, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			entry := filepath.Join(root, ".qory", "outbox", "reply")
+			if err := os.MkdirAll(entry, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(entry, "reply.json"), file(c.n), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			o := &runOutputs{root: root, stage: []runapi.Output{{Type: "reply"}}, types: []exports.ProcessType{c.typ}, target: shopTarget}
+			out, _, err := o.ready(io.Discard, nil, "")
+			switch {
+			case c.want == "" && (err != nil || len(out) != 1):
+				t.Errorf("%d ready, %v, want one", len(out), err)
+			case c.want != "" && (err == nil || err.Error() != c.want):
+				t.Errorf("%v, want %q", err, c.want)
+			}
+		})
 	}
 }

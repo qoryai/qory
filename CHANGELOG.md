@@ -325,7 +325,8 @@ release may change what an existing document does, and states it under Upgrading
   of the checkout, or of the working folder of a run with no repository. After a session
   that succeeded, the push step reads each output of the stage, sets `target` of a type
   that `deliver` of the run documents lists, fills the marked members from the push to the
-  target's repository, checks the file against the type's schema, runs the type's push
+  target's repository, checks the file against the type's schema and, for a delivered
+  type, against 786432 bytes, the most that the next run reads, runs the type's push
   check, stores one version, and removes the output from the outbox. The version of a
   delivered type goes to the artifact `t-` and the first 32 hexadecimal digits of the SHA-256 of the target's `collection`; any other
   type's to `main`. A required output that the session did not write, and that no version of

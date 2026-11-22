@@ -37,6 +37,7 @@ func TestTheTextsOfTheSubmitStepHaveAShortLineOne(t *testing.T) {
 		"textOutboxNotEmpty":    "Remove ",
 		"textSchemaUnread":      "Report ",
 		"textDeliverNoType":     "Define ",
+		"textOutputTooBig":      "Cut ",
 	}
 	texts := map[string]string{
 		"textHandoffIgnored":     textHandoffIgnored,
@@ -74,6 +75,7 @@ func TestTheTextsOfTheSubmitStepHaveAShortLineOne(t *testing.T) {
 		"textOutboxNotEmpty":     "qory run: " + fmt.Sprintf(textOutboxNotEmpty, "/home/dev/acme/shop", "permission denied"),
 		"textSchemaUnread":       "qory run: " + fmt.Sprintf(textSchemaUnread, "a-type-of-19-chars.", "A JSON key is a string"),
 		"textDeliverNoType":      "qory run: " + fmt.Sprintf(textDeliverNoType, "a-type-of-19-chars.", "a-type-of-19-chars."),
+		"textOutputTooBig":       "qory run: " + fmt.Sprintf(textOutputTooBig, "a-type-of-19-chars.", maxStartFile, "pull-request.json", maxStartFile+1),
 	}
 	for name, text := range texts {
 		line, _, _ := strings.Cut(text, "\n")
