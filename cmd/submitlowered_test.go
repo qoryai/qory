@@ -31,12 +31,12 @@ func TestARunLoweredBelowWriteRunsNoSubmitStep(t *testing.T) {
 			agent := writesAndCommits(t)
 			r := p.run(t, agent, nil)
 			r.wantsClose(t, event.StateSucceeded, 0)
-			handoff := false
+			outbox := false
 			for _, v := range variables {
-				handoff = handoff || strings.HasPrefix(v, "QORY_SUBMISSION_HANDOFF=")
+				outbox = outbox || strings.HasPrefix(v, "QORY_OUTBOX=")
 			}
-			if handoff != c.write {
-				t.Errorf("hand-off variable %v, want %v", handoff, c.write)
+			if outbox != c.write {
+				t.Errorf("outbox variable %v, want %v", outbox, c.write)
 			}
 			wantsNoProgram(t, r, log)
 			if c.write {

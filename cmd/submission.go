@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,27 +10,17 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
-	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/primitives"
 	"github.com/qoryai/qory/internal/render"
-	"github.com/qoryai/qory/internal/runapi"
-	"github.com/qoryai/qory/internal/submission"
-	"github.com/qoryai/qory/internal/verdictformat"
 )
 
-// handoffEnv is the variable that gives a session the path of its hand-off file, and
-// handoffMax the largest hand-off file qory reads, in bytes.
-const (
-	handoffEnv = "QORY_SUBMISSION_HANDOFF"
-	handoffMax = 256 << 10
-)
+// handoffMax is the largest pull-request output that the local submit step reads, in bytes.
+const handoffMax = 256 << 10
 
-// The limits that the submission format sets on what a hand-off gives: the title's
-// characters, the description's, and the step's. A hand-off part over a limit is dropped,
-// since the stored version would fail the check of the format after the push.
+// The limits on what the pull-request output gives the submit program: the title's
+// characters, the description's, and the step's. A part over a limit is dropped.
 const (
 	maxTitle       = 256
 	maxDescription = 20000
@@ -42,29 +31,43 @@ const (
 // of the edits that the time limit left, and any commit the session did not list.
 const stepUnreviewed = "unreviewed"
 
-// handoff is what a session hands to the submit step in the file at [handoffEnv]: the title
-// and the description of the draft pull request, and the ledger step that made each commit,
-// keyed by the full commit id. qory is the only writer of the submission: it takes nothing
-// else from the file.
+// handoff is what the local submit step takes from the session's pull-request output: the
+// title and the description of the draft pull request, and the ledger step that made each
+// commit, keyed by the full commit id. It takes nothing else from the file.
 type handoff struct {
-	Text  *submission.Text  `json:"text"`
-	Steps map[string]string `json:"steps"`
-	// dropped is one line for each part that [readHandoff] left out because the format does
+	Text  *draftText
+	Steps map[string]string
+	// dropped is one line for each part that [readHandoff] left out because a draft does
 	// not allow it, with its values; nil for none.
 	dropped []string
 }
 
-// handoffRel is the hand-off file of a run, in the checkout.
-var handoffRel = filepath.Join(".qory", "handoff", "submission.json")
+// pullRequestType is the one output type that the local submit step reads.
+// shortcut: reads one kind by name until the later card.
+const pullRequestType = "pull-request"
 
-// handoffExclude is the line of the checkout's .git/info/exclude that keeps the hand-off
-// folder out of a commit: the file is in the checkout, and only qory reads it.
-const handoffExclude = "/.qory/handoff/"
+// handoffRel is the pull-request output of a run, in the copy: [outputPath] of the type.
+var handoffRel = filepath.FromSlash(outputPath(pullRequestType, true))
 
-// handoffPath is the hand-off file of a run in the checkout at root: .qory/handoff/submission.json.
-func handoffPath(root string) string { return filepath.Join(root, handoffRel) }
+// pullRequestFile is the part of a pull-request output that the local submit step reads:
+// title, text and steps. Other members are read and not used.
+type pullRequestFile struct {
+	Title *string `json:"title,case:strict"`
+	Text  *string `json:"text,case:strict"`
+	Steps []struct {
+		Commit string `json:"commit,case:strict"`
+		Step   string `json:"step,case:strict"`
+	} `json:"steps,case:strict"`
+}
 
-// readHandoff reads the hand-off file of the checkout at root. A root that is "" or a file
+// The words of the local submit step on the pull-request output: line 1 is the fix, then the
+// file and the cause, or the parts that it dropped.
+const (
+	textHandoffIgnored = "qory run: Fix the pull-request output: qory cannot read it, so the draft has no text.\n  File: %s.\n  Cause: %s"
+	textHandoffDropped = "qory run: Fix the pull-request output: qory dropped a part that a draft does not allow."
+)
+
+// readHandoff reads the pull-request output of the copy at root. A root that is "" or a file
 // that is not there is no hand-off, nil with no error; a file that is not JSON in the form of
 // [handoff], or is over [handoffMax], is an error that the caller prints before it goes on
 // without it. The agent wrote the path, so the read stays inside root, whatever links the
@@ -111,9 +114,19 @@ func readHandoff(root string) (*handoff, error) {
 	if len(data) > handoffMax {
 		return nil, fmt.Errorf("the file has more than %d bytes, and qory reads at most %d", handoffMax, handoffMax)
 	}
-	var h handoff
-	if err := json.Unmarshal(data, &h); err != nil {
+	var pr pullRequestFile
+	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, errors.New(jsonCause(err))
+	}
+	h := handoff{Steps: map[string]string{}}
+	if pr.Title != nil {
+		h.Text = &draftText{Title: *pr.Title}
+		if pr.Text != nil {
+			h.Text.Description = *pr.Text
+		}
+	}
+	for _, s := range pr.Steps {
+		h.Steps[s.Commit] = s.Step
 	}
 	h.limit()
 	return &h, nil
@@ -138,14 +151,14 @@ const (
 	maxDroppedSteps        = 5
 )
 
-// controlAt is the 1-based position of the first character of title that [submission.TitleRune]
-// does not pass (a control, a format character other than U+200C and U+200D, or U+2028 or
+// controlAt is the 1-based position of the first character of title that [primitives.StopsLine]
+// stops (a control, a format character other than U+200C and U+200D, or U+2028 or
 // U+2029); 0 for none.
 func controlAt(title string) int {
 	i := 0
 	for _, r := range title {
 		i++
-		if !submission.TitleRune(r) {
+		if primitives.StopsLine(r) {
 			return i
 		}
 	}
@@ -184,10 +197,10 @@ func jsonCause(err error) string {
 			return fmt.Sprintf("the member %s of the file has the wrong type", member)
 		}
 	}
-	return "the file is not JSON of the form of the hand-off"
+	return "the file is not JSON of the form of the pull-request output"
 }
 
-// limit drops the parts of h that are over a limit of the submission format.
+// limit drops the parts of h that are over a limit of a draft.
 func (h *handoff) limit() {
 	if h.Text != nil {
 		switch title, description := utf8.RuneCountInString(h.Text.Title), utf8.RuneCountInString(h.Text.Description); {
@@ -195,7 +208,7 @@ func (h *handoff) limit() {
 			at := controlAt(h.Text.Title)
 			h.Text = nil
 			h.dropped = append(h.dropped, fmt.Sprintf(textDroppedControl, at))
-		case title > 0 && !visibleTitle(h.Text.Title):
+		case title > 0 && !strings.ContainsFunc(h.Text.Title, primitives.ShowsInTitle):
 			h.Text = nil
 			h.dropped = append(h.dropped, textDroppedBlank)
 		case title > maxTitle:
@@ -221,7 +234,7 @@ func (h *handoff) limit() {
 	}
 	badKeys := 0
 	for commit := range h.Steps {
-		if !submission.CommitID(commit) {
+		if !lowerCommitID(commit) {
 			delete(h.Steps, commit)
 			badKeys++
 		}
@@ -231,7 +244,7 @@ func (h *handoff) limit() {
 	}
 	var controlled []string
 	for commit, step := range h.Steps {
-		if strings.ContainsFunc(step, notTitleRune) {
+		if strings.ContainsFunc(step, primitives.StopsLine) {
 			controlled = append(controlled, commit)
 		}
 	}
@@ -262,18 +275,6 @@ func (h *handoff) limit() {
 	if len(over) > maxDroppedSteps {
 		h.dropped = append(h.dropped, fmt.Sprintf(textDroppedFurther, len(over)-maxDroppedSteps, maxStep))
 	}
-}
-
-// notTitleRune reports whether r is a character that [submission.TitleRune] does not pass.
-func notTitleRune(r rune) bool { return !submission.TitleRune(r) }
-
-// visibleTitle reports whether title has a character that shows: not a space, U+200C or U+200D.
-// The spaces are the ones that the contract's draft_title rule lists (U+0020, U+00A0, U+1680,
-// U+2000 to U+200A, U+202F, U+205F and U+3000), which are the characters that [unicode.IsSpace]
-// passes once controls and U+2028 and U+2029 are out. U+200C and U+200D pass [submission.TitleRune]
-// but show nothing alone, and the contract's draft_title rule stops a title of only these.
-func visibleTitle(title string) bool {
-	return strings.ContainsFunc(title, func(r rune) bool { return !unicode.IsSpace(r) && r != '\u200c' && r != '\u200d' })
 }
 
 // shownCommit is commit as a line shows it: printable, masked and at most 64 characters.
@@ -341,73 +342,23 @@ func (h *handoff) stepOf(commit string) string {
 }
 
 // text is the hand-off's text for the draft, nil when there is none or it is not whole.
-func (h *handoff) text() *submission.Text {
+func (h *handoff) text() *draftText {
 	if h == nil || h.Text == nil || h.Text.Title == "" {
 		return nil
 	}
 	return h.Text
 }
 
-// newestVerdict is the verdict of the work item as the submission names it, from the run
-// API: the newest verdict, when this run wrote it, and none otherwise. A kind that this
-// qory does not know is returned unchanged, and a caller takes any kind but passed as not
-// passed. A verdict that is not in the form of a kind is none.
-func newestVerdict(ctx context.Context, client *runapi.Client, runID string) (string, error) {
-	snapshot, err := client.WorkItem(ctx)
-	if err != nil {
-		return "", err
-	}
-	if snapshot.Verdict == nil || snapshot.Verdict.Version == nil {
-		return submission.VerdictNone, nil
-	}
-	index, err := client.Artifacts(ctx)
-	if err != nil {
-		return "", err
-	}
-	for _, artifact := range index.Artifacts {
-		for _, v := range artifact.Versions {
-			if v.ID == snapshot.Verdict.Version.ID && v.Writer.Kind == "run" && v.Writer.RunID == runID {
-				if verdictformat.ValidKind(snapshot.Verdict.Verdict) {
-					return snapshot.Verdict.Verdict, nil
-				}
-			}
-		}
-	}
-	return submission.VerdictNone, nil
-}
-
 // noDraftReason is why a repository has no draft before the submit program runs: the
 // verdict is not passed, the session wrote no text, or the harness has no submit program.
-func noDraftReason(verdict string, text *submission.Text) string {
+func noDraftReason(verdict string, text *draftText) string {
 	switch {
-	case verdict == submission.VerdictEscalate:
-		return submission.NoneEscalated
-	case verdict != submission.VerdictPassed:
-		return submission.NoneNotPassed
+	case verdict != verdictPassed:
+		return noneNotPassed
 	case text == nil:
-		return submission.NoneNoText
+		return noneNoText
 	}
 	// The draft is the placeholder that the submit program fills, or that stays when the
 	// harness has no program or the program handles no such repository.
-	return submission.NoneNoProgram
-}
-
-// assembleSubmission is the document that the submit step stores for the repositories of a
-// push: the branch, the verdict, the hand-off's text, and for each repository its commit,
-// the commit it started at and each commit of the run with its step from the hand-off, and
-// its draft as [noDraftReason] has it. repositories are the entries of
-// [preparation.WorkBranch.Version]: a repository that this run did not push has its commit
-// alone.
-func assembleSubmission(branch *preparation.WorkBranch, repositories []preparation.Repository, verdict string, h *handoff) *submission.Submission {
-	text := h.text()
-	doc := &submission.Submission{Ref: branch.Ref, Verdict: verdict, Text: text}
-	reason := noDraftReason(verdict, text)
-	for _, r := range repositories {
-		entry := submission.Repository{System: r.System, Path: r.Path, Commit: r.Commit, Base: &submission.Base{Commit: r.Base.Commit, Branch: r.Base.Branch}, Draft: submission.None(reason, 0)}
-		for _, c := range r.Commits {
-			entry.Commits = append(entry.Commits, submission.Commit{Commit: c.Commit, Step: h.stepOf(c.Commit)})
-		}
-		doc.Repositories = append(doc.Repositories, entry)
-	}
-	return doc
+	return noneNoProgram
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/runapi"
@@ -52,9 +53,9 @@ const (
 	textOutputHasMember = "Remove %s from the %s output: qory fills it at the push."
 	textOutputBroken    = "Fix the %s output: it breaks its schema at %s."
 	textOutputNotJSON   = "Write the %s output as one JSON object: the file is not one."
-	textOutputUnread    = "Fix the %s output so that qory can read it: %s"
-	textOutputNoPush    = "qory run: stored the reply output; the run has no repository to push."
-	textOutputNoCommits = "qory run: stored no %s output: the run pushed no commits to %s."
+	textOutputUnread    = "Fix the %s output so that qory can read it.\n  %s"
+	textOutputNoPush    = "qory run: stored the %s output; the run has no repository to push."
+	textOutputNoCommits = "qory run: stored no %s output: the run pushed no commits to the target.\n  Target: %s"
 )
 
 // maxShownPlace is the most characters of a place in a schema that a line shows: with a type
@@ -201,7 +202,7 @@ func fillOutput(content []byte, t exports.ProcessType, target *contracts.Target,
 	})
 	for _, name := range marked {
 		if _, ok := members[name]; ok {
-			return nil, fmt.Errorf(textOutputHasMember, shownText(name), shown)
+			return nil, fmt.Errorf(textOutputHasMember, provisioner.ShownType(shownText(name)), shown)
 		}
 	}
 	set := func(name string, v any) error {
@@ -290,4 +291,124 @@ func outputName(t exports.ProcessType, target *contracts.Target) string {
 	}
 	sum := sha256.Sum256([]byte(target.Collection))
 	return "t-" + hex.EncodeToString(sum[:])[:32]
+}
+
+// runOutputs is what the push step needs to store the outputs of a session: the folder that
+// has the outbox, the checkout or the working folder, the stage's outputs from the work item,
+// the artifact types of the composed process.yaml, and the documents' target, nil for none.
+type runOutputs struct {
+	root   string
+	stage  []runapi.Output
+	types  []exports.ProcessType
+	target *contracts.Target
+}
+
+// readyOutput is an output of the outbox that passed its checks: the version to store, and the
+// outbox entry that goes once the version is stored.
+type readyOutput struct {
+	push  runapi.Push
+	entry string
+}
+
+// typeOf is the artifact type typ of types, or a type with only its name when the composed
+// process.yaml does not define it.
+func typeOf(types []exports.ProcessType, typ string) exports.ProcessType {
+	for _, t := range types {
+		if t.Name == typ {
+			return t
+		}
+	}
+	return exports.ProcessType{Name: typ}
+}
+
+// recordOf is what this run pushed to the repository of target, from the branch's version
+// after the push: nil for a run with no branch, a target with no address, and a repository
+// that this run pushed nothing to. The commits are those from the run's start to the head of
+// the branch, across all sessions.
+func recordOf(branch *preparation.WorkBranch, target *contracts.Target) *pushRecord {
+	if branch == nil || target == nil || target.Address == nil {
+		return nil
+	}
+	for _, r := range branch.Version {
+		if r.Base == nil || r.System != target.Address.System || r.Path != target.Address.Path {
+			continue
+		}
+		rec := &pushRecord{
+			System: r.System, Path: r.Path, Collection: target.Collection,
+			Branch: branch.Ref, Head: r.Commit, Base: r.Base.Commit, BaseBranch: r.Base.Branch,
+		}
+		for _, c := range r.Commits {
+			rec.Commits = append(rec.Commits, c.Commit)
+		}
+		return rec
+	}
+	return nil
+}
+
+// ready reads, fills and checks each output of the stage that the outbox has, before any
+// version is stored, so an output that breaks its schema stores nothing. A type that marks
+// pushed-commits, or any member, of a run that pushed nothing to the target gets no version,
+// and a line on w. missing is each required output that the outbox does not have.
+func (o *runOutputs) ready(w io.Writer, branch *preparation.WorkBranch, note string) (out []readyOutput, missing []string, err error) {
+	rec := recordOf(branch, o.target)
+	for _, stage := range o.stage {
+		t := typeOf(o.types, stage.Type)
+		shown := provisioner.ShownType(t.Name)
+		files, found, err := readOutput(o.root, t)
+		if err != nil {
+			return nil, nil, fmt.Errorf(textOutputUnread, shown, shownError(err))
+		}
+		if !found {
+			if stage.Required {
+				missing = append(missing, stage.Type)
+			}
+			continue
+		}
+		if t.Schema != nil {
+			if len(t.Marks) > 0 && (rec == nil || marksCommits(t) && len(rec.Commits) == 0) {
+				fmt.Fprintf(w, textOutputNoCommits+"\n", shown, targetShown(o.target))
+				continue
+			}
+			content, err := fillOutput(files[0].Content, t, o.target, rec)
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := checkOutput(content, t); err != nil {
+				return nil, nil, err
+			}
+			files[0].Content = content
+		}
+		sizes := make([]int64, len(files))
+		for i, f := range files {
+			sizes[i] = int64(len(f.Content))
+		}
+		if err := runapi.CheckVersion(t.Name, sizes); err != nil {
+			return nil, nil, fmt.Errorf(textOutputUnread, shown, shownError(err))
+		}
+		push := runapi.Push{Type: t.Name, Name: outputName(t, o.target), Note: note, Files: files}
+		out = append(out, readyOutput{push: push, entry: path.Join(outboxRel, t.Name)})
+	}
+	return out, missing, nil
+}
+
+// targetShown is the target as a line shows it: its address, or its collection when it has no
+// address.
+func targetShown(target *contracts.Target) string {
+	switch {
+	case target == nil:
+		return "the target"
+	case target.Address != nil:
+		return shownText(target.Address.System + "/" + target.Address.Path)
+	}
+	return shownText(target.Collection)
+}
+
+// removeEntry removes the outbox entry entry, relative to root, once its version is stored.
+func removeEntry(root, entry string) error {
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.RemoveAll(entry)
 }

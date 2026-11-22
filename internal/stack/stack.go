@@ -549,8 +549,8 @@ func TierList() string {
 // The access levels a workflow declares, see [Workflow.Access].
 const (
 	AccessRead = "read"
-	// AccessWriteNoPush is a writable checkout, no push step, no submit, and no version of
-	// the artifact submission.
+	// AccessWriteNoPush is a writable checkout, no push step, no outbox, and no stored
+	// output.
 	AccessWriteNoPush = "write-no-push"
 	AccessWrite       = "write"
 )

@@ -134,7 +134,7 @@ func TestARunWithAccessWriteNoPushRunsTheAgentAndPushesNothing(t *testing.T) {
 // access write, or both are write-no-push. The agent commits a file and leaves another
 // in the checkout, which stays writable. The run opens the host proxy once, for the
 // fetch, and no push proxy: it has no push step, the forge has no branch of the work
-// item, and the run API gets no POST, so no version of the artifact submission. A run of
+// item, and the run API gets no POST, so no version of the artifact pull-request. A run of
 // the level write, in the same fixture, opens the host proxy once, for the fetch, and
 // the push proxy once, for its push.
 func TestAWriteNoPushRunOfEachLevelPairPushesNothing(t *testing.T) {

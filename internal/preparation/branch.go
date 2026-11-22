@@ -18,10 +18,10 @@ import (
 // The words of the checkout of a work item's branch. Each is one format string.
 const (
 	textOnBranch        = "qory run: on branch %s at %s"
-	textBranchNoCommit  = "qory run: The stored version of the artifact submission has commit %[1]s, which is not a commit on %[2]s on %[3]s, so the run did not start; the code is used\n  The fetch through the run's gateway failed: %[4]s"
-	textBranchNotCommit = "qory run: The stored version of the artifact submission has %[1]s for %[2]s, which is not a commit, so the run did not start; the code is used"
+	textBranchNoCommit  = "qory run: The version that the run starts from has commit %[1]s, which is not a commit on %[2]s on %[3]s, so the run did not start; the code is used\n  The fetch through the run's gateway failed: %[4]s"
+	textBranchNotCommit = "qory run: The version that the run starts from has %[1]s for %[2]s, which is not a commit, so the run did not start; the code is used"
 	textQoryInBranch    = "qory run: Commit %[2]s of %[1]s has a .qory folder that differs from the one at target version %[3]s, so the run did not start; the code is used\n  qory keeps the files of the run in .qory."
-	textNoCheckout      = "qory run: git cannot check out commit %[2]s of %[1]s, the stored version of the artifact submission, so the run did not start; the code is used\n  The checkout in %[3]s failed: %[4]s"
+	textNoCheckout      = "qory run: git cannot check out commit %[2]s of %[1]s, where the run starts, so the run did not start; the code is used\n  The checkout in %[3]s failed: %[4]s"
 )
 
 // TargetRef is the ref that [Switch] leaves at the target version: [fromSeed] reads which
@@ -34,7 +34,7 @@ const TargetRef = "refs/qory/target-version"
 type WorkBranch struct {
 	// Ref is the branch's name, the same in each repository: qory/<work item id>.
 	Ref string
-	// Version is the entries of the submission version the run read, nil with none, with the
+	// Version is the repositories of the version the run starts from, nil with none, with the
 	// commit of each repository that a [Push] of the run pushed. It may have repositories
 	// that the run does not list, and those are not fetched.
 	Version []Repository
@@ -95,7 +95,7 @@ type WorkRepository struct {
 	// Start is the commit the run started at in the repository: HEAD after [Switch].
 	Start string
 	// DefaultBranch is the name of the repository's default branch that [RunAt] read when it
-	// fetched the repository, "" when it did not read one: the submission has it as base.branch.
+	// fetched the repository, "" when it did not read one: a delivered output has it as pushed-base-branch.
 	DefaultBranch string
 }
 
@@ -111,7 +111,7 @@ func (b *WorkBranch) CommitOf(system, path string) string {
 }
 
 // fresh reports whether the run documents' checkout is the start of the repository path on
-// system: the submission version has no entry for it and no run that a person did not cancel
+// system: the version the run starts from has no entry for it and no run that a person did not cancel
 // pushed a commit to it, so the branch may be missing at the forge.
 func (b *WorkBranch) fresh(system, path string) bool {
 	if b.CommitOf(system, path) != "" {

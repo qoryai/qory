@@ -14,9 +14,9 @@ import (
 	"github.com/qoryai/qory/internal/primitives"
 )
 
-// pullRequestType is a delivered structured type with a title and every mark, as the
+// pullRequestSchemaType is a delivered structured type with a title and every mark, as the
 // software factory's pull-request type has them.
-func pullRequestType(t *testing.T) exports.ProcessType {
+func pullRequestSchemaType(t *testing.T) exports.ProcessType {
 	t.Helper()
 	ref := map[string]any{"$ref": primitives.URL + "#/$defs/reference"}
 	schema := map[string]any{
@@ -58,7 +58,7 @@ var shopPush = &pushRecord{
 // commits as references oldest first, and leaves pushed-commits-left-out alone; the result
 // passes the type's schema.
 func TestAnOutputGetsItsTargetAndEachMarkFromThePush(t *testing.T) {
-	typ := pullRequestType(t)
+	typ := pullRequestSchemaType(t)
 	filled, err := fillOutput([]byte(`{"title":"Fix the cart"}`), typ, shopTarget, shopPush)
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func mustMarshal(t *testing.T, v any) string {
 // and with the member that Qory Apiary sets: each stops with the fix first, line 1 at most 100
 // characters with "qory run: ". A file that is no JSON object stops too.
 func TestAnOutputThatHasAFilledMemberStops(t *testing.T) {
-	typ := pullRequestType(t)
+	typ := pullRequestSchemaType(t)
 	for file, want := range map[string]string{
 		`{"title":"a","target":{"collection":"x"}}`: "Remove target from the pull-request output: qory fills it at the push.",
 		`{"title":"a","head":{"collection":"x"}}`:   "Remove head from the pull-request output: qory fills it at the push.",
@@ -122,8 +122,8 @@ func TestAnOutputThatHasAFilledMemberStops(t *testing.T) {
 // TestAnOutputWithMarksAndNoPushStops is a marked type of a run that pushed nothing to the
 // target: there is nothing to fill the marks from, and the output stops.
 func TestAnOutputWithMarksAndNoPushStops(t *testing.T) {
-	_, err := fillOutput([]byte(`{"title":"a"}`), pullRequestType(t), shopTarget, nil)
-	if err == nil || !strings.HasPrefix(err.Error(), "Fix the pull-request output so that qory can read it: the run pushed no repository") {
+	_, err := fillOutput([]byte(`{"title":"a"}`), pullRequestSchemaType(t), shopTarget, nil)
+	if err == nil || !strings.HasPrefix(err.Error(), "Fix the pull-request output so that qory can read it.\n  the run pushed no repository") {
 		t.Errorf("%v", err)
 	}
 }
@@ -144,7 +144,7 @@ func TestAnOutputThatIsNotDeliveredGetsNoTarget(t *testing.T) {
 // the primitive title: the error has the place /title; a long place is cut, and line 1 with a
 // type of 19 characters and "qory run: " stays within 100 characters.
 func TestAnOutputThatBreaksItsSchemaStopsWithThePlace(t *testing.T) {
-	typ := pullRequestType(t)
+	typ := pullRequestSchemaType(t)
 	filled, err := fillOutput([]byte(`{"title":""}`), typ, shopTarget, shopPush)
 	if err != nil {
 		t.Fatal(err)
@@ -248,7 +248,7 @@ func TestReadOutputReadsTheTypesEntry(t *testing.T) {
 
 // TestMarksCommitsFindsThePushedCommitsMark is a type with and one without pushed-commits.
 func TestMarksCommitsFindsThePushedCommitsMark(t *testing.T) {
-	if !marksCommits(pullRequestType(t)) || marksCommits(exports.ProcessType{Marks: map[string]string{"head": "pushed-head"}}) {
+	if !marksCommits(pullRequestSchemaType(t)) || marksCommits(exports.ProcessType{Marks: map[string]string{"head": "pushed-head"}}) {
 		t.Error("marksCommits is wrong")
 	}
 }

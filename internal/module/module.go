@@ -109,8 +109,8 @@ type PushCheck struct {
 	Reads []string
 }
 
-// SubmitProgram is the program a module ships for the submit step: it reads the
-// submission and writes the forge's links and draft into it. A composed harness has at
+// SubmitProgram is the program a module ships for the submit step of a local run: it reads
+// the draft document and writes the forge's links and draft into it. A composed harness has at
 // most one.
 type SubmitProgram struct {
 	// Command is the program and its arguments. The program is a path inside the module,

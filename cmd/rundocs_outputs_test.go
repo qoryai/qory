@@ -14,6 +14,8 @@ import (
 
 // outputsAPI serves a run API whose work item's stage has outputs, the JSON list of the
 // snapshot's outputs, and counts the reads of the work item.
+// shortcut: the snapshot follows the run API contract at integrations effc22aa, not a
+// response of Qory Apiary; run the test against Qory Apiary once its card A-78 lands.
 func outputsAPI(t *testing.T, outputs string) (string, *atomic.Int32) {
 	t.Helper()
 	var reads atomic.Int32

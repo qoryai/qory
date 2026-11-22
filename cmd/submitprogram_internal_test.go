@@ -3,14 +3,11 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/qoryai/qory/internal/submission"
 )
 
 const (
@@ -29,16 +26,16 @@ func programScript(t *testing.T, body string) string {
 	return path
 }
 
-// passedDocument is a submission of a passed round with a text and one repository on
+// passedDocument is the document of a passed round with a text and one repository on
 // git.example.com with two commits, whose draft is the placeholder.
-func passedDocument() *submission.Submission {
-	return &submission.Submission{
-		Ref: "qory/wi_1", Verdict: submission.VerdictPassed,
-		Text: &submission.Text{Title: "Add a page", Description: "The page lists orders.\nIt has a second line."},
-		Repositories: []submission.Repository{{
+func passedDocument() *draftDocument {
+	return &draftDocument{
+		Ref: "qory/wi_1", Verdict: verdictPassed,
+		Text: &draftText{Title: "Add a page", Description: "The page lists orders.\nIt has a second line."},
+		Repositories: []draftRepository{{
 			System: "git.example.com", Path: "acme/shop", Commit: headID,
-			Base:    &submission.Base{Commit: baseID, Branch: "main"},
-			Commits: []submission.Commit{{Commit: middleID, Step: "implement"}, {Commit: headID, Step: "unreviewed"}},
+			Base:    &draftBase{Commit: baseID, Branch: "main"},
+			Commits: []draftCommit{{Commit: middleID, Step: "implement"}, {Commit: headID, Step: "unreviewed"}},
 			Draft:   placeholder,
 		}},
 	}
@@ -58,26 +55,14 @@ for c in $QORY_SUBMIT_BASE_COMMIT $QORY_SUBMIT_COMMITS; do echo "commit_url $c h
 `
 
 // runProgram is [submitProgram.apply] of a program with command on document, with the lines it printed.
-func runProgram(t *testing.T, p *submitProgram, document *submission.Submission) (*submission.Submission, string) {
+func runProgram(t *testing.T, p *submitProgram, document *draftDocument) (*draftDocument, string) {
 	t.Helper()
 	var out bytes.Buffer
 	got, err := p.apply(context.Background(), &out, document)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := checkDocument(got); err != nil {
-		t.Errorf("the stored document is not a submission: %v", err)
-	}
 	return got, out.String()
-}
-
-// checkDocument checks document against the submission format.
-func checkDocument(document *submission.Submission) error {
-	content, err := json.Marshal(document)
-	if err != nil {
-		return err
-	}
-	return submission.Check(content)
 }
 
 // TestTheProgramRunsOutsideTheWallWithThePersonsEnvironment is a program on the person's
@@ -127,8 +112,8 @@ echo "stdin=$(cat | wc -c | tr -d ' ')"
 // the addresses are stored.
 func TestARoundThatDidNotPassGetsTheAddressesAndNoDraft(t *testing.T) {
 	document := passedDocument()
-	document.Verdict = submission.VerdictChangesRequested
-	document.Repositories[0].Draft = submission.None(submission.NoneNotPassed, 0)
+	document.Verdict = verdictNone
+	document.Repositories[0].Draft = noDraft(noneNotPassed, 0)
 	seen := filepath.Join(t.TempDir(), "seen")
 	program := &submitProgram{command: []string{programScript(t,
 		`echo "$QORY_SUBMIT_DRAFT title=${QORY_SUBMIT_TITLE-unset} file=${QORY_SUBMIT_DESCRIPTION_FILE-unset}" > `+seen+"\n"+fillScript)}}
@@ -189,11 +174,11 @@ echo "draft_action kept"
 }
 
 // TestATitleWithAZeroWidthJoinerPassesTheHandoffAndTheProgramRead is a title of an emoji sequence,
-// which has U+200D: the contract accepts it, so the hand-off keeps the text and the draft line
+// which has U+200D: the contract accepts it, so the pull-request output keeps the text and the draft line
 // that the program prints with it is recorded.
 func TestATitleWithAZeroWidthJoinerPassesTheHandoffAndTheProgramRead(t *testing.T) {
 	const title = "Add \U0001F469\u200d\U0001F4BB docs"
-	given, err := readHandoff(handoffIn(t, `{"text":{"title":"Add \ud83d\udc69\u200d\ud83d\udcbb docs","description":"d"}}`))
+	given, err := readHandoff(handoffIn(t, `{"title":"Add \ud83d\udc69\u200d\ud83d\udcbb docs","text":"d"}`))
 	if err != nil || given == nil || given.text() == nil || len(given.dropped) != 0 || given.text().Title != title {
 		t.Fatalf("the hand-off is %+v, %v, want the text kept with the title %q", given, err, title)
 	}
@@ -275,7 +260,7 @@ func TestARepositoryWithTooManyCommitsGetsNoProgram(t *testing.T) {
 	r := &document.Repositories[0]
 	r.Commits = nil
 	for range maxSubmitCommits + 1 {
-		r.Commits = append(r.Commits, submission.Commit{Commit: headID, Step: "unreviewed"})
+		r.Commits = append(r.Commits, draftCommit{Commit: headID, Step: "unreviewed"})
 	}
 	started := filepath.Join(t.TempDir(), "started")
 	got, printed := runProgram(t, &submitProgram{command: []string{programScript(t, "touch "+started+"\n")}}, document)
@@ -290,7 +275,7 @@ func TestARepositoryWithTooManyCommitsGetsNoProgram(t *testing.T) {
 // TestARepositoryThatTheRunDidNotPushGetsNoProgram is an entry with its commit alone.
 func TestARepositoryThatTheRunDidNotPushGetsNoProgram(t *testing.T) {
 	document := passedDocument()
-	document.Repositories = append(document.Repositories, submission.Repository{System: "git.example.com", Path: "acme/lib", Commit: baseID, Draft: placeholder})
+	document.Repositories = append(document.Repositories, draftRepository{System: "git.example.com", Path: "acme/lib", Commit: baseID, Draft: placeholder})
 	started := filepath.Join(t.TempDir(), "count")
 	_, _ = runProgram(t, &submitProgram{command: []string{programScript(t, "echo x >> "+started+"\n")}}, document)
 	data, _ := os.ReadFile(started)

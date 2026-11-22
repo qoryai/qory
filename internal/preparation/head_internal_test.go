@@ -449,10 +449,10 @@ func TestSeveralRecordedHeadsOfCancelledRuns(t *testing.T) {
 func TestTheTextsOfTheHeadCheckStartWithTheFix(t *testing.T) {
 	branch := "qory/wi_" + strings.Repeat("a", 64)
 	for name, c := range map[string]struct{ text, start string }{
-		"textHeadChanged":   {(&HeadChanged{Branch: branch, System: "git.example.com", Path: "acme/shop", Head: strings.Repeat("a", 40), Expected: strings.Repeat("b", 40)}).Error(), "qory run: Set "},
-		"textHeadMissing":   {(&HeadChanged{Branch: branch, System: "git.example.com", Path: "acme/shop", Expected: strings.Repeat("b", 40)}).Error(), "qory run: Create "},
-		"textHeadNoRead":    {fmt.Sprintf(textHeadNoRead, "acme/shop", "git.example.com", "cause"), "qory run: Take "},
-		"textHandoffCommit": {fmt.Sprintf(textHandoffCommitted, "git.example.com/acme/shop", strings.Repeat("a", 40), ".qory/handoff/submission.json"), "qory run: Keep "},
+		"textHeadChanged":  {(&HeadChanged{Branch: branch, System: "git.example.com", Path: "acme/shop", Head: strings.Repeat("a", 40), Expected: strings.Repeat("b", 40)}).Error(), "qory run: Set "},
+		"textHeadMissing":  {(&HeadChanged{Branch: branch, System: "git.example.com", Path: "acme/shop", Expected: strings.Repeat("b", 40)}).Error(), "qory run: Create "},
+		"textHeadNoRead":   {fmt.Sprintf(textHeadNoRead, "acme/shop", "git.example.com", "cause"), "qory run: Take "},
+		"textOutboxCommit": {fmt.Sprintf(textOutboxCommitted, "git.example.com/acme/shop", strings.Repeat("a", 40), ".qory/outbox/pull-request/pull-request.json"), "qory run: Keep "},
 	} {
 		line, _, _ := strings.Cut(c.text, "\n")
 		if n := utf8.RuneCountInString(line); n > 100 {

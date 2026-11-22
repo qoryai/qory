@@ -634,8 +634,8 @@ func initFolder(ctx context.Context, git gitRunner, dir string) error {
 }
 
 // cloneBranch is the name of the branch that the clone at dir has checked out, the remote's
-// default branch, or "" when git names none or the name is not a branch name: the submission
-// has it as base.branch, and a run does not stop for it.
+// default branch, or "" when git names none or the name is not a branch name: an output
+// has it as pushed-base-branch, and a run does not stop for it.
 func cloneBranch(ctx context.Context, git gitRunner, dir string) string {
 	out, err := git(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil {

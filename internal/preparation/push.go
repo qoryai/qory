@@ -153,12 +153,12 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			return nil, err
 		}
 	}
-	// No repository is pushed when a commit of one has a path of the hand-off folder.
+	// No repository is pushed when a commit of one has a path of the outbox.
 	for i, r := range b.Repositories {
 		if heads[i] == "" {
 			continue
 		}
-		if err := handoffCommitted(ctx, stepGit(noRemote, ""), folders[i], b.system, r, r.Start, heads[i]); err != nil {
+		if err := outboxCommitted(ctx, stepGit(noRemote, ""), folders[i], b.system, r, r.Start, heads[i]); err != nil {
 			return nil, err
 		}
 	}
@@ -223,8 +223,7 @@ func listFailed(b *WorkBranch, err error) error {
 }
 
 // runCommits lists the commits from start, not included, to head, included, of the
-// repository at dir, oldest first, as the commits of a submission with no step: the
-// caller sets each step.
+// repository at dir, oldest first: the commits that the run pushed.
 func runCommits(ctx context.Context, git gitRunner, dir, start, head string) ([]Commit, error) {
 	out, err := git(ctx, dir, "rev-list", "--reverse", start+".."+head)
 	if err != nil {
@@ -686,12 +685,12 @@ func pushCause(output string) string {
 	return shownText(line)
 }
 
-// maxBaseBranch is the most characters of base.branch that the submission format takes.
+// maxBaseBranch is the most characters of the default branch name that the push records.
 const maxBaseBranch = 255
 
 // baseBranch is the default branch name for base.branch: name, or "" when it has more than
-// [maxBaseBranch] characters, since a version that the format refuses would be refused after
-// the push landed.
+// [maxBaseBranch] characters, since a version whose schema stops a longer name would be
+// stopped after the push landed.
 func baseBranch(name string) string {
 	if utf8.RuneCountInString(name) > maxBaseBranch {
 		return ""

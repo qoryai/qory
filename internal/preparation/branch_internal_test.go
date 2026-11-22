@@ -63,7 +63,7 @@ func switchTo(dir string, b *WorkBranch) (string, error) {
 	return strings.TrimSuffix(report.String(), "\n"), err
 }
 
-// TestTheTargetStaysAtItsVersionUntilTheSwitch is a run with a submission version: the fetch
+// TestTheTargetStaysAtItsVersionUntilTheSwitch is a run with a version to start from: the fetch
 // leaves the working folder at the target version, for the compose, and the switch puts
 // it on the branch at the version's commit.
 func TestTheTargetStaysAtItsVersionUntilTheSwitch(t *testing.T) {
@@ -103,7 +103,7 @@ func TestTheTargetStaysAtItsVersionUntilTheSwitch(t *testing.T) {
 	}
 }
 
-// TestABranchWithNoVersionStartsAtTheTargetVersion is a work item with no submission version:
+// TestABranchWithNoVersionStartsAtTheTargetVersion is a work item with no version to start from:
 // the branch is new, at the target version.
 func TestABranchWithNoVersionStartsAtTheTargetVersion(t *testing.T) {
 	needGit(t)
@@ -224,7 +224,7 @@ func TestAFileInTheWayStopsTheCheckout(t *testing.T) {
 
 			_, err := switchTo(dir, b)
 			want := "qory run: git cannot check out commit " + commit[:12] + " of " + testRef +
-				", the stored version of the artifact submission, so the run did not start; the code is used\n  The checkout in acme/shop failed: "
+				", where the run starts, so the run did not start; the code is used\n  The checkout in acme/shop failed: "
 			if err == nil || !strings.HasPrefix(err.Error(), want) {
 				t.Fatalf("err = %v, want it to start with %s", err, want)
 			}
@@ -244,7 +244,7 @@ func TestStopsOnABranchCommitTheRemoteLacks(t *testing.T) {
 
 	b := &WorkBranch{Ref: testRef, Version: versionOf("acme/shop", strings.Repeat("a", 40))}
 	_, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: first, Branch: b})
-	want := "qory run: The stored version of the artifact submission has commit aaaaaaaaaaaa, which is not a commit on acme/shop on git.example.com, so the run did not start; the code is used\n  The fetch through the run's gateway failed: "
+	want := "qory run: The version that the run starts from has commit aaaaaaaaaaaa, which is not a commit on acme/shop on git.example.com, so the run did not start; the code is used\n  The fetch through the run's gateway failed: "
 	if err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Fatalf("err = %v, want it to start with %s", err, want)
 	}
@@ -259,7 +259,7 @@ func TestStopsOnABranchIDThatIsNoCommit(t *testing.T) {
 
 	b := &WorkBranch{Ref: testRef, Version: versionOf("acme/shop", tree)}
 	_, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: first, Branch: b})
-	want := "qory run: The stored version of the artifact submission has " + tree[:12] + " for acme/shop, which is not a commit, so the run did not start; the code is used"
+	want := "qory run: The version that the run starts from has " + tree[:12] + " for acme/shop, which is not a commit, so the run did not start; the code is used"
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %s", err, want)
 	}

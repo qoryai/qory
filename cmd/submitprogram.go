@@ -16,7 +16,6 @@ import (
 
 	"github.com/qoryai/integrations/contracts"
 	"github.com/qoryai/qory/internal/secretmask"
-	"github.com/qoryai/qory/internal/submission"
 )
 
 // The words of the submit program's run. Each states the cause only: line 1 has at most 100
@@ -53,9 +52,9 @@ var submitLimit time.Duration
 
 // submitProgram is the submit program of a run with no run code: the module's command, with the
 // home's path in it, which runs on the person's machine, outside the wall, once for each
-// repository of the submission. The program uses the login of the forge's command line that the
+// repository of the draft document. The program uses the login of the forge's command line that the
 // person has, and gets no credential from qory. A run with a run code has none: the forge's
-// adapter opens its draft from the stored submission.
+// adapter opens its draft from the stored pull-request output.
 type submitProgram struct {
 	command []string
 	limit   time.Duration
@@ -74,7 +73,7 @@ type programEnd struct {
 // the document to store: each repository with the addresses of its commits and its draft, as
 // the program's lines give them, or with the reason it has none. Each line that the program
 // printed on its standard error goes to w. An error is a ctx that ended, which cuts the step.
-func (p *submitProgram) apply(ctx context.Context, w io.Writer, document *submission.Submission) (*submission.Submission, error) {
+func (p *submitProgram) apply(ctx context.Context, w io.Writer, document *draftDocument) (*draftDocument, error) {
 	out := *document
 	out.Repositories = slices.Clone(document.Repositories)
 	for i, r := range document.Repositories {
@@ -92,13 +91,13 @@ func (p *submitProgram) apply(ctx context.Context, w io.Writer, document *submis
 
 // placeholder is the draft of a repository that the program may fill: the verdict is passed,
 // the session wrote text, and no program has run yet.
-var placeholder = submission.None(submission.NoneNoProgram, 0)
+var placeholder = noDraft(noneNoProgram, 0)
 
 // applyTo runs the program for repository r of document and returns r with its results.
-func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *submission.Submission, r submission.Repository) (submission.Repository, error) {
-	fail := func(reason string, exit int) submission.Repository {
+func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *draftDocument, r draftRepository) (draftRepository, error) {
+	fail := func(reason string, exit int) draftRepository {
 		if bytes.Equal(r.Draft, placeholder) {
-			r.Draft = submission.None(reason, exit)
+			r.Draft = noDraft(reason, exit)
 		}
 		return r
 	}
@@ -110,18 +109,18 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 		fmt.Fprintf(w, textProgramTooMany+"\n", len(commits), maxSubmitCommits)
 		// The program did not run, so its exit is 1, as the contract has it for a program that
 		// did not start.
-		return fail(submission.NoneProgramFailed, contracts.SubmitExitForge), nil
+		return fail(noneProgramFailed, contracts.SubmitExitForge), nil
 	}
 	dir, err := os.MkdirTemp("", "qory-submit-")
 	if err != nil {
 		fmt.Fprintf(w, textProgramNoFolder+"\n", shownError(err))
-		return fail(submission.NoneProgramFailed, contracts.SubmitExitForge), nil
+		return fail(noneProgramFailed, contracts.SubmitExitForge), nil
 	}
 	defer os.RemoveAll(dir)
 	input, err := p.input(document, r, commits, dir)
 	if err != nil {
 		fmt.Fprintf(w, textProgramNoFolder+"\n", shownError(err))
-		return fail(submission.NoneProgramFailed, contracts.SubmitExitForge), nil
+		return fail(noneProgramFailed, contracts.SubmitExitForge), nil
 	}
 	end := p.run(ctx, input, dir)
 	if ctx.Err() != nil {
@@ -138,7 +137,7 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 		fmt.Fprintf(w, textProgramLeftOut+"\n", bad.Line, bad.Reason)
 	}
 	r.CommitURL = rec.CommitURLs[r.Commit]
-	r.Base = &submission.Base{Commit: r.Base.Commit, Branch: r.Base.Branch, CommitURL: rec.CommitURLs[r.Base.Commit]}
+	r.Base = &draftBase{Commit: r.Base.Commit, Branch: r.Base.Branch, CommitURL: rec.CommitURLs[r.Base.Commit]}
 	r.Commits = slices.Clone(r.Commits)
 	for i, c := range r.Commits {
 		r.Commits[i].CommitURL = rec.CommitURLs[c.Commit]
@@ -173,15 +172,15 @@ func (p *submitProgram) applyTo(ctx context.Context, w io.Writer, document *subm
 	default:
 		fmt.Fprintf(w, textProgramFailed+"\n", end.exit)
 	}
-	r.Draft = submission.None(rec.Failed.Reason, exit)
+	r.Draft = noDraft(rec.Failed.Reason, exit)
 	return r, nil
 }
 
 // input is the inputs for repository r of document, with its description in a file in dir.
 // The draft is none for a repository whose draft is not the [placeholder], as after a session
-// that did not pass. A run with no run code has no earlier submission, so a draft is never an
-// update.
-func (p *submitProgram) input(document *submission.Submission, r submission.Repository, commits []string, dir string) (submitInput, error) {
+// that did not pass. A run with no run code has no earlier draft document, so a draft is never
+// an update.
+func (p *submitProgram) input(document *draftDocument, r draftRepository, commits []string, dir string) (submitInput, error) {
 	in := submitInput{
 		System: r.System, Path: r.Path, Branch: document.Ref, BaseBranch: r.Base.Branch, BaseCommit: r.Base.Commit,
 		Commits: commits, Draft: contracts.SubmitDraftNone,

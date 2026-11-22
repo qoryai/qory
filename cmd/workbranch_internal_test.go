@@ -5,14 +5,24 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qoryai/integrations/contracts"
+
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
 )
 
-// branchIndex is an index with the versions of the artifact submission, name main, each given
-// as its id and the stage that wrote it, numbered from 1.
+// startTarget is a repository target of the documents, and startName the name of its
+// artifact of a delivered type.
+var (
+	startTarget = &contracts.Target{Collection: "R_1001", Address: &contracts.TargetAddress{System: "git.example.com", Path: "acme/shop"}}
+	startName   = outputName(exports.ProcessType{Send: "after_gate"}, startTarget)
+)
+
+// branchIndex is an index with the versions of the artifact pull-request of [startTarget]'s
+// collection, each given as its id and the stage that wrote it, numbered from 1.
 func branchIndex(versions ...[2]string) *runapi.Index {
-	artifact := runapi.Artifact{Type: submissionType, Name: defaultName, NewestVersion: len(versions)}
+	artifact := runapi.Artifact{Type: "pull-request", Name: startName, NewestVersion: len(versions)}
 
 	for i, version := range versions {
 		stage := version[1]
@@ -57,10 +67,11 @@ func stageSnapshot() *runapi.Snapshot {
 	return snapshot
 }
 
-// approvedAs sets the approved version of the artifact main of index to id, and returns index.
+// approvedAs sets the approved version of the artifact of [startTarget] in index to id, and
+// returns index.
 func approvedAs(index *runapi.Index, id string) *runapi.Index {
 	for i := range index.Artifacts {
-		if index.Artifacts[i].Name == defaultName {
+		if index.Artifacts[i].Name == startName {
 			index.Artifacts[i].ApprovedVersion = &id
 		}
 	}
@@ -68,10 +79,10 @@ func approvedAs(index *runapi.Index, id string) *runapi.Index {
 	return index
 }
 
-// TestChosenSubmission is each rule of the version a run starts at: the newest version of
-// the artifact main that the work item's stage wrote and that is not cancelled, else the
+// TestStartVersion is each rule of the version a run starts at: the newest version of the
+// target's artifact that the work item's stage wrote and that is not cancelled, else the
 // approved version unless the newest version is a withdrawal, else none.
-func TestChosenSubmission(t *testing.T) {
+func TestStartVersion(t *testing.T) {
 	for name, c := range map[string]struct {
 		snapshot *runapi.Snapshot
 		index    *runapi.Index
@@ -132,11 +143,11 @@ func TestChosenSubmission(t *testing.T) {
 			approvedAs(withdrawnAt(branchIndex([2]string{"av_1", "st_a"}, [2]string{"av_2", "st_a"}), "av_2"), "av_1"),
 			"",
 		},
-		"a withdrawn artifact of another name leaves the approved version of main": {
+		"a withdrawn artifact of another name leaves the approved version of the target's": {
 			stageSnapshot(),
 			withdrawnAt(&runapi.Index{Artifacts: []runapi.Artifact{
 				approvedAs(branchIndex([2]string{"av_1", "st_a"}), "av_1").Artifacts[0],
-				{Type: submissionType, Name: "other", Versions: []runapi.Version{{ID: "av_9", Number: 1}, {ID: "av_10", Number: 2}}},
+				{Type: "pull-request", Name: "other", Versions: []runapi.Version{{ID: "av_9", Number: 1}, {ID: "av_10", Number: 2}}},
 			}}, "av_10"),
 			"av_1",
 		},
@@ -144,14 +155,14 @@ func TestChosenSubmission(t *testing.T) {
 		"no artifact": {stageSnapshot(), &runapi.Index{}, ""},
 		"another artifact name": {
 			stageSnapshot(),
-			&runapi.Index{Artifacts: []runapi.Artifact{{Type: submissionType, Name: "other", Versions: []runapi.Version{{ID: "av_1", Number: 1}}}}},
+			&runapi.Index{Artifacts: []runapi.Artifact{{Type: "pull-request", Name: "other", Versions: []runapi.Version{{ID: "av_1", Number: 1}}}}},
 			"",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := chosenSubmission(c.snapshot, c.index)
-			if err != nil {
-				t.Fatal(err)
+			got, artifact := startVersion(c.snapshot, c.index, startTarget)
+			if got == nil && artifact != "" {
+				t.Fatalf("the approved version of %s is not in the index", artifact)
 			}
 
 			switch {
@@ -164,12 +175,29 @@ func TestChosenSubmission(t *testing.T) {
 	}
 }
 
-// TestChosenSubmissionStopsOnAnApprovedVersionOutsideTheIndex keeps an approved version from
-// becoming the newest one.
-func TestChosenSubmissionStopsOnAnApprovedVersionOutsideTheIndex(t *testing.T) {
-	_, err := chosenSubmission(stageSnapshot(), approvedAs(branchIndex([2]string{"av_1", "st_a"}), "av_9"))
-	if err == nil || !strings.HasPrefix(err.Error(), "Report this run to the instance admin of Qory Apiary.") {
-		t.Fatalf("err = %v", err)
+// TestStartVersionFindsNoApprovedVersionOutsideTheIndex is an approved version that the index
+// does not have: no version, with the artifact's type for the stop of the run.
+func TestStartVersionFindsNoApprovedVersionOutsideTheIndex(t *testing.T) {
+	got, artifact := startVersion(stageSnapshot(), approvedAs(branchIndex([2]string{"av_1", "st_a"}), "av_9"), startTarget)
+	if got != nil || artifact != "pull-request" {
+		t.Fatalf("got %+v of %q, want none of pull-request", got, artifact)
+	}
+}
+
+// TestStartVersionTakesTheLatestOfTwoTypes is two delivered types of the target's collection,
+// each with a version of the stage: the version with the later time wins, with its type. A
+// target with no address has no start.
+func TestStartVersionTakesTheLatestOfTwoTypes(t *testing.T) {
+	stage := "st_b"
+	index := &runapi.Index{Artifacts: []runapi.Artifact{
+		{Type: "pull-request", Name: startName, Versions: []runapi.Version{{ID: "av_1", Number: 1, StageID: &stage, At: "2026-11-02T09:00:00Z"}}},
+		{Type: "notes", Name: startName, Versions: []runapi.Version{{ID: "av_2", Number: 1, StageID: &stage, At: "2026-11-02T10:00:00Z"}}},
+	}}
+	if got, artifact := startVersion(stageSnapshot(), index, startTarget); got == nil || got.ID != "av_2" || artifact != "notes" {
+		t.Errorf("got %+v of %q, want av_2 of notes", got, artifact)
+	}
+	if got, _ := startVersion(stageSnapshot(), index, &contracts.Target{Collection: "R_1001"}); got != nil {
+		t.Errorf("a target with no address starts at %s", got.ID)
 	}
 }
 

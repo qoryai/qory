@@ -7,29 +7,39 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/qoryai/integrations/contracts"
+
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
-	"github.com/qoryai/qory/internal/submission"
 )
 
-// submissionType is the artifact type of a work item's submission, and maxSubmissionFile
-// the largest file of one of its versions in bytes, the type's size limit in the software
-// factory.
+// maxStartFile is the largest file of the version that a run starts from, in bytes: the size
+// limit of a delivered type.
+const maxStartFile = 786432
+
+// The words of a run whose start, the head of the version that it starts from, is unknown.
+// Line 1 is the fix, and the cause is on line 2.
 const (
-	submissionType    = "submission"
-	maxSubmissionFile = 256 << 10
+	textNoStart          = "Report the run to the instance admin of Qory Apiary: no start found" + codeUsed + "\n  %s"
+	textNoStartEntry     = "Version %d of the artifact %s, from run %s, has no pushed commit on %s."
+	textNoStartReference = "Version %d of the artifact %s has %d top-level references to commit %s of %s, not 1."
+	textNoStartFile      = "Version %d of the artifact %s has no one JSON file of at most %d bytes."
+	textNoApproved       = "The approved version of the artifact %s is not in the artifact's index."
 )
 
 // readWorkItem reads the work item that r's run is for, at the start of the run, with or
 // without a repository: it sets r.snapshot and r.runNumber from the work item snapshot of
 // GET /work-item. It reads nothing for a run that is not from a run code or has no work
-// item, and for a server with the feature workflow_model off. Each error ends with
+// item, for a run with no run API, which has no control plane to store an output in, and
+// for a server with the feature workflow_model off. Each error ends with
 // [codeUsed]. The read ends at deadline, the end of the run's setup, and has no such end
 // when deadline is zero.
 func (r *codeRun) readWorkItem(ctx context.Context, run openedRun, deadline time.Time) error {
-	if r == nil || r.workItem == "" {
+	if r == nil || r.workItem == "" || !hasRunAPI(run) {
 		return nil
 	}
 	client, ctx, cancel, err := setupClient(ctx, run, deadline)
@@ -91,33 +101,16 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, deadline time.T
 
 	branch := &preparation.WorkBranch{Ref: preparation.WorkItemRef(r.workItem)}
 
-	version, err := chosenSubmission(snapshot, index)
-	if err != nil {
-		return nil, err
+	version, artifact := startVersion(snapshot, index, r.targetRef)
+	if version == nil && artifact != "" {
+		return nil, fmt.Errorf(textNoStart, fmt.Sprintf(textNoApproved, shownText(artifact)))
 	}
-
-	if version == nil {
-		if err := pushedStarts(branch, snapshot.PushedCommits); err != nil {
+	if version != nil {
+		commit, err := startCommit(ctx, client, version, artifact, snapshot.PushedCommits, r.targetRef)
+		if err != nil {
 			return nil, err
 		}
-
-		return branch, nil
-	}
-
-	document, err := readSubmissionVersion(ctx, client, version)
-	if err != nil {
-		return nil, fmt.Errorf("%w%s", err, codeUsed)
-	}
-
-	if document.Ref != branch.Ref {
-		return nil, fmt.Errorf("Version %d of the artifact %s has a ref other than %s, so the run did not start%s",
-			version.Number, submissionType, branch.Ref, codeUsed)
-	}
-
-	// A repository starts at the commit of the version; its commits, links and draft
-	// belong to the run that wrote it.
-	for _, r := range document.Repositories {
-		branch.Version = append(branch.Version, preparation.Repository{System: r.System, Path: r.Path, Commit: r.Commit})
+		branch.Version = []preparation.Repository{{System: r.targetRef.Address.System, Path: r.targetRef.Address.Path, Commit: commit}}
 	}
 
 	if err := pushedStarts(branch, snapshot.PushedCommits); err != nil {
@@ -138,7 +131,7 @@ func pushedStarts(branch *preparation.WorkBranch, pushed []runapi.PushedEntry) e
 	order := [][2]string{}
 
 	for _, entry := range pushed {
-		if !preparation.CommitID(entry.Commit) {
+		if !lowerCommitID(entry.Commit) {
 			return fmt.Errorf("Report this run to the instance admin of Qory Apiary.\n"+
 				"  The list of pushed commits has %s, which is not a full commit id, so the run did not start%s", shownText(entry.Commit), codeUsed)
 		}
@@ -173,63 +166,99 @@ func featureOff(err error) bool {
 	return errors.As(err, &apiError) && apiError.Status == http.StatusNotFound && apiError.Code == ""
 }
 
-// chosenSubmission is the version of the artifact type submission that a run starts at: the
-// newest version of the artifact main that the work item's stage wrote and that is not
-// cancelled; else the version that a gate approved; nil with none of these, where the run
-// starts at what the run documents check out. A newest version that is a withdrawal counts
-// as none.
-func chosenSubmission(snapshot *runapi.Snapshot, index *runapi.Index) (*runapi.Version, error) {
-	for _, artifact := range index.Artifacts {
-		if artifact.Type != submissionType || artifact.Name != defaultName {
+// startVersion is the version that a run starts from, of the artifact of target's
+// collection, the name [outputName] gives a delivered output: the newest version that the work
+// item's stage wrote and that is not cancelled, as for Build; else the version that a gate
+// approved, as for Verify; nil with none of these, where the run starts at what the run
+// documents check out. A newest version that is a withdrawal counts as none. artifact is the
+// type of the version's artifact; with a nil version it is set only when the approved version
+// is not in the index. When types of the run's outputs have such artifacts, the version with
+// the latest time of all wins.
+// shortcut: two delivered types of one stage written by different runs give the newest one;
+// replace it when the run API names the version a run starts from.
+func startVersion(snapshot *runapi.Snapshot, index *runapi.Index, target *contracts.Target) (version *runapi.Version, artifact string) {
+	if target == nil || target.Address == nil {
+		return nil, ""
+	}
+	name := outputName(exports.ProcessType{Send: "delivered"}, target)
+	stage := snapshot.Stage.ID
+	for _, a := range index.Artifacts {
+		if a.Name != name {
 			continue
 		}
-
-		stage := snapshot.Stage.ID
-		if newest := newestNotCancelled(artifact); newest != nil && stage != nil && newest.StageID != nil && *stage == *newest.StageID {
-			return newest, nil
-		}
-
-		if artifact.ApprovedVersion == nil || withdrawn(artifact) {
-			return nil, nil
-		}
-
-		for i := range artifact.Versions {
-			if artifact.Versions[i].ID == *artifact.ApprovedVersion {
-				return &artifact.Versions[i], nil
+		pick := newestNotCancelled(a)
+		if pick == nil || stage == nil || pick.StageID == nil || *stage != *pick.StageID {
+			pick = nil
+			if a.ApprovedVersion != nil && !withdrawn(a) {
+				for i := range a.Versions {
+					if a.Versions[i].ID == *a.ApprovedVersion {
+						pick = &a.Versions[i]
+					}
+				}
+				if pick == nil {
+					return nil, a.Type
+				}
 			}
 		}
-
-		return nil, fmt.Errorf("Report this run to the instance admin of Qory Apiary. The approved version of the artifact %s is "+
-			"not in the artifact's index.%s", submissionType, codeUsed)
+		if pick != nil && (version == nil || pick.At > version.At) {
+			version, artifact = pick, a.Type
+		}
 	}
-
-	return nil, nil
+	return version, artifact
 }
 
-// readSubmissionVersion downloads the one file of version and returns it, checked against the
-// submission format.
-func readSubmissionVersion(ctx context.Context, client *runapi.Client, version *runapi.Version) (*submission.Submission, error) {
-	if len(version.Files) != 1 || version.Files[0].Size > maxSubmissionFile {
-		return nil, fmt.Errorf("Version %d of the artifact %s does not have exactly one file of at most %d bytes, so the run did not start",
-			version.Number, submissionType, maxSubmissionFile)
+// startCommit is the commit a run starts at in the target's repository: the newest commit of
+// pushed, the work item's pushed commits, that the run which wrote version pushed to the
+// target's address, confirmed by the version's file, which has exactly one top-level reference
+// to that commit in the target's collection. typ is the version's artifact type.
+func startCommit(ctx context.Context, client *runapi.Client, version *runapi.Version, typ string, pushed []runapi.PushedEntry, target *contracts.Target) (string, error) {
+	shown := shownText(typ)
+	repository := shownText(target.Address.System + "/" + target.Address.Path)
+	commit := ""
+	for _, e := range pushed {
+		if e.RunID == version.Writer.RunID && e.System == target.Address.System && e.Path == target.Address.Path {
+			commit = e.Commit
+		}
 	}
-
+	if commit == "" || version.Writer.Kind != "run" {
+		return "", fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartEntry, version.Number, shown, shownText(version.Writer.RunID), repository))
+	}
+	if len(version.Files) != 1 || version.Files[0].Size > maxStartFile {
+		return "", fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartFile, version.Number, shown, maxStartFile))
+	}
 	var content bytes.Buffer
 	if err := client.Download(ctx, version.ID, version.Files[0], &content); err != nil {
-		return nil, err
+		return "", fmt.Errorf("%w%s", err, codeUsed)
 	}
-
-	if err := submission.Check(content.Bytes()); err != nil {
-		return nil, fmt.Errorf("Version %d of the artifact %s does not match the submission format, so the run did not start: %w", version.Number, submissionType, err)
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(content.Bytes(), &members); err != nil {
+		return "", fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartFile, version.Number, shown, maxStartFile))
 	}
-
-	var document submission.Submission
-	if err := json.Unmarshal(content.Bytes(), &document); err != nil {
-		return nil, fmt.Errorf("Version %d of the artifact %s cannot be read as a submission document, so the run did not start: %w", version.Number, submissionType, err)
+	found := 0
+	for _, raw := range members {
+		var ref struct {
+			Collection string `json:"collection,case:strict"`
+			Address    *struct {
+				System string `json:"system,case:strict"`
+				Path   string `json:"path,case:strict"`
+			} `json:"address,case:strict"`
+		}
+		if json.Unmarshal(raw, &ref) == nil && ref.Collection == target.Collection && ref.Address != nil && ref.Address.Path == commit {
+			found++
+		}
 	}
-
-	return &document, nil
+	if found != 1 {
+		return "", fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartReference, version.Number, shown, found, shownCommitID(commit), repository))
+	}
+	return commit, nil
 }
+
+// lowerCommitID reports whether v is a full commit id in lower case, the form that the run
+// API and the pull-request output use: 40 or 64 lower-case hexadecimal digits.
+func lowerCommitID(v string) bool { return preparation.CommitID(v) && strings.ToLower(v) == v }
+
+// shownCommitID is the first 12 characters of commit, a full commit id.
+func shownCommitID(commit string) string { return commit[:min(12, len(commit))] }
 
 // fetchStepNameOn is [fetchStepName] with the branch and the commit a run starts at, for
 // a run with branch set: the version's commit of the target, or the target version.

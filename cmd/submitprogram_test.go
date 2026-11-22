@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,15 +38,15 @@ func newProgramRepo(t *testing.T, access string) (p *pushRepo, log string) {
 	return p, log
 }
 
-// passedWithText is an agent that commits a file and writes a hand-off with a text, and the
-// verdict of the work item that this run wrote: passed.
+// passedWithText is an agent that commits a file and writes a pull-request output with a
+// title and a text, and the verdict of the work item that this run wrote: passed.
 func passedWithText(t *testing.T, p *pushRepo) func(string) {
 	p.api.verdict = "passed"
+	p.noOutput = true
 	return func(dir string) {
 		writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
 		commitAll(t, dir, "Add a file")
-		writeFile(t, filepath.Join(dir, ".qory", "handoff", "submission.json"),
-			`{"text":{"title":"Add a file","description":"A file."},"steps":{"`+gitHead(t, dir)+`":"implement"}}`)
+		writeFile(t, filepath.Join(dir, ".qory", "outbox", "pull-request", "pull-request.json"), `{"title":"Add a file","text":"A file."}`)
 	}
 }
 
@@ -63,19 +64,19 @@ func wantsNoProgram(t *testing.T, r pushed, log string) {
 }
 
 // TestARunWithARunCodeRunsNoSubmitProgram is a passed round of a run from a run code, of a
-// harness with a submit program: qory pushes and stores the submission, and starts no program,
-// no relay and no container. The draft is no-program, for the forge's adapter to fill from the
-// stored submission, and no commit has an address.
+// harness with a submit program: qory pushes and stores the pull-request output, and starts no
+// program, no relay and no container. The stored version has no draft, for the forge's adapter
+// to open from the stored output, and no commit has an address.
 func TestARunWithARunCodeRunsNoSubmitProgram(t *testing.T) {
 	p, log := newProgramRepo(t, "write")
 	r := p.run(t, passedWithText(t, p), nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
-	repo := p.api.document(t, 1).Repositories[0]
-	if got := string(repo.Draft); got != `{"none":"no-program"}` {
-		t.Errorf("the draft is %s, want no-program", got)
+	doc := p.api.document(t, 1)
+	if _, ok := doc["draft"]; ok || doc["title"] != "Add a file" || doc["text"] != "A file." || len(commitsOf(doc)) != 1 {
+		t.Errorf("the version is %+v, want the output's title and text, one commit and no draft", doc)
 	}
-	if repo.CommitURL != "" || repo.Base == nil || repo.Base.CommitURL != "" || len(repo.Commits) != 1 || repo.Commits[0].CommitURL != "" {
-		t.Errorf("the repository has addresses: %+v", repo)
+	if raw, _ := json.Marshal(doc); strings.Contains(string(raw), "commit_url") {
+		t.Errorf("the version has addresses: %s", raw)
 	}
 	if posts, _, stored := p.api.counts(); posts != 1 || stored != 1 {
 		t.Errorf("%d POST and %d versions, want 1 and 1", posts, stored)

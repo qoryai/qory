@@ -784,9 +784,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// [transcriptLinkFor].
 			var link transcriptLink
 			var branch *preparation.WorkBranch
-			// handoffRoot is the checkout that holds the hand-off file of a run on a work item's
-			// branch, and program the composed harness's submit program, nil for none.
-			var handoffRoot string
+			// outputs is what the push step stores a session's outputs from, nil for none, and
+			// program the composed harness's submit program, nil for none.
+			var outputs *runOutputs
 			var program *submitProgram
 			// codexFrom is what a walled Codex run writes its Codex home from, set by the
 			// compose, see [walledCodexHome].
@@ -825,11 +825,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// The report on disk can be another run's by now, so the run reads what it composed.
 				rep, harness, workflows := c.rep, c.harness, c.workflows
 				// types are the artifact types of the composed process.yaml, which inputs.json
-				// and the submit step read.
+				// and the submit step read; the send of each comes from the documents' deliver.
 				types, _ := harnessTypes(rep)
-				if fromCode != nil {
-					fromCode.types = types
-				}
 				extensions, pins, pinFile = rep.Extensions, c.runtimes, c.pinFile
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
@@ -870,27 +867,27 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// The documents' deliver is the run's at level write, and a different one in the
 				// harness gets a line.
 				submitLevel := accessOf(fromCode, workflows)
-				// Only a run at level write submits: a run at write-no-push or read has no
-				// submit program and no hand-off file.
-				if submitLevel == stack.AccessWrite {
+				// Only a run at level write stores its outputs: a run at write-no-push or read
+				// has no submit program and no outbox.
+				if submitLevel == stack.AccessWrite && fromCode.writes() && fromCode.snapshot != nil {
 					if branch != nil {
-						// The hand-off file is in the checkout's .qory, which no commit has: a
-						// walled session writes it through the checkout's mount. Its folder is
-						// in the checkout's .git/info/exclude, which no commit has either, so a
-						// git add -A or git commit -a of the agent leaves the file out.
-						if err := render.Exclude(at.root, handoffExclude); err != nil {
+						// The outbox is in the checkout's .qory, which no commit has: a walled
+						// session writes it through the checkout's mount. Its folder is in the
+						// checkout's .git/info/exclude, which no commit has either, so a git add
+						// -A or git commit -a of the agent leaves the outbox out.
+						if err := render.Exclude(at.root, outboxExclude); err != nil {
 							return false, err
 						}
-						handoffRoot = at.root
-						spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{handoffEnv: handoffPath(at.root)})
 					}
+					outputs = &runOutputs{root: at.root, stage: fromCode.snapshot.Outputs, types: fromCode.deliveredTypes(types), target: fromCode.targetRef}
+					spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{outboxEnv: outboxPath(at.root)})
 				}
 				// The composed harness's submit program runs on a run with neither a run code nor a
 				// run key, on the person's machine and with the person's login of the forge's
 				// command line. A run with a run code or a run key has none: it is a dispatched run,
-				// and the forge's adapter opens its draft from the stored submission. Everything of
-				// the local submit step follows from program: the hand-off exclusion and
-				// QORY_SUBMISSION_HANDOFF of the copy, copied.submits and submitLocal.
+				// and the forge's adapter opens its draft from the stored pull-request output.
+				// Everything of the local submit step follows from program: the outbox exclusion
+				// and QORY_OUTBOX of the copy, copied.submits and submitLocal.
 				if code == nil && key == nil && c.submitProgram != nil {
 					program = &submitProgram{command: c.submitProgram.Command, limit: submitLimit}
 				}
@@ -1256,10 +1253,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// commit has: the copy's .qory stays out of the git session, and its folder out of a
 				// git add -A of the agent.
 				if program != nil && !readOnly && !copied.plain {
-					if err := copied.dir.Exclude(handoffExclude); err != nil {
+					if err := copied.dir.Exclude(outboxExclude); err != nil {
 						return &runLineError{codeLine(err)}
 					}
-					spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{handoffEnv: handoffPath(copied.dir.Work())})
+					spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{outboxEnv: outboxPath(copied.dir.Work())})
 					copied.submits = true
 				}
 				return nil
@@ -1651,7 +1648,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// fails after the close changes only qory run's exit status: only the close proves
 				// that no container is left.
 				ending = pushEnding{session: out, limit: timeout}
-				pushes := keepsWork(fromCode, level, branch, res, err)
+				pushes := keepsWork(fromCode, level, branch, outputs, res, err)
 				returns = copied != nil && !copied.readOnly && (err == nil && res != nil || joined)
 				if copied != nil {
 					copied.cutBy = func() string { return ending.cutLine(stopNow(), returnAfterSignal) }
@@ -1701,7 +1698,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						ctx: ctx, again: again, limit: limit, stopNow: stopNow,
 						run: run, stderr: streams.errOut, branch: branch, dir: cwd, runID: spec.RunID,
 						runNumber: fromCode.runNumber, agentStopped: walled, checks: checks,
-						shared: fromCode.shared, handoff: handoffRoot,
+						shared: fromCode.shared, outputs: outputs,
 					}
 					out, pushErr = pushAfterSession(push, &ending, out)
 				}

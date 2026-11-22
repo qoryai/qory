@@ -137,16 +137,16 @@ type codeRun struct {
 	workItem string
 	// deliver is the documents' deliver, the type and the send of each artifact the run
 	// delivers: the one place qory takes them from, never the composed harness's
-	// process.yaml, see [codeRun.deliverLines]. nil when the documents have none.
+	// process.yaml, see [codeRun.deliveredTypes] and [codeRun.deliverLines]. nil when the
+	// documents have none.
 	deliver []contracts.Deliver
 
 	// runNumber is the run's number on the server, and snapshot the work item snapshot
 	// that the run read at its start, nil for none: [codeRun.readWorkItem] sets both.
 	runNumber int
 	snapshot  *runapi.Snapshot
-	// types are the artifact types of the composed harness's process.yaml, as
-	// [harnessTypes] reads them, which the compose of each session sets.
-	types []exports.ProcessType
+	// targetRef is the documents' target, nil for none: the target of a delivered output.
+	targetRef *contracts.Target
 }
 
 // The harness of a run from a run code as a text shows it: the documents' harness
@@ -231,7 +231,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Target != nil && doc.Target.Address != nil {
 		target.System, target.Path, target.Version = doc.Target.Address.System, doc.Target.Address.Path, doc.TargetVersion
 	}
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, harnessDoc: doc.Harness, runSettings: doc.RunSettings, shared: doc.SharedRun, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: fullSuiteIn(doc.TypeSettings), hidden: hidden, target: target, access: doc.Access}
+	r := &codeRun{targetRef: doc.Target, runtime: runtime, settings: settings, harness: harness, harnessDoc: doc.Harness, runSettings: doc.RunSettings, shared: doc.SharedRun, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: fullSuiteIn(doc.TypeSettings), hidden: hidden, target: target, access: doc.Access}
 	if doc.Subject != nil && doc.Subject.Kind == provisioner.SubjectWorkItem {
 		r.workItem = doc.Subject.ID
 	}
@@ -658,6 +658,30 @@ func (r *codeRun) outputs(types []exports.ProcessType) []inputOutput {
 			}
 		}
 		out = append(out, entry)
+	}
+	return out
+}
+
+// deliveredTypes is types, the artifact types of the composed harness, with the send of each
+// from r's deliver, the documents' deliver: a type that deliver does not list has no send,
+// and a type that deliver lists and types do not define is added with its send alone. The
+// harness's process.yaml sends nothing on a run from a run code.
+func (r *codeRun) deliveredTypes(types []exports.ProcessType) []exports.ProcessType {
+	out := make([]exports.ProcessType, 0, len(types))
+	for _, t := range types {
+		t.Send = ""
+		out = append(out, t)
+	}
+	if r == nil {
+		return out
+	}
+	for _, d := range r.deliver {
+		i := slices.IndexFunc(out, func(t exports.ProcessType) bool { return t.Name == d.Type })
+		if i < 0 {
+			out = append(out, exports.ProcessType{Name: d.Type, Send: d.Send})
+			continue
+		}
+		out[i].Send = d.Send
 	}
 	return out
 }
