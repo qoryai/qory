@@ -58,6 +58,8 @@ type WorkBranch struct {
 	setupChanges map[string]map[string]string
 	// pushed is each repository the last [Push] pushed, as a line shows it.
 	pushed []string
+	// readsShown is, by [WorkRepository.Dir], each read target that [readsAhead] printed.
+	readsShown map[string]bool
 	// landed is each repository the last [Push] pushed, with the commit its branch is at.
 	landed []Landed
 }

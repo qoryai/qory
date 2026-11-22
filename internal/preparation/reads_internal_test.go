@@ -260,7 +260,8 @@ func TestAReadTargetGetsTheWorkBranchCommit(t *testing.T) {
 // target changed too: the push moves the target alone, the read targets' remotes have no
 // work branch, and the version that the check gets and that Push returns has the target
 // alone. Without the skip of read targets in [Push], the read targets would land, since
-// their remotes take the push.
+// their remotes take the push. Each read target's commit gets the line of [textReadAhead],
+// and a second Push prints it no more.
 func TestOnlyTheTargetIsPushed(t *testing.T) {
 	dir, b, base := readsOnBranch(t, nil)
 	write(t, filepath.Join(dir, "change.txt"), "target\n")
@@ -297,15 +298,25 @@ func TestOnlyTheTargetIsPushed(t *testing.T) {
 	if landed := b.Landed(); len(landed) != 1 || landed[0].Path != "acme/shop" {
 		t.Errorf("landed %+v", landed)
 	}
+	// Each read target's commit gets its line once in the run.
+	for _, path := range []string{"acme/api", "acme/docs"} {
+		if want := fmt.Sprintf(textReadAhead+"\n", path); strings.Count(lines, want) != 1 {
+			t.Errorf("the lines lack %q once:\n%s", want, lines)
+		}
+	}
+	if _, lines, err := pushChecked(dir, b, true, nil); err != nil || strings.Contains(lines, "read-only repository") {
+		t.Errorf("the second push: %v\n%s", err, lines)
+	}
 }
 
 // TestAReadCheckoutStopsNoPush is a read-only checkout with an index lock, with the stop of
-// the agent not proven: no check of the read target stops the push of the target.
+// the agent not proven: no check of the read target stops the push of the target, and a
+// read target with no commit gets no line.
 func TestAReadCheckoutStopsNoPush(t *testing.T) {
 	dir, b, _ := readsOnBranch(t, nil)
 	write(t, filepath.Join(dir, "change.txt"), "target\n")
 	write(t, filepath.Join(dir, ".qory", "repositories", "acme", "docs", ".git", "index.lock"), "")
-	if _, lines, err := pushWith(dir, b, false); err != nil || !strings.Contains(lines, "to acme/shop at ") {
+	if _, lines, err := pushWith(dir, b, false); err != nil || !strings.Contains(lines, "to acme/shop at ") || strings.Contains(lines, "read-only repository") {
 		t.Errorf("%v\n%s", err, lines)
 	}
 }

@@ -28,8 +28,10 @@ import (
 
 // The words of the push step of a write run. Each is one format string.
 const (
-	textNoNewCommits     = "qory run: no new commits to push"
-	textPushed           = "qory run: pushed %s to %s at %s"
+	textNoNewCommits = "qory run: no new commits to push"
+	textPushed       = "qory run: pushed %s to %s at %s"
+	// textReadAhead is the cause alone: the push goes on without the read target's commits.
+	textReadAhead        = "qory run: The commits in a read-only repository were not kept: a run changes only its target.\n  The repository is %s."
 	textForgeLine        = "qory run: remote: %s"
 	textNestedRepository = "qory run: have the agent leave plain files in %s of %s to push them: that folder is a repository, so qory left it out of the commit, and what it has stays in the working folder"
 	textLockRemoved      = "qory run: removed .git/index.lock of %s, which the agent left when it stopped"
@@ -114,7 +116,8 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 // [WorkBranch.PushedPaths] lists the repositories of the last Push alone.
 //
 // A read target, [WorkRepository.ReadOnly], is skipped in each step: it is not checked,
-// committed or pushed, and the version has no entry of it. Before any git writes,
+// committed or pushed, and the version has no entry of it. [readsAhead] prints a line for
+// each read target with commits past its [WorkRepository.Start]. Before any git writes,
 // [safeAfterRun] checks the target and [safeFurther] each further repository the push may
 // move, since the agent could write each .git. Every git runs with the environment
 // [proxygit.Env] makes, so it reads no system or global configuration file, and with
@@ -148,6 +151,7 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			work = append(work, i)
 		}
 	}
+	readsAhead(ctx, dir, b, report)
 	folders := make([]string, len(b.Repositories))
 	for _, i := range work {
 		r := b.Repositories[i]
@@ -607,6 +611,32 @@ func addEntry(sum io.Writer, path string) error {
 		fmt.Fprintf(sum, "other %s\x00", info.Mode().Type())
 	}
 	return nil
+}
+
+// readsAhead prints [textReadAhead] on report for each read target of b, in the working
+// folder dir, whose HEAD has a commit that its [WorkRepository.Start] does not have, once per
+// run: b records each read target it printed. git runs there only after [safeFurther] passed.
+// shortcut: a read target that fails that check, or whose git fails, gets no line; check it
+// in a container if a run must report those too.
+func readsAhead(ctx context.Context, dir string, b *WorkBranch, report io.Writer) {
+	for _, r := range b.Repositories {
+		if !r.ReadOnly || b.readsShown[r.Dir] {
+			continue
+		}
+		folder := filepath.Join(dir, filepath.FromSlash(r.Dir))
+		if safeFurther(ctx, dir, folder, true) != nil {
+			continue
+		}
+		out, err := stepGit(noRemote, "")(ctx, folder, "rev-list", "--max-count=1", "HEAD", "^"+r.Start)
+		if err != nil || strings.TrimSpace(out) == "" {
+			continue
+		}
+		if b.readsShown == nil {
+			b.readsShown = map[string]bool{}
+		}
+		b.readsShown[r.Dir] = true
+		fmt.Fprintf(report, textReadAhead+"\n", shownPath(r.Path))
+	}
 }
 
 // headPast is HEAD of the repository r at dir when it is past [WorkRepository.Commit], ""

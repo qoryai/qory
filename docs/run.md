@@ -2126,43 +2126,41 @@ the run stops as it does for documents that break the schema. Only a run whose s
   read-only at the same path. The file has the inputs' members as they came, then one
   member that qory adds once the harness is composed, `qory`:
   `{"harness_extensions": {…}, "outputs": […], "start_commits": […], "start_artifacts": "…"}`.
-  `harness_extensions` is the harness
-  report's `extensions`, or `{}` when the harness has none. `outputs` is the outputs of the
-  work item's stage, or `[]` for none and for a run with no run API (see [The outputs of a
-  session](#the-outputs-of-a-session)). `start_commits` has, for each repository of the
-  run's branch that the run may push, `{"path": <the repository's folder, absolute>, "commit": <the commit the
-  session starts at>}`, `[]` for a run with no branch; and `start_artifacts` is the folder
-  of the session's launch snapshot, `<in>/start-artifacts` (see [The scope check before the
+  `harness_extensions` is the harness report's `extensions`, or `{}` when the harness has
+  none. `outputs` is the outputs of the work item's stage, or `[]` for none and for a run
+  with no run API (see [The outputs of a session](#the-outputs-of-a-session)).
+  `start_commits` has, for each repository of the run's branch that the run may push,
+  `{"path": <the repository's folder, absolute>, "commit": <the commit the session starts
+  at>}`, `[]` for a run with no branch; and `start_artifacts` is the folder of the session's
+  launch snapshot, `<in>/start-artifacts` (see [The scope check before the
   push](#the-scope-check-before-the-push)). Session 1 writes the file after the branch
-  switch and the setup, so its start commits are those the agent starts at; a later
-  session writes it before it starts, with the commits that the last push landed. A walled
-  session whose `--mount` or `wall.mounts` is at or inside `in/` stops before its setup:
-  for a run from a run code with `machine_setup_invalid` and `qory run: A wall mount is at
-  or inside the read-only inputs folder, so the session did not start.`, for a run with a
-  run key with `qory run: Remove the mount at or inside the read-only inputs folder from
-  wall.mounts or --mount.`; the mount and `in/` follow on two lines. A launch snapshot whose
-  fetch fails stops the session with `run_api_failed` and `qory run: The fetch of the
-  session's start artifacts failed, so the agent did not start.`, with the cause on the
-  next line. A launch snapshot whose folders on this machine cannot be removed, made or
-  copied stops the session with `machine_setup_invalid` and `qory run: copying the
-  session's start artifacts on this machine failed, so the agent did not start.`, with
-  the cause on the next line. The workflow reads them from the path after its
-  name in the prompt,
-  and a push check gets the same path after `--inputs` (see Push checks in
-  `contracts/harness/v1/README.md`). qory also writes the same bytes to `inputs.json` in
-  the composed home, mode 0644, so the harness's hooks read them as
-  `$QORY_HARNESS_HOME/inputs.json`. In a home from `--home` or `harness.home`, qory removes
-  that copy when the run ends, also after a failure or a stop; a home for that run alone goes
-  as a whole. A run with a run key and no run code gets the same files, with the member `qory`
-  alone, since it has no inputs: `{"qory": {"harness_extensions": {…}, "outputs": [], "start_commits": […], "start_artifacts": "…"}}` in
-  `in/` (read-only
-  behind a wall), in the composed home, and after `--inputs` of its push checks.
-  A home that already has `inputs.json` stops the run with exit 1: `Remove inputs.json from
-  the home, or omit --home and harness.home, then take the work item in again.` Inputs that
-  have a member `qory` stop the run before
-  it opens, with exit 1: `remove the input qory: qory adds that member to inputs.json; the
-  code is used`, and so do inputs that are not a JSON object: `ask Qory Apiary's instance
-  admin: the run code's inputs are not a JSON object; the code is used`;
+  switch and the setup, so its start commits are those the agent starts at; a later session
+  writes it before it starts, with the commits that the last push landed. A walled session
+  whose `--mount` or `wall.mounts` is at or inside `in/` stops before its setup: for a run
+  from a run code with `machine_setup_invalid` and `qory run: A wall mount is at or inside
+  the read-only inputs folder, so the session did not start.`, for a run with a run key with
+  `qory run: Remove the mount at or inside the read-only inputs folder from wall.mounts or
+  --mount.`; the mount and `in/` follow on two lines. A launch snapshot whose fetch fails
+  stops the session with `run_api_failed` and `qory run: The fetch of the session's start
+  artifacts failed, so the agent did not start.`, with the cause on the next line. A launch
+  snapshot whose folders on this machine cannot be removed, made or copied stops the session
+  with `machine_setup_invalid` and `qory run: copying the session's start artifacts on this
+  machine failed, so the agent did not start.`, with the cause on the next line. The
+  workflow reads them from the path after its name in the prompt, and a push check gets the
+  same path after `--inputs` (see Push checks in `contracts/harness/v1/README.md`). qory
+  also writes the same bytes to `inputs.json` in the composed home, mode 0644, so the
+  harness's hooks read them as `$QORY_HARNESS_HOME/inputs.json`. In a home from `--home` or
+  `harness.home`, qory removes that copy when the run ends, also after a failure or a stop;
+  a home for that run alone goes as a whole. A run with a run key and no run code gets the
+  same files, with the member `qory` alone, since it has no inputs: `{"qory":
+  {"harness_extensions": {…}, "outputs": [], "start_commits": […], "start_artifacts": "…"}}`
+  in `in/` (read-only behind a wall), in the composed home, and after `--inputs` of its push
+  checks. A home that already has `inputs.json` stops the run with exit 1: `Remove
+  inputs.json from the home, or omit --home and harness.home, then take the work item in
+  again.` Inputs that have a member `qory` stop the run before it opens, with exit 1:
+  `remove the input qory: qory adds that member to inputs.json; the code is used`, and so do
+  inputs that are not a JSON object: `ask Qory Apiary's instance admin: the run code's
+  inputs are not a JSON object; the code is used`;
 - starts the runtime with its headless start: the arguments that run one prompt with no
   terminal, write the session's output to stdout and exit. The prompt invokes the
   first of these that the runtime can start: the skill `workflow-<workflow>`, the command
@@ -3023,6 +3021,16 @@ next session or the run's close. A setup container is gone by then: qory removes
 container`, so no process in it writes the working folder after the check. Its kind is `push` and its name is `push qory/<work item
 id> to <system>/<path>`. A read target of the documents is fetched and not pushed: the step
 checks, commits and pushes no read target, and the version it stores has no entry of one.
+When the agent made commits in a read target, the step prints, once in the run and before
+the push of the target, which goes on:
+
+```
+qory run: The commits in a read-only repository were not kept: a run changes only its target.
+  The repository is <path>.
+```
+
+`<path>` is the read target's path on its host, such as `acme/lib`. A read target whose
+`.git` does not pass the check of a further repository gets no line.
 A write run with no branch, such as a run
 with no repository, gets the step to store its outputs alone, with the name `store the
 outputs`: it pushes nothing, and opens no push proxy and no host proxy.
@@ -6349,9 +6357,10 @@ push step.
 #### The scope check before the push
 
 Before the first `git push` after a session of a write run from a run code, qory checks the
-commits of each repository whose head is past the session's start, other than a read target: `Start` for session 1,
-and the commit that the last push landed for a later session. A failure in one repository
-stops the push of every repository, and the commits stay local.
+commits of each repository whose head is past the session's start, other than a read
+target: `Start` for session 1, and the commit that the last push landed for a later
+session. A failure in one repository stops the push of every repository, and the commits
+stay local.
 
 1. qory makes a fresh clone of the repository's commits in the run directory: `git init`
    with no template, then a fetch of the head alone, by its id, with no tag and no ref, and

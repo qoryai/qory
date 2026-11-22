@@ -2092,8 +2092,9 @@ func TestASecondRunStartsAtThePushedCommit(t *testing.T) {
 // TestAWalledRunPushesItsTargetAlone is a walled run with the read target acme/lib, whose
 // read-only checkout has a new commit, and a change in the target: the check of the settings
 // of a place the run used passes after the session, the target's branch reaches the forge
-// and acme/lib's does not, and one version is stored, for the documents' target. The run
-// configuration lists acme/other, which is not fetched.
+// and acme/lib's does not, a line says that acme/lib's commits were not kept, and one
+// version is stored, for the documents' target. The run configuration lists acme/other,
+// which is not fetched.
 func TestAWalledRunPushesItsTargetAlone(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
@@ -2115,6 +2116,8 @@ func TestAWalledRunPushesItsTargetAlone(t *testing.T) {
 		t.Errorf("the read target has the branch: %s\n%s", refs, r.out)
 	}
 	lacks(t, r.out, " to acme/lib at ")
+	wants(t, r.out, "qory run: The commits in a read-only repository were not kept: a run changes only its target.\n"+
+		"  The repository is acme/lib.\n")
 	fetch := ""
 	for _, e := range r.steps {
 		if e.Type == "step_started" && e.Kind == event.StepFetch {

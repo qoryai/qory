@@ -33,8 +33,8 @@ release may change what an existing document does, and states it under Upgrading
   other type, in the run directory and in `start-artifacts/` of the read-only inputs
   folder. A fetch that fails stops the session with `run_api_failed`. `inputs.json` has
   the snapshot's folder in `qory.start_artifacts` and the start commit of each repository
-  the run may push, not a read target, in `qory.start_commits`. Session 1 writes `inputs.json` after the branch switch and the
-  setup.
+  the run may push, not a read target, in `qory.start_commits`. Session 1 writes
+  `inputs.json` after the branch switch and the setup.
 - A walled session whose `--mount` or `wall.mounts` is at or inside the read-only inputs
   folder stops before its setup: a run from a run code with `machine_setup_invalid`.
 - A run from a run code whose step fails closes `failed` with an end code as the reason,
@@ -853,18 +853,21 @@ release may change what an existing document does, and states it under Upgrading
   `QORY_RUN_REPOSITORIES`: the repository of `target` goes into the working folder, and
   the repository of each entry of `read_targets` under `.qory/repositories`. The push step
   checks, commits and pushes the target alone, and the version it stores has no entry of a
-  read target. A read target with no address is not fetched, and the run goes on. A
-  repository listed twice is fetched once. A read target on another host, of another owner
-  on github.com, or inside another, stops the run before any fetch. A run with no
-  `QORY_RUN_SYSTEM` fetches no read target. Documents with read targets and no target
-  fetch each read target and push nothing. A read target for which the version of the work
-  item's branch lists a commit is fetched at that commit. The fetch line and the fetch
-  step say `and 1 read-only repository` in place of `and 1 further repository`. The setup
-  container's `QORY_RUN_REPOSITORIES` is the target, then the read targets, and `qory run
-  prepare` takes such a list up to 4220 bytes, a target and 20 read targets of 200
-  characters; a list that a run configuration sets stays at 256 bytes. A prebuild fetches
-  the repository of its documents' target alone. The stops for a target that
-  `QORY_RUN_REPOSITORIES` lists after another repository, or does not list, are gone.
+  read target. For a read target with commits past its start, the step prints `qory run:
+  The commits in a read-only repository were not kept: a run changes only its target.`,
+  then `The repository is <path>.` indented by two spaces, once in the run. A read target
+  with no address is not fetched, and the run goes on. A repository listed twice is
+  fetched once. A read target on another host, of another owner on github.com, or inside
+  another, stops the run before any fetch. A run with no `QORY_RUN_SYSTEM` fetches no read
+  target. Documents with read targets and no target fetch each read target and push
+  nothing. A read target for which the version of the work item's branch lists a commit is
+  fetched at that commit. The fetch line and the fetch step say `and 1 read-only
+  repository` in place of `and 1 further repository`. The setup container's
+  `QORY_RUN_REPOSITORIES` is the target, then the read targets, and `qory run prepare`
+  takes such a list up to 4220 bytes, a target and 20 read targets of 200 characters; a
+  list that a run configuration sets stays at 256 bytes. A prebuild fetches the repository
+  of its documents' target alone. The stops for a target that `QORY_RUN_REPOSITORIES`
+  lists after another repository, or does not list, are gone.
 - `qory destination clone` checks `destinations` against the explore contract's schema,
   `inputs.schema.json`, and reads each entry as the contract's destination. It also stops
   on a `{` or `}` in a path and on U+0000 in a collection. Line 2 of the error has the
