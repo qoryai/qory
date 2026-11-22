@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/qoryai/qory/internal/preparation"
@@ -88,5 +91,88 @@ func TestClonesDestinationsOnlyForAReadRunWithAHarnessDocument(t *testing.T) {
 	}
 	if (*codeRun)(nil).clonesDestinations() {
 		t.Error("a run with no run code clones its destinations")
+	}
+}
+
+// placeRoot is a folder of clones, opened as an [os.Root], with the folders above the
+// place git.test/acme/web, and the clone of that place.
+func placeRoot(t *testing.T) (*os.Root, clone) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "git.test", "acme"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	r, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	return r, clone{id: "tg_web0000000000000", rel: filepath.Join("git.test", "acme", "web")}
+}
+
+// TestClearPlaceKeepsAFileThatAppeared is a file put at the clone's place after the check
+// before the clone: clearPlace stops with a link or a file at the place, and the file stays.
+func TestClearPlaceKeepsAFileThatAppeared(t *testing.T) {
+	r, d := placeRoot(t)
+	if err := r.WriteFile(d.rel, []byte("notes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := clearPlace(r, d)
+	var pe *fs.PathError
+	if !errors.As(err, &pe) || pe.Path != d.rel || !errors.Is(err, errLinkOrFile) {
+		t.Errorf("clearPlace: %v, want a link or a file at %s", err, d.rel)
+	}
+	if got, err := r.ReadFile(d.rel); err != nil || string(got) != "notes\n" {
+		t.Errorf("the file is %q, %v after clearPlace", got, err)
+	}
+}
+
+// TestClearPlaceKeepsALinkThatAppeared is a symbolic link put at the clone's place after
+// the check before the clone: clearPlace stops with a link or a file at the place, and the
+// link stays.
+func TestClearPlaceKeepsALinkThatAppeared(t *testing.T) {
+	r, d := placeRoot(t)
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(r.Name(), d.rel)); err != nil {
+		t.Fatal(err)
+	}
+	err := clearPlace(r, d)
+	var pe *fs.PathError
+	if !errors.As(err, &pe) || pe.Path != d.rel || !errors.Is(err, errLinkOrFile) {
+		t.Errorf("clearPlace: %v, want a link or a file at %s", err, d.rel)
+	}
+	if got, err := r.Readlink(d.rel); err != nil || got != outside {
+		t.Errorf("the link leads to %q, %v after clearPlace", got, err)
+	}
+}
+
+// TestClearPlaceRemovesAnEmptyFolderOnly is the other places clearPlace finds: nothing is
+// free, an empty folder goes, and a folder with a file stops it and keeps the file.
+func TestClearPlaceRemovesAnEmptyFolderOnly(t *testing.T) {
+	r, d := placeRoot(t)
+	if err := clearPlace(r, d); err != nil {
+		t.Errorf("nothing at the place: %v", err)
+	}
+	if err := r.Mkdir(d.rel, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := clearPlace(r, d); err != nil {
+		t.Errorf("an empty folder: %v", err)
+	}
+	if _, err := r.Lstat(d.rel); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the empty folder stayed: %v", err)
+	}
+	if err := r.Mkdir(d.rel, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	notes := filepath.Join(d.rel, "notes.txt")
+	if err := r.WriteFile(notes, []byte("notes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := clearPlace(r, d); err == nil {
+		t.Error("a folder with a file: no error")
+	}
+	if _, err := r.Lstat(notes); err != nil {
+		t.Errorf("the folder's file is gone: %v", err)
 	}
 }

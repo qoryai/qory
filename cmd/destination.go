@@ -389,15 +389,30 @@ func cloneInto(c *cobra.Command, r *os.Root, d clone) error {
 	if err := folders(r, filepath.Dir(d.rel), true); err != nil {
 		return clonesFolder(d.id, root, err)
 	}
-	// An empty folder at d's place, which [placeFree] passes, goes first, since the rename
-	// does not replace a folder. A folder that got files since stops the Remove.
-	if err := r.Remove(d.rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := clearPlace(r, d); err != nil {
 		return clonesFolder(d.id, root, err)
 	}
 	if err := r.Rename(filepath.Join(filepath.Base(tmp), "repository"), d.rel); err != nil {
 		return clonesFolder(d.id, root, err)
 	}
 	return nil
+}
+
+// clearPlace makes d's place under r free for the move of its clone, after the clone: it
+// removes an empty folder there, which [placeFree] passes and the rename does not replace.
+// A link or a file there, which can appear while git runs, stops it with [errLinkOrFile],
+// and a folder with files stops it with the Remove's error. Nothing there is free.
+func clearPlace(r *os.Root, d clone) error {
+	info, err := r.Lstat(d.rel)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		return err
+	case !info.IsDir():
+		return &fs.PathError{Op: "lstat", Path: d.rel, Err: errLinkOrFile}
+	}
+	return r.Remove(d.rel)
 }
 
 // The lines git writes, with LC_ALL=C, for a host that wants a credential and for one
