@@ -346,8 +346,12 @@ again.`, and on the next line `Push checks cannot start from <value>. A referenc
 with a letter or a digit and has only letters, digits, and . _ / : @ -.` When Forager
 cannot turn on the check of the POSTs from behind the wall, the run stops there with
 exit 1: `Run again.`, and on the next line `Turning on the push checks for the POSTs from
-behind the wall failed, so the run stopped before the setup: <cause>.` A home without push checks, and a run with no control plane,
-start as before, with no check turned on.
+behind the wall failed, so the run stopped before the setup: <cause>.` A walled run from a
+run code whose documents set `shared_run`, through a gateway that sends the run API
+address, turns the check on before session 1 also when its home has no push checks: the
+check passes every POST until a later session's home has push checks (see [A run of
+several sessions](#a-run-of-several-sessions)). Any other run whose home has no push
+checks, and a run with no control plane, start with no check turned on.
 
 A run from a run code stops at the same points of the push-check load and set with the same
 exit status. The code is used by then, so the fix in each line is to take the work item in

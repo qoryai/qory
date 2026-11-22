@@ -35,7 +35,10 @@ release may change what an existing document does, and states it under Upgrading
   closes the run as the session ended, and any other refusal of Qory Apiary's closes it
   `failed`, exit 1. The steps before a later session need a wall and no container of the
   run kept, and past the setup's limit they close the run `cancelled` with `timeout`, exit
-  124.
+  124. In such a run with a run API, Forager's forwarder checks the agent's POSTs to the run
+  API from session 1 on, also before any session has push checks: the forwarder then
+  passes one request per connection through the wall, and a POST to the run API needs a
+  `Content-Length` and no `Transfer-Encoding`, so a chunked body gets a 400.
 - The agent of a walled run gets `QORY_SESSION`, the session's number from 1, which Forager
   sets at each join: `qory run agent-env` keeps the name, as it keeps `QORY_RUN_ID`.
 - In a home composed for codex alone, a Codex agent with a tier gets the tier's model as
