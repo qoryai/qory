@@ -27,7 +27,7 @@ const textStartArtifacts = "The fetch of the session's start artifacts failed, s
 
 // startArtifacts makes the launch snapshot of a session whose workflow's plan type is
 // plan, "" for none: the run folder's copy at runDir/start-artifacts, which it returns,
-// and the copy at in/start-artifacts, each made new, so a later session gets its own. The
+// and the copy at in/start-artifacts, each made new, so a later session gets a new one. The
 // snapshot is the newest version of plan that is neither cancelled nor a withdrawal, and
 // of each other artifact the version a gate approved, laid out as qory artifact pull
 // writes them, with an index.json that lists only those versions. A fetch through the run
