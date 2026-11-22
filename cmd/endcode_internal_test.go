@@ -97,8 +97,9 @@ func TestAFailedPushStepClosesWithItsEndCode(t *testing.T) {
 }
 
 // TestForagersCloseTakesTheEndCodes is a run that Forager opens at a gateway in this process,
-// closed failed with each end code as the reason: the session's check of the outcome takes it,
-// and Close returns the reason as given.
+// closed failed with each end code as the reason, with exit code 1, or -1 for run_api_failed
+// as qory closes a run whose session does not join: the session's check of the outcome takes
+// it, and Close returns the reason as given.
 func TestForagersCloseTakesTheEndCodes(t *testing.T) {
 	for _, code := range []contracts.EndCode{
 		contracts.EndCodePushCredentialMissing, contracts.EndCodePushRefused,
@@ -113,7 +114,11 @@ func TestForagersCloseTakesTheEndCodes(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer at.g.Close(ctx)
-			closed, err := at.run.Close(ctx, session.Outcome{State: event.StateFailed, Reason: string(code), ExitCode: 1})
+			exit := 1
+			if code == contracts.EndCodeRunAPIFailed {
+				exit = -1
+			}
+			closed, err := at.run.Close(ctx, session.Outcome{State: event.StateFailed, Reason: string(code), ExitCode: exit})
 			if err != nil {
 				t.Fatalf("Close refused the outcome: %v", err)
 			}

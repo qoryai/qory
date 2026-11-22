@@ -4618,12 +4618,13 @@ documents set `shared_run`, qory sends the next-session request once the verdict
 the push step passed (see [A run of several sessions](#a-run-of-several-sessions)); otherwise
 the run closes as its session did, and the verdict starts the next round in Qory Apiary. If
 qory cannot post the verdict, it closes the run `failed` and exits 1, so a verdict of `passed`
-that the agent posted does not stand over a suite that did not pass. A post that the run API
-refused, or that got no answer, closes the run with the end code `run_api_failed`. A stop of
-`qory run` that cuts the step posts the red verdict with the point `The full suite did not
-finish: the run was stopped.`, with one request that has 5 seconds, and closes the run
-`cancelled` with the reason `interrupted` and exit status 1, whether or not the post worked.
-qory checks each verdict against the verdict format before it posts it.
+that the agent posted does not stand over a suite that did not pass. A failed call to the run
+API in this step, such as the post or the read of the agent's verdict, closes the run with the
+end code `run_api_failed`. A stop of `qory run` that cuts the step posts the red verdict with
+the point `The full suite did not finish: the run was stopped.`, with one request that has 5
+seconds, and closes the run `cancelled` with the reason `interrupted` and exit status 1,
+whether or not the post worked. qory checks each verdict against the verdict format before it
+posts it.
 
 The point has a text and, for a red suite, sometimes a fix, each on one line. The text is, in this
 order of preference:
