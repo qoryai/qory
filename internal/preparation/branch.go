@@ -38,6 +38,9 @@ type WorkBranch struct {
 	// commit of each repository that a [Push] of the run pushed. It may have repositories
 	// that the run does not list, and those are not fetched.
 	Version []Repository
+	// Approved is true when Version is the one that an approval lists, not one that the run's
+	// stage wrote: the run starts at its commit and moves to no later push.
+	Approved bool
 	// Pushed is, per repository, the newest commit pushed by a run that a person did not
 	// cancel, from the work item's record of pushed commits; the run starts there instead of
 	// at Version when that commit descends from the commit of Version, or from the
@@ -158,9 +161,13 @@ func fetchBranchCommit(ctx context.Context, git gitRunner, dest, system, path st
 // at dest is at the target version: the commit of [WorkBranch.Version], or, when
 // [WorkBranch.Pushed] has a newer commit of the repository whose history has that commit,
 // or the target version when the version has none, the pushed commit, which it also sets
-// in the version. It is "" for a repository with neither.
+// in the version. With [WorkBranch.Approved] it is the commit of the version, whatever was
+// pushed later. It is "" for a repository with neither.
 func (b *WorkBranch) startOf(ctx context.Context, git gitRunner, dest, system, path string) (string, error) {
 	commit := b.CommitOf(system, path)
+	if b.Approved {
+		return commit, nil
+	}
 	var pushed string
 	for _, l := range b.Pushed {
 		if l.System == system && sameRepository(system == ForgeGitHub, l.Path, path) {

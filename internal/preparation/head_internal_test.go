@@ -286,6 +286,49 @@ func TestARunStartsAtTheNewestPushedCommitThatDescends(t *testing.T) {
 	}
 }
 
+// TestAnApprovedStartMovesToNoPushedCommit is a version that an approval lists, with a newer
+// commit that descends from the version's commit, pushed by a later run: the run starts at the
+// version's commit and the version stays. With Approved false the same input moves the run
+// to the pushed commit and sets it in the version.
+func TestAnApprovedStartMovesToNoPushedCommit(t *testing.T) {
+	needGit(t)
+	for _, c := range []struct {
+		name     string
+		approved bool
+		moves    bool
+	}{
+		{"an approved version stays", true, false},
+		{"the stage's own version moves", false, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			base, dir := t.TempDir(), emptyFolder(t)
+			remote(t, base, "acme/shop", "main", nil)
+			bare := filepath.Join(base, "acme", "shop.git")
+			target := run(t, bare, "rev-parse", "main")
+			pushed := bareCommit(t, bare, "qory/wi_1", target, "a later run")
+			b := &WorkBranch{
+				Ref:      testRef,
+				Approved: c.approved,
+				Version:  []Repository{{System: "git.example.com", Path: "acme/shop", Commit: target}},
+				Pushed:   []Landed{{System: "git.example.com", Path: "acme/shop", Commit: pushed}},
+			}
+			if _, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: target, Branch: b}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := switchTo(dir, b); err != nil {
+				t.Fatal(err)
+			}
+			want := target
+			if c.moves {
+				want = pushed
+			}
+			if got := run(t, dir, "rev-parse", "HEAD"); got != want || b.Repositories[0].Start != want || b.CommitOf("git.example.com", "acme/shop") != want {
+				t.Errorf("HEAD is %s, the start %s, the version %s, want %s", got, b.Repositories[0].Start, b.CommitOf("git.example.com", "acme/shop"), want)
+			}
+		})
+	}
+}
+
 // TestAPushOfTwoCancelledCommitsHasOneRecordedHead is the shape the recorder has: a cancelled run
 // pushed 2 commits in one push, so one head is recorded and its parent is not. The branch is at
 // that head, so the next run's first push replaces both with a lease on it.

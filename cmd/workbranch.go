@@ -111,7 +111,7 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, deadline time.T
 	branch := &preparation.WorkBranch{Ref: preparation.WorkItemRef(r.workItem)}
 	pushed := snapshot.PushedCommits
 
-	version, artifact := startVersion(snapshot, index, r.targetRef)
+	version, artifact, approved := startVersion(snapshot, index, r.targetRef)
 	if version == nil && artifact != "" {
 		return nil, fmt.Errorf(textNoStart, fmt.Sprintf(textNoApproved, shownText(artifact)))
 	}
@@ -121,6 +121,7 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, deadline time.T
 			return nil, err
 		}
 		branch.Version = []preparation.Repository{{System: r.targetRef.Address.System, Path: r.targetRef.Address.Path, Commit: commit}}
+		branch.Approved = approved
 		// A commit that the start's run pushed after the start, which no version of the run
 		// confirms, counts as a cancelled run's: the run does not move there, and its push
 		// replaces it.
@@ -189,14 +190,16 @@ func featureOff(err error) bool {
 // approved, as for Verify; nil with none of these, where the run starts at what the run
 // documents check out. A newest version that is a withdrawal counts as none. artifact is the
 // type of the version's artifact; with a nil version it is set only when the approved version
-// is not in the index. When types of the run's outputs have such artifacts, the version with
-// the latest time of all wins.
+// is not in the index. approved is true when the version is the one that a gate approved, not
+// one that the stage wrote: the run stays at its commit. A stage with no version that is not
+// cancelled has the approved version too, so such a Build run stays at it. When types of the
+// run's outputs have such artifacts, the version with the latest time of all wins.
 // shortcut: two delivered types of one stage written by different runs give the newest one;
 // replace it when the run API names the version a run starts from. [startCommit] confirms the
 // start with another version of the same run when the newest one has no reference to it.
-func startVersion(snapshot *runapi.Snapshot, index *runapi.Index, target *contracts.Target) (version *runapi.Version, artifact string) {
+func startVersion(snapshot *runapi.Snapshot, index *runapi.Index, target *contracts.Target) (version *runapi.Version, artifact string, approved bool) {
 	if target == nil || target.Address == nil {
-		return nil, ""
+		return nil, "", false
 	}
 	name := outputName(exports.ProcessType{Send: "delivered"}, target)
 	stage := snapshot.Stage.ID
@@ -205,6 +208,7 @@ func startVersion(snapshot *runapi.Snapshot, index *runapi.Index, target *contra
 			continue
 		}
 		pick := newestNotCancelled(a)
+		fromApproval := false
 		if pick == nil || stage == nil || pick.StageID == nil || *stage != *pick.StageID {
 			pick = nil
 			if a.ApprovedVersion != nil && !withdrawn(a) {
@@ -214,15 +218,16 @@ func startVersion(snapshot *runapi.Snapshot, index *runapi.Index, target *contra
 					}
 				}
 				if pick == nil {
-					return nil, a.Type
+					return nil, a.Type, false
 				}
+				fromApproval = true
 			}
 		}
 		if pick != nil && (version == nil || compareAt(pick.At, version.At) > 0) {
-			version, artifact = pick, a.Type
+			version, artifact, approved = pick, a.Type, fromApproval
 		}
 	}
-	return version, artifact
+	return version, artifact, approved
 }
 
 // startVersionOf is a version that a run may start from, and its artifact type.

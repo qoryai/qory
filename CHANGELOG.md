@@ -1084,6 +1084,11 @@ release may change what an existing document does, and states it under Upgrading
   a commit that is no commit, differs in `.qory` or fails to check out state the fact first:
   `The version that the run starts from has commit <c>, which is not a commit on <path> on
   <system>, so the run did not start; the code is used`.
+- A run whose start version is the one that a gate approved starts at that version's commit
+  and does not move to a commit that a later run pushed, as a run of Verify, whose stage
+  wrote no version. A run whose stage wrote the version still moves to the newest pushed
+  commit that descends from its start. A run whose stage has no version that is not
+  cancelled starts at the approved version and stays at its commit, even a run of Build.
 - Every run of a work item from a run code with a run API reads the work item through `GET
   /work-item` at its start, with or without a repository, as the stage's outputs come from
   it. A setup past its limit in that read names the step `the read of the work item`. A stage

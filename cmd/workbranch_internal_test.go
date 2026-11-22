@@ -178,7 +178,7 @@ func TestStartVersion(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, artifact := startVersion(c.snapshot, c.index, startTarget)
+			got, artifact, _ := startVersion(c.snapshot, c.index, startTarget)
 			if got == nil && artifact != "" {
 				t.Fatalf("the approved version of %s is not in the index", artifact)
 			}
@@ -196,9 +196,46 @@ func TestStartVersion(t *testing.T) {
 // TestStartVersionFindsNoApprovedVersionOutsideTheIndex is an approved version that the index
 // does not have: no version, with the artifact's type for the stop of the run.
 func TestStartVersionFindsNoApprovedVersionOutsideTheIndex(t *testing.T) {
-	got, artifact := startVersion(stageSnapshot(), approvedAs(branchIndex([2]string{"av_1", "st_a"}), "av_9"), startTarget)
+	got, artifact, _ := startVersion(stageSnapshot(), approvedAs(branchIndex([2]string{"av_1", "st_a"}), "av_9"), startTarget)
 	if got != nil || artifact != "pull-request" {
 		t.Fatalf("got %+v of %q, want none of pull-request", got, artifact)
+	}
+}
+
+// TestStartVersionReportsTheApproval is the third result of [startVersion]: true exactly when
+// the version is the one that the approval lists, so the run stays at its commit. A version that
+// the stage wrote is false, with an approval or not. A stage with every version cancelled has the
+// approved version, so a Build run stays at it too.
+func TestStartVersionReportsTheApproval(t *testing.T) {
+	for name, c := range map[string]struct {
+		snapshot *runapi.Snapshot
+		index    *runapi.Index
+		want     string
+		approved bool
+	}{
+		"the stage's newest, with no approval": {
+			stageSnapshot(), branchIndex([2]string{"av_1", "st_a"}, [2]string{"av_2", "st_b"}), "av_2", false,
+		},
+		"the stage's newest, with an approval": {
+			stageSnapshot(), approvedAs(branchIndex([2]string{"av_1", "st_a"}, [2]string{"av_2", "st_b"}), "av_1"), "av_2", false,
+		},
+		"a stage that wrote nothing takes the approved version": {
+			stageSnapshot(), approvedAs(branchIndex([2]string{"av_1", "st_a"}, [2]string{"av_2", "st_a"}), "av_1"), "av_1", true,
+		},
+		"a work item in no stage takes the approved version": {
+			&runapi.Snapshot{}, approvedAs(branchIndex([2]string{"av_1", "st_a"}), "av_1"), "av_1", true,
+		},
+		"every version of the stage cancelled leaves the approved version": {
+			stageSnapshot(), approvedAs(cancelledAt(branchIndex([2]string{"av_1", "st_a"}, [2]string{"av_2", "st_b"}), "av_2"), "av_1"), "av_1", true,
+		},
+		"no version": {stageSnapshot(), branchIndex([2]string{"av_1", "st_a"}), "", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, _, approved := startVersion(c.snapshot, c.index, startTarget)
+			if (got == nil) != (c.want == "") || (got != nil && got.ID != c.want) || approved != c.approved {
+				t.Errorf("got %+v, approved %v; want %q, approved %v", got, approved, c.want, c.approved)
+			}
+		})
 	}
 }
 
@@ -211,10 +248,10 @@ func TestStartVersionTakesTheLatestOfTwoTypes(t *testing.T) {
 		{Type: "pull-request", Name: startName, Versions: []runapi.Version{{ID: "av_1", Number: 1, StageID: &stage, At: "2026-11-02T09:00:00Z"}}},
 		{Type: "notes", Name: startName, Versions: []runapi.Version{{ID: "av_2", Number: 1, StageID: &stage, At: "2026-11-02T10:00:00Z"}}},
 	}}
-	if got, artifact := startVersion(stageSnapshot(), index, startTarget); got == nil || got.ID != "av_2" || artifact != "notes" {
+	if got, artifact, _ := startVersion(stageSnapshot(), index, startTarget); got == nil || got.ID != "av_2" || artifact != "notes" {
 		t.Errorf("got %+v of %q, want av_2 of notes", got, artifact)
 	}
-	if got, _ := startVersion(stageSnapshot(), index, &contracts.Target{Collection: "R_1001"}); got != nil {
+	if got, _, _ := startVersion(stageSnapshot(), index, &contracts.Target{Collection: "R_1001"}); got != nil {
 		t.Errorf("a target with no address starts at %s", got.ID)
 	}
 }
@@ -295,7 +332,7 @@ func TestStartCommitIsTheNewestConfirmedCommitOfThePickedVersionsRun(t *testing.
 			if len(c.snapshot.Outputs) != 0 {
 				t.Fatalf("the snapshot lists outputs %v", c.snapshot.Outputs)
 			}
-			version, typ := startVersion(c.snapshot, c.index, startTarget)
+			version, typ, _ := startVersion(c.snapshot, c.index, startTarget)
 			if version == nil || version.ID != c.version {
 				t.Fatalf("the version is %+v, want %s", version, c.version)
 			}

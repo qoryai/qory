@@ -2322,6 +2322,12 @@ commit of the work item's earlier runs, ordered by run number and then by push o
 marks the commits of cancelled runs. A commit of a cancelled run, and a commit that does not descend from the start
 commit, moves the run nowhere.
 
+A run whose start version is the one that a gate approved (step 2), as a run of a stage that
+wrote no version, such as Verify, does not move: it starts at that version's commit, whatever
+a later run pushed. A run whose stage has no version that is not cancelled gets step 2 too, so
+a Build run with every version of its stage cancelled starts at the approved version and stays
+at its commit.
+
 qory composes the harness at `target_version`, with the read targets at the heads of their
 default branches, before it checks out the work item's branch. A read target whose version
 lists a commit moves to that commit then. When the documents contain
