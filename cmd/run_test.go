@@ -806,7 +806,7 @@ func staticELF(t *testing.T) string {
 // reference, as an engine that has not pulled it, and for run logs the environment
 // file, prints a line and exits 4, as a container's runtime would. It runs the arms of
 // [agentImageAnswers] for the agent image and an agent's container with a transcript
-// bind.
+// bind. A container of a push check or a scope check exits 0 and prints nothing.
 func fakeDocker(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -820,6 +820,12 @@ case "$*" in
 "network create "*" --internal "*) rm -f `+ipv6+` ;;
 "network inspect "*.Subnet*) test -e `+ipv6+` && { echo "172.30.0.0/16 fd00:db8::/64 "; exit 0; } ;;
 "image inspect --format {{json .RepoDigests}} "*) echo "Error response from daemon: No such image: $5" >&2; exit 1 ;;
+*qory-push-check-*)
+	case "$1" in
+	create) echo c0ffee ;;
+	inspect) echo '{"Status":"exited","ExitCode":0,"Error":""}' ;;
+	esac
+	exit 0 ;;
 `+agentImageAnswers(t, dir)+`
 esac
 case "$1 $2" in

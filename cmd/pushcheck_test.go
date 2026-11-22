@@ -292,7 +292,7 @@ func newCheckedRepo(t *testing.T, docker string) (*pushRepo, string) {
 		files[name] = content
 	}
 	stack := "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n" +
-		"  - name: checks\n    source: {path: modules/checks}\nworkflows:\n  hello:\n    access: write\n"
+		"  - name: checks\n    source: {path: modules/checks}\nworkflows:\n  hello:\n    access: write\n" + helloPlan
 	files["qory.yaml"] = ownStack(stack)
 	p := newPushRepoWith(t, "write", files)
 	if docker == "" {
@@ -311,6 +311,8 @@ func newCheckedRepo(t *testing.T, docker string) (*pushRepo, string) {
 // checkDocker is the fake docker of [fakeDocker], with the commands of a push check's
 // container: the create, the start, which prints out and exits code, the inspect,
 // which reports that exit, and the removal. Each of those goes to the log it returns.
+// A scope check's container, whose create has --base, goes to [fakeDocker], which has it
+// exit 0.
 func checkDocker(t *testing.T, code int, out string) (string, string) {
 	t.Helper()
 	docker, _ := fakeDocker(t)
@@ -320,7 +322,15 @@ func checkDocker(t *testing.T, code int, out string) (string, string) {
 	writeFile(t, output, out)
 	script := filepath.Join(dir, "docker")
 	writeFile(t, script, `#!/bin/sh
+case "$1 $*" in
+"create "*" --base "*) : > `+dir+`/scope-$3 ;;
+esac
+case "$1" in
+start) test -e `+dir+`/scope-$3 && exec `+docker+` "$@" ;;
+inspect|rm) test -e `+dir+`/scope-$4 && exec `+docker+` "$@" ;;
+esac
 case "$*" in
+*" --base "*) exec `+docker+` "$@" ;;
 *qory-push-check-*)
 	echo "$*" >> `+log+`
 	case "$1" in

@@ -67,9 +67,9 @@ func cloneFailed(step string, err error) error {
 	return fmt.Errorf("%s failed: %s", step, integration.Printable(exports.HideURLError(err).Error()))
 }
 
-// ChangedPath is the first path that a commit from start, not included, to head changes
-// in the repository at dir, oldest commit first, with that commit; both "" when no commit
-// changes a path. A merge counts by its change from its first parent.
+// ChangedPath is the first path outside .qory/ that a commit from start, not included, to
+// head changes in the repository at dir, oldest commit first, with that commit; both ""
+// when no commit changes such a path. A merge counts by its change from its first parent.
 func ChangedPath(ctx context.Context, base []string, dir, start, head string) (commit, path string, err error) {
 	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
 	git := stepGit(noRemote, "")
@@ -82,8 +82,10 @@ func ChangedPath(ctx context.Context, base []string, dir, start, head string) (c
 		if err != nil {
 			return "", "", cloneFailed("the list of the paths of commit "+shortCommit(c), err)
 		}
-		if first, _, _ := strings.Cut(changed, "\x00"); first != "" {
-			return c, first, nil
+		for _, path := range strings.Split(changed, "\x00") {
+			if path != "" && !strings.HasPrefix(path, ".qory/") {
+				return c, path, nil
+			}
 		}
 	}
 	return "", "", nil

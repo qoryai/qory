@@ -880,6 +880,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return false, err
 					}
 				}
+				checks.setSession(planWorkflow, planType, startSnapshot)
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
 					return false, err
@@ -1277,6 +1278,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return &runLineError{input(err)}
 					}
 					cleanups = append(cleanups, done)
+					done, err = checks.loadScope(setupCtx, run, at.home, spec.RunID, &spec, canPush(fromCode, level, branch))
+					cleanups = append(cleanups, done)
+					if err != nil {
+						return &runLineError{input(err)}
+					}
 					if err := checks.set(run, fromCode != nil && fromCode.shared && hasRunAPI(run)); err != nil {
 						return &runLineError{err}
 					}
@@ -1612,6 +1618,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if walled {
 					enter(stepPushChecks)
 					done, err := checks.next(laterCtx, run, at.home, spec.RunID, &spec, controlPlane)
+					cleanups = append(cleanups, done)
+					if err != nil {
+						return &runLineError{input(err)}
+					}
+					done, err = checks.loadScope(laterCtx, run, at.home, spec.RunID, &spec, canPush(fromCode, level, branch))
 					cleanups = append(cleanups, done)
 					if err != nil {
 						return &runLineError{input(err)}

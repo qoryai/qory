@@ -478,19 +478,37 @@ func newPushRepo(t *testing.T, access string) *pushRepo {
 	return newPushRepoWith(t, access, nil)
 }
 
-// newPushRepoWith is [newPushRepo] with the files extra in the repository.
+// helloPlan is the plan line of a write workflow of [newPushRepoWith], whose module hello
+// declares the scope check [helloScope] for it: the fake docker's container of the check
+// exits 0, so the push step pushes what the session left.
+const helloPlan = "    plan: change-plan\n"
+
+// helloScope is the lines of the manifest of the module hello that declare the scope check
+// of the plan types build-plan and change-plan, with its program [helloScopeProgram].
+const (
+	helloScope        = "scope_checks:\n  build-plan: [checks/scope.sh]\n  change-plan: [checks/scope.sh]\n"
+	helloScopeProgram = "checks/scope.sh"
+)
+
+// newPushRepoWith is [newPushRepo] with the files extra in the repository. A workflow with
+// write access has the plan [helloPlan].
 func newPushRepoWith(t *testing.T, access string, extra map[string]string) *pushRepo {
 	t.Helper()
 	hello := helloFiles(t)
 	h := newHostFetch(t, "", "main")
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	stack := "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n"
+	workflow := "workflows:\n  hello:\n    access: " + access + "\n"
+	if access == "write" {
+		workflow += helloPlan
+	}
 	files := map[string]string{
-		"qory.yaml":                       ownStack(stack + "workflows:\n  hello:\n    access: " + access + "\n"),
-		"README.md":                       "acme/site\n",
-		"modules/hello/qory-module.yaml":  hello["examples/hello/modules/hello/qory-module.yaml"],
-		"modules/hello/commands/hello.md": hello["examples/hello/modules/hello/commands/hello.md"],
-		"modules/hello/process.yaml":      pullRequestProcess,
+		"qory.yaml":                          ownStack(stack + workflow),
+		"README.md":                          "acme/site\n",
+		"modules/hello/qory-module.yaml":     hello["examples/hello/modules/hello/qory-module.yaml"] + helloScope,
+		"modules/hello/commands/hello.md":    hello["examples/hello/modules/hello/commands/hello.md"],
+		"modules/hello/process.yaml":         pullRequestProcess,
+		"modules/hello/" + helloScopeProgram: "#!/bin/sh\n",
 	}
 	maps.Copy(files, extra)
 	first := h.server.Repository(t, "acme/site", "main", files)
@@ -772,8 +790,8 @@ func TestARunWithNoNewCommitsPushesNothing(t *testing.T) {
 	if head := p.branchHead(t); head != "" {
 		t.Errorf("the forge has the branch at %s", head)
 	}
-	if posts, reads, _ := p.api.counts(); posts != 0 || reads != 1 {
-		t.Errorf("%d POST and %d reads of the index, want 0 and the read of the fetch", posts, reads)
+	if posts, reads, _ := p.api.counts(); posts != 0 || reads != 2 {
+		t.Errorf("%d POST and %d reads of the index, want 0, and the reads of the fetch and of the launch snapshot", posts, reads)
 	}
 	wants(t, r.log(), "qory run: no new commits to push")
 }
@@ -814,10 +832,13 @@ func TestAReadRunPushesNothing(t *testing.T) {
 // harness document and whose inputs list destinations: qory fetches its target at the
 // target version before the session, and the push step pushes what the agent left to the
 // work item's branch, as for a run whose inputs list none. The harness defines pull-request,
-// which the documents deliver.
+// which the documents deliver, and the plan [helloPlan].
 func TestAWriteRunWhoseInputsListDestinationsPushes(t *testing.T) {
 	files := harnessFiles(t, "write")
 	files["examples/hello/modules/hello/process.yaml"] = pullRequestProcess
+	files["examples/hello/qory-stack.yaml"] += helloPlan
+	files["examples/hello/modules/hello/qory-module.yaml"] += helloScope
+	files["examples/hello/modules/hello/"+helloScopeProgram] = "#!/bin/sh\n"
 	p := newPushRepo(t, "write")
 	harness := servedHarness(t, p.h, files)
 	p.change = func(d map[string]any) {

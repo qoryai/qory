@@ -27,7 +27,8 @@ import (
 )
 
 // sharedPushRepo is a [pushRepo] whose documents set shared_run, with a harness document
-// that defines a stack of the module hello of acme/site and its workflow hello, write; the
+// that defines a stack of the module hello of acme/site and its workflow hello, write, with
+// the plan type build-plan, whose fake scope check passes; the
 // module has the skill workflow-hello, by which Codex starts the workflow. The
 // next-session request after session n gets answers[n-1], or the end once answers run out;
 // requests counts the requests.
@@ -42,7 +43,7 @@ func sharedPushRepo(t *testing.T, answers ...string) (p *pushRepo, requests func
 		d["shared_run"] = true
 		d["harness"] = map[string]any{"harness": map[string]any{
 			"modules":   []map[string]any{{"name": "hello", "source": map[string]any{"git": url, "ref": "main", "path": "modules/hello"}}},
-			"workflows": map[string]any{"hello": map[string]any{"access": "write"}},
+			"workflows": map[string]any{"hello": map[string]any{"access": "write", "plan": "build-plan"}},
 		}}
 	}
 	var mu sync.Mutex

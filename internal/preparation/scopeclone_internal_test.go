@@ -72,7 +72,8 @@ func TestScopeCloneReadsAShallowCheckout(t *testing.T) {
 }
 
 // TestChangedPathFindsTheFirstChange lists the paths of the commits past a start: none
-// for an empty commit, and the first changed path, oldest commit first, otherwise.
+// for an empty commit or one under .qory/, and the first changed path outside .qory/,
+// oldest commit first, otherwise.
 func TestChangedPathFindsTheFirstChange(t *testing.T) {
 	dir := emptyFolder(t)
 	start := commitIn(t, dir, "a.txt", "a\n")
@@ -80,6 +81,13 @@ func TestChangedPathFindsTheFirstChange(t *testing.T) {
 	empty := run(t, dir, "rev-parse", "HEAD")
 	if c, p, err := ChangedPath(t.Context(), os.Environ(), dir, start, empty); c != "" || p != "" || err != nil {
 		t.Errorf("an empty commit: %q, %q, %v", c, p, err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".qory", "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inside := commitIn(t, dir, ".qory/build/notes.md", "notes\n")
+	if c, p, err := ChangedPath(t.Context(), os.Environ(), dir, start, inside); c != "" || p != "" || err != nil {
+		t.Errorf("a commit under .qory/: %q, %q, %v", c, p, err)
 	}
 	first := commitIn(t, dir, "src.go", "package src\n")
 	commitIn(t, dir, "z.txt", "z\n")
