@@ -1383,11 +1383,11 @@ func TestAMissingRequiredOutputFailsTheRun(t *testing.T) {
 	}
 }
 
-// TestAMissingOutputWithNoIndexHasNoEndCode is a stage that requires the pull-request output,
-// a session that writes none, and a read of the run's versions that gets a 500: the check
-// before the push stops the step, qory pushes and posts nothing, and the run closes failed
-// with no end code, since the read failed and no output was found missing.
-func TestAMissingOutputWithNoIndexHasNoEndCode(t *testing.T) {
+// TestAMissingOutputWithNoIndexClosesRunAPIFailed is a stage that requires the pull-request
+// output, a session that writes none, and a read of the run's versions that gets a 500: the
+// check before the push stops the step, qory pushes and posts nothing, and the run closes
+// failed with run_api_failed, since the read failed and no output was found missing.
+func TestAMissingOutputWithNoIndexClosesRunAPIFailed(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.noOutput = true
 	p.api.outputs = `[{"type":"pull-request","required":true,"version":null,"check":"missing"}]`
@@ -1405,7 +1405,7 @@ func TestAMissingOutputWithNoIndexHasNoEndCode(t *testing.T) {
 		ran.Store(true)
 	}, nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	r.wantsReason(t, "")
+	r.wantsReason(t, string(contracts.EndCodeRunAPIFailed))
 	wants(t, r.out, "output pull-request was not stored")
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST, want 0", posts)
@@ -1966,6 +1966,50 @@ func TestAWorkspaceWithoutTheTypeFailsTheStep(t *testing.T) {
 	}
 	if p.branchHead(t) == "" {
 		t.Error("the forge has no branch: the push comes before the POST")
+	}
+}
+
+// TestAFailedStoreAfterThePushClosesRunAPIFailed is a push that lands and a store of its
+// version that fails at the run API: a 500 to each POST, an unknown_type, and a POST with no
+// response whose index read fails too. Each closes the run failed with run_api_failed and
+// exit status 1.
+func TestAFailedStoreAfterThePushClosesRunAPIFailed(t *testing.T) {
+	for name, c := range map[string]struct {
+		post  func(n int, w http.ResponseWriter) (bool, bool)
+		index func(n int, w http.ResponseWriter) bool
+	}{
+		"a 500 to each POST": {post: func(_ int, w http.ResponseWriter) (bool, bool) {
+			failing(w, http.StatusInternalServerError, "internal", "")
+			return true, false
+		}},
+		"unknown_type": {post: func(_ int, w http.ResponseWriter) (bool, bool) {
+			failing(w, http.StatusUnprocessableEntity, "unknown_type", "")
+			return true, false
+		}},
+		"an unknown store": {
+			post: func(_ int, w http.ResponseWriter) (bool, bool) {
+				failing(w, http.StatusServiceUnavailable, "unavailable", "")
+				return true, false
+			},
+			index: func(n int, w http.ResponseWriter) bool {
+				if n == 1 {
+					return false
+				}
+				failing(w, http.StatusServiceUnavailable, "unavailable", "")
+				return true
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPushRepo(t, "write")
+			p.api.post, p.api.index = c.post, c.index
+			r := p.run(t, writesAndCommits(t), nil)
+			r.wantsClose(t, event.StateFailed, 1)
+			r.wantsReason(t, string(contracts.EndCodeRunAPIFailed))
+			if p.branchHead(t) == "" {
+				t.Errorf("the forge has no branch: the push comes before the POST\n%s", r.out)
+			}
+		})
 	}
 }
 
@@ -3242,10 +3286,10 @@ func TestARunWithNoRepositoryThatFailsItsOutputCheckStoresNothing(t *testing.T) 
 	}
 }
 
-// TestARunWithNoRepositoryWhoseStoreFailsHasNoEndCode is the run of
+// TestARunWithNoRepositoryWhoseStoreFailsClosesRunAPIFailed is the run of
 // [TestARunWithNoRepositoryStoresItsReply] whose POST of the version gets a 400: the reply
-// passed its check, so the run closes failed with no end code and the line of the store.
-func TestARunWithNoRepositoryWhoseStoreFailsHasNoEndCode(t *testing.T) {
+// passed its check, so the run closes failed with run_api_failed and the line of the store.
+func TestARunWithNoRepositoryWhoseStoreFailsClosesRunAPIFailed(t *testing.T) {
 	p, _ := replyRepo(t)
 	p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
 		failing(w, http.StatusBadRequest, "invalid_request", "")
@@ -3253,7 +3297,7 @@ func TestARunWithNoRepositoryWhoseStoreFailsHasNoEndCode(t *testing.T) {
 	}
 	r := p.run(t, nil, nil)
 	r.wantsClose(t, event.StateFailed, 1)
-	r.wantsReason(t, "")
+	r.wantsReason(t, string(contracts.EndCodeRunAPIFailed))
 	if _, _, stored := p.api.counts(); stored != 0 {
 		t.Errorf("%d versions stored, want 0", stored)
 	}
@@ -3262,7 +3306,8 @@ func TestARunWithNoRepositoryWhoseStoreFailsHasNoEndCode(t *testing.T) {
 
 // TestARunWithNoRepositoryStopsWhenItCannotReadItsWorkItem is the run of
 // [TestARunWithNoRepositoryStoresItsReply] whose GET /work-item ends with a 500: the run
-// stops before its session with the line of the read, and stores nothing.
+// stops before its session with the line of the read, closes with run_api_failed, and stores
+// nothing.
 func TestARunWithNoRepositoryStopsWhenItCannotReadItsWorkItem(t *testing.T) {
 	p, outbox := replyRepo(t)
 	p.api.workItemFails = true
@@ -3270,6 +3315,7 @@ func TestARunWithNoRepositoryStopsWhenItCannotReadItsWorkItem(t *testing.T) {
 	if r.err == nil || *outbox != "" {
 		t.Fatalf("%v, the session's outbox %q, want the run to stop before the session\n%s", r.err, *outbox, r.out)
 	}
+	r.wantsReason(t, string(contracts.EndCodeRunAPIFailed))
 	wants(t, r.out, "GET /work-item returned 500 internal.; the code is used")
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST, want 0", posts)

@@ -6,16 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/checkout"
@@ -689,6 +692,33 @@ func TestThePushStepStoresAVersionThatPasses(t *testing.T) {
 	if !strings.Contains(checkLog(t, log), "/qory-push-check/files/pull-request.json") {
 		t.Errorf("the check did not run:\n%s", checkLog(t, log))
 	}
+}
+
+// TestAPushCheckWhoseFetchFailsClosesRunAPIFailed is the run of
+// [TestThePushStepStoresAVersionThatPasses] whose read of the artifact index gets a 500 once
+// the session ran: the fetch of the check fails, the step stores nothing, and the run closes
+// failed with run_api_failed.
+func TestAPushCheckWhoseFetchFailsClosesRunAPIFailed(t *testing.T) {
+	docker, _ := checkDocker(t, 0, "")
+	p, _ := newCheckedRepo(t, docker)
+	var ran atomic.Bool
+	p.api.index = func(_ int, w http.ResponseWriter) bool {
+		if !ran.Load() {
+			return false
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		return true
+	}
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
+		ran.Store(true)
+	}, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	r.wantsReason(t, string(contracts.EndCodeRunAPIFailed))
+	if posts, _, _ := p.api.counts(); posts != 0 {
+		t.Errorf("%d POST, want none\n%s", posts, r.out)
+	}
+	wants(t, r.out, "the fetch of the artifacts for the check of pull-request failed")
 }
 
 // TestAHomeWhosePushChecksDoNotReadStopsTheRun is a walled run whose composed home has a

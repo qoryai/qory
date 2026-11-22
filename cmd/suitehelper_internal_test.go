@@ -22,6 +22,7 @@ import (
 
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/stack"
@@ -680,31 +681,35 @@ func TestAVerdictMemberInAnotherCaseIsNotRead(t *testing.T) {
 }
 
 // TestAFailedPostDoesNotEndTheRunPassed: the run API refuses the verdict, or the agent's verdict
-// cannot be read: the run closes failed with exit status 1, and the line has the fix first.
+// cannot be read: the run closes failed with exit status 1, and the line has the fix first. A
+// post that the run API refused closes with run_api_failed; a verdict that qory does not send
+// closes with no end code.
 func TestAFailedPostDoesNotEndTheRunPassed(t *testing.T) {
 	was := submissionWait
 	submissionWait = func(context.Context, time.Duration) error { return nil }
 	t.Cleanup(func() { submissionWait = was })
+	called := string(contracts.EndCodeRunAPIFailed)
 	for _, c := range []struct {
-		name  string
-		setup func(h helperRun)
-		posts int
+		name   string
+		setup  func(h helperRun)
+		posts  int
+		reason string
 	}{
-		{"the run API answers 503", func(h helperRun) { h.api.verdictStatus = http.StatusServiceUnavailable }, maxSubmissionTries},
-		{"the run API answers 409", func(h helperRun) { h.api.verdictStatus = http.StatusConflict }, 1},
+		{"the run API answers 503", func(h helperRun) { h.api.verdictStatus = http.StatusServiceUnavailable }, maxSubmissionTries, called},
+		{"the run API answers 409", func(h helperRun) { h.api.verdictStatus = http.StatusConflict }, 1, called},
 		{"the agent's verdict is no valid verdict", func(h helperRun) {
 			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: `{"verdict":"escalate","points":[{"text":"` + strings.Repeat("a", 600) + `","action":"run_again"}]}`})
-		}, 0},
+		}, 0, ""},
 		{"the verdict file is no JSON", func(h helperRun) {
 			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: "passed"})
-		}, 0},
+		}, 0, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHelper(t)
 			c.setup(h)
 			got, err := h.after(ranRed(t, h), succeeded)
-			if got.State != event.StateFailed || got.ExitCode != 1 {
-				t.Errorf("outcome %+v, want failed with 1", got)
+			if got.State != event.StateFailed || got.ExitCode != 1 || got.Reason != c.reason {
+				t.Errorf("outcome %+v, want failed with 1 and the reason %q", got, c.reason)
 			}
 			if ExitCode(err) != 1 {
 				t.Errorf("error %v, exit status %d, want 1", err, ExitCode(err))
