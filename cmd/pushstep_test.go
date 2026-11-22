@@ -437,6 +437,8 @@ type pushRepo struct {
 	stackProxy  bool
 	// noOutput has the session write no pull-request output to its outbox.
 	noOutput bool
+	// noSystem gives the run configuration no QORY_RUN_SYSTEM.
+	noSystem bool
 }
 
 // outboxOf is the value of QORY_OUTBOX in the session's variables, "" with none.
@@ -621,6 +623,9 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	}
 	if p.stackProxy {
 		nowhere.StackProxy, nowhere.StackCABundle = p.h.server.Proxy.URL, p.h.server.Proxy.CABundle
+	}
+	if p.noSystem {
+		nowhere.System = ""
 	}
 	closes, calls, restore := cmd.OpenNowhereWith(nowhere)
 	defer restore()
@@ -3348,6 +3353,43 @@ func replyRepoWith(t *testing.T, process string) (*pushRepo, *string) {
 		}
 	}
 	return p, outbox
+}
+
+// TestARunWithNoSystemStoresNoOutputThatQoryFillsFromThePush is a write run from a run code
+// whose documents set the target acme/site, whose stage requires pull-request, and whose
+// run configuration has no QORY_RUN_SYSTEM: the run fetches and pushes nothing, so the
+// pull-request output, whose head and base qory fills from the push, gets no version and
+// its line. The run does not stop there: it closes succeeded with exit 0.
+func TestARunWithNoSystemStoresNoOutputThatQoryFillsFromThePush(t *testing.T) {
+	p, outbox := replyRepoWith(t, pullRequestProcess)
+	p.noSystem = true
+	p.api.outputs = `[{"type":"pull-request","required":true,"version":null,"check":"missing"}]`
+	change := p.change
+	p.change = func(d map[string]any) {
+		change(d)
+		target := map[string]any{"collection": "R_1001", "address": map[string]any{"system": proxygittest.Host, "path": "acme/site"}}
+		d["target"], d["inputs"].(map[string]any)["target"] = target, target
+		d["deliver"] = []any{map[string]any{"type": "pull-request", "send": "after_gate"}}
+	}
+	p.mountsOf = func(spec session.SessionSpec) {
+		*outbox = outboxOf(spec)
+		if *outbox != "" {
+			writeFile(t, filepath.Join(*outbox, "pull-request", "pull-request.json"), `{"title":"Add a file"}`)
+		}
+	}
+	r := p.run(t, nil, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if r.closes[0].Reason != "" {
+		t.Errorf("the run closed with the reason %q, want none", r.closes[0].Reason)
+	}
+	wants(t, r.out, "qory run: stored no pull-request output: the run pushed no commits to the target.\n  Target: git.test/acme/site\n")
+	lacks(t, r.out, "qory run: fetched acme/site", "qory run: pushed ")
+	if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
+		t.Errorf("%d POST and %d versions stored, want none", posts, stored)
+	}
+	if head := p.branchHead(t); head != "" {
+		t.Errorf("the forge has the branch at %s", head)
+	}
 }
 
 // TestAWriteRunWithReadTargetsAndNoTargetPushesNothing is a write run whose documents set a
