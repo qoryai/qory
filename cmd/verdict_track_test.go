@@ -137,6 +137,8 @@ func TestRunVerdictChecksItsTrack(t *testing.T) {
 			"Write --track-reason on one line. The reason has a tab (U+0009)."},
 		{"reason with a zero-width space", pair("small-change", "One​file."),
 			"Remove the character U+200B from --track-reason. The verdict format excludes it."},
+		{"reason with a tag character", pair("small-change", "One\U000E0041file."),
+			"Remove the character U+E0041 from --track-reason. The verdict format excludes it."},
 		{"the flag --track-kind", []string{"run", "verdict", "passed", "--track", "small-change", "--track-reason", trackReason,
 			"--track-kind", "A comment"}, "unknown flag: --track-kind"},
 		{"track flag on another command", []string{"run", "verdict", "passed", "--track-id", "x"}, "unknown flag: --track-id"},

@@ -660,7 +660,7 @@ artifact_types:                  # optional; the artifact types the workspaces u
 | `description` | how such a workspace works, at most 1200 characters and at most 80 words |
 | `type` | the workspace type of a workspace made from the template: a workspace type key, such as `qory.software` |
 | `stack` | the stack the workspace's workflows run on, one that `exports.stacks` of the same repository lists |
-| `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`; that each `workflow` of a stage's `sequence`, a loop's `body` included, is a non-empty string of one line that the stack's `qory-stack.yaml` declares under `workflows`; and that each stage `name` has no line break or other control character. qory checks nothing else in it |
+| `process` | the workspace's process, a `qory.process/v1` document. qory checks that it is an object with `schema: qory.process/v1` and a list of `stages`; that each `workflow` of a stage's `sequence`, a loop's `body` included, is a non-empty string of one line of text that the stack's `qory-stack.yaml` declares under `workflows`; and that each stage `name` is one line of text. A stage may have `outputs`, a list of objects with `type`, the name of an entry of `artifact_types`, which qory checks with the stage and the type in the message, and that the stage lists each type once, and `required`, `true` or `false`, and `false` when left out; an output has no other key. qory checks nothing else in it |
 | `artifact_types` | optional; the list of the artifact types the workspaces use, as [Artifact types](#artifact-types) has it. A list with no entries is valid |
 | `submit` | optional; the submit step of a run, as [The submit step](#the-submit-step) has it |
 
@@ -678,10 +678,11 @@ Declare check-the-tone in stack support, or remove it from stage Answer.
   The stack is in harness/stacks/support/qory-stack.yaml.
 ```
 
-A workflow that is empty, null, not a string, such as `123` or `true`, or has a line
-break or another control character, is refused the same way, with the entry's place in the stage, such as `entry
-2 in the loop of entry 3`. A stage name and a `stack` with a line break or another
-control character are refused too. qory reads the file through the module's folder, as
+A workflow that is empty, null, not a string, such as `123` or `true`, or is not one line
+of text (see `line` in The primitives), is stopped the same way, with the entry's place
+in the stage, such as `entry 2 in the loop of entry 3`. A stage name and a `stack` that
+are not one line of text are stopped too: the message shows the line break, the control
+character, or the character, such as U+200B or the tag character U+E0041, as a code point. qory reads the file through the module's folder, as
 the compose reads a module's files: a link to a file inside the folder is followed, and
 a link to a place outside it is refused without reading the place it leads to.
 
@@ -698,10 +699,11 @@ is a standard type, `name` alone or with `withdrawable`, or a custom type, with 
 |---|---|
 | `name` | required: lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes, such as `reply-draft`. Each name is listed once |
 | `base_view` | `document`, `image`, `video`, `file` or `structured`, how a version's files are shown |
-| `size_limit` | the most bytes of all files of one version, a whole number from 1 to the base view's most: 10 MiB for `document`, 50 MiB for `image`, 2 GiB for `video`, 1 GiB for `file` and 1 MiB for `structured` |
+| `size_limit` | the most bytes of all files of one version, a whole number from 1 to the base view's most: 10 MiB for `document`, 50 MiB for `image`, 2 GiB for `video`, 1 GiB for `file` and 1 MiB for `structured`, and 786432 bytes for a type with `deliver` |
 | `max_files` | the most files of one version, a whole number from 1 to 20; exactly 1 for `structured` |
 | `json_schema` | the JSON Schema of the file, exactly when `base_view` is `structured` |
 | `withdrawable` | optional, `true` or `false`, and `true` when the entry has none: whether a run may withdraw a name of the type with `qory artifact push --withdraw`. A standard type and a custom type may both set it. qory refuses any other value, such as `"no"`, with the fix on the first line and the file on the last |
+| `deliver` | optional, an object with one required member `send`, `end_of_run` or `after_gate`. `deliver` marks a type that Apiary delivers to the target in the run documents: `end_of_run` at the end of the run, and `after_gate` after the gate of the run's stage passes, and until then qory stores the version. A type without `deliver` is stored and never delivered. Only a custom structured type has `deliver`, with a `size_limit` of at most 786432 bytes, and its `json_schema` has the root `type` `object`, so that no value but an object validates, and a top-level property `target` that is the primitive `reference`: a `$ref` to `https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference`, or a copy of that definition written out under `$defs`, where each definition that it refers to under `$defs` is the definition of that name in the primitives, each directly, in an `allOf`, or through a `$ref` to a definition under `$defs`. The `target` has no `type` beside the reference but `object`, on the property or in an `allOf` entry. Its name is in the `required` list of the root, and only the root list counts. A schema fails when `$id`, `$anchor` or `$dynamicAnchor` is a key anywhere in it, also as the name of a property or a definition, because `$id` changes where a `$ref` points. It fails when the root `$schema` is anything other than `https://json-schema.org/draft/2020-12/schema`, with or without a final `#`, because draft-07 ignores the keys next to a `$ref`; a `$schema` below the root is no draft and passes. It fails when the `$ref` that leads to the `target` goes through a `$defs` name with a character other than a letter, a digit, `_` or `-`, because the compiler decodes `%`, `~0` and `~1` and splits a name at `/`. A top-level property may have the keyword `x-qory-fill` with one of these values, each on one property at most: `pushed-commits` on a list whose `items` are the primitive `reference` (the commits qory pushed to the target, oldest first), `pushed-head` and `pushed-base` on a `reference` (the last pushed commit, and the commit the run started at), which a property with a mark takes through a `$ref`, to the primitives or to a local `$defs` `reference`, because a written-out copy with the mark is not the primitive `reference`, and with no `type` beside the `$ref` but `object`, `pushed-branch` and `pushed-base-branch` on a string, and `pushed-commits-left-out` on an integer. `x-qory-fill` fails on `target`, because `target` is the destination and qory fills only other members, and below the top level (the root, `$defs`, `items`, a nested property), on a property of another shape, with another value, and in a type without `deliver`, because qory fills a member only for a type that Apiary delivers. A nested property or a definition named `x-qory-fill` fails too, as does a property of that name in a type without `deliver`, because qory reads the name as the mark. qory checks the `target` and the marks, and nothing reads `deliver` yet |
 
 A custom type has `base_view`, `size_limit` and `max_files`. qory has no list of standard
 types: a name alone, or a name with `withdrawable` alone, passes for any name of the right
@@ -721,9 +723,14 @@ when a stage has an input or output that is neither in the list nor one of those
 
 A `json_schema` is an object that compiles as a JSON Schema. It is draft 2020-12 unless its
 `$schema` sets draft-07, the only other draft. A reference to a file or URL outside the
-schema fails when the schema reaches it, and qory reads no file or URL for one. The JSON
-Schema metaschemas are built in, so a reference to one passes. A `pattern` is a Go
-regular expression (RE2). A
+schema fails when the schema reaches it, and qory reads no file or URL for one. Two kinds
+of reference pass: a reference to a JSON Schema metaschema, which is built in, and a
+reference into `primitives.schema.json`, such as
+`https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/title` (§The
+primitives). A `pattern` is a Go regular expression (RE2). YAML reads no surrogate pair, and the patterns of
+the primitives write the characters above U+FFFF as one: where you paste a schema of this
+directory into a `process.yaml`, write each such pair as the escape `\UXXXXXXXX` of the
+character in a double-quoted string, such as `\U000E0041` for `\udb40\udc41`. A
 `json_schema` has at most 65,536 bytes as compact JSON, 4096 values in all,
 1024 entries in a list, 1024 members in an object, 16,384 bytes in a string or a member
 name, and 64 lists and objects nested in one another. The patterns of all custom types in
@@ -765,6 +772,39 @@ Remove the key "command" from submit.
   submit is in /src/acme-harness/harness/modules/support-desk/process.yaml.
 ```
 
+## The primitives
+
+[primitives.schema.json](primitives.schema.json) defines the strings and objects that the
+schemas of artifact types have in common. It is not the schema of a document. Each definition is under
+`$defs`:
+
+| Definition | A value that |
+|---|---|
+| `line` | has no control character (U+0000 to U+001F and U+007F to U+009F), no U+2028 or U+2029, and no Cf character except U+200C and U+200D, the joiners that emoji sequences and some scripts need |
+| `text` | is Markdown: of the control characters it has only tab, line feed and carriage return, and it has the same other stops as a `line`; at most 20,000 characters |
+| `title` | is a `line` of 1 to 256 characters with at least one character that is not a space (U+0020, U+00A0, U+1680, U+2000 to U+200A, U+202F, U+205F, U+3000), U+200C or U+200D |
+| `reference` | is an object with a `collection` (a `line` of 1 to 200 characters) and, optionally, an `address` with a `system` (1 to 253 lower-case letters, digits, dots and hyphens) and a `path` (a `line` of 1 to 200 characters); an `address` has both |
+| `link` | is an `https` URL of at most 2048 characters, with a host, with no user information |
+| `amount` | is an object with a `value`, a decimal number written as a string (an optional minus sign, 1 to 15 digits, and optionally a point with 1 to 6 digits, such as `12.50` or `-3`), and exactly one of `currency` (an ISO 4217 code, three capital letters) and `unit` (a `title` of at most 32 characters); it has no other member |
+
+The Cf characters include the bidirectional controls, the soft hyphen, the zero width
+space and the tag characters such as U+E0041. The patterns of `line` and `text` list the
+characters of Unicode 17.0.0 that Go's and Node's tables have as Cc and Cf. The characters
+above U+FFFF are written as surrogate pairs, because the checks of the harness read a
+pattern as JavaScript with the `u` flag. The control characters are written as the regex
+escapes `\x00-\x1f` and `\x7f-\x9f` (for a `text`, `\x00-\x08\x0b\x0c\x0e-\x1f` and
+`\x7f-\x9f`), never as the JSON escape `\u0000`: that escape decodes to a raw control
+character in the pattern, and a reader fails on a file that has one.
+
+A schema of an artifact type in a `process.yaml` refers to a definition by the address of
+the file, such as
+`{"$ref": "https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/title"}`.
+qory resolves that address from its built-in copy and reads no file or URL. The schemas of
+the formats in this document do not refer to the file: each has a `$defs` `line` and, where
+it has Markdown, a `$defs` `text` with the same pattern as here, so that each one passes the
+check as the schema of a custom type without a loader. A test compares each pattern with
+the one in the primitives file.
+
 ## The submission format
 
 A submission document records what a run submits for a work item: the branch, the commits
@@ -788,17 +828,19 @@ writes it, after the push. This is version 1 of the format
 |---|---|
 | `ref` | the branch's name, the same in each repository: `qory/` followed by the work item's id |
 | `verdict` | the work item's newest verdict, when this run wrote it: `passed`, `changes-requested`, `escalate`, or `none` |
-| `text` | the title and the description of the draft pull request, from the session's hand-off file. The title has 1 to 256 characters and no control character: no tab, no line end. Absent when the session wrote none |
+| `text` | the title and the description of the draft pull request, from the session's hand-off file. The title is a `title` of the primitives, 1 to 256 characters; the description is a `text` of the primitives, at most 20,000 characters. Absent when the session wrote none |
 | `repositories` | each repository with the commit of the branch in it, at least one |
 | `system` | the host the repository is on, a lower-case host name of at most 253 characters |
 | `path` | the repository's path on the host: at most 200 characters of segments joined by slashes, with no `.`, `..` or `.git` segment |
 | `commit` | the head of the branch: a full commit id, 40 or 64 lower-case hexadecimal digits. Each commit id of the format has this form |
 | `base` | the commit the run started at (`commit`), and the name of the repository's default branch when the run started (`branch`, optional, at most 255 characters, a name that git accepts after `refs/heads/`): the branch that a pull request of the run is based on |
-| `commits` | each commit from the base to the head, oldest first, with the ledger step that made it, at most 128 characters: the id of a ledger row, such as `deliverable:d-1`, `fix:f1`, `plan`, `checks`, `small-change` or `script:scenario-2#3`. A commit that a step made gets that step. Any commit with no step gets `unreviewed` |
-| `draft` | the draft pull request (`number`, `url`, `title`, `state`, `action`), or `{"none": <reason>}` with the reason `not-passed`, `no-text`, `escalated`, `no-program`, `program-failed` (with `exit`, 0, 1 or 2), `program-timeout` or `login-needed` (with `exit` 3). The `state` of a draft is `draft`, `open`, `closed` or `merged` |
+| `commits` | each commit from the base to the head, oldest first, with the ledger step that made it, at most 128 characters on one line (a `line` of the primitives): the id of a ledger row, such as `deliverable:d-1`, `fix:f1`, `plan`, `checks`, `small-change` or `script:scenario-2#3`. A commit that a step made gets that step. Any commit with no step gets `unreviewed` |
+| `draft` | the draft pull request (`number`, `url`, `title`, `state`, `action`; the `title` is a `line` with a character that is not a space, U+200C or U+200D, and the program reader limits it to 256 characters), or `{"none": <reason>}` with the reason `not-passed`, `no-text`, `escalated`, `no-program`, `program-failed` (with `exit`, 0, 1 or 2), `program-timeout` or `login-needed` (with `exit` 3). The `state` of a draft is `draft`, `open`, `closed` or `merged` |
 | `commit_url` | the forge's address of a commit, from the submit program of a run with no run code |
 
-A document has no other member. A software factory can use the format as the JSON Schema
+A document has no other member. The schema writes the patterns of the primitives in its
+`$defs` `line`, `text` and `visible`, and a test compares them with the primitives file. A
+software factory can use the format as the JSON Schema
 of a custom artifact type in its `process.yaml`:
 
 ```yaml
@@ -986,7 +1028,7 @@ stores it as a version of the artifact type `verdict`. This is version 1 of the 
 |---|---|
 | `verdict` | `passed`: the work meets the bar; `changes-requested`: the work needs another round; `escalate`: a person must act |
 | `points` | what is wrong or missing, 1 to 20 points: required with `escalate`, optional with `changes-requested`, where each point has the action `run_again`, and absent with `passed` |
-| `text` | what is wrong or missing, in one plain sentence for a person on one line, 1 to 500 characters, with no action and no question id, because Qory Apiary adds the action from `action`: it has no control character, so no tab, line feed or carriage return, and the schema's `$defs` `line`, the `line` of the questions format, lists the format characters it cannot have |
+| `text` | what is wrong or missing, in one plain sentence for a person on one line, 1 to 500 characters, with no action and no question id, because Qory Apiary adds the action from `action`: it has no control character, so no tab, line feed or carriage return, and the schema's `$defs` `line`, the `line` of the primitives, stops the other characters a line cannot have |
 | `action` | `answer`: a person answers the question in `question`, only with `escalate`; `run_again`: another round runs, and with `escalate` a person runs it |
 | `question` | the id of an open question in the work item's newest `questions` version, in the id form of the questions format: required with `answer`, and absent with `run_again` |
 | `fix` | what a person does to fix the point, in one plain sentence on one line, with the rules of `text`: optional with `run_again`, and absent with `answer`. Qory Apiary shows it in place of the sentence of the action `run_again` |
@@ -1065,7 +1107,7 @@ format ([review-report.schema.json](review-report.schema.json)):
 | `problem` | what is wrong, 1 to 2000 characters. Required |
 | `fix` | what the next session changes, 1 to 2000 characters. Required |
 | `proof` | `failing check: `, `failing input: ` or `broken rule: `, then the evidence, at most 1000 characters. A blocking finding has a failing check or a failing input. Required |
-| `point` | the finding in one line, 1 to 500 characters, with at least one character that is not a space. qory trims the spaces at its ends, and reads a point of spaces and characters that show nothing, such as U+200B, as a report that does not match the format. Required |
+| `point` | the finding in one line, 1 to 500 characters, a `line` of the primitives (no control character, so no tab, line feed or carriage return, no U+2028 or U+2029, and no Cf character such as U+200B or U+E0041, except U+200C and U+200D), with at least one character that is not a space. qory trims the spaces at its ends, and reads a point of spaces and characters that show nothing, such as U+00A0 or U+3164, as a report that does not match the format. Required |
 | `file` | the path of the file that the finding is about, 1 to 500 characters. Optional |
 | `line` | the line of `file`, a whole number from 1. Optional |
 

@@ -685,6 +685,51 @@ release may change what an existing document does, and states it under Upgrading
   least one character that is not a space. A blocking finding has a `failing check` or a
   `failing input` as its proof. See The review report format in
   `contracts/harness/v1/README.md`.
+- Version 1 of the primitives, `contracts/harness/v1/primitives.schema.json`: the `line`,
+  `title`, `text`, `reference`, `link` and `amount` that the schemas of artifact types have in
+  common. A `json_schema` in a `process.yaml` can refer to a definition by the address of
+  the file, such as
+  `https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/title`. qory resolves
+  that address from a built-in copy and reads no file or URL; a reference to any other
+  address fails as before. See The primitives in `contracts/harness/v1/README.md`.
+- An artifact type of a `process.yaml` can have `deliver: {send: end_of_run}` or
+  `deliver: {send: after_gate}`. `deliver` marks a type that Apiary delivers to the
+  target in the run documents, at the end of the run or after the gate of the run's
+  stage passes; a type without `deliver` is stored and never delivered. Only a
+  structured type has `deliver`, with a `size_limit` of at most 786432 bytes, and its
+  `json_schema` has the root `type` `object`, so that no value but an object validates,
+  and a top-level property `target` that is the primitive `reference`, written as a
+  `$ref` to `primitives.schema.json#/$defs/reference`, in an `allOf`, or through a
+  definition under `$defs`, or as a written-out copy of that definition. In a
+  written-out copy, each definition that it refers to under `$defs` is the definition of
+  that name in the primitives. The `target` has no `type` beside the reference but
+  `object`, on the property or in an `allOf` entry. Its name is in the `required` list
+  of the root, and only the root list counts. A schema fails when `$id`, `$anchor` or
+  `$dynamicAnchor` is a key anywhere in it, also as the name of a property or a
+  definition, because `$id` changes where a `$ref` points. It fails when the root
+  `$schema` is anything other than `https://json-schema.org/draft/2020-12/schema`, with or
+  without a final `#`, because draft-07 ignores the keys next to a `$ref`. It fails when
+  the `$ref` that leads to the `target` goes through a `$defs` name with a character
+  other than a letter, a digit, `_` or `-`, because the compiler decodes `%`, `~0` and
+  `~1` and splits a name at `/`.
+  A `deliver` that breaks a rule stops the command with the fix on the first line, at
+  most 100 characters, and the type name on the second line, such as ``Add a top-level
+  `target` of the primitive `reference` to the schema, or remove `deliver`.``
+- A top-level property of a type with `deliver` can have the keyword `x-qory-fill` with
+  one of these values, each on one property at most: `pushed-commits` on a list whose
+  `items` are the primitive `reference` (the commits qory pushed to the target, oldest
+  first), `pushed-head` and `pushed-base` on a `reference` that the property takes
+  through a `$ref`, to the primitives or to a local `$defs` `reference`, with no `type`
+  beside the `$ref` but `object`, `pushed-branch` and `pushed-base-branch` on a string,
+  and `pushed-commits-left-out` on an integer. qory stops the command with the fix on
+  the first line when `x-qory-fill` is on `target`, below the top level, on a property
+  of another shape, a value that qory does not fill, or in a type without `deliver`.
+- A stage of the `process` of a `process.yaml` can have `outputs`, a list of objects
+  with `type`, the name of an entry of `artifact_types`, and `required`, `true` or
+  `false`, `false` when left out. An output has no other key. qory stops the command
+  with the fix on the first line when a stage has an output type that `artifact_types`
+  does not list, or when a stage lists a type twice; the message has the stage and the
+  type.
 
 ### Changed
 
@@ -1764,6 +1809,51 @@ release may change what an existing document does, and states it under Upgrading
   files of codex/<folder> add up to more than 1 GiB, the most a walled Codex run takes.``
   or ``Ship codex/<path> under 64 MiB.`` and the next line ``The file is larger than 64
   MiB, the most a walled Codex run takes for one file.``
+- The character rule of the contract schemas is one for a line and one for a text. A line
+  has no control character, no U+2028 or U+2029, and no format character (Unicode
+  category Cf) except U+200C and U+200D, the joiners that emoji sequences need. A text
+  keeps tab, line feed and carriage return as its only control characters and has the same
+  other stops. Until this change, the schemas of the questions, acceptance criteria,
+  verification, review comments, proposal sources and verdict formats listed the stopped
+  characters themselves, and the lists stopped at U+FFFF: U+0600 and a tag character such
+  as U+E0041 passed. Each `$defs` `line` and `text` has the pattern of the primitives.
+  The checks of `qory run verdict` and of the review round stop the same characters.
+  The `point` of a finding in `review-report.schema.json` is a `line` too: a tab, U+200B
+  and U+E0041 in a point fail the report format.
+- The hand-off drops a `description` that has a character that a text does not have: a control
+  character other than tab, line feed and carriage return, U+2028, U+2029, or a Cf character
+  other than U+200C and U+200D, such as U+200B or the tag character U+E0041. It prints
+  `Remove the character U+200B at character 4 of the description. qory dropped the
+  text.`, and the commit is `unreviewed`. Until this change, the run stored the
+  description and the submission then failed the check of the format.
+- The step leaves out each `draft_title` line of a submit program whose title has a character
+  that a title does not have, such as U+200B or a tag character, or has no character that is
+  not a space, U+200C or U+200D. It lists the line as a line that qory cannot use, with the
+  cause and the character as a code point, and the draft is `program-failed` as for any draft
+  line that qory leaves out. After a timeout, a program that did not start or an exit status
+  other than 0, 1 or 2, the step lists no line, because qory reads none. Until this
+  change, the step stored such a title and the submission then failed the check of the
+  format.
+- The submission format stops the same characters. The title of the text and the title of a
+  draft are a line with a character that is not a space, U+200C or U+200D; a step is a line;
+  the description is a text. Until this change, the title stopped only the control
+  characters U+0000 to U+001F and U+007F, and a step, a description and the title of a
+  draft had no rule.
+- A stack, a stage name or a workflow in a `process.yaml` that has U+200B, U+2028, U+2029
+  or another character that a line does not have is stopped, with the fix `Set stack in
+  process.yaml to one line of text.` and the cause `The value has the character U+200B,
+  which a line of text does not have.` Until this change, only the control characters were
+  stopped.
+- The patterns of the primitives write the characters above U+FFFF, such as the tag
+  characters, as surrogate pairs. YAML reads no surrogate pair, so in a `process.yaml`
+  write each pair as `\UXXXXXXXX` in a double-quoted string, such as `\U000E0041`, when you
+  paste a schema of `contracts/harness/v1/` into a `json_schema`.
+- The patterns of the contract schemas and of the primitives write the control characters
+  as the regex escapes `\x00-\x1f` and `\x7f-\x9f`, and the branch name pattern of
+  `submission.schema.json` writes `\x00-\x20\x7f` the same way. A pattern written with
+  the JSON escape `\u0000` decodes to a raw control character, and a reader fails on a
+  file that has one. The patterns accept and stop the same characters as before. A test
+  fails when a pattern of a contract schema has a raw control character.
 
 ### Removed
 

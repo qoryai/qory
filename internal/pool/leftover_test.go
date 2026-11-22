@@ -962,6 +962,9 @@ func TestARunHoldsItsLock(t *testing.T) {
 	h.waitFor("the dispatch", func() bool { return len(h.srv.Dispatches()) == 1 })
 	d := h.only()
 	h.ready(d.ID)
+	// The pool writes run.session after the start and before it logs lineStarted, while
+	// the fake writes its ready file without waiting for run.session.
+	h.waitFor("the start's line", func() bool { return len(h.log.with(lineStarted)) == 1 })
 	dir := filepath.Join(h.state, "runs", d.ID)
 	lock := filepath.Join(dir, "run.lock")
 	if lockFree(lock) {

@@ -3171,12 +3171,12 @@ characters is dropped, so its commit is `unreviewed`. A `text` whose `title` has
 character (Unicode category Cc, such as a tab or a line end), a format character (category
 Cf, such as a bidirectional control, a zero-width space or a tag character) other than U+200C
 and U+200D, or U+2028 or U+2029, is dropped whole. U+200C and U+200D, as in an emoji
-sequence, stay in a title, but a `text` whose `title` has no character that is not a space, U+200C or U+200D is dropped whole. A step with one of these characters is dropped, and so is a step
+sequence, stay in a title, but a `text` whose `title` has no character that is not a space, U+200C or U+200D is dropped whole. A `text` whose `description` has a character that a text does not have is dropped whole too: a control character other than tab, line feed and carriage return, a format character other than U+200C and U+200D, U+2028 or U+2029. A step with one of these characters is dropped, and so is a step
 whose key is not a full commit id of 40 or 64 lower-case hexadecimal digits. qory prints `qory run: The hand-off
 file has a part the submission format does not allow, so qory dropped it.`, then one line
 indented by two spaces for each part: `Title: <n> characters, over the limit of 256. qory
 dropped the text.`, `Description: <n> characters, over the limit of 20000. qory dropped the
-text.`, `Title: has a control character at character <n>. qory dropped the text.`, `Description: has a NUL character at character <n>. qory dropped the text.`, `Description: line <n> is a marker line of the draft's block. qory dropped the text.`, `Step of commit <commit>: has a control, invisible, direction or separator character. qory dropped the step.`, `<n> further steps have a control, invisible, direction or separator character. qory dropped them.`, `Title: has no character that is not a space, U+200C or U+200D. qory dropped the text.`, `<n> step
+text.`, `Title: has a control character at character <n>. qory dropped the text.`, `Description: has a NUL character at character <n>. qory dropped the text.`, `Remove the character <U+code point> at character <n> of the description. qory dropped the text.`, `Description: line <n> is a marker line of the draft's block. qory dropped the text.`, `Step of commit <commit>: has a control, invisible, direction or separator character. qory dropped the step.`, `<n> further steps have a control, invisible, direction or separator character. qory dropped them.`, `Title: has no character that is not a space, U+200C or U+200D. qory dropped the text.`, `<n> step
 keys are not a full commit id of 40 or 64 lower-case hexadecimal digits. qory dropped them.`, and `Step of commit <commit>: <n> characters, over the limit of 128. qory dropped the
 step.`, for at most 5 steps, then `<n> further steps are over the limit of 128 characters.
 qory dropped them.` It prints no content of the file. A step for a commit that this run did not make is not used. The run
@@ -3344,7 +3344,12 @@ repository's `system`, with a path, at most 2048 characters, of the ASCII charac
 `Line <n>: <reason>.` on a second line, for at most 5 lines: a line with a key that is not
 listed, no value, a control character or no final line feed, a repeated draft key or address, an
 address of a commit that qory did not give the program, any draft line when `QORY_SUBMIT_DRAFT`
-is `none`, and each draft line of a draft that lacks one of the five. When the program ends, qory
+is `none`, each `draft_title` line with a character that a title does not have, such as U+200B or
+the tag character U+E0041, or with no character that is not a space, U+200C or U+200D (the cause
+is `the title has the character U+200B, which a title does not have, at character 2` or `the
+title has no character that is not a space, U+200C or U+200D`), and each draft line of a draft
+that lacks one of the five, which includes the draft lines of a draft whose title qory left
+out. When the program ends, qory
 prints one of these, each with line 1 as the cause, then lines indented by two spaces:
 
 - `qory run: The submit program failed, so a repository it did not finish has no draft.`,
