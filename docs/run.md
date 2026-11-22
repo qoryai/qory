@@ -3053,24 +3053,23 @@ A run has no step in these cases, and what the agent left stays in the working f
   and is deleted with it, so nothing reaches the branch.
 - A run on a machine that is lost: nothing is left to run the step.
 
-The step does this, in order, for each repository that it pushes. The step leaves each read
-target's checkout as the agent left it: no check, commit or push.
+The step does this, in order, for the target, the one repository it pushes. The step leaves
+each read target's checkout as the agent left it: no check, commit or push.
 
-1. qory checks each repository again, because the agent could write to each `.git`. The
+1. qory checks the target again, because the agent could write to its `.git`. The
    check stops on a key in a configuration file in `.git` that neither `git init` nor the
    fetch writes, apart from `user.name` and `user.email` in `.git/config`, which the commit
    of this step does not use, on such a file that is not a regular file, on `alternates`, on
    `info/grafts`, on a `commondir` file, on a `.git` with no `HEAD`, `objects` or `refs`,
-   on a link in `.git` or on the way to a further repository, and on a hard link in `.git`
-   outside `objects`.
-2. qory removes `.git/index.lock` of each repository, a file that an agent killed in a git
+   on a link in `.git`, and on a hard link in `.git` outside `objects`.
+2. qory removes `.git/index.lock` of the target, a file that an agent killed in a git
    command leaves behind, and prints `qory run: removed .git/index.lock of <path>, which the
    agent left when it stopped`. qory does this only for a walled run, whose container the
    session removed: when it could not, the run's push proxy does not open, and the step
    runs no git. With an agent on the host, the stop of the agent is not proven, and a lock
    fails the step. qory removes only that file, and only as a regular file in a `.git`
    directory, so a link stops the check and any other lock stays.
-3. qory commits what the agent left in each repository, with the message `Changes left by
+3. qory commits what the agent left in the target, with the message `Changes left by
    run <run number>` and the author and committer `qory <qory@localhost>`. A new file is in
    the commit unless git ignores it through `.gitignore` or `.git/info/exclude`. `.qory`
    and the links into it stay out, also when the agent staged them. When a commit of the
@@ -3083,33 +3082,31 @@ target's checkout as the agent left it: no check, commit or push.
    container, qory records each changed path and its content, and commits a path only if
    the agent changed it again. With `wall.setup: inside`, the setup runs in the agent's
    container, so what it changed counts as what the agent left. No hook in `.git` runs.
-   The commits of all repositories come before the first push, so a failed commit pushes
-   nothing.
-4. qory checks each commit from the start commit to `HEAD`, merges included, in each
-   repository. A commit that has a path under `.qory/outbox/`, in any letter case such as
-   `.QORY/Outbox/`, as `git add -f` makes one, stops the step before any push, in any repository, and the run closes `failed`. qory
-   prints `qory run: Keep .qory/outbox/ out of the commits of this run; qory pushed
-   nothing.`, then four lines indented by two spaces: `A commit of this run has a path under
-   .qory/outbox/.`, `Repository <system>/<path>.`, `Commit <commit>.` and `Path <path>.` A commit that added the path and a later commit that
-   removed it counts too, since the push would send the file in the history. A list of the
-   commits that fails stops the step before any push: `qory run: Start the run again: the
-   list of the run's commits failed.`, then `Listing the commits of <path> from commit
-   <start> to <head> failed: <error>. qory pushed nothing. The run code is used up.`
-   indented by two spaces. qory then checks the scope of the commits of each repository
-   whose `HEAD` is past the session's start, on a fresh clone, see [The scope check before
-   the push](#the-scope-check-before-the-push): a repository that fails stops the step
-   before any push, in any repository. After a session that succeeded, qory then reads,
-   fills and checks the session's outputs with the heads that the push would leave, see [The
-   outputs of a session](#the-outputs-of-a-session): an output that fails stops the step
-   before any push, and the run closes `failed` with the end code `outputs_invalid`.
-5. qory checks the head of the branch on the forge, for each repository whose `HEAD` is past
-   the commit the run expected: see [The head check](#the-head-check). When one
-   repository fails the check, qory pushes nothing in any repository.
-6. qory pushes each of these repositories to `refs/heads/qory/<work item id>`, through the
-   run's push proxy: a fast-forward push, or a push with a lease where the head check requires
-   one. It prints `qory run: pushed qory/<work item id> to <path> at <commit>`, where
-   `<commit>` is the commit's first 12 characters. With no new commit in any repository,
-   it prints `qory run: no new commits to push`, and pushes nothing.
+   A failed commit pushes nothing.
+4. qory checks each commit from the start commit to `HEAD`, merges included. A commit that
+   has a path under `.qory/outbox/`, in any letter case such as `.QORY/Outbox/`, as `git add
+   -f` makes one, stops the step before the push, and the run closes `failed`. qory prints
+   `qory run: Keep .qory/outbox/ out of the commits of this run; qory pushed nothing.`, then
+   four lines indented by two spaces: `A commit of this run has a path under
+   .qory/outbox/.`, `Repository <system>/<path>.`, `Commit <commit>.` and `Path <path>.` A
+   commit that added the path and a later commit that removed it counts too, since the push
+   would send the file in the history. A list of the commits that fails stops the step
+   before any push: `qory run: Start the run again: the list of the run's commits failed.`,
+   then `Listing the commits of <path> from commit <start> to <head> failed: <error>. qory
+   pushed nothing. The run code is used up.` indented by two spaces. When `HEAD` is past the
+   session's start, qory then checks the scope of the commits on a fresh clone, see [The
+   scope check before the push](#the-scope-check-before-the-push): a failure stops the step
+   before the push. After a session that succeeded, qory then reads, fills and checks the
+   session's outputs with the heads that the push would leave, see [The outputs of a
+   session](#the-outputs-of-a-session): an output that fails stops the step before any push,
+   and the run closes `failed` with the end code `outputs_invalid`.
+5. When `HEAD` is past the commit the run expected, qory checks the head of the branch on the
+   forge: see [The head check](#the-head-check). A failure stops the step before the push.
+6. qory pushes the target to `refs/heads/qory/<work item id>`, through the run's push proxy:
+   a fast-forward push, or a push with a lease where the head check requires one. It prints
+   `qory run: pushed qory/<work item id> to <path> at <commit>`, where `<commit>` is the
+   commit's first 12 characters. With no new commit, it prints `qory run: no new commits to
+   push`, and pushes nothing.
 7. After a session that succeeded, qory stores a version of each output of the outbox, see
    [The outputs of a session](#the-outputs-of-a-session). After a 429, qory waits for
    `Retry-After`, at most 60 seconds, and sends the request again, at most 5 requests in
@@ -3278,11 +3275,11 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
 
 #### The head check
 
-Before any push, qory reads the head of `refs/heads/qory/<work item id>` on the forge, for
-each repository whose `HEAD` is past the commit the run expected. The expected commit is the
+Before the push, qory reads the head of `refs/heads/qory/<work item id>` on the forge, when
+the target's `HEAD` is past the commit the run expected. The expected commit is the
 start commit, or, after a push of this run, the commit of its last push. qory reads through
 the run's host proxy, with the read credential, because the push proxy has the push
-credential alone. The result of each repository is one of these:
+credential alone. The result is one of these:
 
 - The head is the expected commit: qory pushes with no lease.
 - The branch is not on the forge, and the run started at the checkout at `target_version`
@@ -3299,7 +3296,7 @@ credential alone. The result of each repository is one of these:
   those commits only while the branch is still at the head qory read.
 - Any other head (an unrecorded head, a recorded head after the run's first push, or a
   recorded head that does not descend from the start commit) or the branch missing where the
-  run did not start at the checkout: qory pushes nothing in any repository, and the step
+  run did not start at the checkout: qory pushes nothing, and the step
   fails with the line in the list above, which starts with `Set the branch to the
   expected commit or delete it`, or with `Create the branch at the expected commit on the
   forge` for a missing branch.
@@ -6356,11 +6353,10 @@ push step.
 
 #### The scope check before the push
 
-Before the first `git push` after a session of a write run from a run code, qory checks the
-commits of each repository whose head is past the session's start, other than a read
-target: `Start` for session 1, and the commit that the last push landed for a later
-session. A failure in one repository stops the push of every repository, and the commits
-stay local.
+Before the `git push` after a session of a write run from a run code, qory checks the
+target's commits when its head is past the session's start: `Start` for session 1, and the
+commit that the last push landed for a later session. A read target is not checked. A
+failure stops the push, and the commits stay local.
 
 1. qory makes a fresh clone of the repository's commits in the run directory: `git init`
    with no template, then a fetch of the head alone, by its id, with no tag and no ref, and

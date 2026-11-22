@@ -18,12 +18,12 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
-- Before the first push after a session of a write run from a run code, `qory run` checks
-  the commits of each repository whose head is past the session's start, on a fresh clone
+- Before the push after a session of a write run from a run code, `qory run` checks the
+  target's commits when its head is past the session's start, on a fresh clone
   that has no ref or hook the agent wrote. For a workflow with a `plan`, the scope check
   that a module declares for the plan type runs in the push checks' container with
   `--base <session start> --artifacts <launch snapshot>`; a workflow with no `plan` may
-  commit no file outside `.qory/`. A failure in one repository stops every push: exit 1, a
+  commit no file outside `.qory/`. A failure stops the push: exit 1, a
   changed file with no plan, and a check past 30 seconds end `push_scope_refused`; exit 2
   or 3 and a home with no scope check for the type `harness_invalid`; a failed clone
   `repository_check_failed`; and a failed engine `machine_setup_invalid`. See docs/run.md,
