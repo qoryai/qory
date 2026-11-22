@@ -23,7 +23,7 @@ import (
 // not run.
 const (
 	textScopeOutside  = "The commits do not pass the scope check of the session's plan, so qory pushed nothing.\n  Repository %s, plan type %s, commits %s to %s."
-	textScopeNoPlan   = "This workflow has no plan, so its commits may change no file; qory pushed nothing.\n  Workflow %s. Repository %s. Commit %s changes %s."
+	textScopeNoPlan   = "this workflow has no plan, so its commits may change no file outside .qory/; qory pushed nothing.\n  Workflow %s. Repository %s. Commit %s changes %s."
 	textScopeTimedOut = "The scope check of the session's plan did not end within 30 seconds; qory pushed nothing.\n  Repository %s."
 	textScopeError    = "The scope check of the session's plan ended with an error, so qory pushed nothing.\n  Repository %s.\n  Cause: %s"
 	textScopeNotRun   = "qory could not run the scope check of the session's plan, so it pushed nothing.\n  Repository %s.\n  Cause: %s"

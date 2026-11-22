@@ -134,7 +134,7 @@ func TestAWorkflowWithNoPlanPushesNoChangedFile(t *testing.T) {
 		leavesApp(t)(dir)
 		commitAll(t, dir, "Add the app")
 	}, nil)
-	p.wantsNoPush(t, r, contracts.EndCodePushScopeRefused, "qory run: This workflow has no plan, so its commits may change no file; qory pushed nothing.\n  Workflow hello. Repository acme/site. Commit ")
+	p.wantsNoPush(t, r, contracts.EndCodePushScopeRefused, "qory run: this workflow has no plan, so its commits may change no file outside .qory/; qory pushed nothing.\n  Workflow hello. Repository acme/site. Commit ")
 	wants(t, r.out, " changes src/app.go.\n")
 	if got := checkLog(t, log); got != "" {
 		t.Errorf("a scope check's container ran:\n%s", got)

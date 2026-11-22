@@ -6340,7 +6340,7 @@ Each failure ends the run failed, with its end code:
 | Case | End code | Line 1 |
 |---|---|---|
 | The check exits 1 | `push_scope_refused` | `qory run: The commits do not pass the scope check of the session's plan, so qory pushed nothing.` |
-| A workflow with no `plan` changes a file | `push_scope_refused` | `qory run: This workflow has no plan, so its commits may change no file; qory pushed nothing.` |
+| A workflow with no `plan` changes a file | `push_scope_refused` | `qory run: this workflow has no plan, so its commits may change no file outside .qory/; qory pushed nothing.` |
 | The check runs past 30 seconds | `push_scope_refused` | `qory run: The scope check of the session's plan did not end within 30 seconds; qory pushed nothing.` |
 | The check exits 2, 3 or another code | `harness_invalid` | `qory run: The scope check of the session's plan ended with an error, so qory pushed nothing.` |
 | The home has no scope check for the plan type | `harness_invalid` | `qory run: qory could not run the scope check of the session's plan, so it pushed nothing.` |
