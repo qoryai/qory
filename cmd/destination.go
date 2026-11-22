@@ -89,16 +89,17 @@ var (
 )
 
 // destination is one entry of the inputs' destinations: id, and the target, a collection
-// and an address, nil for a place with none.
+// and an address, nil for a place with none. Each member matches by its exact name, and
+// a member that the schema does not define is read and not used.
 type destination struct {
-	ID     string `json:"id"`
+	ID     string `json:"id,case:strict"`
 	Target struct {
-		Collection string `json:"collection"`
+		Collection string `json:"collection,case:strict"`
 		Address    *struct {
-			System string `json:"system"`
-			Path   string `json:"path"`
-		} `json:"address"`
-	} `json:"target"`
+			System string `json:"system,case:strict"`
+			Path   string `json:"path,case:strict"`
+		} `json:"address,case:strict"`
+	} `json:"target,case:strict"`
 }
 
 // errNotObject is the error of inputs that are not a JSON object.

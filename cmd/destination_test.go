@@ -250,6 +250,30 @@ func TestDestinationCloneStopsOnMalformedDestinations(t *testing.T) {
 // TestDestinationCloneCountsAtMost100 is a session that cloned 100 destinations: a call
 // that would make clone 101 stops before it clones, exit 2, and a call for a destination
 // cloned before still prints its line.
+// TestDestinationCloneMatchesEachMemberByItsExactName is an entry in which each member
+// is followed by one whose name differs only in case: an id that the call does not name,
+// an empty target, an empty collection, no address, a system that is no host name, and
+// the path of another repository. The clone uses the lower-case members alone.
+func TestDestinationCloneMatchesEachMemberByItsExactName(t *testing.T) {
+	c := destinationSession(t)
+	writeFile(t, filepath.Join(c.home, "inputs.json"), `{"destinations": [{"id": "`+webID+`", "ID": "`+backID+`",
+		"target": {"collection": "c", "COLLECTION": "",
+			"address": {"system": "`+proxygittest.Host+`", "SYSTEM": "Git.test", "path": "acme/web", "PATH": "acme/back"},
+			"ADDRESS": null},
+		"TARGET": {"collection": ""}}]}`)
+	out, err := run(t, "destination", "clone", webID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := c.line(webID, "acme/web"); out != want {
+		t.Errorf("printed %q, want %q", out, want)
+	}
+	wantFile(t, filepath.Join(c.root, proxygittest.Host, "acme", "web", "README.md"), "web\n")
+	if _, err := os.Lstat(filepath.Join(c.root, proxygittest.Host, "acme", "back")); !os.IsNotExist(err) {
+		t.Errorf("acme/back is cloned: %v", err)
+	}
+}
+
 func TestDestinationCloneCountsAtMost100(t *testing.T) {
 	c := destinationSession(t)
 	if _, err := run(t, "destination", "clone", webID); err != nil {
