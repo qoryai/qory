@@ -10,9 +10,9 @@ import (
 	"time"
 )
 
-// The time limits of one request of the install. The run's time limit, when it has one,
-// applies on top; a run without a time limit relies on these, so a registry that stops
-// sending cannot hold a run's start forever.
+// The time limits of one request of the install. The context of the install, which in
+// qory run ends with the run's setup, applies on top; within it, these keep a registry
+// that stops sending from holding the install until the setup's end.
 const (
 	// dialTimeout is the most time to open a connection.
 	dialTimeout = 30 * time.Second

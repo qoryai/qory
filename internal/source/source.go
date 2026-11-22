@@ -168,22 +168,25 @@ type SchemeError struct {
 	Name string
 }
 
-// Error is the line [HTTPSFix] makes for the URL and the file; for a source of a
-// [Named] compose, the line with the source's name in place of the URL.
+// Error is the lines [HTTPSFix] makes for the URL and the file; for a source of a
+// [Named] compose, the fix with the source's name in place of the URL on line 1, and
+// the cause on line 2.
 func (e *SchemeError) Error() string {
 	if e.Name != "" {
-		return "use an https URL for " + e.Name + ": a run from a control plane fetches git sources only over https"
+		return "use an https URL for " + e.Name + ".\n  A run from a control plane fetches git sources only over https."
 	}
 	return HTTPSFix(e.URL, e.File)
 }
 
 // HTTPSFix is "" for a git source git fetches over https, an https URL with a host, and
-// otherwise the line a run from a control plane stops with for it: use an https URL for
-// it, in file when file is set, such as the https URL of the same repository when one
-// follows from it, and why. The source is printed with a URL's password hidden. A local
+// otherwise the lines a run from a control plane stops with for it: line 1 is the fix,
+// use an https URL for it, in file when file is set; then the https URL of the same
+// repository as an example when one follows from it, and why. The source is printed
+// with a URL's password hidden. A local
 // path or a file URL is a folder of this machine; an ssh URL or the scp form host:path,
-// which git fetches over ssh, would use this machine's keys; a git:// URL would reach
-// the host past the gateway; any other is not an https URL.
+// which git fetches over ssh, would sign in with your private keys in ~/.ssh, outside
+// the gateway; a git:// URL would reach the host past the gateway; any other is not an
+// https URL.
 func HTTPSFix(src, file string) string {
 	shown := exports.URL(src)
 	why, https := "", ""
@@ -198,7 +201,7 @@ func HTTPSFix(src, file string) string {
 		case "file":
 			why = shown + " is a folder of this machine."
 		case "ssh", "git+ssh", "ssh+git":
-			why = "ssh would use this machine's keys."
+			why = "ssh would sign in with your private keys in ~/.ssh, outside the gateway."
 			https = httpsOf(rest, "/")
 		case "git":
 			why = "git:// would reach the host past the gateway."
@@ -216,7 +219,7 @@ func HTTPSFix(src, file string) string {
 	} else if i := strings.Index(src, ":"); i > 0 && !strings.Contains(src[:i], "/") {
 		// git reads host:path as ssh when no slash comes before the first colon, and any
 		// other source without a scheme as a path on this machine.
-		why = "ssh would use this machine's keys."
+		why = "ssh would sign in with your private keys in ~/.ssh, outside the gateway."
 		https = httpsOf(src, ":")
 	} else {
 		why = shown + " is a folder of this machine."
@@ -225,10 +228,11 @@ func HTTPSFix(src, file string) string {
 	if file != "" {
 		line += " in " + file
 	}
+	line += "."
 	if https != "" {
-		line += ", such as " + https
+		line += "\n  For example: " + https + "."
 	}
-	return line + ". A run from a control plane fetches git sources only over https, through the run's gateway; " + why
+	return line + "\n  A run from a control plane fetches git sources only over https, through the run's gateway; " + why
 }
 
 // httpsOf is the https URL of the repository at rest, [user@]host[:port]<sep>path, with
@@ -281,6 +285,9 @@ type Git struct {
 type Memo struct {
 	mu   sync.Mutex
 	seen map[[2]string]memoEntry
+	// sealed is set by [Memo.Seal]: a source the memo has no clone of fails, see
+	// [SealedError].
+	sealed bool
 }
 
 // memoEntry is one resolution a [Memo] holds: the full commit and the warning it came
@@ -302,6 +309,50 @@ func (m *Memo) get(url, ref string) (memoEntry, bool) {
 	defer m.mu.Unlock()
 	e, ok := m.seen[[2]string{url, ref}]
 	return e, ok
+}
+
+// Seal makes m the pins of every later compose that shares it: a git source whose URL and
+// ref m holds, with its clone in the cache, resolves to the commit m holds, and any other
+// git source fails with a [*SealedError], with no lookup and no fetch. qory run seals the
+// memo of a run's first compose, so the compose of a later session of the run reads the
+// run's cache alone, at the commits of the first. A nil memo has no seal.
+func (m *Memo) Seal() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sealed = true
+}
+
+// isSealed reports whether [Memo.Seal] sealed m.
+func (m *Memo) isSealed() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sealed
+}
+
+// SealedError is a git source that a compose with a sealed [Memo] has no clone of: the
+// first compose of the run did not fetch it, and a later one contacts no remote.
+type SealedError struct {
+	// URL is the git URL as the stack writes it, and Ref the ref.
+	URL, Ref string
+	// Name is the source as a text of a [Named] compose shows it; "" for a source whose
+	// address shows.
+	Name string
+}
+
+// Error is the fix on line 1, and on line 2 the source, by its name for a named stack's
+// source; it is masked as [FetchError.Error] is.
+func (e *SealedError) Error() string {
+	what := e.Name
+	if what == "" {
+		what = secretmask.Default().Replace(fmt.Sprintf("%s at %s", exports.URL(e.URL), exports.Value(e.Ref, false)))
+	}
+	return "set the stage's workflows in Qory Apiary to runtimes whose modules session 1 fetched.\n  " + what + " is not in the run's cache, since the run's first compose did not fetch it"
 }
 
 // put records what url at ref resolved to. A nil memo records nothing.
@@ -329,6 +380,9 @@ type Options struct {
 	Cache string
 	// Timeout is the longest one git command may run, 0 for no limit.
 	Timeout time.Duration
+	// Context, when set, stops every git command of the resolve once it ends, as qory run's
+	// setup limit does; nil stops none.
+	Context context.Context
 	// Memo is shared by every source of one compose, so one URL at one ref resolves once,
 	// to one commit; nil resolves each source on its own.
 	Memo *Memo
@@ -494,6 +548,13 @@ func resolveGit(s stack.Source, opts Options) (Resolved, error) {
 	}
 	dir := filepath.Join(cache, folderName(s.Git, opts))
 	got, ok := opts.Memo.get(s.Git, s.Ref)
+	if (!ok || !cloned(filepath.Join(dir, got.commit))) && opts.Memo.isSealed() {
+		e := &SealedError{URL: s.Git, Ref: s.Ref}
+		if n != nil {
+			e.Name = shownAs(s, opts)
+		}
+		return Resolved{}, e
+	}
 	if !ok || !cloned(filepath.Join(dir, got.commit)) {
 		var err error
 		start := time.Now()
@@ -940,7 +1001,8 @@ func cacheName(v string) string {
 
 // git runs one git command in dir and returns its combined output. A command still
 // running after opts.Timeout is killed and the error says so; a timeout of zero is no
-// limit.
+// limit. A command still running when opts.Context ends is killed too, and the error
+// wraps the context's cause.
 //
 // With opts.Git nil, git runs through [hostgit.Command], with every prompt off, the
 // terminal's, an askpass program's and ssh's, so a remote that wants a password or an
@@ -953,7 +1015,11 @@ func cacheName(v string) string {
 // parent; its folder is one of the run's cache, which nothing but this compose writes. The output has the proxy's password hidden.
 func git(dir string, opts Options, args ...string) ([]byte, error) {
 	timeout := opts.Timeout
-	ctx, cancel := context.Background(), func() {}
+	parent := opts.Context
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := parent, func() {}
 	if timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 	}
@@ -969,8 +1035,16 @@ func git(dir string, opts Options, args ...string) ([]byte, error) {
 		// for a repository no higher than dir, so the configuration of a repository
 		// above it sets no proxy, URL or header.
 		cmd.Env = append(proxygit.Env(cmd.Env, p), "GIT_CEILING_DIRECTORIES="+filepath.Dir(dir))
+		// A helper git started stops with git; a process left holding the output is not
+		// waited for past a second.
+		cmd.WaitDelay = time.Second
+		hostgit.Group(cmd)
 		out, err := cmd.CombinedOutput()
+		hostgit.StopGroup(cmd)
 		out = []byte(proxygit.Hide(string(out), p))
+		if parent.Err() != nil {
+			return out, fmt.Errorf("git %s was stopped: %w", args[0], context.Cause(parent))
+		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return out, fmt.Errorf("git %s ran past %s and was stopped", args[0], timeout)
 		}
@@ -987,7 +1061,13 @@ func git(dir string, opts Options, args ...string) ([]byte, error) {
 	if os.Getenv("GIT_SSH_COMMAND") == "" {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
 	}
+	cmd.WaitDelay = time.Second
+	hostgit.Group(cmd)
 	out, err := cmd.CombinedOutput()
+	hostgit.StopGroup(cmd)
+	if parent.Err() != nil {
+		return out, fmt.Errorf("git %s was stopped: %w", args[0], context.Cause(parent))
+	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return out, fmt.Errorf("git %s ran past %s and was stopped", args[0], timeout)
 	}

@@ -2,11 +2,11 @@
 // beyond what its run sets: its runtime's and qory's settings, its telemetry, its tool
 // servers, and what a program or a shell loads before it starts. A pool's prebuild
 // stops on an image or a development container configuration that sets one, and a
-// dispatched walled run of Claude Code drops the image's values of them, but for the
-// gateway's placeholders. Both guard against the values an image or a configuration
-// leaves in place, not against a program of the image or a command of the repository,
-// which runs as the agent's user in the agent's container; against those, the boundary
-// is the wall. This is the one list of them; whatever else reads them reads it here.
+// walled run of Claude Code drops the image's values of them, but for the gateway's
+// placeholders. Both guard against the values an image or a configuration leaves in
+// place, not against a program of the image or a command of the repository, which runs
+// as the agent's user in the agent's container; against those, the boundary is the
+// wall. This is the one list of them; whatever else reads them reads it here.
 package agentenv
 
 import "strings"

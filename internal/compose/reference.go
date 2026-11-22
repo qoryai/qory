@@ -32,7 +32,7 @@ import (
 // stack file, is an error that starts with "Check the folder in -f.".
 func LoadReference(ref stack.Source, opts Options) (*stack.Stack, source.Resolved, error) {
 	sel := ref.Shown()
-	src, err := source.Resolve("", ref, source.Options{Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo, Git: opts.Git})
+	src, err := source.Resolve("", ref, source.Options{Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Context: opts.Context, Memo: opts.Memo, Git: opts.Git})
 	var gone *source.GoneError
 	var fetch *source.FetchError
 	var pathErr *fs.PathError

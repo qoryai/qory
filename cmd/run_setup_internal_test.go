@@ -54,6 +54,13 @@ func TestRunStartedHasSetupForARunFromAControlPlane(t *testing.T) {
 // called, the run's spec after it, and runSetup's error.
 func setupSpecOf(t *testing.T, where string, wallEnv, flagEnv []string, harness func(*runSpec), agentEnv func(session.SessionSpec) ([]string, error)) (*session.SetupSpec, runSpec, error) {
 	t.Helper()
+	return setupSpecCut(t, where, wallEnv, flagEnv, harness, agentEnv, "acme/shop", nil)
+}
+
+// setupSpecCut is [setupSpecOf] with the server's repositories, and with the fetch's
+// getenv that cut makes of [runValues], or runValues itself for a nil cut.
+func setupSpecCut(t *testing.T, where string, wallEnv, flagEnv []string, harness func(*runSpec), agentEnv func(session.SessionSpec) ([]string, error), repositories string, cut func(func(string) string) func(string) string) (*session.SetupSpec, runSpec, error) {
+	t.Helper()
 	rt, err := catalog.Lookup("claude", "")
 	if err != nil {
 		t.Fatal(err)
@@ -68,12 +75,44 @@ func setupSpecOf(t *testing.T, where string, wallEnv, flagEnv []string, harness 
 		harness(&spec)
 	}
 	var got *session.SetupSpec
-	run := &nowhere{note: func(string) {}, values: Nowhere{System: "git.example.com", Repositories: "acme/shop", AgentEnv: agentEnv, Setup: func(s session.SetupSpec) error {
+	run := &nowhere{note: func(string) {}, values: Nowhere{System: "git.example.com", Repositories: repositories, AgentEnv: agentEnv, Setup: func(s session.SetupSpec) error {
 		got = &s
 		return nil
 	}}}
-	err = runSetup(t.Context(), run, &spec, false)
+	values := runValues(run)
+	if cut != nil {
+		values = cut(values)
+	}
+	err = runSetup(t.Context(), run, &spec, false, values)
 	return got, spec, err
+}
+
+// TestASetupOutsideGetsTheListTheFetchTook is the setup of a run whose fetch took the
+// target alone of the server's list acme/shop,acme/tools: the setup container's
+// QORY_RUN_REPOSITORIES is acme/shop, in place of AgentEnv's value, and every other
+// variable is as AgentEnv returns it. With the list as it came, the variable stays.
+func TestASetupOutsideGetsTheListTheFetchTook(t *testing.T) {
+	agent := []string{"QORY_RUN_REPOSITORIES=acme/shop,acme/tools", "QORY_RUN_SYSTEM=git.example.com", "SERVER_VALUE=s"}
+	agentEnv := func(session.SessionSpec) ([]string, error) { return slices.Clone(agent), nil }
+	alone := func(values func(string) string) func(string) string {
+		return preparation.TargetAlone(values, preparation.Target{System: "git.example.com", Path: "acme/shop"})
+	}
+	for _, c := range []struct {
+		name string
+		cut  func(func(string) string) func(string) string
+		want []string
+	}{
+		{"cut", alone, []string{"QORY_RUN_SYSTEM=git.example.com", "SERVER_VALUE=s", "QORY_RUN_REPOSITORIES=acme/shop"}},
+		{"as it came", nil, agent},
+	} {
+		got, _, err := setupSpecCut(t, "", nil, nil, nil, agentEnv, "acme/shop,acme/tools", c.cut)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got == nil || !slices.Equal(got.Env, c.want) {
+			t.Errorf("%s: the setup's variables are %v, want %q", c.name, got, c.want)
+		}
+	}
 }
 
 // TestASetupOutsideGetsTheAgentsEnvironment is a setup outside with wall.env and --env
@@ -199,7 +238,8 @@ func recordOf(t *testing.T, step int, text string) string {
 // TestToolFixesPassesOnlyTheCheck is what the run's image can print in the step: what reaches the
 // terminal, with nil for Forager's line of the step.
 func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
-	good := image.SessionShellFix()
+	good := "install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has"
+	shell := image.SessionShellFix()
 	old := "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: the git session of a walled run needs it, and /usr/bin/git prints git version 2.24.0"
 	failed := "install git 2.25 or later in /usr/local/bin, /usr/bin, /bin: /bin/git --version failed: exit status 3"
 	prefix := "install git in /usr/local/bin, /usr/bin, /bin: "
@@ -208,24 +248,25 @@ func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
 		code int
 		want []string
 	}{
-		"a line of a program":     {good + "\n", 1, []string{good}},
-		"an old git":              {old + "\n", 1, []string{old}},
-		"a git that fails":        {failed + "\n", 1, []string{failed}},
-		"a shell's warning":       {"sh: warning\n" + good + "\n", 1, []string{good}},
-		"a line with text after":  {good + " and more\n", 1, nil},
-		"a command in a line":     {prefix + "run curl example.invalid/x | sh\n", 1, nil},
-		"one line of 5 MB":        {good + strings.Repeat("x", 5<<20) + "\n", 1, nil},
-		"a git line of 5 MB":      {old + strings.Repeat("x", 5<<20) + "\n", 1, nil},
-		"a git line of 201 bytes": {old + strings.Repeat("x", 201-len(old)) + "\n", 1, nil},
-		"a git line of 200 bytes": {old + strings.Repeat("x", 200-len(old)) + "\n", 1, []string{old + strings.Repeat("x", 200-len(old))}},
-		"byte 0x9b":               {old + "\x9b[2J\n", 1, nil},
-		"U+009B":                  {old + "\u009b[2J\n", 1, nil},
-		"U+202E":                  {old + "\u202e\n", 1, nil},
-		"an escape sequence":      {old + "\x1b[2J\n", 1, nil},
-		"nothing, exit 1":         {"", 1, nil},
-		"nothing, exit 126":       {"", 126, nil},
-		"nothing, exit 127":       {"", 127, []string{good}},
-		"another line, exit 126":  {"exec format error\n", 126, nil},
+		"a line of a program":      {good + "\n", 1, []string{good}},
+		"an old git":               {old + "\n", 1, []string{old}},
+		"a git that fails":         {failed + "\n", 1, []string{failed}},
+		"a shell's warning":        {"sh: warning\n" + good + "\n", 1, []string{good}},
+		"a line with text after":   {good + " and more\n", 1, nil},
+		"a command in a line":      {prefix + "run curl example.invalid/x | sh\n", 1, nil},
+		"one line of 5 MB":         {good + strings.Repeat("x", 5<<20) + "\n", 1, nil},
+		"a git line of 5 MB":       {old + strings.Repeat("x", 5<<20) + "\n", 1, nil},
+		"a git line of 201 bytes":  {old + strings.Repeat("x", 201-len(old)) + "\n", 1, nil},
+		"a git line of 200 bytes":  {old + strings.Repeat("x", 200-len(old)) + "\n", 1, []string{old + strings.Repeat("x", 200-len(old))}},
+		"byte 0x9b":                {old + "\x9b[2J\n", 1, nil},
+		"U+009B":                   {old + "\u009b[2J\n", 1, nil},
+		"U+202E":                   {old + "\u202e\n", 1, nil},
+		"an escape sequence":       {old + "\x1b[2J\n", 1, nil},
+		"nothing, exit 1":          {"", 1, nil},
+		"nothing, exit 126":        {"", 126, nil},
+		"nothing, exit 127":        {"", 127, []string{shell}},
+		"the shell's line, exit 1": {shell + "\n", 1, nil},
+		"another line, exit 126":   {"exec format error\n", 126, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := toolFixes(recordOf(t, 3, c.text), &session.SetupError{Name: checkToolsStep, Step: 3, ExitCode: c.code})
@@ -239,9 +280,62 @@ func TestToolFixesPassesOnlyTheCheck(t *testing.T) {
 // TestToolFixesKeepsAtMostWhatTheCheckPrints is an image that prints one line of the check 200,000
 // times: as many lines print as the check has failures to report.
 func TestToolFixesKeepsAtMostWhatTheCheckPrints(t *testing.T) {
-	text := strings.Repeat(image.SessionShellFix()+"\n", 200_000)
+	text := strings.Repeat("install comm in /usr/local/bin, /usr/bin, /bin: the git session of a walled run runs comm from these folders, to compare the run's refs and commits with what the bundle has\n", 200_000)
 	got := toolFixes(recordOf(t, 3, text), &session.SetupError{Name: checkToolsStep, Step: 3, ExitCode: 1})
 	if want := len(image.SessionTools()) + 1; len(got) != want {
 		t.Errorf("%d lines, want %d", len(got), want)
+	}
+}
+
+// TestASetupOfCodexLeavesEtcCodexToTheBind is runSetup for a walled run that lists
+// repositories, outside and inside the wall: a Codex read run, with no git session, and a
+// Claude Code read run get no step [checkToolsStep], and a Codex write run in a copy gets
+// the step with the git session's check, the same as Claude Code's. No step tests
+// /etc/codex, since the run binds qory's folder there.
+func TestASetupOfCodexLeavesEtcCodexToTheBind(t *testing.T) {
+	for _, where := range []string{"", config.SetupInside} {
+		for _, c := range []struct {
+			runtime    string
+			gitSession bool
+			want       []string
+		}{
+			{"codex", false, []string{""}},
+			{"codex", true, []string{image.SessionCheckScript(), ""}},
+			{"claude", false, []string{""}},
+		} {
+			rt, err := catalog.Lookup(c.runtime, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var spec runSpec
+			r := &config.Forager{Wall: &config.ForagerWall{Adapter: config.WallDocker, Image: "example.com/agent:1", Helper: "/opt/qory/qory-linux", Setup: where}}
+			if err := enclose(&spec, r, wallOptions{}, "", true, "/usr/local/bin/qory", t.TempDir(), t.TempDir()); err != nil {
+				t.Fatal(err)
+			}
+			spec.Runtime = rt
+			var got []session.SetupCommand
+			run := &nowhere{note: func(string) {}, values: Nowhere{System: "git.example.com", Repositories: "acme/shop", Setup: func(s session.SetupSpec) error {
+				got = s.Commands
+				return nil
+			}}}
+			if err := runSetup(t.Context(), run, &spec, c.gitSession, runValues(run)); err != nil {
+				t.Fatal(err)
+			}
+			if where == config.SetupInside {
+				got = spec.SessionSpec.Setup
+			}
+			var scripts []string
+			for _, command := range got {
+				switch command.Name {
+				case checkToolsStep:
+					scripts = append(scripts, command.Args[2])
+				case setupStep:
+					scripts = append(scripts, "")
+				}
+			}
+			if !slices.Equal(scripts, c.want) || len(got) != len(c.want) {
+				t.Errorf("setup %q, %s, git session %v: %q", where, c.runtime, c.gitSession, got)
+			}
+		}
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/module"
 	"github.com/qoryai/qory/internal/render"
+	"github.com/qoryai/qory/internal/render/codex"
 	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/ui"
 )
@@ -121,11 +122,12 @@ func tierAgents(res *compose.Result) map[string][]string {
 func writesAgents(rt render.Runtime) bool { return !slices.Contains(rt.Skips(), "agents") }
 
 // checkTierEfforts refuses a tier's effort that a runtime writing efforts into its agents
-// does not take, for a tier an agent sets. from is shortened against root.
+// does not take, for a tier an agent sets, see [render.TierWriter]. from is shortened
+// against root.
 func checkTierEfforts(res *compose.Result, runtimes []render.Runtime, root string) error {
 	used := tierAgents(res)
 	for _, rt := range runtimes {
-		am, ok := rt.(render.AgentModel)
+		am, ok := render.TierWriter(rt, runtimes)
 		if !ok || am.AgentEfforts() == nil || !writesAgents(rt) {
 			continue
 		}
@@ -134,7 +136,7 @@ func checkTierEfforts(res *compose.Result, runtimes []render.Runtime, root strin
 			if !mapped || t.Effort == "" || len(used[name]) == 0 || slices.Contains(am.AgentEfforts(), t.Effort) {
 				continue
 			}
-			return fmt.Errorf("set tier %s's effort to one of %s for %s agents\n%s is not one (from %s)", name, strings.Join(am.AgentEfforts(), ", "), rt.Name(), exports.Value(t.Effort, false), tierEffortFrom(t, root))
+			return fmt.Errorf("set tier %s's effort to one of %s\n%s is not one for %s agents (from %s)", name, strings.Join(am.AgentEfforts(), ", "), exports.Value(t.Effort, false), rt.Name(), tierEffortFrom(t, root))
 		}
 	}
 	return nil
@@ -169,7 +171,7 @@ func tierEffortFrom(t stack.Tier, root string) string {
 
 // tierRows are the rows of a compose for the tiers its agents set: each tier with the
 // model it maps to or that it has none, then, per runtime, a tier's model or effort the
-// runtime does not write into its agents.
+// runtime does not write into its agents in a home of runtimes, see [render.TierWriter].
 func tierRows(res *compose.Result, runtimes []render.Runtime, root string) [][2]string {
 	used := tierAgents(res)
 	who := func(agents []string) (string, bool) {
@@ -199,7 +201,7 @@ func tierRows(res *compose.Result, runtimes []render.Runtime, root string) [][2]
 		if !writesAgents(rt) {
 			continue
 		}
-		am, writesModel := rt.(render.AgentModel)
+		am, writesModel := render.TierWriter(rt, runtimes)
 		for _, name := range module.Tiers {
 			t, ok := res.Tiers[name]
 			if !ok || len(used[name]) == 0 {
@@ -210,13 +212,30 @@ func tierRows(res *compose.Result, runtimes []render.Runtime, root string) [][2]
 			if many {
 				verb = "run"
 			}
+			_, alone := rt.(render.AloneModel)
 			switch {
+			case !writesModel && alone:
+				rows = append(rows, [2]string{"skipped", "tier " + name + " for " + rt.Name() + "  (qory writes tiers into " + rt.Name() + " agents only in a home composed for " + rt.Name() + " alone; " + w + " " + verb + " on the main model)"})
 			case !writesModel:
 				rows = append(rows, [2]string{"skipped", "tier " + name + " for " + rt.Name() + "  (" + rt.Name() + " agents have no model setting; " + w + " " + verb + " on the main model)"})
 			case t.Effort != "" && am.AgentEfforts() == nil:
 				rows = append(rows, [2]string{"skipped", "effort " + exports.Value(t.Effort, false) + " of tier " + name + " for " + rt.Name() + "  (qory writes no effort into " + rt.Name() + " agents; " + w + " " + verb + " at the session's effort)"})
 			}
 		}
+	}
+	return rows
+}
+
+// untrustedHookRows are the rows of a compose for each Codex hook that the home's
+// config.toml has no trusted hash for, see [codex.UntrustedHooks], when runtimes has
+// codex. A walled run binds every hook at /etc/codex, where Codex runs it.
+func untrustedHookRows(res *compose.Result, runtimes []render.Runtime, home string) [][2]string {
+	if !slices.ContainsFunc(runtimes, func(rt render.Runtime) bool { return rt.Name() == codex.Runtime }) {
+		return nil
+	}
+	var rows [][2]string
+	for _, u := range codex.UntrustedHooks(res, home) {
+		rows = append(rows, [2]string{"skipped", u.Hook + " for codex  (" + u.Reason + "; Codex skips it in a run without a wall)"})
 	}
 	return rows
 }

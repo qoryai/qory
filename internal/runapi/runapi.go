@@ -101,66 +101,80 @@ var ProcessTypes = []string{"questions", "review-comments", "verdict", "proposal
 
 // VersionRef is one version of an artifact.
 type VersionRef struct {
-	ID     string `json:"id"`
-	Number int    `json:"number"`
+	ID     string `json:"id,case:strict"`
+	Number int    `json:"number,case:strict"`
 }
 
 // Snapshot is the work item as the run reads it. It has the members that qory acts on;
 // Raw is the whole response, as the run API returned it.
 type Snapshot struct {
 	WorkItem struct {
-		ID     string `json:"id"`
-		Number int    `json:"number"`
-		URL    string `json:"url"`
-	} `json:"work_item"`
+		ID     string `json:"id,case:strict"`
+		Number int    `json:"number,case:strict"`
+		URL    string `json:"url,case:strict"`
+	} `json:"work_item,case:strict"`
 	// Number is the run's number on the server, from 1, and 0 in a response with none.
 	// Workflow and Round are nil for a run that has neither.
 	Run struct {
-		ID       string  `json:"id"`
-		Number   int     `json:"number"`
-		Workflow *string `json:"workflow"`
-		Round    *int    `json:"round"`
-	} `json:"run"`
+		ID       string  `json:"id,case:strict"`
+		Number   int     `json:"number,case:strict"`
+		Workflow *string `json:"workflow,case:strict"`
+		Round    *int    `json:"round,case:strict"`
+	} `json:"run,case:strict"`
 	// Name, Round, Rounds and State are nil for a work item that is in no stage.
 	Stage struct {
-		ID     *string `json:"id"`
-		Name   *string `json:"name"`
-		Round  *int    `json:"round"`
-		Rounds *int    `json:"rounds"`
-		State  *string `json:"state"`
-	} `json:"stage"`
-	Inputs  []Input  `json:"inputs"`
-	Outputs []Output `json:"outputs"`
+		ID     *string `json:"id,case:strict"`
+		Name   *string `json:"name,case:strict"`
+		Round  *int    `json:"round,case:strict"`
+		Rounds *int    `json:"rounds,case:strict"`
+		State  *string `json:"state,case:strict"`
+	} `json:"stage,case:strict"`
+	Inputs  []Input  `json:"inputs,case:strict"`
+	Outputs []Output `json:"outputs,case:strict"`
 	// Verdict is the work item's newest verdict, nil for none.
-	Verdict *GivenVerdict `json:"verdict"`
+	Verdict *GivenVerdict `json:"verdict,case:strict"`
+	// PushedCommits is every commit that an earlier run of the work item pushed, ordered by
+	// run number and then push order, without the commits of the requesting run; nil for none.
+	PushedCommits []PushedEntry `json:"pushed_commits,case:strict"`
 	// Notes is the work item's notes, oldest first, byte for byte as the run API returned
 	// them: a JSON array, or null or empty for a response with no notes.
-	Notes json.RawMessage `json:"notes"`
+	Notes json.RawMessage `json:"notes,case:strict"`
 
 	Raw json.RawMessage `json:"-"`
+}
+
+// PushedEntry is one commit that a run pushed: the repository, the commit, the run, whether a
+// member cancelled that run, and when the push was recorded.
+type PushedEntry struct {
+	System    string `json:"system,case:strict"`
+	Path      string `json:"path,case:strict"`
+	Commit    string `json:"commit,case:strict"`
+	RunID     string `json:"run_id,case:strict"`
+	Cancelled bool   `json:"cancelled,case:strict"`
+	At        string `json:"at,case:strict"`
 }
 
 // Input is one input of the work item's stage. Version is nil when the input has no
 // version yet.
 type Input struct {
-	Type     string      `json:"type"`
-	Required bool        `json:"required"`
-	Version  *VersionRef `json:"version"`
+	Type     string      `json:"type,case:strict"`
+	Required bool        `json:"required,case:strict"`
+	Version  *VersionRef `json:"version,case:strict"`
 }
 
 // Output is one output of the work item's stage, with its newest version, nil for none,
 // and its check: `passed`, `missing` or `not_checked`.
 type Output struct {
-	Type     string      `json:"type"`
-	Required bool        `json:"required"`
-	Version  *VersionRef `json:"version"`
-	Check    string      `json:"check"`
+	Type     string      `json:"type,case:strict"`
+	Required bool        `json:"required,case:strict"`
+	Version  *VersionRef `json:"version,case:strict"`
+	Check    string      `json:"check,case:strict"`
 }
 
 // GivenVerdict is a verdict that the work item has.
 type GivenVerdict struct {
-	Verdict string      `json:"verdict"`
-	Version *VersionRef `json:"version"`
+	Verdict string      `json:"verdict,case:strict"`
+	Version *VersionRef `json:"version,case:strict"`
 }
 
 // Point is one point of a verdict that [Client.PushVerdict] sends: what is wrong or
@@ -169,24 +183,24 @@ type GivenVerdict struct {
 // run_again only: Qory Apiary shows it in place of the action's sentence. Fix is empty
 // for none. The contract is contracts/harness/v1/verdict.schema.json.
 type Point struct {
-	Text     string `json:"text"`
-	Action   string `json:"action"`
-	Question string `json:"question,omitempty"`
-	Fix      string `json:"fix,omitempty"`
+	Text     string `json:"text,case:strict"`
+	Action   string `json:"action,case:strict"`
+	Question string `json:"question,omitempty,case:strict"`
+	Fix      string `json:"fix,omitempty,case:strict"`
 }
 
 // Track is the track that a verdict proposes for the work item, with the reason. ID is
 // the id of a track that the gate of the run's stage offers. The contract is
 // contracts/harness/v1/verdict.schema.json.
 type Track struct {
-	ID     string `json:"id"`
-	Reason string `json:"reason"`
+	ID     string `json:"id,case:strict"`
+	Reason string `json:"reason,case:strict"`
 }
 
 // Index is the work item's artifacts with their versions. Raw is the whole response, as
 // the run API returned it.
 type Index struct {
-	Artifacts []Artifact `json:"artifacts"`
+	Artifacts []Artifact `json:"artifacts,case:strict"`
 
 	Raw json.RawMessage `json:"-"`
 }
@@ -195,13 +209,13 @@ type Index struct {
 // version that a gate approved, nil for none; NewestVersion is the number of the newest
 // version.
 type Artifact struct {
-	Type                 string    `json:"type"`
-	Name                 string    `json:"name"`
-	StageID              *string   `json:"stage_id"`
-	ApprovedVersion      *string   `json:"approved_version"`
-	NewestVersion        int       `json:"newest_version"`
-	ChangedAfterApproval bool      `json:"changed_after_approval"`
-	Versions             []Version `json:"versions"`
+	Type                 string    `json:"type,case:strict"`
+	Name                 string    `json:"name,case:strict"`
+	StageID              *string   `json:"stage_id,case:strict"`
+	ApprovedVersion      *string   `json:"approved_version,case:strict"`
+	NewestVersion        int       `json:"newest_version,case:strict"`
+	ChangedAfterApproval bool      `json:"changed_after_approval,case:strict"`
+	Versions             []Version `json:"versions,case:strict"`
 }
 
 // Version is one version of an artifact. Cancelled is true when a member cancelled the
@@ -209,32 +223,32 @@ type Artifact struct {
 // files and removes its name from gates, stage inputs and the work item's pages. An
 // index without either field reads it as false.
 type Version struct {
-	ID        string     `json:"id"`
-	Number    int        `json:"number"`
-	Writer    Writer     `json:"writer"`
-	Cancelled bool       `json:"cancelled"`
-	Withdrawn bool       `json:"withdrawn"`
-	StageID   *string    `json:"stage_id"`
-	Note      *string    `json:"note"`
-	At        string     `json:"at"`
-	Files     []File     `json:"files"`
-	Approvals []Approval `json:"approvals"`
+	ID        string     `json:"id,case:strict"`
+	Number    int        `json:"number,case:strict"`
+	Writer    Writer     `json:"writer,case:strict"`
+	Cancelled bool       `json:"cancelled,case:strict"`
+	Withdrawn bool       `json:"withdrawn,case:strict"`
+	StageID   *string    `json:"stage_id,case:strict"`
+	Note      *string    `json:"note,case:strict"`
+	At        string     `json:"at,case:strict"`
+	Files     []File     `json:"files,case:strict"`
+	Approvals []Approval `json:"approvals,case:strict"`
 }
 
 // Writer is who wrote a version: Kind `run` with RunID, or `person` with Name.
 type Writer struct {
-	Kind  string `json:"kind"`
-	RunID string `json:"run_id,omitempty"`
-	Name  string `json:"name,omitempty"`
+	Kind  string `json:"kind,case:strict"`
+	RunID string `json:"run_id,omitempty,case:strict"`
+	Name  string `json:"name,omitempty,case:strict"`
 }
 
 // File is one file of a version, as the index lists it. Filename comes from the server:
 // check it before using it as a path.
 type File struct {
-	Filename    string `json:"filename"`
-	ContentType string `json:"content_type"`
-	Size        int64  `json:"size"`
-	SHA256      string `json:"sha256"`
+	Filename    string `json:"filename,case:strict"`
+	ContentType string `json:"content_type,case:strict"`
+	Size        int64  `json:"size,case:strict"`
+	SHA256      string `json:"sha256,case:strict"`
 }
 
 // Approval is a gate's approval of a version. Automatic is true for the approval that a
@@ -242,20 +256,22 @@ type File struct {
 // false for the approval of a member. An index without the field reads as false.
 type Approval struct {
 	By struct {
-		Name string `json:"name"`
-	} `json:"by"`
-	Automatic bool    `json:"automatic"`
-	StageID   *string `json:"stage_id"`
-	At        string  `json:"at"`
+		Name string `json:"name,case:strict"`
+	} `json:"by,case:strict"`
+	Automatic bool    `json:"automatic,case:strict"`
+	StageID   *string `json:"stage_id,case:strict"`
+	At        string  `json:"at,case:strict"`
 }
 
-// Push is the body of a new version of an artifact. Name and Note are left out of the
-// request when they are empty, and the run API then uses the name `main`. Withdraw
-// makes the version a withdrawal, which has no Files.
+// Push is the body of a new version of an artifact. Name, Note and Decision are left out
+// of the request when they are empty, and the run API then uses the name `main`.
+// Decision is the id of the person's note on the work item that asked for the version.
+// Withdraw makes the version a withdrawal, which has no Files.
 type Push struct {
 	Type     string     `json:"type"`
 	Name     string     `json:"name,omitempty"`
 	Note     string     `json:"note,omitempty"`
+	Decision string     `json:"decision,omitempty"`
 	Withdraw bool       `json:"withdraw,omitempty"`
 	Files    []PushFile `json:"files"`
 }
@@ -271,9 +287,9 @@ type PushFile struct {
 
 // Pushed is the version that a push or a verdict stored.
 type Pushed struct {
-	Type    string     `json:"type"`
-	Name    string     `json:"name"`
-	Version VersionRef `json:"version"`
+	Type    string     `json:"type,case:strict"`
+	Name    string     `json:"name,case:strict"`
+	Version VersionRef `json:"version,case:strict"`
 }
 
 // WorkItem returns the work item snapshot.
@@ -551,16 +567,25 @@ func fullCommit(value string) bool {
 	return true
 }
 
+// storedAnswer is the answer to a push or a verdict: the version that it stored.
+type storedAnswer struct {
+	Artifact Pushed `json:"artifact,case:strict"`
+}
+
 func (c *Client) post(ctx context.Context, path string, body []byte) (*Pushed, error) {
-	var stored struct {
-		Artifact Pushed `json:"artifact"`
-	}
+	var stored storedAnswer
 
 	if _, err := c.exchange(ctx, http.MethodPost, path, body, http.StatusCreated, &stored); err != nil {
 		return nil, err
 	}
 
 	return &stored.Artifact, nil
+}
+
+// answerHead is the member of every answer that qory reads first: the version of the run
+// API.
+type answerHead struct {
+	Version *int `json:"version,case:strict"`
 }
 
 // exchange sends a request and decodes a response with the status want into target. It
@@ -589,9 +614,7 @@ func (c *Client) exchange(
 		return nil, fmt.Errorf("Check the run's gateway. The response to %s is over %d bytes.", request, maxResponse)
 	}
 
-	var head struct {
-		Version *int `json:"version"`
-	}
+	var head answerHead
 
 	if err := json.Unmarshal(raw, &head); err != nil {
 		return nil, fmt.Errorf("Check the run's gateway. The response to %s is not the run API's JSON: %w", request, err)

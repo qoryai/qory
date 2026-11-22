@@ -1,0 +1,3 @@
+Fix json_schema of type_settings so that it compiles as a JSON Schema.
+  The schema does not compile: at '/type': value must be one of 'array', 'boolean', 'integer', 'null', 'number', 'object', 'string'; at '/type': got string, want array
+  type_settings is in modules/support-desk/process.yaml.

@@ -444,6 +444,53 @@ func TestRefusalsMatchTheirRequest(t *testing.T) {
 	}
 }
 
+// TestARefusalIsReadByTheRuleOfTheContract answers each request with a signed 403 or
+// 409. A member the schema does not define is not read, and a must_understand of /error
+// is met: the refusal matches its code. A body that breaks refusal.schema.json, or whose
+// must_understand lists a member qory does not read, has no code: a 403 or 409 to any
+// request but a machine end is then Unread, and only a machine end ends its attempts on
+// such a 403.
+func TestARefusalIsReadByTheRuleOfTheContract(t *testing.T) {
+	all := []provisionertest.Route{"claim", "dispatched", "release", "machine-log", "machine-end"}
+	for _, c := range []struct {
+		name   string
+		status int
+		body   string
+		code   string
+		is     error
+	}{
+		{"a 403 with a member the schema does not define", 403, `{"error":"forbidden","zz":1}`, "forbidden", provisioner.ErrForbidden},
+		{"a 403 that must understand its error", 403, `{"error":"forbidden","must_understand":["/error"]}`, "forbidden", provisioner.ErrForbidden},
+		{"a 403 that must understand another member", 403, `{"error":"forbidden","zz":1,"must_understand":["/zz"]}`, "", nil},
+		{"a 403 in another case", 403, `{"ERROR":"forbidden"}`, "", nil},
+		{"a 409 with no code", 409, `{}`, "", nil},
+		{"a 409 that is not JSON", 409, `lease_expired`, "", nil},
+	} {
+		for _, route := range all {
+			srv, cl, _, _ := setup(t)
+			d := claimed(t, srv, cl, provisionertest.Run{})
+			srv.Script(route, provisionertest.Reply{Status: c.status, Body: c.body})
+			err := send(cl, route, d)
+			var r *provisioner.Refusal
+			if !errors.As(err, &r) || r.Code != c.code || c.is != nil && !errors.Is(err, c.is) {
+				t.Errorf("%s to %s: %v", c.name, route, err)
+			}
+			if unread := c.is == nil && route != "machine-end"; provisioner.Unread(err) != unread {
+				t.Errorf("%s to %s: Unread is %v, want %v", c.name, route, !unread, unread)
+			}
+			if route == "release" || route == "machine-end" {
+				ends := c.status == 403 && (c.is != nil || route == "machine-end")
+				if provisioner.EndsAttempts(err) != ends {
+					t.Errorf("%s to %s: EndsAttempts is %v, want %v", c.name, route, !ends, ends)
+				}
+			}
+		}
+	}
+	if provisioner.Unread(errors.New("409")) || provisioner.Unread(nil) {
+		t.Error("an error that is no refusal is Unread")
+	}
+}
+
 // send sends route's request for the claimed dispatch.
 func send(c *provisioner.Client, route provisionertest.Route, cl provisioner.Claimed) error {
 	ctx := context.Background()
@@ -575,18 +622,18 @@ func TestARetryAfterIsBounded(t *testing.T) {
 }
 
 // TestAnAnswerThatBreaksTheContractIsNotUsed answers a claim with a signed 200 of
-// another revision, a member the schema does not define, members of the claim before
-// revision 1, and a member twice, and dispatched with a 200: each is ErrAnswerUnusable
-// after one try, and its text quotes no value and no run code.
+// another revision, one whose must_understand lists a member the schema does not define,
+// and a member twice, and dispatched with a 200: each is ErrAnswerUnusable after one
+// try, and its text quotes no value and no run code.
 func TestAnAnswerThatBreaksTheContractIsNotUsed(t *testing.T) {
 	edits := map[string]func(map[string]any){
-		"revision 0":   func(d map[string]any) { d["revision"] = 0 },
-		"revision 2":   func(d map[string]any) { d["revision"] = 2 },
-		"revision 3":   func(d map[string]any) { d["revision"] = 3 },
-		"a new member": func(d map[string]any) { d["extra"] = "the title of the ticket" },
-		"a step":       func(d map[string]any) { d["step"] = "explore" },
-		"a run id":     func(d map[string]any) { d["run_id"] = "0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d" },
-		"no run code":  func(d map[string]any) { delete(d, "run_code") },
+		"revision 0": func(d map[string]any) { d["revision"] = 0 },
+		"revision 2": func(d map[string]any) { d["revision"] = 2 },
+		"revision 3": func(d map[string]any) { d["revision"] = 3 },
+		"a new member it must understand": func(d map[string]any) {
+			d["extra"], d["must_understand"] = "the title of the ticket", []any{"/extra"}
+		},
+		"no run code": func(d map[string]any) { delete(d, "run_code") },
 		"a run code of another shape": func(d map[string]any) {
 			d["run_code"] = strings.ToLower(d["run_code"].(string))
 		},
@@ -617,6 +664,22 @@ func TestAnAnswerThatBreaksTheContractIsNotUsed(t *testing.T) {
 	if err := c.Dispatched(context.Background(), cl.DispatchID); !errors.Is(err, provisioner.ErrAnswerUnusable) {
 		t.Errorf("a 200 to dispatched: %v", err)
 	}
+}
+
+// TestAnAnswerWithMembersTheSchemaDoesNotDefineIsUsed answers a claim with a signed 200
+// that has a new member, a step and a run id, none of which the schema defines: the
+// claim is used, after one try.
+func TestAnAnswerWithMembersTheSchemaDoesNotDefineIsUsed(t *testing.T) {
+	srv, c, _, _ := setup(t)
+	srv.Offer(provisionertest.Run{})
+	srv.Script(provisionertest.RouteClaim, provisionertest.Reply{Edit: func(d map[string]any) {
+		d["extra"], d["step"], d["run_id"] = "the title of the ticket", "workflow", "0192f0c1-7d4e-7a2b-8c3d-4e5f6a7b8c9d"
+	}})
+	cl, ok, err := c.Claim(context.Background())
+	if err != nil || !ok || cl.RunCode.Len() == 0 || len(srv.Calls()) != 1 {
+		t.Errorf("a claim with members the schema does not define: %v, %v", ok, err)
+	}
+	cl.RunCode.Clear()
 }
 
 // TestAnswersAreReadUpToTheirBound answers a claim's 200 one byte over its bound, and

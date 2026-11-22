@@ -101,7 +101,8 @@ type suiteSetup struct {
 	walled bool
 	// readOnly is whether the run only reads the checkout, so no commit comes of it.
 	readOnly bool
-	// fullSuite is the run documents' full_suite: whether the session runs the full suite.
+	// fullSuite is full_suite of the run documents' type_settings: whether the session runs
+	// the full suite.
 	fullSuite bool
 	// workflow is the workflow of the run, and plan the plan type set in
 	// workflows.<name>.plan for it, "" for a workflow that sets none.
@@ -174,8 +175,8 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 // limit covers the agent's runtime only.
 func afterLimit(minutes int) time.Duration { return time.Duration(minutes) * suiteMinutes }
 
-// fullSuiteOf is whether the session of a run from Qory Apiary runs the full suite: the run
-// documents' full_suite, false for a run with no run code.
+// fullSuiteOf is whether the session of a run from Qory Apiary runs the full suite: full_suite
+// of the run documents' type_settings, false for a run with no run code.
 var fullSuiteOf = func(c *codeRun) bool { return c != nil && c.fullSuite }
 
 // planOf is the workflow of a run from Qory Apiary and the plan type set in
@@ -357,7 +358,7 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 	}
 	postCtx, cancelPost := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
 	defer cancelPost()
-	posted, err := r.post(postCtx, *point, kind, maxBranchTries)
+	posted, err := r.post(postCtx, *point, kind, maxSubmissionTries)
 	if err != nil {
 		r.said(fmt.Sprintf(textSuiteNoPost, shownError(err)))
 		return session.Outcome{State: event.StateFailed, ExitCode: 1}, &exitError{code: 1}
@@ -427,7 +428,8 @@ func (r *suiteRun) post(ctx context.Context, point runapi.Point, kind suiteKind,
 		if kind == kindUnfixable {
 			verdict = runapi.VerdictEscalate
 		}
-	case agent.verdict == runapi.VerdictEscalate:
+	case agent.verdict == runapi.VerdictEscalate || !verdictformat.Known(agent.verdict):
+		// A kind that this qory does not know stops at a person, as escalate does.
 		verdict, points = runapi.VerdictEscalate, append(agent.points, point)
 	case kind == kindRed:
 		return fmt.Sprintf(textSuiteStands, agent.verdict), nil
@@ -587,7 +589,7 @@ type priorVerdict struct {
 
 // agentVerdict is the newest verdict that the run wrote, nil when it wrote none. It is read
 // from the artifact index and its file, since the work item's newest verdict can be an earlier
-// run's.
+// run's. A member whose name differs from a defined one only in letter case is not read.
 func agentVerdict(ctx context.Context, client *runapi.Client, runID string) (*priorVerdict, error) {
 	ctx, cancel := context.WithTimeout(ctx, runAPITimeout)
 	defer cancel()
@@ -619,9 +621,9 @@ func agentVerdict(ctx context.Context, client *runapi.Client, runID string) (*pr
 		return nil, err
 	}
 	var d struct {
-		Verdict string         `json:"verdict"`
-		Points  []runapi.Point `json:"points"`
-		Track   *runapi.Track  `json:"track"`
+		Verdict string         `json:"verdict,case:strict"`
+		Points  []runapi.Point `json:"points,case:strict"`
+		Track   *runapi.Track  `json:"track,case:strict"`
 	}
 	if err := json.Unmarshal(file.Bytes(), &d); err != nil {
 		return nil, fmt.Errorf("the run's verdict is not a verdict document: %w", err)
@@ -642,7 +644,7 @@ func postVerdict(ctx context.Context, client *runapi.Client, verdict string, poi
 	var last error
 	for try := 1; try <= tries; try++ {
 		if try > 1 {
-			if err := branchWait(ctx, retryAfter(last)); err != nil {
+			if err := submissionWait(ctx, retryAfter(last)); err != nil {
 				return err
 			}
 		}

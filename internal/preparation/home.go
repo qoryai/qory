@@ -17,11 +17,11 @@ import (
 // settings, CLAUDE.md, plugins, memory, .claude.json and transcripts.
 const EnvAgentHome = "CLAUDE_CONFIG_DIR"
 
-// AgentHome is the agent's configuration directory on a dispatched walled run of Claude
-// Code, a fixed path inside the container that qory owns. It is under /tmp, which an
-// image usually has and any user may write, so it does not depend on the image's HOME
-// or user; it is in the container alone, so nothing of it reaches the machine or the
-// checkout, and it goes with the container.
+// AgentHome is the agent's configuration directory on a walled run of Claude Code, a
+// fixed path inside the container that qory owns. It is under /tmp, which an image
+// usually has and any user may write, so it does not depend on the image's HOME or user;
+// it is in the container alone, so nothing of it reaches the machine or the checkout, and
+// it goes with the container.
 const AgentHome = "/tmp/qory-agent-home"
 
 // TempStore is the folder of the artifact files of a run that cannot write its checkout,
@@ -29,6 +29,11 @@ const AgentHome = "/tmp/qory-agent-home"
 // any folder, and the Claude Code rules of a read run are written before the container
 // starts.
 const TempStore = "/tmp/qory-artifacts"
+
+// Destinations is the folder that qory destination clone clones a run's destinations
+// into, each at <system>/<path>, in the agent's container, at one fixed path: the Claude
+// Code rules of a read run are written before the container starts.
+const Destinations = "/tmp/qory-destinations"
 
 // managedSettings is where Claude Code on Linux reads managed settings, above every
 // other source and whatever CLAUDE_CONFIG_DIR is: managed-settings.json,
@@ -39,10 +44,10 @@ var managedSettings = "/etc/claude-code"
 // The words of the agent's home, which qory run agent-env prints after its name. Each
 // is one format string, with the fix first.
 const (
-	textManaged        = "use an image without %s: Claude Code reads managed settings there above every other source, so a run given a run key does not start"
+	textManaged        = "use an image without %s\n  Claude Code reads managed settings there above every other source, so the run does not start"
 	textManagedUnread  = "make %s readable for the agent's user in the image: Claude Code reads managed settings there, and the check for them failed: %s"
-	textHomeExists     = "remove %s from the image and from the setup commands: qory makes the agent's home only where nothing is, so a run given a run key does not start"
-	textHomeNotEmpty   = "leave no program of the image or the setup commands running that writes into %s: the agent's home held something once qory made it, so a run given a run key does not start"
+	textHomeExists     = "remove %s from the image and from the setup commands\n  qory makes the agent's home only where nothing is, so the run does not start"
+	textHomeNotEmpty   = "leave no program running that writes into %s\n  The agent's home held something once qory made it, so the run does not start; a program that the image or the setup commands started can write there"
 	textHomeParentLink = "replace the symbolic link %s with a folder in the image: the agent's home %s is made only where no link leads"
 	textHomeNotMade    = "let the agent's user make %s, then run again: the agent's home could not be made: %s"
 )
@@ -56,17 +61,27 @@ const (
 	textStoreNotMade    = "let the agent's user make %s, then run again: the folder of a run's artifact files could not be made: %s"
 )
 
+// The words of [Destinations], which qory run agent-env prints after its name. Each is
+// one format string: the fix on line 1, the cause on line 2.
+const (
+	textClonesExists     = "remove %s from the image\n  qory makes the folder of a run's clones only where nothing is, so a read run does not start"
+	textClonesNotEmpty   = "leave no program of the image running that writes into %s\n  The folder of a run's clones contained something once qory made it, so a read run does not start"
+	textClonesParentLink = "replace the symbolic link %s with a folder in the image\n  The folder of a run's clones, %s, is made only where no link leads"
+	textClonesNotMade    = "let the agent's user make %s, then run again\n  The folder of a run's clones could not be made: %s"
+)
+
 // freshWords are the lines of [freshFolder] for one folder.
 type freshWords struct{ exists, notEmpty, parentLink, notMade string }
 
-// The lines of the agent's home and of [TempStore].
+// The lines of the agent's home, of [TempStore] and of [Destinations].
 var (
-	homeWords  = freshWords{textHomeExists, textHomeNotEmpty, textHomeParentLink, textHomeNotMade}
-	storeWords = freshWords{textStoreExists, textStoreNotEmpty, textStoreParentLink, textStoreNotMade}
+	homeWords   = freshWords{textHomeExists, textHomeNotEmpty, textHomeParentLink, textHomeNotMade}
+	storeWords  = freshWords{textStoreExists, textStoreNotEmpty, textStoreParentLink, textStoreNotMade}
+	clonesWords = freshWords{textClonesExists, textClonesNotEmpty, textClonesParentLink, textClonesNotMade}
 )
 
 // FreshHome makes the agent's home, [AgentHome], new and empty when getenv sets
-// [EnvAgentHome] to it, as qory run does for a dispatched walled run of Claude Code, and
+// [EnvAgentHome] to it, as qory run does for a walled run of Claude Code, and
 // does nothing otherwise. qory run agent-env calls it last before the agent starts, after
 // the setup commands, and it refuses anything at the home when it runs, such as a home
 // the image holds or the setup commands made. It refuses first an image with Claude Code's managed settings, which no
@@ -74,22 +89,37 @@ var (
 // repository's files leave in place, not against a repository that acts against them:
 // the image's programs and the repository's commands run as the agent's user in the
 // agent's container, so a program they leave running can write in the home after
-// FreshHome returns; against that, the boundary is the wall. Every error's text is one
-// line, ready for stderr. With store, for a run that cannot write its checkout, it also
-// makes [TempStore] new and empty with mode 0700, under the same rules: Claude Code reads
-// permissions.additionalDirectories when it starts, and leaves out a folder that does not
-// exist then.
+// FreshHome returns; against that, the boundary is the wall. Every error's text is ready
+// for stderr: one line, or for [Destinations] the fix and the cause on two. With store, for a run that cannot write its checkout, it also
+// makes [TempStore] and then [Destinations] new and empty with mode 0700, under the same
+// rules: Claude Code reads permissions.additionalDirectories when it starts, and leaves
+// out a folder that does not exist then.
 func FreshHome(getenv func(string) string, store bool) error {
 	if getenv(EnvAgentHome) != AgentHome {
 		return nil
 	}
-	if err := agentHome(AgentHome); err != nil {
+	return freshHomeAt(AgentHome, store, TempStore, Destinations)
+}
+
+// freshHomeAt is [FreshHome] with the agent's home at home, and with store, the folders of
+// a read run at storeDir and clones.
+func freshHomeAt(home string, store bool, storeDir, clones string) error {
+	if err := agentHome(home); err != nil {
 		return err
 	}
 	if store {
-		return freshFolder(TempStore, storeWords)
+		return readFolders(storeDir, clones)
 	}
 	return nil
+}
+
+// readFolders makes the folders of a read run, store, the folder of its artifact files,
+// and clones, the folder of its clones, see [freshFolder], each with its lines.
+func readFolders(store, clones string) error {
+	if err := freshFolder(store, storeWords); err != nil {
+		return err
+	}
+	return freshFolder(clones, clonesWords)
 }
 
 // agentHome refuses anything at [managedSettings], a link or a file too, and then makes
@@ -159,7 +189,7 @@ func freshFolder(path string, words freshWords) error {
 // one format string, with the fix first.
 const (
 	textLinkBad     = "point wall.helper at the Linux build of the qory that starts the run: the transcripts' folder %s or its place %s is not a relative path without a .. name"
-	textLinkExists  = "leave no program of the image or the setup commands running that writes into %s: something was at %s when qory linked the agent's transcripts there, so a run given a run key does not start"
+	textLinkExists  = "leave no program running that writes into %s\n  Something was at %s when qory linked the agent's transcripts there, so the run does not start; a program that the image or the setup commands started can write there"
 	textLinkNotMade = "let the agent's user write %s, then run again: the link of the agent's transcripts to %s could not be made: %s"
 )
 

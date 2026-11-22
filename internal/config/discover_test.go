@@ -29,8 +29,8 @@ func writeRaw(t *testing.T, path, body string) {
 const deliveredDoc = stackDoc + "extending:\n  kinds: [skills]\n"
 
 // TestDiscoverStackPrefersTheCheckoutRoot returns the checkout's own stack even when an
-// ancestor directory holds one, and a qory.yaml with only machine keys beside it is not
-// in the way.
+// ancestor directory holds one, and a qory.yaml with only machine harness settings
+// beside it is not in the way.
 func TestDiscoverStackPrefersTheCheckoutRoot(t *testing.T) {
 	hermetic(t)
 	base := t.TempDir()
@@ -126,9 +126,10 @@ func TestDiscoverStackRefusesBothAndNamesNone(t *testing.T) {
 
 // TestLoadStackReadsTheHarnessSectionAsTheComposeDocument reads a qory.yaml through its
 // harness section: the stack it extends and its modules come out as a compose document,
-// a machine key beside them is no error, a target beside extends is the target the
-// checkout composes the base for, a section without extends is the checkout's own stack
-// and needs a target, and a section of machine keys alone is no document.
+// a machine harness setting beside them is no error, a target beside extends is the
+// target the checkout composes the base for, a section without extends is the
+// checkout's own stack and needs a target, and a section of machine harness settings
+// alone is no document.
 func TestLoadStackReadsTheHarnessSectionAsTheComposeDocument(t *testing.T) {
 	hermetic(t)
 	dir := t.TempDir()
@@ -235,8 +236,9 @@ func TestHarnessYamlIsReadAtEveryLevel(t *testing.T) {
 
 // TestDiscoverStackReadsHarnessYaml is the document under its other name: found in an
 // ancestor when the root holds none, passed over in the root when its harness section
-// holds machine keys alone, and found in the root when the section composes. Extensions
-// alone make a document, since they are what a checkout adds beside its base.
+// holds machine harness settings alone, and found in the root when the section
+// composes. Extensions alone make a document, since they are what a checkout adds
+// beside its base.
 func TestDiscoverStackReadsHarnessYaml(t *testing.T) {
 	hermetic(t)
 	base := t.TempDir()

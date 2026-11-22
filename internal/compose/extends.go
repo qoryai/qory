@@ -73,7 +73,7 @@ func LoadBase(p *stack.Stack, pin string, opts Options) (*stack.Stack, *Base, er
 	if p.Extends.Path == "" && p.Extends.Git == "" {
 		return p, nil, nil
 	}
-	so := source.Options{Pin: pin, Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo, Git: opts.Git}
+	so := source.Options{Pin: pin, Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Context: opts.Context, Memo: opts.Memo, Git: opts.Git}
 	var named *source.Named
 	if opts.Git != nil && opts.Git.Named != nil {
 		named = opts.Git.Named
@@ -214,6 +214,13 @@ func checkExtending(l *module.Module, base *Base) error {
 		}
 		sort.Strings(files)
 		for _, f := range files {
+			if rt == "codex" && f == CodexReadRulesName {
+				// Read rules set no key. Codex takes the strictest decision of all the
+				// rules that match a command (codex-rs/execpolicy/src/policy.rs,
+				// Evaluation::from_matches), so an extending module's rules cannot allow a
+				// command that a rule of the base forbids.
+				continue
+			}
 			keys, err := leafKeys(l.Settings[rt][f])
 			if err != nil {
 				return module.Prefixed("module "+shown(l.Name), err)

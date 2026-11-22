@@ -45,20 +45,20 @@
 // follows. A release of an entry left at claimed after a dispatched that succeeded
 // returns 409 machine_exists, and the pool sends gone for it. A release that fails with
 // no response, an unsigned response, a fourth signed 429, a server error or another
-// refusal than a signed 400, 403 or 404 leaves the entry at claimed, and is sent again
-// beside the claim loop after a wait, as gone is, until it is settled; no qory run
-// starts for that dispatch, and it takes none of the pool's Runs. The dispatch's folder
-// is removed before its first gone: once qory run ended, after the upload of its
-// machine log, or at once when no qory run started. The entry is removed once the
-// dispatch ends; an ended entry once its gone got a signed 204, 400, 403 or 404. When
-// the program starts, before its first claim, it runs the check of [Probe]: when a
-// container on the engine's default bridge network connects to the cloud metadata
-// service, or the check cannot run, Run returns its error and claims nothing. Then each
-// claimed entry it finds is released, with its folder, and each dispatched entry is
-// written at ended. Each ended entry, each dispatched one, and each claimed one whose
-// release returns 409 machine_exists, gets gone, sent as above in a separate goroutine
-// beside the claim loop, so the first claim does not wait for it; a release that fails
-// is sent again there too.
+// refusal than a signed 400 or 404, or a 403 that reads as forbidden, leaves the entry
+// at claimed, and is sent again beside the claim loop after a wait, as gone is, until
+// it is settled; no qory run starts for that dispatch, and it takes none of the pool's
+// Runs. The dispatch's folder is removed before its first gone: once qory run ended,
+// after the upload of its machine log, or at once when no qory run started. The entry
+// is removed once the dispatch ends; an ended entry once its gone got a signed 204,
+// 400, 403 or 404. When the program starts, before its first claim, it runs the check
+// of [Probe]: when a container on the engine's default bridge network connects to the
+// cloud metadata service, or the check cannot run, Run returns its error and claims
+// nothing. Then each claimed entry it finds is released, with its folder, and each
+// dispatched entry is written at ended. Each ended entry, each dispatched one, and each
+// claimed one whose release returns 409 machine_exists, gets gone, sent as above in a
+// separate goroutine beside the claim loop, so the first claim does not wait for it; a
+// release that fails is sent again there too.
 //
 // qory run, and each program it starts that inherits descriptor 4, hold the lock of
 // run.lock until they end, so the lock outlasts a crash of the pool, and the pool
@@ -866,14 +866,32 @@ func writeCode(name string, c provisioner.Claimed, m runtimeinstall.Machine) (*o
 // gone, with its journal entry at ended. A signed 429 is waited out up to
 // [maxRateLimited] times while the lease lasts. On 409 lease_expired or 410 gone the
 // dispatch is not released, and gets gone: an earlier try of dispatched may have been
-// taken with its response lost. Any other end releases the dispatch, as [Pool.giveBack]
+// taken with its response lost. A signed 403 or 409 that is [provisioner.Unread] changes
+// nothing: dispatched is sent again after a wait that doubles from [firstBackoff] up to
+// [maxBackoff], while the lease lasts. Any other end releases the dispatch, as [Pool.giveBack]
 // has it: for the pool's stop during a wait, the lease, or a failure. A dispatched that
 // succeeded but could not be journaled starts no qory run: Qory Apiary does not release
 // the dispatch then, so it gets gone, as one whose qory run could not start does.
 func (p *Pool) dispatched(stop context.Context, c provisioner.Claimed) (started, gone bool) {
 	id := c.DispatchID
 	work := context.WithoutCancel(stop)
-	for limited := 0; ; limited++ {
+	// wait is the next wait after a refusal that is not read.
+	wait := firstBackoff
+	// again waits pause before dispatched is sent again, and reports whether it is: the
+	// lease lasts past the wait, and the pool did not stop during it. Otherwise the
+	// dispatch is released.
+	again := func(pause time.Duration) bool {
+		if !p.now().Add(pause).Before(c.LeaseUntil) {
+			p.giveBack(stop, id, ReasonLeasePassed)
+			return false
+		}
+		if p.sleep(stop, pause) != nil {
+			p.giveBack(stop, id, ReasonStoppedBeforeStart)
+			return false
+		}
+		return true
+	}
+	for limited := 0; ; {
 		err := p.Client.Dispatched(work, id)
 		var r *provisioner.Refusal
 		switch {
@@ -886,12 +904,16 @@ func (p *Pool) dispatched(stop context.Context, c provisioner.Claimed) (started,
 			}
 			return true, false
 		case errors.Is(err, provisioner.ErrRateLimited) && errors.As(err, &r) && limited < maxRateLimited:
-			if !p.now().Add(r.RetryAfter).Before(c.LeaseUntil) {
-				p.giveBack(stop, id, ReasonLeasePassed)
+			limited++
+			if !again(r.RetryAfter) {
 				return false, false
 			}
-			if p.sleep(stop, r.RetryAfter) != nil {
-				p.giveBack(stop, id, ReasonStoppedBeforeStart)
+			continue
+		case provisioner.Unread(err):
+			p.log.Warn(lineNotRecorded, slog.String("dispatch_id", id), errAttr(err))
+			pause := wait
+			wait = min(wait*2, maxBackoff)
+			if !again(pause) {
 				return false, false
 			}
 			continue
@@ -1008,7 +1030,7 @@ const (
 	// while the pool runs; the next start releases what is left.
 	releaseKept releaseEnd = iota
 	// releaseOver is a dispatch released, over already, or one Qory Apiary does not
-	// release for a signed 400, 403 or 404: the entry goes.
+	// release for a signed 400 or 404, or a 403 that reads as forbidden: the entry goes.
 	releaseOver
 	// releaseMachine is a release that returned 409 machine_exists: Qory Apiary took
 	// dispatched for the dispatch, or the machine redeemed its run code, so the
@@ -1018,9 +1040,10 @@ const (
 
 // release gives the dispatch id back, for reason, and reports how that ended, with the
 // error of a release kept. A signed 429 is waited out up to [maxRateLimited] times. A
-// 409 lease_expired or a 410 gone is the dispatch over already; a signed 400, 403 or 404
-// is one Qory Apiary does not release, and a 409 machine_exists one that gets gone;
-// neither is sent again, and each is logged. A release kept is logged by its caller.
+// 409 lease_expired or a 410 gone is the dispatch over already; a signed 400 or 404, or
+// a 403 that reads as forbidden, is one Qory Apiary does not release, and a 409
+// machine_exists one that gets gone; neither is sent again, and each is logged. A
+// release kept is logged by its caller.
 func (p *Pool) release(work context.Context, id, reason string) (releaseEnd, error) {
 	ids := slog.String("dispatch_id", id)
 	for limited := 0; ; limited++ {

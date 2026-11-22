@@ -49,11 +49,14 @@ import (
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/render"
+	"github.com/qoryai/qory/internal/render/claude"
+	"github.com/qoryai/qory/internal/render/codex"
 	"github.com/qoryai/qory/internal/report"
 	"github.com/qoryai/qory/internal/runcopy"
 	"github.com/qoryai/qory/internal/runtimeinstall"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/source"
+	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/statusfd"
 	"github.com/qoryai/qory/internal/ui"
 )
@@ -152,6 +155,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			maskServerSecrets()
 			streams := newRunStreams(cmd.OutOrStdout(), cmd.ErrOrStderr())
 			defer streams.flush()
+			// The drafts of a local run print as the last lines of the run. Defers run last in, first
+			// out: this one runs after every defer registered below it, and before streams.flush,
+			// which writes only what the masking writers still hold.
+			var drafts []string
+			defer func() {
+				for _, address := range drafts {
+					fmt.Fprintln(streams.out, textDraftLine+address)
+				}
+			}()
 			// The access key's descriptor is read and closed first, whatever comes next, so
 			// nothing qory starts inherits it.
 			var fdKey *accesskey.Key
@@ -478,8 +490,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				defer homeLock.Release()
 			}
 			// A run from a run code takes its harness, runtime, compose flags, inputs and
-			// time limit from the documents of the answer to the code; its workflow's
-			// time_limit is known once the harness is composed, see prepareLaunch.
+			// time limit from the documents of the answer to the code.
 			var fromCode *codeRun
 			var in string
 			if code != nil {
@@ -539,7 +550,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// reads to mask the harness's text in the session's log and events.
 				composing.hidden, spec.HarnessHidden = fromCode.hidden, fromCode.hidden
 				composing.fromCode = true
-				timeout = provisioner.TimeLimit(fromCode.minutes, 0)
+				timeout = fromCode.sessionLimit()
 				var remove func()
 				in, remove, err = fromCode.inputsDir()
 				defer remove()
@@ -697,8 +708,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return withRecord(streams.errOut, err, record)
 			}
-			// A walled run whose composed home has push checks checks each POST of its run
-			// API from behind the wall, see [runPushChecks].
+			// A walled run whose composed home has push checks, and a walled run of several
+			// sessions with a run API, checks each POST of its run API from behind the
+			// wall, see [runPushChecks].
 			checks := &runPushChecks{report: said, fromCode: code != nil}
 			run, err := openRun(ctx, spec.OpenSpec)
 			if err != nil {
@@ -708,6 +720,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return failed(err)
 			}
+			// fetches is whether the run fetches repositories before its session: the run
+			// configuration lists some, and the run does not clone its destinations in the
+			// session instead, see [codeRun.clonesDestinations]. Each step that works on the
+			// fetched repositories reads it.
+			fetches := run.Repositories() != "" && !fromCode.clonesDestinations()
 			// Only an open that went through makes the run's id this run's: before it, a folder
 			// at runHome can be the home of another run that has this id.
 			if runHome != "" {
@@ -717,8 +734,23 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			if machineSteps != "" {
 				writeMachineStep(run, machineSteps, said)
 			}
-			// The run's time limit counts from its open: the compose and the session.
+			// The run's setup, every step from its open to its agent's start, ends at
+			// setupDeadline, [setupBound] after the open, and each step runs on setupCtx.
+			// step is the step that runs, or ran last, which enter sets. Session 1's time limit
+			// counts from the join, see [sessionDeadline].
 			opened := time.Now()
+			setupDeadline := opened.Add(setupBound)
+			setupCtx, cancelSetup := context.WithDeadline(ctx, setupDeadline)
+			defer func() { cancelSetup() }()
+			var step prepStep
+			// enter makes s the step that runs, unless setupCtx has ended: a step that ran on
+			// past the limit, as a compose does, stays the step that the line names, and the
+			// next step, which fails at once, does not take its place.
+			enter := func(s prepStep) {
+				if setupCtx.Err() == nil {
+					step = s
+				}
+			}
 			// closeRun closes the run with out, and returns what the close came to, nil when
 			// it failed, which Forager's line says.
 			closeRun := func(out session.Outcome) *session.Closed {
@@ -738,7 +770,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			var copied *runCopy
 			// prepareLaunch composes the harness into the home the session starts on and
 			// makes the session's launch from it, writing the compose's lines to w;
-			// freshHome is true for a dispatched walled run of a runtime that is a
+			// freshHome is true for a walled run of a runtime that is a
 			// [render.AgentHomer], whose agent starts on a new, empty configuration
 			// directory.
 			// readOnly and level are set once the compose has the workflows: readOnly is whether
@@ -750,11 +782,39 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// planWorkflow is the run's workflow, and planType the plan type set in workflows.<name>.plan
 			// for it, "" for none.
 			var planWorkflow, planType string
+			// composedSessions are the rows of the report's sessions, see [report.Report.Sessions].
+			var composedSessions []report.Session
+			// pins are the composed stack's pins of the runtimes' versions, which the install
+			// reads, and pinFile is the file in its fix line for a git base, see [composed].
+			var pins map[string]stack.RuntimePin
+			var pinFile string
 			// link is the transcript link of a run whose agent starts on a fresh home, see
 			// [transcriptLinkFor].
 			var link transcriptLink
-			prepareLaunch := func(w io.Writer) (freshHome bool, err error) {
-				composing.writable = nil
+			var branch *preparation.WorkBranch
+			// handoffRoot is the checkout that holds the hand-off file of a run on a work item's
+			// branch, and program the composed harness's submit program, nil for none.
+			var handoffRoot string
+			var program *submitProgram
+			// codexFrom is what a walled Codex run writes its Codex home from, set by the
+			// compose, see [walledCodexHome].
+			var codexFrom codexParts
+			prepareLaunch := func(stepCtx context.Context, w io.Writer, n int) (freshHome bool, err error) {
+				// later is a session after the run's first.
+				later := n > 1
+				// A later session composes the home that the run made for itself for its runtime
+				// alone; a home from --home or harness.home keeps every runtime's tree, so the
+				// checkout's links into it still resolve after the run.
+				composing.writable, composing.ctx, composing.alone = nil, stepCtx, later && runHome != ""
+				// The report of a run of several sessions has each session's runtime and tier
+				// map, which the compose writes with the rest of its report.
+				composing.sessions = nil
+				if fromCode != nil && fromCode.shared {
+					composing.sessions = func(rep *report.Report) {
+						rep.Sessions = append(slices.Clone(composedSessions), report.Session{Session: n, Runtime: runtime, Tiers: rep.Tiers})
+						composedSessions = rep.Sessions
+					}
+				}
 				for _, m := range spec.Mounts {
 					if !m.ReadOnly {
 						composing.writable = append(composing.writable, m.Path)
@@ -772,7 +832,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				// The report on disk can be another run's by now, so the run reads what it composed.
 				rep, harness, workflows := c.rep, c.harness, c.workflows
-				extensions = rep.Extensions
+				extensions, pins, pinFile = rep.Extensions, c.runtimes, c.pinFile
 				planWorkflow, planType = planOf(fromCode, workflows)
 				if fromCode != nil {
 					if err := fullSuiteNoPlan(fromCode, workflows); err != nil {
@@ -814,21 +874,52 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if extra, err = fromCode.workflowArgs(name, rep, in, run.System()); err != nil {
 						return false, err
 					}
-					// The time limit counts from the open, so the compose's time is in it.
-					timeout = provisioner.TimeLimit(fromCode.minutes, workflows[fromCode.workflow].TimeLimit)
 				}
 				// The documents' submit is the run's at level write, and a different one in the
 				// harness gets a line.
 				submitLevel := accessOf(fromCode, workflows)
-				fromCode.limitSubmit(submitLevel)
+				// Only a run at level write submits: a run at write-no-push or read has no
+				// submit program and no hand-off file.
+				if submitLevel == stack.AccessWrite {
+					if branch != nil {
+						// The hand-off file is in the checkout's .qory, which no commit has: a
+						// walled session writes it through the checkout's mount. Its folder is
+						// in the checkout's .git/info/exclude, which no commit has either, so a
+						// git add -A or git commit -a of the agent leaves the file out.
+						if err := render.Exclude(at.root, handoffExclude); err != nil {
+							return false, err
+						}
+						handoffRoot = at.root
+						spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{handoffEnv: handoffPath(at.root)})
+					}
+				}
+				// The composed harness's submit program runs on a run with neither a run code nor a
+				// run key, on the person's machine and with the person's login of the forge's
+				// command line. A run with a run code or a run key has none: it is a dispatched run,
+				// and the forge's adapter opens its draft from the stored submission. Everything of
+				// the local submit step follows from program: the hand-off exclusion and
+				// QORY_SUBMISSION_HANDOFF of the copy, copied.submits and submitLocal.
+				if code == nil && key == nil && c.submitProgram != nil {
+					program = &submitProgram{command: c.submitProgram.Command, limit: submitLimit}
+				}
 				if line := fromCode.submitLine(rep, submitLevel); line != "" {
 					fmt.Fprintln(w, "qory run:", line)
+				}
+				// A later session binds the checkout as session 1 did, so its workflow has
+				// session 1's access, or the session stops before it starts.
+				if later {
+					if got := accessOf(fromCode, workflows); got != level || readsOnly(fromCode, workflows) != readOnly {
+						return false, &runLineError{fmt.Errorf(textLaterAccess, fromCode.workflow, got, level, codeUsed)}
+					}
 				}
 				// A run that only reads the checkout sees it read-only, or stops here, before
 				// the image's fetch and the setup.
 				level = accessOf(fromCode, workflows)
 				readOnly = readsOnly(fromCode, workflows)
-				if readOnly {
+				switch {
+				case later:
+					// Session 1 made the checkout's mounts, and checked them.
+				case readOnly:
 					if err := readOnlyCheckout(&spec, at.root, fromCode.workflow, run.Image()); err != nil {
 						return false, err
 					}
@@ -837,7 +928,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return false, err
 					}
 					// A run with no setup binds the checkout itself, see hostWork.
-					if run.Repositories() == "" {
+					if !fetches {
 						if err := bindsReserved(textReadBindsReserved, at.root, cwd, homeOrState); err != nil {
 							return false, err
 						}
@@ -845,11 +936,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err := fromCode.readExposed(at.root, cwd, at.report); err != nil {
 						return false, err
 					}
-				} else if fromCode != nil && !walled {
+				case fromCode != nil && !walled:
 					// A run from a run code that may write stops here with no wall, before the
 					// image's fetch and the setup: the agent would run as this machine's user.
 					return false, writeNeedsWall(fromCode.workflow)
-				} else if fromCode != nil {
+				case fromCode != nil:
 					// A write run from a run code gets no copy: it binds the checkout itself.
 					if err := bindsReserved(textCodeWriteBindsReserved, at.root, cwd, reserved); err != nil {
 						return false, err
@@ -867,6 +958,18 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						readRoot = at.root
 					}
 					if launchArgs, err = inlineSettings(s.SettingsFlag(), launch.Args, extra, at.home, readRoot); err != nil {
+						return false, err
+					}
+				}
+				// A refusal of the arguments stops the run here, as a refusal of the
+				// harness's settings stops the compose.
+				if c, ok := renderer.(render.ArgsChecker); ok && !walled {
+					if err := c.CheckArgs(launchArgs); err != nil {
+						return false, err
+					}
+				}
+				if walled {
+					if launchArgs, err = walledArgs(renderer, launchArgs, at.home); err != nil {
 						return false, err
 					}
 				}
@@ -889,21 +992,39 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				spec.Runtime, spec.Command, spec.Args, spec.Declared, spec.Harness = rt, launch.Command, launchArgs, rep.Hosts(), harness
 				spec.LaunchFixed, spec.LaunchDefaults, spec.HarnessHome = launch.Fixed, launch.Defaults, launch.HarnessHome
-				if h, ok := renderer.(render.AgentHomer); ok && dispatched && walled {
+				// A later session on a runtime with no agent home has no transcript link.
+				link = transcriptLink{}
+				if h, ok := renderer.(render.AgentHomer); ok && walled {
 					spec.LaunchFixed, freshHome = withAgentHome(spec.LaunchFixed, h.AgentHomeVariable()), true
 					link = transcriptLinkFor(renderer, rt)
+				}
+				// A walled Codex run starts Codex on the home that codexHomeWork writes.
+				if walled && name == codex.Runtime {
+					spec.LaunchFixed, spec.LaunchDefaults = withCodexHome(spec.LaunchFixed, spec.LaunchDefaults)
+					codexFrom = c.codex
 				}
 				return freshHome, nil
 			}
 			// prepareSession makes the rest of the session's spec once its launch is made:
 			// for a walled run the places the container may write.
+			// sessionMounts are the mounts that prepareSession and codexHomeWork added for the
+			// session that joins next, which a later session takes out again, and
+			// onVariablesBase is spec's OnVariables before prepareSession wrapped it.
+			var sessionMounts []wall.Mount
+			var onVariablesBase func(session.Applied)
+			based := false
 			prepareSession := func(freshHome bool) error {
+				if !based {
+					onVariablesBase, based = spec.OnVariables, true
+				}
 				if wrapsAgentEnv(freshHome, walled) {
+					before := len(spec.Mounts)
 					done, err := wrapAgentEnv(&spec, hasRunAPI(run), link, said)
 					if err != nil {
 						return err
 					}
 					cleanups = append(cleanups, done)
+					sessionMounts = append(sessionMounts, spec.Mounts[before:]...)
 				}
 				// Forager ends the join before the runtime starts when it reads a file for
 				// the run from any place the container may write, or reaches a mount or
@@ -913,12 +1034,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return nil
 			}
-			// stopped reports whether qory run was stopped or ran out of time.
+			// stopped reports whether qory run was stopped or its setup passed setupDeadline.
 			stopped := func() bool {
-				return ctx.Err() != nil || timeout > 0 && time.Since(opened) >= timeout
+				return ctx.Err() != nil || !time.Now().Before(setupDeadline)
 			}
 			// branch is the branch of the run's work item, set by hostWork, nil for none.
-			var branch *preparation.WorkBranch
 			// codeLine ends a line that stops a run from a run code with [codeUsed].
 			codeLine := func(err error) error {
 				if code != nil {
@@ -928,51 +1048,58 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			}
 			controlPlane := remote || server != nil && !local
 			// makeCopy makes the copy of a walled run that may write, see [startCopy], within the
-			// run's time limit: the working folder's state is that of its commit at HEAD.
+			// run's setup: the working folder's state is that of its commit at HEAD.
 			makeCopy := func() error {
-				copyCtx, cancel := ctx, func() {}
-				if timeout > 0 {
-					copyCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-				}
-				defer cancel()
+				enter(stepCopy)
 				ref := ""
 				if branch != nil {
 					ref = branch.Ref
 				}
 				var err error
-				if copied, err = startCopy(copyCtx, at.root, spec.RunID, ref, remote && run.Repositories() == "", state, spec.RunsDir); err != nil {
+				if copied, err = startCopy(setupCtx, at.root, spec.RunID, ref, remote && !fetches, state, spec.RunsDir); err != nil {
 					return &runLineError{codeLine(err)}
 				}
 				cleanups = append(cleanups, func() { copied.done(said) })
 				// .qory/artifacts is the store only outside a control plane.
 				if !controlPlane {
-					if err := copied.artifactsIn(copyCtx, said); err != nil {
+					if err := copied.artifactsIn(setupCtx, said); err != nil {
 						return &runLineError{codeLine(err)}
 					}
 				}
 				return nil
 			}
 			// installWork installs the program of the session's runtime, see [installRuntime],
-			// within the run's time limit, prints the installed version, and gives the
+			// within the run's setup, prints the installed version, and gives the
 			// session the install, see [useInstalledRuntime].
-			installWork := func() error {
-				installCtx, cancel := ctx, func() {}
-				if timeout > 0 {
-					installCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
+			// installed has the install of each runtime the run installed, nil for one with no
+			// install: a later session of a runtime the run has installed takes that install.
+			installed := map[string]*runtimeinstall.Installed{}
+			installWork := func(stepCtx context.Context) error {
+				if in, ok := installed[name]; ok {
+					if in != nil {
+						useInstalledRuntime(&spec, in)
+					}
+					return nil
 				}
-				defer cancel()
+				if installs(name) {
+					enter(stepInstall)
+				}
 				var machine runtimeinstall.Machine
 				if code != nil {
 					machine = code.machine
 				}
-				in, err := installRuntime(installCtx, run, conf.Forager, machine, walled || remote, name, state, said)
+				in, err := installRuntime(stepCtx, run, conf.Forager, machine, walled || remote, name, pins[name], pinFile, state, said)
 				if err != nil {
-					return &runLineError{codeLine(installFailed(err))}
+					err = installFailed(err)
+					if dispatched {
+						err = causeOnly(err)
+					}
+					return &runLineError{codeLine(err)}
 				}
 				if in != nil {
 					said(installedLine(*in))
 					useInstalledRuntime(&spec, in)
-				} else if installStandIn != nil && name == installedRuntime {
+				} else if installStandIn != nil && name == claude.Runtime {
 					stood, err := installStandIn(spec.Command)
 					if err != nil {
 						return &runLineError{codeLine(err)}
@@ -980,7 +1107,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if stood != nil {
 						useInstalledRuntime(&spec, stood)
 					}
+					in = stood
 				}
+				installed[name] = in
 				return nil
 			}
 			// hostWork is the run's work on this machine before its session joins, in two
@@ -1000,14 +1129,20 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// repository while the target is on its system. A run of a work item at that
 			// version reads the work item's branch first: the fetch takes its commit, the
 			// compose reads the target version, and the branch is checked out last, so no
-			// file of the branch reaches the harness.
+			// file of the branch reaches the harness. A read run whose documents contain a
+			// harness document and whose inputs list destinations, such as an Explore run,
+			// fetches nothing here and reads no branch: the agent clones each destination it
+			// needs with qory destination clone.
 			hostWork := func() error {
-				if run.Repositories() != "" {
+				switch {
+				case fetches:
 					var err error
-					if branch, err = fromCode.readBranch(ctx, run, timeout, opened); err != nil {
+					enter(stepBranchRead)
+					if branch, err = fromCode.readBranch(ctx, run, setupDeadline); err != nil {
 						return &runLineError{err}
 					}
-					err = inStep(run, streams.errOut, event.StepFetch, fetchStepNameOn(branch, fromCode, runValues(run)), stopped, func(w io.Writer) error {
+					enter(stepFetch)
+					err = inStep(run, streams.errOut, event.StepFetch, fetchStepNameOn(branch, fromCode, fromCode.fetchValues(run)), stopped, func(w io.Writer) error {
 						h, err := run.HostProxy()
 						if err != nil {
 							return &runLineError{noHostProxy(err, code != nil)}
@@ -1015,14 +1150,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						secretmask.Default().AddURLPassword(h.proxy.URL)
 						// The host proxy closes with the fetch, before the compose starts.
 						defer h.close()
-						fetchCtx, cancel := ctx, func() {}
-						if timeout > 0 {
-							fetchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-						}
-						defer cancel()
 						target := fromCode.fetchTarget()
 						target.Branch = branch
-						if _, err := preparation.RunAt(fetchCtx, cwd, os.Environ(), runValues(run), target, h.proxy, w); err != nil {
+						if _, err := preparation.RunAt(setupCtx, cwd, os.Environ(), fromCode.fetchValues(run), target, h.proxy, w); err != nil {
 							return &runLineError{err}
 						}
 						return nil
@@ -1030,10 +1160,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err != nil {
 						return err
 					}
-				} else if err := preparation.Unlisted(runValues(run), fromCode.fetchTarget()); err != nil {
-					return &runLineError{err}
+				case fromCode.clonesDestinations():
+					// Nothing is fetched before the session.
+				default:
+					if err := preparation.Unlisted(runValues(run), fromCode.fetchTarget()); err != nil {
+						return &runLineError{err}
+					}
 				}
 				var freshHome bool
+				enter(stepCompose)
 				err := inStep(run, streams.errOut, event.StepCompose, composeStepName(runtime), stopped, func(w io.Writer) error {
 					var n *source.Named
 					if fromCode != nil {
@@ -1072,7 +1207,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						composing.cache = filepath.Join(run.Dir(), runSources)
 					}
 					var err error
-					freshHome, err = prepareLaunch(w)
+					freshHome, err = prepareLaunch(setupCtx, w, 1)
 					return err
 				})
 				if err != nil {
@@ -1080,24 +1215,20 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				// A run installs its runtime once the compose named it, and before
 				// prepareSession wraps the session's command for the wall.
-				if err := installWork(); err != nil {
+				if err := installWork(setupCtx); err != nil {
 					return err
 				}
 				// A home whose push checks qory cannot run stops the run here, before the
 				// setup and the agent. The run's forwarder checks the POSTs from behind the
 				// wall from here on: nothing behind the wall has run yet.
 				if walled {
-					loadCtx, cancel := ctx, func() {}
-					if timeout > 0 {
-						loadCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-					}
-					done, err := checks.load(loadCtx, run, at.home, spec.RunID, &spec, remote || server != nil && !local)
-					cancel()
+					enter(stepPushChecks)
+					done, err := checks.load(setupCtx, run, at.home, spec.RunID, &spec, remote || server != nil && !local)
 					if err != nil {
 						return &runLineError{input(err)}
 					}
 					cleanups = append(cleanups, done)
-					if err := checks.set(run); err != nil {
+					if err := checks.set(run, fromCode != nil && fromCode.shared && hasRunAPI(run)); err != nil {
 						return &runLineError{err}
 					}
 				}
@@ -1110,19 +1241,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return err
 				}
 				if branch != nil {
-					switchCtx, cancel := ctx, func() {}
-					if timeout > 0 {
-						switchCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-					}
-					defer cancel()
-					if err := preparation.Switch(switchCtx, cwd, os.Environ(), branch, stderr); err != nil {
+					enter(stepSwitch)
+					if err := preparation.Switch(setupCtx, cwd, os.Environ(), branch, stderr); err != nil {
 						return &runLineError{err}
 					}
 				}
 				// A read run with no setup binds the person's checkout read-only. A setup can write
 				// what it binds, the .git too, so a read run with one gets a copy. A write run from a
 				// run code works in the checkout, and its push step pushes from there.
-				if !walled || readOnly && run.Repositories() == "" || code != nil && !readOnly {
+				if !walled || readOnly && !fetches || code != nil && !readOnly {
 					return nil
 				}
 				if err := makeCopy(); err != nil {
@@ -1135,20 +1262,71 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err := copied.recordLinks(); err != nil {
 					return &runLineError{codeLine(err)}
 				}
+				// A local write run of a harness with a submit program (program is set for a run with
+				// no run code and no run key) hands its text over in a file of the copy, which no
+				// commit has: the copy's .qory stays out of the git session, and its folder out of a
+				// git add -A of the agent.
+				if program != nil && !readOnly && !copied.plain {
+					if err := copied.dir.Exclude(handoffExclude); err != nil {
+						return &runLineError{codeLine(err)}
+					}
+					spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{handoffEnv: handoffPath(copied.dir.Work())})
+					copied.submits = true
+				}
+				return nil
+			}
+			// codexHomeWork writes the Codex home of a walled Codex run, see [walledCodexHome],
+			// within the run's setup, once hostWork has bound the checkout or its copy, and
+			// mounts it. No call in it takes setupCtx: a write that passes setupDeadline runs
+			// to its end, and the check after the steps names it. The home goes in the copy's
+			// folder, <user cache>/qory/runs/<run id>, or, for a run with no copy, in a new
+			// folder at that path. Both go when the run ends, as the copy does; the home goes
+			// also when the copy stays.
+			// codexRoot is the folder of the run's Codex homes, "" until a Codex session made it.
+			// Each Codex session of the run gets a new home there: prepareLater removes the
+			// home of the session before.
+			codexRoot := ""
+			codexHomeWork := func() error {
+				enter(stepCodexHome)
+				checkout := at.root
+				if copied != nil {
+					checkout = copied.dir.Work()
+				}
+				switch {
+				case codexRoot != "":
+				case copied != nil:
+					root := copied.dir.Root()
+					codexRoot = root
+					cleanups = append(cleanups, func() { _, _ = removeCodexHome(root, said) })
+				default:
+					d, err := runcopy.NewCodexHome(spec.RunID, state, spec.RunsDir)
+					if err != nil {
+						return &runLineError{codeLine(err)}
+					}
+					cleanups = append(cleanups, func() {
+						if err := d.Remove(); err != nil {
+							said(fmt.Sprintf(textCopyNoRemove, exports.Value(d.Root(), false), exports.HideError(err)))
+						}
+					})
+					codexRoot = d.Root()
+				}
+				mounts, err := walledCodexHome(codexRoot, at.home, checkout, spec.Dir, spec.Args, readOnly, codexFrom)
+				if err != nil {
+					return &runLineError{codeLine(err)}
+				}
+				spec.Mounts = append(spec.Mounts, mounts...)
+				sessionMounts = append(sessionMounts, mounts...)
+				spec.Written = writtenPlaces(checkout, spec.Mounts)
 				return nil
 			}
 			// setupWork runs the setup of a walled run whose run configuration lists
-			// repositories, see [runSetup], within the run's time limit. A setup command that
+			// repositories, see [runSetup], within the run's setup. A setup command that
 			// exits otherwise than 0 is the run's error line, and a mount refusal of the
 			// setup container's places, or of the places AgentEnv checks, gets the line a
 			// join's mount refusal gets.
 			setupWork := func() error {
-				setupCtx, cancel := ctx, func() {}
-				if timeout > 0 {
-					setupCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-				}
-				defer cancel()
-				err := runSetup(setupCtx, run, &spec, copied != nil && !copied.plain && !copied.readOnly)
+				enter(stepSetupCommands)
+				err := runSetup(setupCtx, run, &spec, copied != nil && !copied.plain && !copied.readOnly, fromCode.fetchValues(run))
 				var exited *session.SetupError
 				switch {
 				case err == nil:
@@ -1167,102 +1345,47 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				return err
 			}
 			// removeSetupWork removes the setup container of a read run, see [removeSetup],
-			// within the run's time limit. No host step is open: hostWork exited its steps,
-			// and FetchImage and Setup write theirs. A call cut short by the time limit or a
+			// within the run's setup. No host step is open: hostWork exited its steps,
+			// and FetchImage and Setup write theirs. A call cut short by setupDeadline or a
 			// signal ends as a setup cut short does: the switch after the preparation tests
 			// both before the error.
 			removeSetupWork := func() error {
-				removeCtx, cancel := ctx, func() {}
-				if timeout > 0 {
-					removeCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-				}
-				defer cancel()
-				return removeSetup(removeCtx, run)
+				enter(stepSetupRemoval)
+				return removeSetup(setupCtx, run)
 			}
 			// imageWork fetches the image of a walled run, see [fetchImage], within the
-			// run's time limit, once the harness is composed and before the setup, so the
-			// setup and the join start from the image the step fetched. With an engine
-			// proxy, the step holds the engine lock, which it waits for within the time
-			// limit too: see [withEngineLock].
+			// run's setup, once the harness is composed and before the setup commands, so
+			// they and the join start from the image the step fetched. With an engine
+			// proxy, the step holds the engine lock, which it waits for within the run's
+			// setup too: see [withEngineLock].
 			imageWork := func() error {
-				imageCtx, cancel := ctx, func() {}
-				if timeout > 0 {
-					imageCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-				}
-				defer cancel()
-				return withEngineLock(imageCtx, spec.engineProxyFile, code != nil, func() error {
-					return fetchImage(imageCtx, run, spec.EngineProxy, code != nil)
+				enter(stepImage)
+				return withEngineLock(setupCtx, spec.engineProxyFile, code != nil, func() error {
+					return fetchImage(setupCtx, run, spec.EngineProxy, code != nil)
 				})
 			}
-			// recordSetupWork records what the setup left changed, within the run's time limit:
+			// recordSetupWork records what the setup left changed, within the run's setup:
 			// in the copy, so the git session leaves it out, see [runCopy.recordSetup], or in the
 			// working folder of a run with no copy, so the push step leaves it out, see
 			// [preparation.RecordSetup].
 			recordSetupWork := func() error {
-				recordCtx, cancel := ctx, func() {}
-				if timeout > 0 {
-					recordCtx, cancel = context.WithDeadline(ctx, opened.Add(timeout))
-				}
-				defer cancel()
+				enter(stepSetupRecord)
 				if copied == nil {
-					if err := preparation.RecordSetup(recordCtx, cwd, os.Environ(), branch); err != nil {
+					if err := preparation.RecordSetup(setupCtx, cwd, os.Environ(), branch); err != nil {
 						return &runLineError{err}
 					}
 					return nil
 				}
-				if err := copied.recordSetup(recordCtx, run, &spec); err != nil {
+				if err := copied.recordSetup(setupCtx, run, &spec); err != nil {
 					return &runLineError{codeLine(err)}
 				}
 				return nil
 			}
-			// A run stopped or out of time before its session joins prepares nothing more.
-			var prepErr error
-			if ctx.Err() == nil && (timeout == 0 || time.Since(opened) < timeout) {
-				prepErr = hostWork()
-				if prepErr == nil && walled {
-					prepErr = imageWork()
-				}
-				if prepErr == nil && walled && run.Repositories() != "" {
-					prepErr = setupWork()
-				}
-				if prepErr == nil && readOnly {
-					prepErr = removeSetupWork()
-				}
-				if prepErr == nil && copied == nil && walled &&
-					spec.setupWhere != config.SetupInside && canPush(fromCode, level, branch) {
-					prepErr = recordSetupWork()
-				}
-				if prepErr == nil && copied != nil && !copied.plain && !copied.readOnly && run.Repositories() != "" && spec.setupWhere != config.SetupInside {
-					prepErr = recordSetupWork()
-				}
-				if beforeJoin != nil {
-					beforeJoin()
-				}
-			}
-			left := time.Duration(0)
-			if timeout > 0 {
-				left = timeout - time.Since(opened)
-			}
-			switch {
-			case ctx.Err() != nil:
-				closeRun(session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1})
-				lines.done(nil)
-				u.Fail(errors.New(cancelledBeforeJoin(got(), name)))
-				said("the record is in " + record)
-				return reported(&exitError{code: 1})
-			case timeout > 0 && left <= 0:
-				closeRun(session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout})
-				lines.done(nil)
-				line := timedOutBeforeJoin(timeout, name)
-				if fromCode != nil {
-					line = fromCode.timedOutLine(timeout, name)
-				}
-				u.Fail(errors.New(line))
-				said("the record is in " + record)
-				return reported(&exitError{code: exitTimeout})
-			case prepErr != nil:
-				// A run no session joined is failed with no_session, or with the reason a
-				// [*reasonError] sets.
+			// noJoin closes a run whose next session does not join because of prepErr, an error of
+			// the steps before the join, and returns qory run's error: failed with no_session, or
+			// with the reason a [*reasonError] sets. A later session's steps, and the
+			// next-session request before them, end the run this way too.
+			noJoin := func(prepErr error) error {
 				out := session.Outcome{State: event.StateFailed, ExitCode: -1}
 				var ended *reasonError
 				if errors.As(prepErr, &ended) {
@@ -1290,110 +1413,372 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				return withRecord(streams.errOut, prepErr, record)
 			}
-			spec.Timeout = left
+			// stoppedBeforeJoin closes a run that a stop ended before session n joined:
+			// cancelled with interrupted, exit 1, also between two sessions.
+			stoppedBeforeJoin := func(n int) error {
+				closeRun(session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1})
+				lines.done(nil)
+				line := cancelledBeforeJoin(got(), name)
+				if n > 1 {
+					line = cancelledBeforeSession(got(), n)
+				}
+				u.Fail(errors.New(line))
+				said("the record is in " + record)
+				return reported(&exitError{code: 1})
+			}
+			// setupTimedOut closes a run whose steps before a session passed setupDeadline. It
+			// ends as a session at its time limit does: cancelled with timeout, exit 124.
+			setupTimedOut := func() error {
+				closeRun(session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout})
+				lines.done(nil)
+				u.Fail(codeLine(setupPassed(step, name, setupBound, dispatched)))
+				said("the record is in " + record)
+				return reported(&exitError{code: exitTimeout})
+			}
+			// A run whose documents set shared_run shares the memo of session 1's compose with the
+			// composes of its later sessions, sealed once session 1's is done.
+			if fromCode != nil && fromCode.shared {
+				composing.memo = source.NewMemo()
+			}
+			// A run stopped, or past setupDeadline, before its session joins prepares nothing
+			// more.
+			var prepErr error
+			if ctx.Err() == nil && time.Now().Before(setupDeadline) {
+				prepErr = hostWork()
+				if prepErr == nil && walled && name == codex.Runtime {
+					prepErr = codexHomeWork()
+				}
+				if prepErr == nil && walled {
+					prepErr = imageWork()
+				}
+				if prepErr == nil && walled && fetches {
+					prepErr = setupWork()
+				}
+				if prepErr == nil && readOnly {
+					prepErr = removeSetupWork()
+				}
+				if prepErr == nil && copied == nil && walled &&
+					spec.setupWhere != config.SetupInside && canPush(fromCode, level, branch) {
+					prepErr = recordSetupWork()
+				}
+				if prepErr == nil && copied != nil && !copied.plain && !copied.readOnly && fetches && spec.setupWhere != config.SetupInside {
+					prepErr = recordSetupWork()
+				}
+				if beforeJoin != nil {
+					beforeJoin()
+				}
+			}
+			composing.memo.Seal()
+			switch {
+			case ctx.Err() != nil:
+				return stoppedBeforeJoin(1)
+			case !time.Now().Before(setupDeadline):
+				return setupTimedOut()
+			case prepErr != nil:
+				return noJoin(prepErr)
+			}
+			// prepareLater makes the spec of session n, a later session of a run whose documents
+			// set shared_run, once fromCode has the session's next-session answer: it takes out
+			// the mounts and the wrap of the session before, composes the harness for the
+			// session's runtime and model settings, in a compose step, installs the runtime when
+			// the run has not installed it yet, follows the push checks of the new home, and
+			// wraps the session's command again. The compose reads the run's cache at the commits
+			// of session 1's compose: Forager closed the stack proxy at the run's first join, and
+			// the sealed memo fetches nothing, see [source.Memo.Seal]. A run whose documents
+			// contain no harness document composed the checkout's file for session 1, which the
+			// branch may have changed since, so it stops here. The steps before a later session
+			// have the setup's limit, setupBound, from their start, as session 1's have from the
+			// run's open: setupCtx and setupDeadline are the later session's from here on.
+			prepareLater := func(n int) error {
+				cancelSetup()
+				setupDeadline = time.Now().Add(setupBound)
+				setupCtx, cancelSetup = context.WithDeadline(ctx, setupDeadline)
+				laterCtx := setupCtx
+				if fromCode.harness == nil {
+					return &runLineError{errors.New(textLaterCheckoutHarness + codeUsed)}
+				}
+				runtime = fromCode.runtime
+				fromCode.applyTo(&composing)
+				spec.Mounts = slices.DeleteFunc(spec.Mounts, func(m wall.Mount) bool { return slices.Contains(sessionMounts, m) })
+				sessionMounts = nil
+				spec.OnVariables = onVariablesBase
+				spec.installed, spec.RuntimeInstall = nil, nil
+				// The Codex home of an earlier session goes, with its sessions' files, before
+				// the next join.
+				if codexRoot != "" {
+					if stayed, err := removeCodexHome(codexRoot, func(string) {}); err != nil {
+						return &runLineError{fmt.Errorf(textLaterCodexHome, n-1, exports.Value(stayed, false), n, exports.HideError(err), codeUsed)}
+					}
+				}
+				// The session's inputs.json replaces the one before, in the inputs folder and in
+				// the home, which qory wrote and the compose would find.
+				for _, f := range []string{filepath.Join(in, inputsFile), filepath.Join(at.home, inputsFile)} {
+					if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
+						return &runLineError{keyedError(fromCode, inputsNotWritten(err))}
+					}
+				}
+				var freshHome bool
+				enter(stepCompose)
+				cut := func() bool { return ctx.Err() != nil || laterCtx.Err() != nil }
+				err := inStep(run, streams.errOut, event.StepCompose, composeStepName(runtime), cut, func(w io.Writer) error {
+					if n := fromCode.named; n != nil {
+						lines := &namedLines{w: w, n: n}
+						defer lines.flush()
+						w = lines
+					}
+					dir := filepath.Join(run.Dir(), fmt.Sprintf(laterHarnessDir, n))
+					if err := os.Mkdir(dir, 0o700); err != nil {
+						return fmt.Errorf("Check the run's folder.\n  qory run could not write the workspace's harness in %s: %w%s", exports.Value(run.Dir(), false), exports.HideError(err), codeUsed)
+					}
+					file, err := fromCode.writeHarness(dir)
+					if err != nil {
+						return err
+					}
+					composing.file, composing.fromDocuments = file, true
+					if composing.git != nil {
+						composing.git = &source.Git{Named: composing.git.Named}
+					}
+					freshHome, err = prepareLaunch(laterCtx, w, n)
+					return err
+				})
+				if err != nil {
+					return err
+				}
+				if err := installWork(laterCtx); err != nil {
+					return err
+				}
+				if walled {
+					enter(stepPushChecks)
+					done, err := checks.next(laterCtx, run, at.home, spec.RunID, &spec, controlPlane)
+					cleanups = append(cleanups, done)
+					if err != nil {
+						return &runLineError{input(err)}
+					}
+				}
+				if err := prepareSession(freshHome); err != nil {
+					return err
+				}
+				if walled && name == codex.Runtime {
+					return codexHomeWork()
+				}
+				if walled {
+					checkout := at.root
+					if copied != nil {
+						checkout = copied.dir.Work()
+					}
+					spec.Written = writtenPlaces(checkout, spec.Mounts)
+				}
+				return nil
+			}
 			// Forager's session masks the runtime's output with the run's masker, on a
 			// terminal and on pipes.
 			spec.Stdout, spec.Stderr = streams.session()
-			// joined is whether the join passed its checks. Past them the agent may have run,
-			// and a join that returned an error has no result to show it.
+			// joined is whether the join of the last session passed its checks. Past them the
+			// agent may have run, and a join that returned an error has no result to show it.
 			joined := false
-			onVariables := spec.OnVariables
-			spec.OnVariables = func(a session.Applied) {
-				joined = true
-				if onVariables != nil {
-					onVariables(a)
+			markJoined := func() {
+				onVariables := spec.OnVariables
+				spec.OnVariables = func(a session.Applied) {
+					joined = true
+					if onVariables != nil {
+						onVariables(a)
+					}
 				}
 			}
-			// The agent's session is the run's first join, so the gateway numbers it 1.
-			suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, fullSuite: fullSuiteOf(fromCode), workflow: planWorkflow, plan: planType, extensions: extensions, said: said})
-			closeRoute := route.open(1)
-			res, err := joinSession(run, ctx, spec.SessionSpec)
-			closeRoute()
-			out := sessionOutcome(res, err)
-			var suiteLimit time.Time
-			if timeout > 0 {
-				suiteLimit = opened.Add(timeout)
-			}
-			out, suiteErr := suites.after(ctx, again, suiteLimit, res, out)
-			// pushWork is the push step of a run with an agent session that may write, see
-			// [keepsWork], before the close: Qory Apiary takes no version of a run that ended.
-			// The step runs under [pushContext], since a stop has ended ctx or spent the time
-			// limit. A failed step changes the close only of a session that succeeded. The stop
-			// of a walled agent is proven: the join removes its container, and when it could
-			// not, [openedRun.RemoveSetup] and the step's [openedRun.PushProxy] fail, so the step
-			// runs no git. An unwalled agent's process leaves no proof that it stopped.
-			//
-			// A walled write run with no run code works in a copy, and the git session commits
-			// and bundles the agent's work there, in a container qory starts, see
-			// [runCopy.inContainer]. While the run is open, the session runs here, in the copy
-			// step, once [openedRun.RemoveSetup] removed the setup container and
-			// [openedRun.ContainerKept] shows no container of the run left: a git session that
-			// fails then changes the close of a session that succeeded, see
-			// [pushEnding.copyOutcome]. After a join that returned an error once the agent may
-			// have run, a run the gateway closed, or a copy step that did not start, it runs
-			// after the close instead, with no step, see [runCopy.gitSessionAfterClose]. A
-			// removal of the setup container that failed, or a container of the run kept, sets
-			// [session.Closed.WallKept] in Forager: then no git session runs after the close,
-			// and nothing comes back. A removal or a copy step that failed after a session that
-			// succeeded closes the run as a copy step that did not start, and qory run exits
-			// with 1. The work comes back after the close, under [returnContext]. A return that
-			// fails after the close changes only qory run's exit status: only the close proves
-			// that no container is left.
-			ending := pushEnding{session: out, limit: timeout}
-			var pushErr, sessionErr error
-			pushes := keepsWork(fromCode, level, branch, res, err)
-			returns := copied != nil && !copied.readOnly && (err == nil && res != nil || joined)
+			markJoined()
+			// number is the number the gateway gives the session that joins next: 1 for the
+			// run's first join, one more than the last session's after it. The route serves that
+			// number during the join. qory predicts it: Forager returns a session's number only
+			// in its join's result, once the session ended. A session the gateway numbered
+			// otherwise got 503 from the route for its requests, and ends the run failed after
+			// its join, see [textSessionNumber].
+			number := 1
+			var res *session.Result
+			var out session.Outcome
+			var suiteErr, pushErr, sessionErr error
+			var ending pushEnding
+			var returns, afterClose, returnFailed bool
+			var backCtx context.Context
+			// cancelBack ends the backCtx of the last pass: each pass ends the one before at its
+			// start.
+			cancelBack := func() {}
+			defer func() { cancelBack() }()
 			stopNow := func() stopRead { return stopRead{ctx.Err() != nil, again.Err() != nil, got()} }
-			if copied != nil {
-				copied.cutBy = func() string { return ending.cutLine(stopNow(), returnAfterSignal) }
-			}
-			backCtx, cancelBack := returnContext(ctx, again, func(wait time.Duration) {
-				if returns && again.Err() == nil {
-					said(fmt.Sprintf(textCopyWaiting, got(), wait))
-				}
-			})
-			defer cancelBack()
-			// afterClose is whether the git session runs after the close.
-			afterClose := returns && !copied.plain && (err != nil || res == nil || res.RunClosed)
-			// returnFailed is whether a part of the return failed before the close: qory run then
-			// exits with 1 even when the work comes back.
-			returnFailed := false
-			if returns && !copied.plain && !afterClose {
-				removeCtx, cancelRemove := context.WithTimeout(backCtx, removeSetupLimit)
-				removeErr := run.RemoveSetup(removeCtx)
-				cancelRemove()
-				afterClose = removeErr != nil || run.ContainerKept()
-				var stepErr error
-				if !afterClose {
-					stepErr, sessionErr = copied.gitSession(backCtx, run, &spec, streams.errOut)
-					afterClose = stepErr != nil
-				}
-				switch {
-				case removeErr != nil || stepErr != nil:
-					// The run closes as after a copy step that did not start: failed, or
-					// cancelled when a stop or the run's time limit ended the removal or the step.
-					said(shownError(errors.Join(removeErr, stepErr)))
-					returnFailed = true
-					ending.settle(stopNow())
-					ending.cut = backCtx.Err() != nil
-					out = ending.copyOutcome(-1)
-				case sessionErr != nil:
-					ending.settle(stopNow())
-					ending.cut = copied.cut
-					out = ending.copyOutcome(copied.stepCode)
-				}
-			}
-			if pushes {
-				var limit time.Time
+			// laterErr is the error that ends the run between two sessions, nil when none did,
+			// and laterTimedOut whether the steps before the next session passed setupDeadline.
+			var laterErr error
+			var laterTimedOut bool
+		sessions:
+			for {
+				cancelBack()
+				joined = false
+				// Forager's limit of the session is the whole of its time limit: the setup's
+				// time, and the steps between two sessions, are not in it.
+				spec.Timeout = 0
 				if timeout > 0 {
-					limit = opened.Add(timeout)
+					spec.Timeout = timeout
 				}
-				push := &sessionPush{
-					ctx: ctx, again: again, limit: limit, stopNow: stopNow,
-					run: run, stderr: streams.errOut, branch: branch, dir: cwd, runID: spec.RunID,
-					runNumber: fromCode.runNumber, agentStopped: walled, checks: checks,
+				spec.ModelProviderCredentialName = ""
+				if fromCode != nil {
+					spec.ModelProviderCredentialName = fromCode.modelCredential
 				}
-				out, pushErr = pushAfterSession(push, &ending, out)
+				spec.After, spec.AfterTimeout = nil, 0
+				suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, fullSuite: fullSuiteOf(fromCode), workflow: planWorkflow, plan: planType, extensions: extensions, said: said})
+				closeRoute := route.open(number)
+				// The session's time limit counts from the agent's start, here, see [sessionDeadline].
+				deadline := sessionDeadline(time.Now(), timeout)
+				res, err = joinSession(run, ctx, spec.SessionSpec)
+				closeRoute()
+				out = sessionOutcome(res, err)
+				// asked is how the session ended, as the next-session request sends it.
+				asked := out
+				var suiteLimit time.Time
+				if timeout > 0 {
+					suiteLimit = deadline
+				}
+				out, suiteErr = suites.after(ctx, again, suiteLimit, res, out)
+				// pushWork is the push step of a run with an agent session that may write, see
+				// [keepsWork], before the close: Qory Apiary takes no version of a run that ended.
+				// The step runs under [pushContext], since a stop has ended ctx or spent the time
+				// limit. A failed step changes the close only of a session that succeeded. The stop
+				// of a walled agent is proven: the join removes its container, and when it could
+				// not, [openedRun.RemoveSetup] and the step's [openedRun.PushProxy] fail, so the step
+				// runs no git. An unwalled agent's process leaves no proof that it stopped.
+				//
+				// A walled write run with no run code works in a copy, and the git session commits
+				// and bundles the agent's work there, in a container qory starts, see
+				// [runCopy.inContainer]. While the run is open, the session runs here, in the copy
+				// step, once [openedRun.RemoveSetup] removed the setup container and
+				// [openedRun.ContainerKept] shows no container of the run left: a git session that
+				// fails then changes the close of a session that succeeded, see
+				// [pushEnding.copyOutcome]. After a join that returned an error once the agent may
+				// have run, a run the gateway closed, or a copy step that did not start, it runs
+				// after the close instead, with no step, see [runCopy.gitSessionAfterClose]. A
+				// removal of the setup container that failed, or a container of the run kept, sets
+				// [session.Closed.WallKept] in Forager: then no git session runs after the close,
+				// and nothing comes back. A removal or a copy step that failed after a session that
+				// succeeded closes the run as a copy step that did not start, and qory run exits
+				// with 1. The work comes back after the close, under [returnContext]. A return that
+				// fails after the close changes only qory run's exit status: only the close proves
+				// that no container is left.
+				ending = pushEnding{session: out, limit: timeout}
+				pushes := keepsWork(fromCode, level, branch, res, err)
+				returns = copied != nil && !copied.readOnly && (err == nil && res != nil || joined)
+				if copied != nil {
+					copied.cutBy = func() string { return ending.cutLine(stopNow(), returnAfterSignal) }
+				}
+				backCtx, cancelBack = returnContext(ctx, again, func(wait time.Duration) {
+					if returns && again.Err() == nil {
+						said(fmt.Sprintf(textCopyWaiting, got(), wait))
+					}
+				})
+				// afterClose is whether the git session runs after the close.
+				afterClose = returns && !copied.plain && (err != nil || res == nil || res.RunClosed)
+				// returnFailed is whether a part of the return failed before the close: qory run then
+				// exits with 1 even when the work comes back.
+				returnFailed = false
+				if returns && !copied.plain && !afterClose {
+					removeCtx, cancelRemove := context.WithTimeout(backCtx, removeSetupLimit)
+					removeErr := run.RemoveSetup(removeCtx)
+					cancelRemove()
+					afterClose = removeErr != nil || run.ContainerKept()
+					var stepErr error
+					if !afterClose {
+						stepErr, sessionErr = copied.gitSession(backCtx, run, &spec, streams.errOut)
+						afterClose = stepErr != nil
+					}
+					switch {
+					case removeErr != nil || stepErr != nil:
+						// The run closes as after a copy step that did not start: failed, or
+						// cancelled when a stop or the run's time limit ended the removal or the step.
+						said(shownError(errors.Join(removeErr, stepErr)))
+						returnFailed = true
+						ending.settle(stopNow())
+						ending.cut = backCtx.Err() != nil
+						out = ending.copyOutcome(-1)
+					case sessionErr != nil:
+						ending.settle(stopNow())
+						ending.cut = copied.cut
+						out = ending.copyOutcome(copied.stepCode)
+					}
+				}
+				var push *sessionPush
+				if pushes {
+					var limit time.Time
+					if timeout > 0 {
+						limit = deadline
+					}
+					push = &sessionPush{
+						ctx: ctx, again: again, limit: limit, stopNow: stopNow,
+						run: run, stderr: streams.errOut, branch: branch, dir: cwd, runID: spec.RunID,
+						runNumber: fromCode.runNumber, agentStopped: walled, checks: checks,
+						shared: fromCode.shared, handoff: handoffRoot,
+					}
+					out, pushErr = pushAfterSession(push, &ending, out)
+				}
+				// A run whose documents set shared_run sends the next-session request after a
+				// session that joined, was not stopped and did not pause, once the session's
+				// suite result is posted and its push step passed. Any other run has one session.
+				if fromCode == nil || !fromCode.shared || err != nil || res == nil || res.RunClosed || returns ||
+					ctx.Err() != nil || asked.State == event.StatePaused || suiteErr != nil || pushErr != nil ||
+					push != nil && push.ended != "" {
+					break
+				}
+				// number is the prediction that the route served during the join; a session the
+				// gateway numbered otherwise ends the run failed.
+				if res.Session != number {
+					laterErr = &runLineError{fmt.Errorf(textSessionNumber, res.Session, number, codeUsed)}
+					break
+				}
+				// From here on number is the session that joins next.
+				number = res.Session + 1
+				a, endLine, nextErr := askNextSession(ctx, run.NextSession, res.Session, asked)
+				switch {
+				case nextErr != nil:
+					laterErr = &runLineError{nextErr}
+					break sessions
+				case endLine != "":
+					fmt.Fprintln(streams.errOut, endLine)
+					break sessions
+				case a.Next == contracts.NextSessionKindEnd:
+					said(fmt.Sprintf(textLaterEnd, res.Session))
+					break sessions
+				}
+				// No process of the session may run on when qory composes, installs or runs git
+				// on this machine for the next session, a run with no push step too.
+				if laterErr = agentStopProof(walled, run.ContainerKept(), fmt.Sprintf("session %d does not start", number)); laterErr != nil {
+					break
+				}
+				if err := fromCode.next(a); err != nil {
+					laterErr = &runLineError{err}
+					break
+				}
+				said(fmt.Sprintf(textLaterStarts, number, fromCode.workflow, fromCode.runtime))
+				laterErr = prepareLater(number)
+				if laterErr == nil && beforeJoin != nil {
+					beforeJoin()
+				}
+				// A stop during the steps before the session, or steps past their limit, start
+				// no session, also when the steps passed, as for session 1.
+				switch {
+				case ctx.Err() != nil:
+					laterErr = ctx.Err()
+				case !time.Now().Before(setupDeadline):
+					laterErr, laterTimedOut = context.DeadlineExceeded, true
+				}
+				if laterErr != nil {
+					break
+				}
+				timeout = fromCode.sessionLimit()
+				markJoined()
+			}
+			switch {
+			case laterErr != nil && ctx.Err() != nil:
+				return stoppedBeforeJoin(number)
+			case laterTimedOut:
+				return setupTimedOut()
+			case laterErr != nil:
+				return noJoin(laterErr)
 			}
 			closed := closeRun(out)
 			// Nothing of the copy comes back when a process of the run could have written it past
@@ -1477,6 +1862,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			default:
 				back = copied.comeBack(backCtx, spec.RunID, said)
 			}
+			// A local run that came back whole submits, as a run from a run code does however its
+			// session ended: it pushes its branches and runs the harness's submit program. The
+			// program opens a draft only after a session that passed.
+			if back && copied.submits && program != nil {
+				drafts = copied.submitLocal(backCtx, streams.errOut, program, ExitCode(ended) == 0)
+			}
 			// A run the gateway closed as completed ends with an exit status of 0 that is not nil.
 			if (!back || !artifactsBack || returnFailed) && ExitCode(ended) == 0 {
 				return reported(&exitError{code: 1})
@@ -1494,7 +1885,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 	c.Flags().StringVar(&title, "title", "", "the run's title, for a person to read, reported when the run starts")
 	c.Flags().StringArrayVar(&subjects, "subject", nil, "what the run works on, type=<type>,ref=<ref>[,url=<url>][,title=<title>], such as type=ticket,ref=7; title takes the rest of the value, commas too; repeatable")
 	c.Flags().StringVar(&details, "details", "", "a JSON object of the run's details, read from this file, or - for stdin when stdin is not a terminal; at most 8192 bytes compacted, 4 levels deep")
-	c.Flags().DurationVar(&timeout, "timeout", 0, "stop the run after this long, counted from its open, compose included, such as 5h30m, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.ForagerFileName+": session.run.timeout)")
+	c.Flags().DurationVar(&timeout, "timeout", 0, "stop the run after this long, counted from the agent's start, such as 5h30m, and exit "+fmt.Sprint(exitTimeout)+" (default no limit; "+config.ForagerFileName+": session.run.timeout)")
 	c.Flags().StringVar(&stopSignal, "stop-signal", "", "the signal that stops the agent: SIGTERM, SIGINT, SIGHUP, SIGQUIT, SIGUSR1 or SIGUSR2 (default SIGTERM; "+config.ForagerFileName+": session.run.stop_signal)")
 	c.Flags().DurationVar(&grace, "stop-grace", 0, "the time between the stop signal and SIGKILL (default 10s; "+config.ForagerFileName+": session.run.stop_grace)")
 	c.Flags().StringVar(&o.name, "wall", "", "run the agent in a container whose one way out is the proxy: "+config.WallDocker+", or none ("+config.ForagerFileName+": wall.adapter)")
@@ -1692,6 +2083,9 @@ type openedRun interface {
 	// link of the run's gateway and returns the answer's body; see
 	// [session.Run.PushedCommits]. The run API's client does not reach this route.
 	PushedCommits(ctx context.Context, body []byte) ([]byte, error)
+	// NextSession sends the next-session request after a session, over the link of the
+	// run's gateway, and returns the answer's body; see [session.Run.NextSession].
+	NextSession(ctx context.Context, body []byte) ([]byte, error)
 	// Image is the image chosen at the run's open, the zero Image with no wall or when
 	// the gateway's run answer has no image; a walled run with no image fails at the open.
 	Image() session.Image
@@ -1770,18 +2164,21 @@ var (
 	}
 )
 
-// beforeJoin, when not nil, is called once the harness is composed, before the run's
-// session joins; a test sets it.
+// beforeJoin, when not nil, is called once the harness is composed, before each session of
+// the run joins; a test sets it.
 var beforeJoin func()
 
 // sessionOutcome is the run's outcome qory closes the run with once its one session
 // ended with res, or did not start, err: the time limit's, cancelled with timeout and
 // 124; a stop from where the run was started, cancelled with interrupted and the
-// runtime's exit code; a session that paused at the model key limit, paused with
-// model_key_limit and the runtime's exit code; otherwise succeeded or failed by the
-// session's state, with the runtime's exit code. A session that did not start, or whose
-// run the gateway closed, is failed with -1: Forager closes a run the gateway closed
-// with the gateway's end.
+// runtime's exit code; a session paused after the model provider rejected its key while
+// another key is usable, paused with model_key_switch and the runtime's exit code; any
+// other paused session, at the model key limit, paused with model_key_limit and the
+// runtime's exit code; a session failed after the model provider rejected every key,
+// failed with model_key_unauthorized and the runtime's exit code; otherwise succeeded or
+// failed by the session's state, with the runtime's exit code. A session that did not
+// start, or whose run the gateway closed, is failed with -1: Forager closes a run the
+// gateway closed with the gateway's end.
 func sessionOutcome(res *session.Result, err error) session.Outcome {
 	switch {
 	case err != nil || res == nil || res.RunClosed:
@@ -1790,13 +2187,26 @@ func sessionOutcome(res *session.Result, err error) session.Outcome {
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
 	case res.Cancelled:
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: res.ExitCode}
+	case res.State == event.StatePaused && res.Reason == reasonModelKeySwitch:
+		return session.Outcome{State: event.StatePaused, Reason: reasonModelKeySwitch, ExitCode: res.ExitCode}
 	case res.State == event.StatePaused:
-		// Forager pauses a session only at the model key limit, model_key_limit.
+		// Forager pauses a session otherwise only at the model key limit, model_key_limit.
 		return session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: res.ExitCode}
+	case res.State == event.StateFailed && res.Reason == reasonModelKeyUnauthorized:
+		return session.Outcome{State: event.StateFailed, Reason: reasonModelKeyUnauthorized, ExitCode: res.ExitCode}
 	case res.State == event.StateSucceeded:
 		return session.Outcome{State: event.StateSucceeded, ExitCode: res.ExitCode}
 	}
 	return session.Outcome{State: event.StateFailed, ExitCode: res.ExitCode}
+}
+
+// cancelledBeforeSession is the line of a run that a stop ended before session n, a later
+// session, started: got is the signal qory run got, "" for none.
+func cancelledBeforeSession(got string, n int) string {
+	if got == "" {
+		return fmt.Sprintf("the run was cancelled before session %d started", n)
+	}
+	return fmt.Sprintf("the run was cancelled: qory run got %s before session %d started", got, n)
 }
 
 // cancelledBeforeJoin is the line of a run that qory run's signal, got, stopped before
@@ -1806,12 +2216,6 @@ func cancelledBeforeJoin(got, runtime string) string {
 		return "the run was cancelled before " + agentName(runtime) + " started"
 	}
 	return "the run was cancelled: qory run got " + got + " before " + agentName(runtime) + " started"
-}
-
-// timedOutBeforeJoin is the line of a run that reached its time limit, limit, before
-// its session joined, and runtime the agent's name, "" when it is not known yet.
-func timedOutBeforeJoin(limit time.Duration, runtime string) string {
-	return fmt.Sprintf("give the run a longer --timeout: the run was cancelled at its time limit of %s, before %s started", limit, agentName(runtime))
 }
 
 // agentName is the runtime's name as a line says it, "the agent" when it is not known.
@@ -1911,7 +2315,7 @@ func runEnded(u *ui.UI, res *session.Result, e runEnd) error {
 	switch {
 	case res.RunClosed:
 		o := outcomeOf(res.State, res.Reason)
-		say(o, o.said()+", and "+accesskey.ShownName(e.runtime, false)+" was stopped")
+		say(o, o.stopped(accesskey.ShownName(e.runtime, false)))
 		return reported(&exitError{code: o.exitCode()})
 	case res.TimedOut:
 		u.Fail(fmt.Errorf("the run was cancelled: it reached the time limit of %s, and %s was stopped", e.timeout, accesskey.ShownName(e.runtime, false)))
@@ -3356,7 +3760,7 @@ func reallyWithin(root, path string) bool {
 // run's code into, the exec step that starts the launch with the names nothing sets
 // unset, the program that keeps the setup container running, and the runner of a setup
 // command inside the wall; [agentEnvArgs] selects agent-env, which starts the agent of
-// a dispatched walled run of Claude Code. Each verb carries [inWall], so no look for a
+// a walled run of Claude Code. Each verb carries [inWall], so no look for a
 // release runs inside a container.
 var (
 	relayArgs        = []string{"run", "relay"}
@@ -3613,8 +4017,11 @@ func toolFixes(dir string, err error) []string {
 // run until [removeSetup]. The setup container is checked and limited as the session is: it gets the session's working
 // folder, ForagerFiles, Written and Limits, and the agent's variables, see [setupEnv].
 // Inside, the setup commands get the agent's environment. gitSession is what
-// [setupCommands] takes.
-func runSetup(ctx context.Context, run openedRun, spec *runSpec, gitSession bool) error {
+// [setupCommands] takes. values is the fetch's getenv, [codeRun.fetchValues]: outside,
+// the setup container's [preparation.EnvRepositories] is the list the fetch took, so qory
+// run prepare reads what was fetched. A run whose list the fetch cut is a read run, whose
+// setup is always outside, see [readOnlyCheckout].
+func runSetup(ctx context.Context, run openedRun, spec *runSpec, gitSession bool, values func(string) string) error {
 	commands := setupCommands(gitSession)
 	if spec.setupWhere == config.SetupInside {
 		spec.SessionSpec.Setup = commands
@@ -3624,6 +4031,9 @@ func runSetup(ctx context.Context, run openedRun, spec *runSpec, gitSession bool
 	env, err := setupEnv(run, spec)
 	if err != nil {
 		return err
+	}
+	if fetched := values(preparation.EnvRepositories); fetched != run.Repositories() {
+		env = withEnv(env, map[string]string{preparation.EnvRepositories: fetched})
 	}
 	return run.Setup(ctx, session.SetupSpec{
 		Dir:          spec.Dir,

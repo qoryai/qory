@@ -16,55 +16,59 @@ import (
 
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/integrations/contracts"
 
-	"github.com/qoryai/qory/internal/branchformat"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/secretmask"
 	"github.com/qoryai/qory/internal/stack"
+	"github.com/qoryai/qory/internal/submission"
 	"github.com/qoryai/qory/internal/ui"
 )
 
 // The words of the push step of a write run. textChangesLeft is the message of the commit
-// of what the agent left, with the run's number. textNoBranchType has the fix of the workflow
+// of what the agent left, with the run's number. textNoSubmissionType has the fix of the workflow
 // model, with the fix of [preparation.WorkBranch.DeleteBranch].
 const (
-	textChangesLeft     = "Changes left by run %d"
-	textNoRunNumber     = "Check the run's gateway. The response to GET /work-item has no run number" + codeUsed
-	textPushStep        = "push %s to %s"
-	textPushStepOne     = "push %s to %s and 1 further repository"
-	textPushStepMany    = "push %s to %s and %d further repositories"
-	textPushNoProxy     = "take the work item in again in Qory Apiary: the run's push proxy, through which qory pushes the run's commits, did not open: %s" + codeUsed
-	textPushNoCred      = "Contact support: this run has no push credential, so qory pushed nothing.\n  The run configuration has no credential with purpose push, so qory pushed nothing" + codeUsed
-	textPushNoRunAPI    = "take the work item in again in Qory Apiary: the run API, which stores the version of the artifact " + branchType + ", is not reachable from this run: %s" + codeUsed
-	textNoBranchType    = "Define the artifact type " + branchType + " in the workspace's Artifact types, then %s, then run the round again"
-	textNotStored       = "%s, then take the work item in again: qory pushed %s, and the version of the artifact " + branchType + " was not stored: %s" + codeUsed
-	textStoreUnknown    = "check the artifact " + branchType + " of the work item in Qory Apiary; with no version of this run, %s; then take the work item in again: qory pushed %s, and the request that stores its version ended with no response, so the version may or may not be stored: %s" + codeUsed
-	textSetupStays      = "take the work item in again in Qory Apiary: the setup container of this run was not removed, so a process in it could write the working folder, and qory pushed nothing: %s" + codeUsed
-	textPushCut         = "take the work item in again in Qory Apiary: %s during the push step, and the run's commits may not have reached the branch" + codeUsed
-	textPushCutPushed   = "check the artifact " + branchType + " of the work item in Qory Apiary; with no version of this run, %s; then take the work item in again: qory pushed %s, and %s, so the version may or may not be stored" + codeUsed
-	textCutSecondSignal = "qory run got a second signal"
-	textCutTimeLimit    = "the run reached its time limit of %s"
-	textCutPushLimit    = "the step reached its limit of %s"
-	textCutSignal       = "qory run got %s, and " + textCutPushLimit
-	textRunEnded        = "The run ended %s: %s."
+	textChangesLeft      = "Changes left by run %d"
+	textNoRunNumber      = "Check the run's gateway. The response to GET /work-item has no run number" + codeUsed
+	textPushStep         = "push %s to %s"
+	textPushStepOne      = "push %s to %s and 1 further repository"
+	textPushStepMany     = "push %s to %s and %d further repositories"
+	textPushNoProxy      = "take the work item in again in Qory Apiary: the run's push proxy, through which qory pushes the run's commits, did not open: %s" + codeUsed
+	textPushNoCred       = "Contact support: this run has no push credential, so qory pushed nothing.\n  The run configuration has no credential with purpose push, so qory pushed nothing" + codeUsed
+	textPushNoReadProxy  = "Take the work item in again in Qory Apiary: the run's host proxy did not open.\n  qory could not read the head of the branch, so it pushed nothing.\n  Cause: %s" + codeUsed
+	textHandoffIgnored   = "qory run: The hand-off file is not usable, so the submission has no text and no steps.\n  File: %s, from " + handoffEnv + ".\n  Cause: %s"
+	textHandoffDropped   = "qory run: The hand-off file has a part the submission format does not allow, so qory dropped it."
+	textPushNoRunAPI     = "take the work item in again in Qory Apiary: the run API, which stores the version of the artifact " + submissionType + ", is not reachable from this run: %s" + codeUsed
+	textNoSubmissionType = "Define the artifact type " + submissionType + " in the workspace's Artifact types, then %s, then run the round again"
+	textNotStored        = "%s, then take the work item in again: qory pushed %s, and the version of the artifact " + submissionType + " was not stored: %s" + codeUsed
+	textStoreUnknown     = "check the artifact " + submissionType + " of the work item in Qory Apiary; with no version of this run, %s; then take the work item in again: qory pushed %s, and the request that stores its version ended with no response, so the version may or may not be stored: %s" + codeUsed
+	textSetupStays       = "take the work item in again in Qory Apiary: the setup container of this run was not removed, so a process in it could write the working folder, and qory pushed nothing: %s" + codeUsed
+	textPushCut          = "take the work item in again in Qory Apiary: %s during the push step, and the run's commits may not have reached the branch" + codeUsed
+	textPushCutPushed    = "check the artifact " + submissionType + " of the work item in Qory Apiary; with no version of this run, %s; then take the work item in again: qory pushed %s, and %s, so the version may or may not be stored" + codeUsed
+	textCutSecondSignal  = "qory run got a second signal"
+	textCutTimeLimit     = "the run reached its time limit of %s"
+	textCutPushLimit     = "the step reached its limit of %s"
+	textCutSignal        = "qory run got %s, and " + textCutPushLimit
+	textRunEnded         = "The run ended %s: %s."
 )
 
-// branchFile is the name of the one file of a version of the artifact type branch.
-const branchFile = "branch.json"
+// submissionFile is the name of the one file of a version of the artifact type submission.
+const submissionFile = "submission.json"
 
-// The bounds of the requests that store a version of the artifact type branch:
-// maxBranchTries is how many times the push step sends or reads, and maxBranchWait the
+// The bounds of the requests that store a version of the artifact type submission:
+// maxSubmissionTries is how many times the push step sends or reads, and maxSubmissionWait the
 // longest wait between two tries, whatever the value of Retry-After.
 const (
-	maxBranchTries = 5
-	maxBranchWait  = time.Minute
+	maxSubmissionTries = 5
+	maxSubmissionWait  = time.Minute
 )
 
-// branchWait waits for d, or until ctx ends; a test replaces it.
-var branchWait = func(ctx context.Context, d time.Duration) error {
+// submissionWait waits for d, or until ctx ends; a test replaces it.
+var submissionWait = func(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
@@ -190,6 +194,11 @@ type sessionPush struct {
 	// [preparation.Push]: true for a walled run.
 	agentStopped bool
 	checks       *runPushChecks
+	// shared is whether the run's documents set shared_run, so a later session may follow
+	// the push: the push then needs [agentStopProof].
+	shared bool
+	// handoff is the checkout that has the session's hand-off file, "" for none.
+	handoff string
 	// ended is the line that says the report of pushed commits found the run over, Qory
 	// Apiary's run_ended or the gateway's 410, see [runEndedLine]: no later push and no later
 	// session of the run goes on. It is "" while the run goes on. A loop over the run's
@@ -209,10 +218,17 @@ func (p *sessionPush) after(ending *pushEnding, out session.Outcome) (session.Ou
 	if p.ended != "" {
 		return out, nil
 	}
+	if p.shared {
+		if err := agentStopProof(p.agentStopped, p.run.ContainerKept(), "qory pushed nothing"); err != nil {
+			ending.noStep = true
+			ending.settle(p.stopNow())
+			return ending.outcome(err), err
+		}
+	}
 	ctx, cancel := pushContext(p.ctx, p.again, p.limit, pushTimes.limit, pushTimes.signal)
 	defer cancel()
 	var err error
-	ending.noStep, err = removeThenPush(ctx, p.run, p.stderr, p.branch, p.dir, p.runID, p.runNumber, out, p.agentStopped, p.checks, &p.ended)
+	ending.noStep, err = removeThenPush(ctx, p.run, p.stderr, p.branch, p.dir, p.runID, p.runNumber, out, p.agentStopped, p.checks, &p.ended, p.handoff)
 	ending.settle(p.stopNow())
 	ending.cut = ctx.Err() != nil
 	if p.ended != "" {
@@ -228,7 +244,7 @@ func (p *sessionPush) after(ending *pushEnding, out session.Outcome) (session.Ou
 	return out, nil
 }
 
-// pushAfterSession is [sessionPush.after], which qory run calls once, after its session.
+// pushAfterSession is [sessionPush.after], which qory run calls after each session.
 // A test replaces it to stand in for further sessions of the run around the step.
 var pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outcome) (session.Outcome, error) {
 	return p.after(ending, out)
@@ -239,28 +255,28 @@ var pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outc
 // working folder, so the check of the step is valid only once the container is gone. After a
 // failed removal [openedRun.PushProxy] fails and [openedRun.StartStep] still works, so this
 // check alone stops the push, and the run has no step.
-func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string) (noStep bool, err error) {
+func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string, handoffRoot string) (noStep bool, err error) {
 	if err := run.RemoveSetup(ctx); err != nil {
 		return true, fmt.Errorf(textSetupStays, shownError(err))
 	}
-	return false, pushWork(ctx, run, stderr, branch, dir, runID, runNumber, out, agentStopped, checks, ended)
+	return false, pushWork(ctx, run, stderr, branch, dir, runID, runNumber, out, agentStopped, checks, ended, handoffRoot)
 }
 
 // pushWork is the run's step of kind push: it pushes what the agent left, through the
 // run's push proxy, which it starts at the push, after [openedRun.RemoveSetup], and closes
-// when the push returns, and stores the new version of the artifact type branch. The step
+// when the push returns, and stores the new version of the artifact type submission. The step
 // ends as [inStep] ends it, cancelled when ctx ended. out is how the session ended, which
 // the commit and the version show when it did not succeed, see [failedEnd]. agentStopped
 // is whether the agent's stop is proven, see [preparation.Push]. runNumber is the number
 // in the commit's message, and runID the run that the version's check reads. checks
-// checks the version before it is stored, see [checkBranchVersion]. After the push, the
+// checks the version before it is stored, see [checkSubmissionVersion]. After the push, the
 // step reports what the push moved, see [recordPushed], before it stores the version, and
 // that also when a later repository's push failed: the repositories that landed are
 // reported, and the push's error stays the step's. *ended is set to the line of
 // [runEndedLine] when the report found the run over, Qory Apiary's run_ended or the gateway's
 // 410, also when the push failed. The step then stores no version, and ends with no error
 // unless the push failed.
-func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string) error {
+func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string, handoffRoot string) error {
 	cut := func() bool { return ctx.Err() != nil }
 	return inStep(run, stderr, event.StepPush, pushStepName(branch, run.System()), cut, func(w io.Writer) error {
 		httpClient, base, err := run.RunAPI()
@@ -277,13 +293,24 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 		}
 		secretmask.Default().AddURLPassword(h.proxy.URL)
 		defer h.close()
+		// The head of the branch is read through the host proxy, with the read credential: the
+		// push proxy has the push credential alone, and git's ls-remote and fetch are
+		// requests that its push list does not have.
+		read, err := run.HostProxy()
+		if err != nil {
+			return &runLineError{fmt.Errorf(textPushNoReadProxy, shownError(err))}
+		}
+		secretmask.Default().AddURLPassword(read.proxy.URL)
+		defer read.close()
 		end := failedEnd(out)
 		message := fmt.Sprintf(textChangesLeft, runNumber)
 		if end != "" {
 			message += "\n\n" + end
 		}
-		document, pushErr := preparation.Push(ctx, dir, os.Environ(), branch, message, h.proxy, agentStopped, w)
-		// The push proxy ends with the push: the check and the store that follow reach no forge.
+		repositories, pushErr := preparation.Push(ctx, dir, os.Environ(), branch, message, read.proxy, h.proxy, agentStopped, w)
+		// The read proxy and the push proxy end with the push: the check and the store that
+		// follow reach no forge.
+		read.close()
 		h.close()
 		runEnded, recordErr := recordPushed(ctx, run, branch)
 		*ended = runEnded
@@ -296,13 +323,22 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 			return &runLineError{recordErr}
 		case runEnded != "":
 			return nil
-		case document == nil:
+		case repositories == nil:
 			return nil
 		}
-		check := func(content []byte) error {
-			return checkBranchVersion(ctx, checks, branch, document.Ref, content)
+		// Every pushing session stores a version, with the verdict none when it wrote none.
+		// shortcut: a version is stored after every pushing session, replace it when Q-35b moves
+		// the call to the end of the round.
+		verdict, err := newestVerdict(ctx, client, runID)
+		if err != nil {
+			return &runLineError{fmt.Errorf(textNotStored, branch.DeleteBranch(), branch.Ref, shownError(err))}
 		}
-		if err := storeBranch(ctx, client, runID, end, branch, document, check); err != nil {
+		given := readHandoffPrinting(w, handoffRoot)
+		document := assembleSubmission(branch, repositories, verdict, given)
+		check := func(content []byte) error {
+			return checkSubmissionVersion(ctx, checks, branch, document.Ref, content)
+		}
+		if err := storeSubmission(ctx, client, runID, end, branch, document, check); err != nil {
 			return &runLineError{err}
 		}
 		return nil
@@ -351,47 +387,47 @@ func pushStepName(branch *preparation.WorkBranch, system string) string {
 	}
 }
 
-// storeBranch stores document as a new version of the artifact main of the type branch.
+// storeSubmission stores document as a new version of the artifact main of the type submission.
 // The gateway never retries a POST and Qory Apiary does not detect one sent twice, so:
 // a 429, which neither forwarded nor stored the POST, sends it again after Retry-After;
-// a POST with no response sends it again only when [branchStored] reads that no
-// version of this run has the document. At most [maxBranchTries] POST go out, and
-// unknown_type is [textNoBranchType]. Every failure has the fix of
+// a POST with no response sends it again only when [submissionStored] reads that no
+// version of this run has the document. At most [maxSubmissionTries] POST go out, and
+// unknown_type is [textNoSubmissionType]. Every failure has the fix of
 // [preparation.WorkBranch.DeleteBranch], as the push landed. check gets the version's
 // file before the first POST, and its error sends none.
-func storeBranch(ctx context.Context, client *runapi.Client, runID, note string, branch *preparation.WorkBranch, document *branchformat.Branch, check func(content []byte) error) error {
+func storeSubmission(ctx context.Context, client *runapi.Client, runID, note string, branch *preparation.WorkBranch, document *submission.Submission, check func(content []byte) error) error {
 	content, err := json.Marshal(document)
 	if err != nil {
 		return fmt.Errorf(textNotStored, branch.DeleteBranch(), document.Ref, shownError(err))
 	}
-	if err := branchformat.Check(content); err != nil {
+	if err := submission.Check(content); err != nil {
 		return fmt.Errorf(textNotStored, branch.DeleteBranch(), document.Ref, shownError(err))
 	}
 	if err := check(content); err != nil {
 		return err
 	}
 	sum := sha256.Sum256(content)
-	push := runapi.Push{Type: branchType, Name: defaultName, Note: note, Files: []runapi.PushFile{
-		{Filename: branchFile, ContentType: "application/json", Content: content},
+	push := runapi.Push{Type: submissionType, Name: defaultName, Note: note, Files: []runapi.PushFile{
+		{Filename: submissionFile, ContentType: "application/json", Content: content},
 	}}
 	var last error
-	for try := 1; try <= maxBranchTries; try++ {
+	for try := 1; try <= maxSubmissionTries; try++ {
 		if try > 1 {
-			if err := branchWait(ctx, retryAfter(last)); err != nil {
+			if err := submissionWait(ctx, retryAfter(last)); err != nil {
 				return err
 			}
 		}
-		last = postBranch(ctx, client, push)
+		last = postSubmission(ctx, client, push)
 		switch {
 		case last == nil:
 			return nil
 		case ctx.Err() != nil:
 			return last
 		case runapi.HasCode(last, runapi.CodeUnknownType):
-			return fmt.Errorf(textNoBranchType, branch.DeleteBranch())
+			return fmt.Errorf(textNoSubmissionType, branch.DeleteBranch())
 		case runapi.HasCode(last, runapi.CodeRateLimited):
 		case noResponse(last):
-			stored, err := branchStored(ctx, client, runID, hex.EncodeToString(sum[:]))
+			stored, err := submissionStored(ctx, client, runID, hex.EncodeToString(sum[:]))
 			switch {
 			case err != nil && ctx.Err() != nil:
 				return err
@@ -407,8 +443,8 @@ func storeBranch(ctx context.Context, client *runapi.Client, runID, note string,
 	return fmt.Errorf(textNotStored, branch.DeleteBranch(), document.Ref, shownError(last))
 }
 
-// postBranch sends push once, within the limit of one request.
-func postBranch(ctx context.Context, client *runapi.Client, push runapi.Push) error {
+// postSubmission sends push once, within the limit of one request.
+func postSubmission(ctx context.Context, client *runapi.Client, push runapi.Push) error {
 	ctx, cancel := context.WithTimeout(ctx, runAPITimeout)
 	defer cancel()
 	_, err := client.PushArtifact(ctx, push)
@@ -424,24 +460,24 @@ func noResponse(err error) bool {
 }
 
 // retryAfter is the wait after err: its Retry-After, 1 second with none, at most
-// [maxBranchWait].
+// [maxSubmissionWait].
 func retryAfter(err error) time.Duration {
 	wait := time.Second
 	var apiError *runapi.Error
 	if errors.As(err, &apiError) && apiError.RetryAfter > 0 {
 		wait = time.Duration(apiError.RetryAfter) * time.Second
 	}
-	return min(wait, maxBranchWait)
+	return min(wait, maxSubmissionWait)
 }
 
-// branchStored reports whether the index of the work item has a version of the artifact
-// main of the type branch that the run runID wrote, with one file of the SHA-256 sum. A
-// 429 or a request with no response reads the index again, at most [maxBranchTries] times.
-func branchStored(ctx context.Context, client *runapi.Client, runID, sum string) (bool, error) {
+// submissionStored reports whether the index of the work item has a version of the artifact
+// main of the type submission that the run runID wrote, with one file of the SHA-256 sum. A
+// 429 or a request with no response reads the index again, at most [maxSubmissionTries] times.
+func submissionStored(ctx context.Context, client *runapi.Client, runID, sum string) (bool, error) {
 	var last error
-	for try := 1; try <= maxBranchTries; try++ {
+	for try := 1; try <= maxSubmissionTries; try++ {
 		if try > 1 {
-			if err := branchWait(ctx, retryAfter(last)); err != nil {
+			if err := submissionWait(ctx, retryAfter(last)); err != nil {
 				return false, err
 			}
 		}
@@ -449,7 +485,7 @@ func branchStored(ctx context.Context, client *runapi.Client, runID, sum string)
 		index, err := client.Artifacts(read)
 		cancel()
 		if err == nil {
-			return hasBranchVersion(index, runID, sum), nil
+			return hasSubmissionVersion(index, runID, sum), nil
 		}
 		last = err
 		if ctx.Err() != nil || !runapi.HasCode(err, runapi.CodeRateLimited) && !noResponse(err) {
@@ -459,10 +495,10 @@ func branchStored(ctx context.Context, client *runapi.Client, runID, sum string)
 	return false, last
 }
 
-// hasBranchVersion reports whether index has the version [branchStored] looks for.
-func hasBranchVersion(index *runapi.Index, runID, sum string) bool {
+// hasSubmissionVersion reports whether index has the version [submissionStored] looks for.
+func hasSubmissionVersion(index *runapi.Index, runID, sum string) bool {
 	for _, artifact := range index.Artifacts {
-		if artifact.Type != branchType || artifact.Name != defaultName {
+		if artifact.Type != submissionType || artifact.Name != defaultName {
 			continue
 		}
 		for _, version := range artifact.Versions {
@@ -518,20 +554,35 @@ func (e *pushEnding) settle(now stopRead) {
 	e.stopped, e.again, e.got = now.stopped, now.again, now.got
 }
 
-// outcome is the outcome a run closes with after its push step failed with err. A session
-// that did not succeed keeps its end, whatever the step did. After a session that
-// succeeded, a cut step closes the run as a stop does, and a failed one closes it failed
-// with the status of err.
+// outcome is the outcome a run closes with after its push step failed with err. A refusal
+// because the branch moved ([*preparation.HeadChanged]) closes the run failed with the end code
+// push_head_changed after a session that succeeded, failed or timed out, since the next run of
+// the work item needs that code; after a session that failed or timed out, the close keeps the
+// session's exit code. The run's time limit that cuts the step after the refusal does not change
+// that close. A stop that landed after the refusal still wins, and a session that was
+// interrupted, cancelled or paused keeps its end. Any other failure after a session that did not
+// succeed keeps the session's end, whatever the step did. After a session that succeeded, a cut
+// step with no refusal closes the run as a stop does, and a failed one closes it failed with the status of err.
 func (e pushEnding) outcome(err error) session.Outcome {
+	changed := errors.As(err, new(*preparation.HeadChanged))
 	switch {
 	case e.session.State != event.StateSucceeded:
+		failedOrTimedOut := e.session.State == event.StateFailed ||
+			e.session.State == event.StateCancelled && e.session.Reason == event.ReasonTimeout
+		if changed && failedOrTimedOut && !(e.cut && e.stopped) {
+			return session.Outcome{State: event.StateFailed, ExitCode: e.session.ExitCode, Reason: string(contracts.EndCodePushHeadChanged)}
+		}
 		return e.session
 	case e.cut && e.stopped:
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}
-	case e.cut:
+	case e.cut && !changed:
 		return session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
 	}
-	return session.Outcome{State: event.StateFailed, ExitCode: ExitCode(err)}
+	out := session.Outcome{State: event.StateFailed, ExitCode: ExitCode(err)}
+	if changed {
+		out.Reason = string(contracts.EndCodePushHeadChanged)
+	}
+	return out
 }
 
 // copyOutcome is the outcome a run closes with when its copy step did not succeed or did not
@@ -560,9 +611,13 @@ func (e pushEnding) cutBy() string {
 // ended prints how a push step that failed with err ended, for a run on branch, and
 // returns qory run's exit status: ended, the session's, when the session did not succeed,
 // [exitTimeout] for a step cut at the run's time limit, and 1 otherwise. Each cut line
-// has the fix for a push that landed with no version stored.
+// has the fix for a push that landed with no version stored. A step that a refusal because the
+// branch moved ended prints the refusal, not a cut line.
 func (e pushEnding) ended(u *ui.UI, said func(string), err error, branch *preparation.WorkBranch, ended error) error {
-	if e.cut && !e.noStep {
+	out := e.outcome(err)
+	// A run that closes push_head_changed prints the refusal, also when the run's time limit cut the
+	// step after it: the cut line would say that the commits may have reached the branch.
+	if e.cut && !e.noStep && out.Reason != string(contracts.EndCodePushHeadChanged) {
 		if pushed := branch.PushedPaths(); pushed != "" {
 			u.Fail(fmt.Errorf(textPushCutPushed, branch.DeleteBranch(), pushed, e.cutBy()))
 		} else {
@@ -571,7 +626,6 @@ func (e pushEnding) ended(u *ui.UI, said func(string), err error, branch *prepar
 	} else {
 		said(strings.TrimPrefix(err.Error(), "qory run: "))
 	}
-	out := e.outcome(err)
 	switch {
 	case e.session.State != event.StateSucceeded:
 		return ended

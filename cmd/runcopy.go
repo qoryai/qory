@@ -135,6 +135,13 @@ type runCopy struct {
 	// [runcopy.FreeBranch]: the same as branch for a run with no branch of a work item. qory
 	// never checks it out. It is "" for a plain folder.
 	back string
+	// submits is whether a local write run of a harness with a submit program gave its session the
+	// hand-off file, so the run submits when it comes back.
+	submits bool
+	// landed is the branch the run's commits landed on in each of the person's repositories, by
+	// [runcopy.Repository.Path]: [runCopy.back], or the next free name when a branch there had or
+	// blocked it by then. A repository with no commit of the run has no entry.
+	landed map[string]string
 	// plain is whether the checkout is not a git working tree: [runcopy.Dir.CopyBack] brings the
 	// files back.
 	plain bool
@@ -486,7 +493,7 @@ var runRecordContainer = func(ctx context.Context, c gitContainer) (int, error) 
 // opens the copy. The container's lines go nowhere. When the container does not start, fails or
 // runs past that limit, each such repository is other and the setup's end is unknown, so the git
 // session keeps the copy for such a repository and for a path under the setup's ignore rules. A
-// stop or the run's time limit that ends ctx is the error.
+// stop or the end of the run's setup, [setupLimit], that ends ctx is the error.
 func (c *runCopy) recordRepositories(ctx context.Context, run openedRun, spec *runSpec) error {
 	gs, needed, err := c.dir.RecordSession(ctx, c.repos, c.out)
 	if err != nil {
@@ -706,6 +713,12 @@ func (c *runCopy) fetchOne(ctx context.Context, q *runcopy.Quarantine, runID str
 			report(line)
 		}
 		return false
+	}
+	if branch != "" {
+		if c.landed == nil {
+			c.landed = map[string]string{}
+		}
+		c.landed[q.Repo.Path] = branch
 	}
 	var line string
 	switch {

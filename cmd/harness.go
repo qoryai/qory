@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,7 +37,7 @@ import (
 	_ "github.com/qoryai/qory/internal/render/amp"
 	_ "github.com/qoryai/qory/internal/render/any"
 	_ "github.com/qoryai/qory/internal/render/claude"
-	_ "github.com/qoryai/qory/internal/render/codex"
+	"github.com/qoryai/qory/internal/render/codex"
 	_ "github.com/qoryai/qory/internal/render/copilot"
 	_ "github.com/qoryai/qory/internal/render/cursor"
 	_ "github.com/qoryai/qory/internal/render/gemini"
@@ -167,7 +168,7 @@ func placesFromReport(o homeOptions) (places, bool, error) {
 		return places{}, false, nil
 	}
 	if err != nil {
-		return places{}, false, err
+		return places{}, false, exports.HideValueError(err, reportFor(home))
 	}
 	at := places{root: rep.Checkout, home: home, report: reportFor(home), links: rep.Links != report.NoLinks && !o.noLinks}
 	// A home is the checkout's .qory/harness, the one home inside a checkout, or a home
@@ -495,7 +496,7 @@ type composeOptions struct {
 	// inCheckout is set for a run given a run key: every path source that a file inside
 	// the checkout lists resolves inside the checkout, every git source it lists is an
 	// https URL, the compose reads no git or env key of the checkout's qory.yaml and no
-	// machine key under harness, such as model or launch, and it starts as if there were
+	// machine harness setting, such as model or launch, and it starts as if there were
 	// no report.
 	inCheckout bool
 	// walled is set for a run behind a wall: the home contains copies of every module's
@@ -511,6 +512,9 @@ type composeOptions struct {
 	// [source.Named], no text shows the address of a git source.
 	git   *source.Git
 	cache string
+	// ctx, when set, stops every git command of the compose once it ends: qory run's
+	// setup context, see [setupLimit].
+	ctx context.Context
 	// checkedAs, when set, is the harness as a text shows it, such as the workspace's
 	// harness, for a compose whose git goes through the run's stack proxy, which sets
 	// the run configuration's harness credentials: [compose.CheckBase] checks the URL of the base before it is fetched,
@@ -524,6 +528,31 @@ type composeOptions struct {
 	// fromCode is set for the compose of a run from a run code: a line of
 	// [pushChecksWritable] ends with [codeUsed].
 	fromCode bool
+	// memo, when set, is the memo of the compose's git sources, which qory run shares
+	// between the composes of a run's sessions: sealed after the first, it makes a later
+	// compose read the run's cache at the first compose's commits, see [source.Memo.Seal].
+	// nil makes a memo for this compose alone.
+	memo *source.Memo
+	// sessions, when set, changes the report before the compose writes it, under the
+	// compose's lock: qory run adds the rows of a run of several sessions, see
+	// [report.Report.Sessions].
+	sessions func(*report.Report)
+	// alone is set for the compose of a later session of a qory run in the home that the
+	// run made for itself: the home holds the session's runtime alone, see
+	// [composeOptions.homeRuntimes].
+	alone bool
+}
+
+// homeRuntimes is every runtime the home holds after a compose for targets, see
+// [allRuntimes]. A later session of a run composes for its runtime alone, as a home of one
+// runtime gets the tiers of an [render.AloneModel]: the build replaces the home whole, so
+// the runtime of the session before leaves it. The runtime's install is outside the home,
+// so qory still installs each runtime once per run.
+func (o composeOptions) homeRuntimes(home string, targets []render.Runtime) []render.Runtime {
+	if o.alone {
+		return targets
+	}
+	return allRuntimes(home, targets)
 }
 
 // named is the harness o composes with no address shown, see [source.Named]; nil for any
@@ -682,8 +711,29 @@ type composed struct {
 	harness []session.HarnessSource
 	// workflows are the composed stack's workflows, nil for none.
 	workflows map[string]stack.Workflow
+	// runtimes are the composed stack's pins of the runtimes' versions, nil for none.
+	runtimes map[string]stack.RuntimePin
+	// pinFile is the name of the checkout's file when the base was fetched over git, ""
+	// otherwise: the fix line of a pin that the registry does not have uses it in place
+	// of the base's file, which is in a cache clone, see [installRuntime].
+	pinFile string
 	// checkoutOnly is, per runtime composed for, what [render.CheckoutOnly] lists.
 	checkoutOnly map[string][]string
+	// submitProgram is the composed harness's submit program, its command with the home's
+	// path in it; nil when no module declares one.
+	submitProgram *compose.SubmitProgram
+	// codex is what a walled Codex run writes its Codex home from, see [codexParts].
+	codex codexParts
+}
+
+// codexParts are the parts of a compose that [codex.WriteWalledHome] reads besides the
+// composed home: the skills the run may load, [codex.AllowedSkills], the harness's
+// execpolicy rules for a read run, compose.Result.CodexReadRules, and the folders the
+// compose read its modules from, compose.Result.SourceDirs.
+type codexParts struct {
+	skills     []string
+	readRules  []byte
+	sourceDirs []string
 }
 
 // composeHome is [runCompose] returning what it composed; nil after a check or a dry
@@ -725,7 +775,7 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 	// composed for others before. The home is one tree that a build replaces
 	// whole, so every runtime it is to hold goes into one call: the targets and
 	// the runtimes already there, whose links would otherwise stop resolving.
-	all := allRuntimes(at.home, targets)
+	all := o.homeRuntimes(at.home, targets)
 	// The report's target is every runtime the home holds after this compose,
 	// the targets first, since the harness was rendered for all of them.
 	rep.Target.Runtimes = nil
@@ -742,14 +792,20 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 		return nil, err
 	}
 	var workflows map[string]stack.Workflow
+	var runtimes map[string]stack.RuntimePin
+	var pinFile string
 	if res.Stack != nil {
-		workflows = res.Stack.Workflows
+		workflows, runtimes = res.Stack.Workflows, res.Stack.RuntimePins
+		if res.Base != nil && res.Base.Commit != "" {
+			pinFile = res.Stack.ConfigFile()
+		}
 	}
 	checkoutOnly := map[string][]string{}
 	for _, rt := range targets {
 		checkoutOnly[rt.Name()] = render.CheckoutOnly(rt, res)
 	}
-	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, checkoutOnly: checkoutOnly}, nil
+	parts := codexParts{skills: codex.AllowedSkills(res), readRules: res.CodexReadRules, sourceDirs: res.SourceDirs()}
+	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, runtimes: runtimes, pinFile: pinFile, checkoutOnly: checkoutOnly, submitProgram: res.SubmitProgramFor(at.home), codex: parts}, nil
 }
 
 // pushChecksWritable stops a walled run before the home is written when a module
@@ -823,6 +879,9 @@ func allRuntimes(home string, targets []render.Runtime) []render.Runtime {
 // --runtime and --model flags, looks every runtime up, prints the title, composes, and
 // builds the report. A collision is printed on errOut and comes back marked reported.
 func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) {
+	// A path of -f that contains a key or a code, such as qrk_, prints as a phrase in
+	// each error of the compose, see [exports.HideValueError].
+	defer func() { err = exports.HideValueError(err, o.file) }()
 	flagTiers, err := tierFlags(o.tiers, o.tierEfforts)
 	if err != nil {
 		return nil, input(err)
@@ -876,7 +935,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	// stands over the document.
 	// A run given a run key reads them from no checkout's qory.yaml either, as
 	// [locateRun] does, so the repository a dispatched run works on sets no git or env
-	// key and no machine key under harness, such as model or launch.
+	// key and no machine harness setting, such as model or launch.
 	var conf config.Config
 	loadConf := func(extends bool) (err error) {
 		if conf, err = config.Load(root, !extends && !o.inCheckout); err != nil {
@@ -902,7 +961,10 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 			update = *o.update
 		}
 	}
-	memo := source.NewMemo()
+	memo := o.memo
+	if memo == nil {
+		memo = source.NewMemo()
+	}
 	var p *stack.Stack
 	var fetched source.Resolved
 	if byRef {
@@ -920,7 +982,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 			return nil, err
 		}
 		updateFrom()
-		fetchOpts := compose.Options{Update: update, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Memo: memo}
+		fetchOpts := compose.Options{Update: update, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Context: o.ctx, Memo: memo}
 		if o.git != nil {
 			fetchOpts.Git, fetchOpts.Cache = o.git, o.cache
 		}
@@ -932,8 +994,17 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 		if p, fetched, err = compose.LoadReference(ref, fetchOpts); err != nil {
 			return nil, composeError(err)
 		}
-	} else if p, err = config.LoadStack(file); err != nil {
-		return nil, input(err)
+	} else {
+		// A document that -f selects in an ancestor directory is refused for a pin, as
+		// [config.DiscoverStack] refuses it.
+		if o.file != "" {
+			if err := config.SelectedDocument(root, file); err != nil {
+				return nil, input(err)
+			}
+		}
+		if p, err = config.LoadStack(file); err != nil {
+			return nil, input(err)
+		}
 	}
 	retired.add(p.File, p.RetiredAPIVersion)
 	// A stack named with -f, in a checkout whose own document extends one, is that
@@ -999,7 +1070,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 			pins[l.Source] = l.Pin
 		}
 	}
-	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Env: conf.Env, Memo: memo, Tiers: resolveTiers(flagTiers, conf), Copies: copies(at, o.walled || o.hidden), Walled: o.walled, Hidden: o.hidden, Checkout: at.root}
+	opts := compose.Options{Update: update, Pins: pins, Cache: conf.Git.Cache, Timeout: conf.Git.Timeout, Context: o.ctx, Env: conf.Env, Memo: memo, Tiers: resolveTiers(flagTiers, conf), Copies: copies(at, o.walled || o.hidden), Walled: o.walled, Hidden: o.hidden, Checkout: at.root}
 	if o.fromDocuments && o.checkedAs != "" {
 		opts.StackAs = o.checkedAs + " in Qory Apiary"
 	}
@@ -1121,7 +1192,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	}
 	// The runtimes the home holds after this compose, the targets and the ones a previous
 	// compose wrote, all get the agents' tiers.
-	all := allRuntimes(at.home, targets)
+	all := o.homeRuntimes(at.home, targets)
 	if err := checkTierEfforts(res, all, at.root); err != nil {
 		return nil, input(err)
 	}
@@ -1157,8 +1228,8 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	}
 	var baseErr error
 	rep.Worktree, baseErr = reportBase(at.root, conf)
-	// The machine keys of a qory.yaml at the checkout root are not read under
-	// extends, and a row says so, on a dry run as well, so the person who wrote
+	// The machine harness settings of a qory.yaml at the checkout root are not read
+	// under extends, and a row says so, on a dry run as well, so the person who wrote
 	// them learns that the base stack decides.
 	skippedConfig := moved
 	if base != nil {
@@ -1180,6 +1251,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	}
 	skippedConfig = append(skippedConfig, effortRows...)
 	skippedConfig = append(skippedConfig, tierRows(res, all, at.root)...)
+	skippedConfig = append(skippedConfig, untrustedHookRows(res, all, at.home)...)
 	skippedConfig = append(skippedConfig, envRows...)
 	skippedConfig = append(skippedConfig, checks.rows...)
 	skippedConfig = append(skippedConfig, retired.rows...)
@@ -1389,6 +1461,9 @@ func write(out io.Writer, o composeOptions, at places, res *compose.Result, rep,
 		if takenBack, err = unlinkAll(at.root); err != nil {
 			return err
 		}
+	}
+	if o.sessions != nil {
+		o.sessions(&rep)
 	}
 	if err := report.Write(at.report, rep); err != nil {
 		return err
@@ -1605,9 +1680,9 @@ const (
 	// ExitNoWorkItem is qory work-item show with no work item, on a command that has no
 	// collision: the harness verbs use the same number for ExitCollision.
 	ExitNoWorkItem = 3
-	// ExitArtifactRefused is a push that failed the run API's check of its type or a
-	// limit, or a verdict that the run API refused with 422 invalid_artifact, on a command
-	// that has no foreign path: the harness verbs use the same number for ExitForeign.
+	// ExitArtifactRefused is a push that failed the run API's check of its type, a limit or
+	// its decision, or a verdict for which the run API returns 422 invalid_artifact, on a
+	// command that has no foreign path: the harness verbs use the same number for ExitForeign.
 	ExitArtifactRefused = 4
 )
 
@@ -1877,7 +1952,7 @@ func readReport(at places) (report.Report, error) {
 		return rep, fmt.Errorf("no composed harness for %s; run qory harness compose", at.root)
 	}
 	if err != nil {
-		return rep, err
+		return rep, exports.HideValueError(err, at.report)
 	}
 	if rep.Version != report.Version {
 		return rep, input(fmt.Errorf("%s: report version %d is not one this qory reads; versions: %d", exports.Value(at.report, false), rep.Version, report.Version))

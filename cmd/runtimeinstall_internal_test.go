@@ -2,13 +2,24 @@ package cmd
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoryai/forager/accesskey"
+
+	"github.com/qoryai/qory/internal/runtimeinstall"
+	rt "github.com/qoryai/qory/internal/runtimeinstall/runtimeinstalltest"
 )
 
 // fakeMountsEngine writes a program in place of docker whose ps prints ids, one a line, and
@@ -87,5 +98,234 @@ func TestEngineMountsFindsNoRunningContainerWithNoEngineProgram(t *testing.T) {
 	got, err := engineMounts("qory-test-no-such-engine")(context.Background())
 	if err != nil || len(got) != 0 {
 		t.Errorf("mounts = %v, %v, want none and no error", got, err)
+	}
+}
+
+// registryStub starts a registry that returns 401 to every request but one for
+// /registry/token, which it returns {} to: with a Bearer challenge whose realm is realm()
+// when challenge is set, else with none. tls starts it with TLS.
+func registryStub(t *testing.T, challenge, tls bool, realm func() string) *httptest.Server {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/registry/token":
+			w.Write([]byte("{}"))
+		case challenge:
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm()+`",service="registry"`)
+			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	})
+	srv := httptest.NewUnstartedServer(h)
+	if tls {
+		srv.StartTLS()
+	} else {
+		srv.Start()
+	}
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// installStub installs claude with fetch into a new folder, and returns its error.
+func installStub(t *testing.T, fetch runtimeinstall.Fetch) error {
+	t.Helper()
+	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: fetch, Runtime: "claude", Folder: t.TempDir(), Keys: rt.Keys()})
+	if err == nil {
+		t.Fatal("the install succeeded")
+	}
+	return err
+}
+
+// TestTheInstallCausesStandAlone installs claude with a registry that returns 401 with
+// no Bearer challenge, a token realm whose response has no token, an instance address
+// that is no URL, one with a path, and a source that returns a release with no tarball.
+// A dispatched run from a run code shows each cause alone, with "; the code is used" at
+// its end, as [causeOnly] makes it, and each says what is wrong without the fix line.
+// For the address that is no URL and the release with no tarball, of claude 2.1.320 and
+// of a version of 64 characters, each line, with "qory run: " before the first, has at
+// most 100 characters. A person's run shows the fix line, then the cause.
+func TestTheInstallCausesStandAlone(t *testing.T) {
+	registry := func(t *testing.T, challenge bool, path string) (string, string) {
+		var srv *httptest.Server
+		srv = registryStub(t, challenge, false, func() string { return srv.URL + "/registry/token" })
+		host := strings.TrimPrefix(srv.URL, "http://")
+		return host, srv.URL + path
+	}
+	install := installStub
+	noTarballOf := func(version string) runtimeinstall.Fetch {
+		return func(context.Context, string, string) (runtimeinstall.Release, error) {
+			integrity := rt.Integrity(rt.PlainTarball(t, version))
+			signed := "@anthropic-ai/claude-code-linux-x64@" + version
+			return runtimeinstall.Release{Version: version, Integrity: integrity, Signed: signed, Signatures: rt.Signatures(signed, integrity)}, nil
+		}
+	}
+	noTarball := noTarballOf("2.1.320")
+	long := "2.1.320-" + strings.Repeat("a", 56)
+	noURL := func(t *testing.T) error {
+		host, _ := registry(t, true, "")
+		return install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", "ftp://apiary.example.com"))
+	}
+	for _, c := range []struct {
+		name string
+		err  func(t *testing.T) (string, error)
+		fits bool
+	}{
+		{"a 401 with no Bearer challenge", func(t *testing.T) (string, error) {
+			host, instance := registry(t, false, "")
+			return "the registry\n  at " + host + "\n  returned 401 with no Bearer challenge; the code is used",
+				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", instance))
+		}, true},
+		{"a token response with no token", func(t *testing.T) (string, error) {
+			host, instance := registry(t, true, "")
+			return "the response of the token realm\n  at " + host + "\n  contains no token; the code is used",
+				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", instance))
+		}, true},
+		{"an address of Qory Apiary that is no URL", func(t *testing.T) (string, error) {
+			return "the run's address of Qory Apiary is not an http or https URL\n  with a host and no user; the code is used", noURL(t)
+		}, true},
+		{"an address of Qory Apiary with a path", func(t *testing.T) (string, error) {
+			host, instance := registry(t, true, "/base")
+			return "the address of Qory Apiary has a path:\n  \"" + instance + "\"; the code is used",
+				install(t, runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", instance))
+		}, false},
+		{"a release with no tarball", func(t *testing.T) (string, error) {
+			return "the source of the runtime's releases returned no tarball\n  of claude 2.1.320; the code is used", install(t, noTarball)
+		}, true},
+		{"a release with no tarball of a long version", func(t *testing.T) (string, error) {
+			return "the source of the runtime's releases returned no tarball\n  of claude " + long + "; the code is used", install(t, noTarballOf(long))
+		}, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			want, err := c.err(t)
+			if got := causeOnly(installFailed(err)).Error() + codeUsed; got != want {
+				t.Errorf("a dispatched run shows %q, want %q", got, want)
+			}
+			for _, line := range strings.Split("qory run: "+want, "\n") {
+				if c.fits && len(line) > 100 {
+					t.Errorf("the line has %d characters: %s", len(line), line)
+				}
+			}
+		})
+	}
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{install(t, noTarball), "Check the source of claude's releases.\n  The source of the runtime's releases returned no tarball\n  of claude 2.1.320."},
+		{noURL(t), "Set the address of Qory Apiary to an https URL\nThe run's address of Qory Apiary is not an http or https URL\n  with a host and no user"},
+	} {
+		if person := installFailed(c.err).Error(); person != c.want {
+			t.Errorf("a person's run shows %q, want %q", person, c.want)
+		}
+	}
+}
+
+// TestTheDispatchedCauseOfTheLongestPinFits is the line a run from a run code prints for
+// a pin that the registry does not have, and the lines it prints for a release signed
+// with a bad signature, a key qory does not have and an expired key, with the longest
+// runtime name of runtimeinstall.Runtimes() and a pin of 32 characters, the longest one a
+// stack may set: with "qory run: " and [codeUsed], each line has at most 100 characters.
+func TestTheDispatchedCauseOfTheLongestPinFits(t *testing.T) {
+	runtime := ""
+	for _, r := range runtimeinstall.Runtimes() {
+		if len(r) > len(runtime) {
+			runtime = r
+		}
+	}
+	pin := "1" + strings.Repeat("0", 31)
+	if !runtimeinstall.ValidVersion(pin) || runtimeinstall.ValidVersion(pin+"0") {
+		t.Fatalf("the longest pin a stack may set is not %d characters", len(pin))
+	}
+	err := fmt.Errorf(textNotPublished, runtime, "qory-stack.yaml", runtime, pin)
+	line := "qory run: " + causeOnly(installFailed(err)).Error() + codeUsed
+	if want := "qory run: the registry has no " + runtime + " " + pin + "; the code is used"; line != want {
+		t.Fatalf("a dispatched run shows %q, want %q", line, want)
+	}
+	if len(line) > 100 {
+		t.Errorf("the line has %d characters: %s", len(line), line)
+	}
+
+	// The test's source signs only claude, so the signature cases need claude to be the
+	// longest name.
+	if runtime != "claude" {
+		t.Fatalf("the longest runtime name is %s, and the signature cases install claude", runtime)
+	}
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad, unknown, expired := rt.Keys(), rt.Keys(), rt.Keys()
+	bad[0].Key = &other.PublicKey
+	unknown[0].KeyID = "SHA256:another"
+	expired[0].Expires = time.Date(2025, 1, 29, 0, 0, 0, 0, time.UTC)
+	for first, keys := range map[string][]runtimeinstall.SigningKey{
+		"npm's signature of claude " + pin + " does not verify.":               bad,
+		"npm signed claude " + pin + " with a key this qory does not have.":    unknown,
+		"npm signed claude " + pin + " with a key that expired on 2025-01-29.": expired,
+	} {
+		src := &rt.Source{}
+		src.Publish(pin, rt.PlainTarball(t, pin))
+		_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: src.Fetch, Runtime: runtime, Version: pin, Folder: t.TempDir(), Keys: keys})
+		if err == nil {
+			t.Fatalf("%s: the install succeeded", first)
+		}
+		out := "qory run: " + causeOnly(installFailed(err)).Error() + codeUsed
+		if want := "qory run: " + first + "\n  The key is " + rt.KeyID + codeUsed; out != want {
+			t.Errorf("a dispatched run shows %q, want %q", out, want)
+		}
+		for l := range strings.SplitSeq(out, "\n") {
+			if len(l) > 100 {
+				t.Errorf("the line has %d characters: %s", len(l), l)
+			}
+		}
+	}
+}
+
+// TestAnExpiredKeysCauseStandsAlone installs claude 2.1.320, signed only by a key that
+// expired on 2025-01-29, pinned and with no pin. A dispatched run shows the same cause
+// for both, alone, with no indent on its first line; a person's run shows the fix line
+// of each, then the cause on indented lines.
+func TestAnExpiredKeysCauseStandsAlone(t *testing.T) {
+	keys := rt.Keys()
+	keys[0].Expires = time.Date(2025, 1, 29, 0, 0, 0, 0, time.UTC)
+	const cause = "npm signed claude 2.1.320 with a key that expired on 2025-01-29.\n  The key is " + rt.KeyID
+	for pin, fix := range map[string]string{"2.1.320": "Pin a newer version of claude.", "": "Check the source of claude's releases."} {
+		src := &rt.Source{}
+		src.Publish("2.1.320", rt.PlainTarball(t, "2.1.320"))
+		_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Fetch: src.Fetch, Runtime: "claude", Version: pin, Folder: t.TempDir(), Keys: keys})
+		if err == nil {
+			t.Fatalf("pin %q: the install succeeded", pin)
+		}
+		if got := causeOnly(installFailed(err)).Error(); got != cause {
+			t.Errorf("pin %q: a dispatched run shows %q, want %q", pin, got, cause)
+		}
+		if got, want := installFailed(err).Error(), fix+"\n  "+cause+"."; got != want {
+			t.Errorf("pin %q: a person's run shows %q, want %q", pin, got, want)
+		}
+	}
+}
+
+// TestALongRegistryHostIsOnASeparateLine installs claude from a registry whose host has
+// 253 characters, the most a DNS name has, that returns 401 with no Bearer challenge, and
+// from one whose token realm's response has no token: a dispatched run from a run code
+// shows the host on an indented line, which [installFailed] cuts at its limit of a line,
+// and the first line, with "qory run: ", has at most 100 characters.
+func TestALongRegistryHostIsOnASeparateLine(t *testing.T) {
+	host := strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 61)
+	for _, challenge := range []bool{false, true} {
+		srv := registryStub(t, challenge, true, func() string { return "https://" + host + "/registry/token" })
+		// Each connection goes to the stub, whose certificate is for example.com.
+		tlsConfig := srv.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+		tlsConfig.ServerName = "example.com"
+		client := &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig, DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, network, srv.Listener.Addr().String())
+		}}}
+		err := installStub(t, runtimeinstall.RegistryFetch(client, host, "amd64", "https://"+host))
+		got := causeOnly(installFailed(err)).Error() + codeUsed
+		first, rest, _ := strings.Cut(got, "\n")
+		if len("qory run: "+first) > 100 || !strings.HasPrefix(rest, "  at "+host[:64]) {
+			t.Errorf("a dispatched run shows %q, want a short first line and the host on the second", got)
+		}
 	}
 }

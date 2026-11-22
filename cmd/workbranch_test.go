@@ -23,7 +23,7 @@ import (
 // workItem is the id of the work item in the documents of [codeDocuments].
 const workItem = "wi_8Kx2mQ4vT9"
 
-// branchAPI serves a run API whose work item has one branch version, with file as its
+// branchAPI serves a run API whose work item has one submission version, with file as its
 // file, or no version for an empty file, and counts the file's downloads.
 func branchAPI(t *testing.T, file string) string {
 	t.Helper()
@@ -31,7 +31,7 @@ func branchAPI(t *testing.T, file string) string {
 	if file != "" {
 		sum := sha256.Sum256([]byte(file))
 		versions = fmt.Sprintf(`[{"id":"av_1","number":1,"writer":{"kind":"run","run_id":"r"},"stage_id":"st_a","at":"2026-11-02T09:00:00Z",`+
-			`"files":[{"filename":"branch.json","content_type":"application/json","size":%d,"sha256":%q}],"approvals":[]}]`,
+			`"files":[{"filename":"submission.json","content_type":"application/json","size":%d,"sha256":%q}],"approvals":[]}]`,
 			len(file), hex.EncodeToString(sum[:]))
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,8 +39,8 @@ func branchAPI(t *testing.T, file string) string {
 		case "/v1/runs/r/work-item":
 			fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"run":{"id":"r","number":57},"stage":{"id":"st_a"},"inputs":[],"outputs":[]}`, workItem)
 		case "/v1/runs/r/artifacts":
-			fmt.Fprintf(w, `{"version":1,"artifacts":[{"type":"branch","name":"main","newest_version":1,"versions":%s}]}`, versions)
-		case "/v1/runs/r/artifacts/av_1/files/branch.json":
+			fmt.Fprintf(w, `{"version":1,"artifacts":[{"type":"submission","name":"main","newest_version":1,"versions":%s}]}`, versions)
+		case "/v1/runs/r/artifacts/av_1/files/submission.json":
 			fmt.Fprint(w, file)
 		default:
 			http.NotFound(w, r)
@@ -55,7 +55,7 @@ func runOnBranch(t *testing.T, h *hostFetch, version, api string, flags ...strin
 	t.Helper()
 	g := newCodeRelay(t)
 	g.documents = codeDocuments(t, func(d map[string]any) {
-		target := map[string]any{"system": proxygittest.Host, "path": "acme/site"}
+		target := map[string]any{"collection": "R_1001", "address": map[string]any{"system": proxygittest.Host, "path": "acme/site"}}
 		d["target"], d["inputs"].(map[string]any)["target"] = target, target
 		d["target_version"] = version
 		d["harness_hidden"] = false
@@ -78,8 +78,10 @@ func runOnBranch(t *testing.T, h *hostFetch, version, api string, flags ...strin
 func branchDocument(t *testing.T, commit string) string {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{
-		"ref":          "qory/" + workItem,
-		"repositories": []map[string]string{{"system": proxygittest.Host, "path": "acme/site", "commit": commit}},
+		"ref":     "qory/" + workItem,
+		"verdict": "none",
+		"repositories": []map[string]any{{"system": proxygittest.Host, "path": "acme/site", "commit": commit,
+			"draft": map[string]string{"none": "not-passed"}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -156,12 +158,12 @@ func TestARunStopsOnABrokenBranchVersion(t *testing.T) {
 	commit := strings.Repeat("a", 40)
 	for name, c := range map[string]struct{ file, want string }{
 		"another work item": {
-			`{"ref":"qory/wi_other","repositories":[{"system":"git.test","path":"acme/site","commit":"` + commit + `"}]}`,
-			"Version 1 of the artifact branch has a ref other than qory/" + workItem + ", so the run did not start; the code is used",
+			`{"ref":"qory/wi_other","verdict":"none","repositories":[{"system":"git.test","path":"acme/site","commit":"` + commit + `","draft":{"none":"not-passed"}}]}`,
+			"Version 1 of the artifact submission has a ref other than qory/" + workItem + ", so the run did not start; the code is used",
 		},
-		"not the format": {`{"ref":"main"}`, "Version 1 of the artifact branch does not match the branch format, so the run did not start: fix the branch document"},
-		"too big":        {strings.Repeat("a", 64<<10+1), "Version 1 of the artifact branch does not have exactly one file of at most 65536 bytes, so the run did not start; the code is used"},
-		"not JSON":       {"text", "Version 1 of the artifact branch does not match the branch format, so the run did not start: write the branch document"},
+		"not the format": {`{"ref":"main"}`, "Version 1 of the artifact submission does not match the submission format, so the run did not start: fix the submission"},
+		"too big":        {strings.Repeat("a", 256<<10+1), "Version 1 of the artifact submission does not have exactly one file of at most 262144 bytes, so the run did not start"},
+		"not JSON":       {"text", "Version 1 of the artifact submission does not match the submission format, so the run did not start: write the submission as one JSON object"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h, first, _, _ := versionRepository(t)

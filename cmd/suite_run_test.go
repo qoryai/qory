@@ -88,7 +88,7 @@ type suiteEnd struct {
 	// extensions are lines under harness.extensions in the checkout's qory.yaml, each
 	// indented 4 spaces or more.
 	extensions string
-	// noFullSuite is whether the run documents have full_suite false.
+	// noFullSuite is whether the session runs no full suite: SetFullSuite(true) is left out.
 	noFullSuite bool
 	// plan is the plan type set in workflows.<name>.plan for the run's workflow fix, build-plan when
 	// "". noPlan is whether the workflow sets none.
@@ -283,7 +283,8 @@ func TestASessionThatLeftHeadWhereItStartedPostsNothing(t *testing.T) {
 	wants(t, out, "the full suite did not run: the session left HEAD at the commit it started at")
 }
 
-// TestARunWithFullSuiteFalseRunsNoSuite: with full_suite false, the session has no after step.
+// TestARunWithFullSuiteFalseRunsNoSuite: with SetFullSuite(true) left out, the session has no
+// after step.
 func TestARunWithFullSuiteFalseRunsNoSuite(t *testing.T) {
 	api := newSuiteAPI(t, http.StatusCreated)
 	var seen session.SessionSpec

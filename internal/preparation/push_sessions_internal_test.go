@@ -2,6 +2,7 @@ package preparation
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -114,5 +115,40 @@ func TestALaterSessionThatLeavesThePushedCommitIsRefused(t *testing.T) {
 	}
 	if got := onRemote(t, "acme/shop", b.Ref); got != first {
 		t.Errorf("the branch is at %q, want %s", got, first)
+	}
+}
+
+// TestALaterRepositoryThatFindsItsHeadMovedStillGivesTheHeadChanged is a run of two
+// repositories whose second branch another push creates while the first repository's push
+// lands: the error says that a push landed and no version was stored, and it still unwraps
+// to the [*HeadChanged] of the second repository, which the run's code push_head_changed
+// is read from.
+func TestALaterRepositoryThatFindsItsHeadMovedStillGivesTheHeadChanged(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop,acme/lib")
+	shop, lib := filepath.Join(base, "acme", "shop.git"), filepath.Join(base, "acme", "lib.git")
+	tree := run(t, lib, "rev-parse", "main^{tree}")
+	moved := run(t, lib, "commit-tree", tree, "-m", "another push")
+	hook := filepath.Join(shop, "hooks", "post-receive")
+	script := "#!/bin/sh\ngit --git-dir=" + lib + " update-ref refs/heads/" + b.Ref + " " + moved + "\n"
+	if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "left.txt"), "shop\n")
+	write(t, filepath.Join(dir, b.Repositories[1].Dir, "left.txt"), "lib\n")
+	_, _, err := pushOf(dir, b)
+	if err == nil || !strings.Contains(err.Error(), "stored no version") {
+		t.Fatalf("the error is %v, want a push that landed with no version stored", err)
+	}
+	if changed := headError(t, err); changed.Path != "acme/lib" || changed.Head != moved {
+		t.Errorf("refusal %+v, want acme/lib at %s", changed, moved)
+	}
+	if got := run(t, shop, "rev-parse", b.Ref); got == "" {
+		t.Error("the first repository's push did not land")
+	}
+	if got := run(t, lib, "rev-parse", b.Ref); got != moved {
+		t.Errorf("the second repository's branch is at %s, want %s", got, moved)
 	}
 }

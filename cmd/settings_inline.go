@@ -168,7 +168,8 @@ const workspaceInWall = "/workspace"
 // NotebookEdit, allows in Bash only the commands of a work item on the qory inside the
 // wall, which is mounted at [wall.HelperPath] and is not on PATH, because the hidden verbs
 // of that binary start any program, allows reads and edits in [tempStoreDir], where
-// the agent reads what it pulled and makes the files it pushes, and denies every other
+// the agent reads what it pulled and makes the files it pushes, allows reads in
+// [destinationsDir], where qory destination clone clones, and denies every other
 // tool that no rule allows, without a prompt. Edit rules cover the Write tool too, and a
 // bare Edit or Write would remove the tool from the agent, also in that folder. A deny
 // wins over any allow that the composed settings contain. The read-only mount stays the
@@ -189,8 +190,10 @@ func readAllow() []string {
 		"Bash(" + wall.HelperPath + " artifact *)",
 		"Bash(" + wall.HelperPath + " run verdict *)",
 		"Bash(" + wall.HelperPath + " work-item *)",
+		"Bash(" + wall.HelperPath + " destination *)",
 		"Read(/" + ruleGlob.Replace(tempStoreDir) + "/**)",
 		"Edit(/" + ruleGlob.Replace(tempStoreDir) + "/**)",
+		"Read(/" + ruleGlob.Replace(destinationsDir) + "/**)",
 	}
 }
 
@@ -204,11 +207,12 @@ var ruleGlob = strings.NewReplacer(`\`, `\\\\`, `*`, `\*`, `[`, `\[`, `]`, `\]`)
 const readDefaultMode = "dontAsk"
 
 // readRules is object, Claude Code's settings, as JSON with [readDeny] of root added to
-// permissions.deny, [readAllow] to permissions.allow, [tempStoreDir] to
-// permissions.additionalDirectories, each once, and permissions.defaultMode set to
-// [readDefaultMode]; every other key stays as it is, and < > & stay unescaped. The
-// directory opens the folder under permissions.blockReadsOutsideWorkingDirectories, which
-// a composed module can set and which stops a Read rule there. shown is the settings file
+// permissions.deny, [readAllow] to permissions.allow, [tempStoreDir] and
+// [destinationsDir] to permissions.additionalDirectories, each once, and
+// permissions.defaultMode set to [readDefaultMode]; every other key stays as it is, and
+// < > & stay unescaped. The directories open the folders under
+// permissions.blockReadsOutsideWorkingDirectories, which a composed module can set and
+// which stops a Read rule there. shown is the settings file
 // as a text shows it, or "of the launch" for settings that the launch passes as JSON. A
 // permissions that is no object, and an allow, a deny or an additionalDirectories that is
 // no array, stop the run.
@@ -226,7 +230,7 @@ func readRules(object map[string]any, shown, root string) ([]byte, error) {
 	for _, add := range []struct {
 		key   string
 		rules []string
-	}{{"deny", readDeny(root)}, {"allow", readAllow()}, {"additionalDirectories", []string{tempStoreDir}}} {
+	}{{"deny", readDeny(root)}, {"allow", readAllow()}, {"additionalDirectories", []string{tempStoreDir, destinationsDir}}} {
 		var list []any
 		if v, ok := permissions[add.key]; ok {
 			if list, ok = v.([]any); !ok {

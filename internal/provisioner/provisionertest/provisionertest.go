@@ -120,7 +120,7 @@ const (
 )
 
 // Run is a run waiting in the queue, as [Server.Offer] puts it there. Each member left
-// empty is filled in: a new run id, the step explore, the contract's documents fixture
+// empty is filled in: a new run id, the step workflow, the contract's documents fixture
 // of the step, a new run code, [GatewayURL], [MaxLifetimeMinutes] and [Lease]. Machine
 // empty sends no machine; a Machine is sent with [MachineSpec].
 type Run struct {
@@ -438,13 +438,13 @@ var (
 	outcomePathShape  = regexp.MustCompile(`^` + RunPath + `/([^/]+)/outcome$`)
 )
 
-// fixtureDocuments are the contract's documents fixtures of the steps explore and
-// prebuild, by step.
+// fixtureDocuments are the contract's documents fixtures of the steps workflow and
+// prebuild, by step: explore.json is the contract's fixture of the step workflow.
 var fixtureDocuments = map[string]json.RawMessage{}
 
 func init() {
-	for _, step := range []string{provisioner.StepExplore, provisioner.StepPrebuild} {
-		b, err := fs.ReadFile(contracts.RunFS, "fixtures/documents/"+step+".json")
+	for step, name := range map[string]string{provisioner.StepWorkflow: "explore", provisioner.StepPrebuild: "prebuild"} {
+		b, err := fs.ReadFile(contracts.RunFS, "fixtures/documents/"+name+".json")
 		if err != nil {
 			panic(err)
 		}
@@ -458,7 +458,7 @@ func filled(r Run) Run {
 		r.RunID = newRunID()
 	}
 	if r.Step == "" {
-		r.Step = provisioner.StepExplore
+		r.Step = provisioner.StepWorkflow
 	}
 	if r.Documents == nil {
 		r.Documents = fixtureDocuments[r.Step]

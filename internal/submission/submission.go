@@ -1,0 +1,167 @@
+// Package submission is version 1 of the submission format: what a run submits for a work
+// item, its branch with the commits in each repository, the verdict and the draft pull
+// request, the file of a version of the structured artifact type submission. Only qory's
+// submit step writes it. The contract is contracts/harness/v1/submission.schema.json.
+package submission
+
+import (
+	"bytes"
+	_ "embed"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"sync"
+	"unicode"
+
+	"github.com/qoryai/qory/internal/exports"
+	"github.com/santhosh-tekuri/jsonschema/v6"
+)
+
+// prefix starts every branch's name.
+const prefix = "qory/"
+
+// schemaURL is the schema's $id, which it is compiled under.
+const schemaURL = "https://qory.dev/contracts/harness/v1/submission.schema.json"
+
+// contractPath is the contract's schema, as a message prints it.
+const contractPath = "contracts/harness/v1/submission.schema.json"
+
+// submissionSchema is a copy of contracts/harness/v1/submission.schema.json, byte for byte,
+// which a test checks: go:embed does not reach a file above the package.
+//
+//go:embed submission.schema.json
+var submissionSchema []byte
+
+// Repository is one repository of a submission, with the commit of the branch in it.
+type Repository struct {
+	// System is the host the repository is on, such as github.com.
+	System string `json:"system"`
+	// Path is the repository's path on the host, such as acme/web.
+	Path string `json:"path"`
+	// Commit is the head of the branch: a full commit id, 40 or 64 lower-case hexadecimal
+	// digits.
+	Commit string `json:"commit"`
+	// CommitURL is the forge's address of Commit, written by the submit program.
+	CommitURL string `json:"commit_url,omitempty"`
+	// Base is the commit the run started at, nil when the run pushed nothing.
+	Base *Base `json:"base,omitempty"`
+	// Commits are the commits from Base to Commit, oldest first.
+	Commits []Commit `json:"commits,omitempty"`
+	// Draft is the draft pull request or the reason there is none, as [Draft] has it.
+	Draft json.RawMessage `json:"draft"`
+}
+
+// Base is the commit a run started at in a repository, with the name of the repository's
+// default branch when qory fetched it: the branch a pull request of the run is based on.
+type Base struct {
+	Commit    string `json:"commit"`
+	Branch    string `json:"branch,omitempty"`
+	CommitURL string `json:"commit_url,omitempty"`
+}
+
+// Commit is one commit of a run, with the ledger step that made it.
+type Commit struct {
+	Commit    string `json:"commit"`
+	Step      string `json:"step"`
+	CommitURL string `json:"commit_url,omitempty"`
+}
+
+// Text is the title and the description of the draft pull request.
+type Text struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+// The verdicts of a submission.
+const (
+	VerdictPassed           = "passed"
+	VerdictChangesRequested = "changes-requested"
+	VerdictEscalate         = "escalate"
+	VerdictNone             = "none"
+)
+
+// The reasons a draft is none, the value of the member none.
+const (
+	NoneNotPassed      = "not-passed"
+	NoneNoText         = "no-text"
+	NoneEscalated      = "escalated"
+	NoneNoProgram      = "no-program"
+	NoneProgramFailed  = "program-failed"
+	NoneProgramTimeout = "program-timeout"
+	NoneLoginNeeded    = "login-needed"
+)
+
+// Submission is one document of the format.
+type Submission struct {
+	// Ref is the branch's name, as [Name] builds it.
+	Ref string `json:"ref"`
+	// Verdict is one of the Verdict constants.
+	Verdict string `json:"verdict"`
+	// Text is the draft's title and description, nil when the session wrote none.
+	Text *Text `json:"text,omitempty"`
+	// Repositories has at least one entry.
+	Repositories []Repository `json:"repositories"`
+}
+
+// None is the draft member of a repository with no draft: {"none": reason}, with the exit
+// status for [NoneProgramFailed] (0, 1 or 2) and [NoneLoginNeeded] (3), and no exit for any
+// other reason.
+func None(reason string, exit int) json.RawMessage {
+	if reason == NoneProgramFailed || reason == NoneLoginNeeded {
+		return json.RawMessage(fmt.Sprintf(`{"none":%q,"exit":%d}`, reason, exit))
+	}
+	return json.RawMessage(fmt.Sprintf(`{"none":%q}`, reason))
+}
+
+// commitID is the pattern of a commit id in the schema: 40 or 64 lower-case hexadecimal digits.
+var commitID = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+
+// CommitID reports whether v is a commit id of the format: a full id of 40 or 64 lower-case
+// hexadecimal digits, as the schema's pattern for each commit.
+func CommitID(v string) bool { return commitID.MatchString(v) }
+
+// TitleRune reports whether the character r may be in a draft title, a step of the hand-off, or
+// a name that a status line shows: not a control character (Unicode category Cc), not a format
+// character (Cf) except U+200C and U+200D, which emoji sequences and some scripts need, and not
+// U+2028 or U+2029. A tag character such as U+E0041 and a bidirectional control such as U+202E
+// are Cf, so they do not pass. One rule serves every caller.
+func TitleRune(r rune) bool {
+	if r == '\u200c' || r == '\u200d' {
+		return true
+	}
+	return !unicode.Is(unicode.Cc, r) && !unicode.Is(unicode.Cf, r) && r != '\u2028' && r != '\u2029'
+}
+
+// Name is the name of the branch of the work item with the id workItemID.
+func Name(workItemID string) string { return prefix + workItemID }
+
+// contract is the schema, compiled once.
+var contract = sync.OnceValues(func() (*jsonschema.Schema, error) {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(submissionSchema))
+	if err != nil {
+		return nil, err
+	}
+	c := jsonschema.NewCompiler()
+	c.UseLoader(jsonschema.SchemeURLLoader{})
+	if err := c.AddResource(schemaURL, doc); err != nil {
+		return nil, err
+	}
+	return c.Compile(schemaURL)
+})
+
+// Check checks document, one JSON document, against the schema. The error starts with
+// the fix, and then has each rule the document breaks, with its place in the document.
+func Check(document []byte) error {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(document))
+	if err != nil {
+		return fmt.Errorf("write the submission as one JSON object, the format of %s: %s", contractPath, exports.HideValues(err.Error()))
+	}
+	schema, err := contract()
+	if err != nil {
+		return err
+	}
+	if err := schema.Validate(doc); err != nil {
+		return fmt.Errorf("fix the submission to match %s: %s", contractPath, exports.SchemaRules(err))
+	}
+	return nil
+}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -30,6 +31,7 @@ import (
 	"github.com/qoryai/qory/internal/pool/prebuild"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
+	"github.com/qoryai/qory/internal/render/codex"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/runcopy"
 	"github.com/qoryai/qory/internal/runtimeinstall"
@@ -285,6 +287,14 @@ func SetCopyStepLimit(limit time.Duration) func() {
 	return func() { copyStepLimit = before }
 }
 
+// SetSessionMinute makes a minute of the documents' time_limit_minutes last d, so a
+// test gives a session a limit of seconds, and returns the function that undoes it.
+func SetSessionMinute(d time.Duration) func() {
+	before := sessionMinute
+	sessionMinute = d
+	return func() { sessionMinute = before }
+}
+
 // SetPushTimes sets the time the push step has past a run's limit and after a signal, and
 // returns what restores the defaults.
 func SetPushTimes(limit, signal time.Duration) func() {
@@ -302,6 +312,14 @@ func ArtifactsForCheck(base string) (func(ctx context.Context, dir string, types
 	return artifactsForCheck(client), nil
 }
 
+// SetWriteWalledHome makes a walled Codex run write the read-only parts of its Codex home
+// with f, and returns what restores the writer.
+func SetWriteWalledHome(f func(dir, files string, run codex.WalledRun) ([]codex.Bound, error)) func() {
+	before := writeWalledHome
+	writeWalledHome = f
+	return func() { writeWalledHome = before }
+}
+
 // SetLoadPushChecks makes qory run read the push checks of a home with f, and returns
 // what restores the reader.
 func SetLoadPushChecks(f func(home string) ([]compose.PushCheck, error)) func() {
@@ -310,15 +328,42 @@ func SetLoadPushChecks(f func(home string) ([]compose.PushCheck, error)) func() 
 	return func() { loadPushChecks = before }
 }
 
+// RegisterPushCheck sets the push check with name for a local run, called with the repository's
+// folder and the commit about to be pushed, as the real checks get it, and returns what restores
+// the checks.
+func RegisterPushCheck(name string, check func(ctx context.Context, dir, head string) error) func() {
+	before := maps.Clone(localPushChecks)
+	registerPushCheck(name, func(ctx context.Context, repo localRepository) error { return check(ctx, repo.Dir, repo.Head) })
+	return func() { localPushChecks = before }
+}
+
+// PushChecksRequired is the names of the push checks that a local run needs.
+func PushChecksRequired() []string { return slices.Clone(requiredPushChecks) }
+
+// SetLocalPushAddress makes a local run's push of address go to route(address), a repository on
+// disk, by a real url.<route>.insteadOf rule in the push's configuration, and returns what
+// restores it. The checks and the program still get the address.
+func SetLocalPushAddress(route func(address string) string) func() {
+	before := localPushConfig
+	localPushConfig = func(address string) []string {
+		to := route(address)
+		if to == address {
+			return nil
+		}
+		return []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=url." + to + ".insteadOf", "GIT_CONFIG_VALUE_0=" + address}
+	}
+	return func() { localPushConfig = before }
+}
+
 // SetBranchWait makes the push step pass each wait to f in place of waiting, and returns
 // what restores the default.
 func SetBranchWait(f func(time.Duration)) func() {
-	before := branchWait
-	branchWait = func(_ context.Context, d time.Duration) error {
+	before := submissionWait
+	submissionWait = func(_ context.Context, d time.Duration) error {
 		f(d)
 		return nil
 	}
-	return func() { branchWait = before }
+	return func() { submissionWait = before }
 }
 
 // SetRecordAttemptLimit makes each send of the report of a push have d, and returns what
@@ -393,11 +438,18 @@ type Nowhere struct {
 	NoPushProxy             bool
 	PushProxyErr            func() error
 	// OnCall, when not nil, gets each call [OpenNowhereWith] lists, as the call is made.
-	OnCall      func(call string)
-	AtGateway   bool
-	Real        bool
-	PolicyImage string
-	OnImage     func(session.Image)
+	OnCall    func(call string)
+	AtGateway bool
+	// GatewayServer, when not nil, is the control plane the gateway of AtGateway reports
+	// each run to and takes each run's configuration from; nil starts it with none.
+	GatewayServer *gateway.Server
+	// GatewayAllow, when not empty, is the allow list of the policy of the machine the
+	// gateway of AtGateway starts with, under enforce: the gateway's proxy dials a
+	// private network address only when an entry of that list allows it.
+	GatewayAllow []string
+	Real         bool
+	PolicyImage  string
+	OnImage      func(session.Image)
 	// CloseErr, when not nil, is the error of the run's Close, which then returns no result.
 	CloseErr error
 	// WallKept is [session.Closed.WallKept] of the run's Close. A RemoveSetup that returns
@@ -426,6 +478,10 @@ type Nowhere struct {
 	// [session.Run.PushedCommits] sends the report over the link; nil sends it to RunAPI
 	// as [PushedThroughLink] does.
 	PushedCommits func(ctx context.Context, body []byte) ([]byte, error)
+	// NextSession, when not nil, is each NextSession of the run, as Forager's
+	// [session.Run.NextSession] sends the request over the link; nil returns Forager's
+	// error of a run with no control plane.
+	NextSession func(ctx context.Context, body []byte) ([]byte, error)
 }
 
 // StepEvent is one event of a host step of a run [OpenNowhereWith] opened: Type is
@@ -465,7 +521,7 @@ func OpenNowhereWith(n Nowhere) (outcomes func() []session.Outcome, calls func()
 		var at *gatewayRun
 		if n.AtGateway {
 			var err error
-			if at, err = openAtGateway(ctx, spec, n.PolicyImage); err != nil {
+			if at, err = openAtGateway(ctx, spec, n.PolicyImage, n.GatewayAllow, n.GatewayServer); err != nil {
 				return nil, err
 			}
 		}
@@ -570,20 +626,26 @@ func answeredImage(spec session.OpenSpec, selected string) session.Image {
 	return session.Image{Ref: selected}
 }
 
-// openAtGateway starts a gateway in this process with no server, which keeps the
-// record of each run in the folder of its id under spec.RunsDir and runs each under a
-// policy that selects image, "" for no policy, and opens the run of spec there, over
-// the gateway's local link.
-func openAtGateway(ctx context.Context, spec session.OpenSpec, image string) (*gatewayRun, error) {
+// openAtGateway starts a gateway in this process with the control plane srv, nil for
+// none, which keeps the record of each run in the folder of its id under spec.RunsDir
+// and runs each under a policy that selects image and, under enforce, allows the hosts
+// of allow; with neither, under no policy. It opens the run of spec there, over the
+// gateway's local link.
+func openAtGateway(ctx context.Context, spec session.OpenSpec, image string, allow []string, srv *gateway.Server) (*gatewayRun, error) {
 	var pol *gateway.Policy
-	if image != "" {
-		pol = &gateway.Policy{Version: 1, Image: image, Egress: gateway.PolicyEgress{Mode: "observe"}}
+	if image != "" || len(allow) > 0 {
+		egress := gateway.PolicyEgress{Mode: "observe"}
+		if len(allow) > 0 {
+			egress = gateway.PolicyEgress{Mode: "enforce", Allow: allow}
+		}
+		pol = &gateway.Policy{Version: 1, Image: image, Egress: egress}
 	}
 	g, err := gateway.Start(ctx, gateway.Config{
 		RunDir:       func(id string) string { return filepath.Join(spec.RunsDir, id) },
 		NoLinkSocket: true,
 		Report:       func(string) {},
 		Policy:       pol,
+		Server:       srv,
 	})
 	if err != nil {
 		return nil, err
@@ -626,6 +688,19 @@ func (n *nowhere) PushedCommits(ctx context.Context, body []byte) ([]byte, error
 		return nil, errors.New("Open the run with a control plane to send the pushed-commits request: this run has none.")
 	}
 	return PushedThroughLink(ctx, n.values.RunAPI, body)
+}
+
+// NextSession is [session.Run.NextSession] of the run: Nowhere.NextSession, else Forager's
+// error of a run with no control plane. After Close it returns an error that wraps
+// [session.ErrRunClosed], as Forager's does.
+func (n *nowhere) NextSession(ctx context.Context, body []byte) ([]byte, error) {
+	if n.ended {
+		return nil, fmt.Errorf("Open another run to send the next-session request: %w.", session.ErrRunClosed)
+	}
+	if n.values.NextSession != nil {
+		return n.values.NextSession(ctx, body)
+	}
+	return nil, errors.New("Open the run with a control plane to send the next-session request: this run has none.")
 }
 
 // codeShape is the form of a code that the gateway passes on from Qory Apiary.
@@ -997,8 +1072,15 @@ func (n *nowhere) System() string       { return n.values.System }
 func (n *nowhere) Repositories() string { return n.values.Repositories }
 func (n *nowhere) Dir() string          { return n.dir }
 
-// SetBeforeJoin makes qory run call f once the harness is composed, before the run's
-// session joins, and returns what restores the default.
+// SetSetupLimit makes d the limit of a run's setup in place of 30 minutes, and returns
+// what restores it.
+func SetSetupLimit(d time.Duration) func() {
+	setupBound = d
+	return func() { setupBound = setupLimit }
+}
+
+// SetBeforeJoin makes qory run call f once the harness is composed, before each session of
+// the run joins, and returns what restores the default.
 func SetBeforeJoin(f func()) func() {
 	beforeJoin = f
 	return func() { beforeJoin = nil }
@@ -1089,6 +1171,14 @@ func SetTempStoreDir(dir string) func() {
 	return func() { tempStoreDir = before }
 }
 
+// SetDestinationsDir sets the folder qory destination clone clones into to dir, and
+// returns what restores it.
+func SetDestinationsDir(dir string) func() {
+	before := destinationsDir
+	destinationsDir = dir
+	return func() { destinationsDir = before }
+}
+
 // SetRunStartFolder sets the folder that a run in a wall started in, and returns a
 // function that restores the check.
 func SetRunStartFolder(dir string) func() {
@@ -1165,6 +1255,22 @@ func SetNpmRegistry(url string) func() {
 	return func() { npmRegistry = before }
 }
 
+// SetRunRuntimes makes names the runtimes that a run from a run code runs on, and
+// returns what restores the default.
+func SetRunRuntimes(names ...string) func() {
+	before := runRuntimes
+	runRuntimes = func() []string { return names }
+	return func() { runRuntimes = before }
+}
+
+// SetRuntimeKeys makes qory run check npm's signatures with keys, and returns what
+// restores the default.
+func SetRuntimeKeys(keys []runtimeinstall.SigningKey) func() {
+	before := runtimeKeys
+	runtimeKeys = keys
+	return func() { runtimeKeys = before }
+}
+
 // SetInstanceAddress makes qory run read the address of its Qory Apiary instance with
 // f, and returns what restores the default.
 func SetInstanceAddress(f func(*config.Forager) string) func() {
@@ -1176,8 +1282,8 @@ func SetInstanceAddress(f func(*config.Forager) string) func() {
 // InstanceAddress is instanceAddress.
 var InstanceAddress = instanceAddress
 
-// SetFullSuite makes every run's session run the full suite as the run documents' full_suite
-// does, and returns what restores the default.
+// SetFullSuite makes every run's session run the full suite as full_suite of the run documents'
+// type_settings does, and returns what restores the default.
 func SetFullSuite(yes bool) func() {
 	before := fullSuiteOf
 	fullSuiteOf = func(*codeRun) bool { return yes }

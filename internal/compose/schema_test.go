@@ -15,7 +15,8 @@ import (
 
 // TestSchemas validates every fixture document against the contract's schemas: a
 // qory.yaml that composes passes config.schema.json, one refused for its apiVersion, a
-// kind, its qory key, its workflows or its bind fails it,
+// kind, its qory key, its workflows, its runtimes, its bind or a key it does not read
+// fails it,
 // every module manifest passes module.schema.json unless the fixture expects it refused,
 // every MCP server file passes
 // mcp.schema.json unless the fixture expects it refused, the stack a fixture extends,
@@ -55,10 +56,17 @@ func TestSchemas(t *testing.T) {
 		wantInvalid := strings.Contains(string(errText), "apiVersion") || badKind || strings.HasPrefix(fix, "Set qory to ") ||
 			strings.Contains(string(errText), " in qory.yaml.") && (strings.Contains(fix, " workflows.") || strings.HasPrefix(fix, "Remove workflows ")) ||
 			strings.Contains(string(errText), "bind.") && strings.Contains(string(errText), " in qory.yaml") && !strings.Contains(string(errText), " as many, ")
+		// A runtime's pin that is not an exact version, or of a runtime qory does not
+		// install, fails the schema of the file that sets it.
+		pinRefused := strings.HasPrefix(fix, "Set runtimes.") || strings.HasSuffix(fix, " from runtimes.")
+		wantInvalid = wantInvalid || pinRefused && strings.Contains(string(errText), " is in qory.yaml.")
 		// A plan on a workflow whose access is not write is refused by the stack check, and
 		// the schemas state the same rule for the document that has the plan.
 		planOnNoWrite := strings.HasPrefix(fix, "Remove `plan` from ")
 		wantInvalid = wantInvalid || planOnNoWrite && fileHas(filepath.Join(dir, "qory.yaml"), "plan:")
+		// A key the file does not read is refused by the decoder, and the schema of that file
+		// allows no such key either.
+		wantInvalid = wantInvalid || fix == "Remove the key, or rename it to one qory.yaml reads."
 		err := composeSchema.Validate(document(t, filepath.Join(dir, "qory.yaml")))
 		if wantInvalid && err == nil {
 			t.Errorf("%s: the document passed the schema; want a failure", dir)
@@ -67,8 +75,9 @@ func TestSchemas(t *testing.T) {
 			t.Errorf("%s: the document failed the schema: %v", dir, err)
 		}
 		if f := filepath.Join(dir, "stack", "qory-stack.yaml"); fileExists(f) {
-			wantBadStack := strings.HasPrefix(fix, "Set workflows.") && strings.Contains(string(errText), " is in stack/qory-stack.yaml.") ||
-				planOnNoWrite && fileHas(f, "plan:")
+			wantBadStack := (strings.HasPrefix(fix, "Set workflows.") || pinRefused) && strings.Contains(string(errText), " is in stack/qory-stack.yaml.") ||
+				planOnNoWrite && fileHas(f, "plan:") ||
+				fix == "Remove the key, or rename it to one qory-stack.yaml reads." && strings.Contains(string(errText), " of stack/qory-stack.yaml.")
 			err := stackSchema.Validate(document(t, f))
 			if wantBadStack && err == nil {
 				t.Errorf("%s passed the schema; want a failure", f)
@@ -404,6 +413,53 @@ func TestModuleSchemaMatchesTheReaderOnPushChecks(t *testing.T) {
 		}
 		if _, err := module.ReadManifest(dir); (err == nil) != c.valid {
 			t.Errorf("reader: %s valid=%v err=%v", c.items, c.valid, err)
+		}
+	}
+}
+
+// TestModuleSchemaMatchesTheReaderOnSubmitProgram keeps the schema and module.ReadManifest
+// in step on submit_program: each value passes both or fails both.
+func TestModuleSchemaMatchesTheReaderOnSubmitProgram(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/module.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		value string
+		valid bool
+	}{
+		{`{"command": ["bin/open-draft"]}`, true},
+		{`{"command": ["./bin/open-draft", "--strict", ""]}`, true},
+		{`{"command": ["c.js", "--dir", "../x"]}`, true},
+		{`{"command": []}`, false},
+		{`{"command": [""]}`, false},
+		{`{"command": ["/usr/bin/node"]}`, false},
+		{`{"command": ["../c.js"]}`, false},
+		{`{"command": ["a/../c.js"]}`, false},
+		{`{"command": ["c.js", 3]}`, false},
+		{`{"command": "c.js"}`, false},
+		{`{}`, false},
+		{`{"command": ["c.js"], "timeout": 5}`, false},
+		{`["c.js"]`, false},
+	} {
+		var value any
+		if err := json.Unmarshal([]byte(c.value), &value); err != nil {
+			t.Fatal(err)
+		}
+		doc := map[string]any{"apiVersion": "qory.dev/v1alpha1", "name": "core", "submit_program": value}
+		if err := schema.Validate(doc); (err == nil) != c.valid {
+			t.Errorf("schema: %s valid=%v err=%v", c.value, c.valid, err)
+		}
+		dir := t.TempDir()
+		body, err := yaml.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, module.ManifestName), body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := module.ReadManifest(dir); (err == nil) != c.valid {
+			t.Errorf("reader: %s valid=%v err=%v", c.value, c.valid, err)
 		}
 	}
 }
@@ -744,6 +800,12 @@ func TestQuestionsSchema(t *testing.T) {
 		{replace(question, `Which\ndatabase?`), false},
 		{replace(question, `Which\tdatabase?`), false},
 		{replace(question, `Which \u202edatabase?`), false},
+		{replace(question, `Which \udb40\udc41database?`), false},
+		{replace(question, `Which \u200bdatabase?`), false},
+		{replace(question, `Which \u200cdatabase?`), true},
+		{replace("The service reads `DATABASE_URL`.", `Tab\there, line\nbreak, carriage\rreturn, family \ud83d\udc68\u200d\ud83d\udc69.`), true},
+		{replace("The service reads `DATABASE_URL`.", `One\udb40\udc41tag.`), false},
+		{replace("The service reads `DATABASE_URL`.", `One\u200bspace.`), false},
 		// context
 		{replace(`"context": "The service`, `"context": "`+strings.Repeat("a", 20000-len("The service reads `DATABASE_URL`.\n\n- one\n- two"))+`The service`), true},
 		{replace(`"context": "The service`, `"context": "`+strings.Repeat("a", 20001-len("The service reads `DATABASE_URL`.\n\n- one\n- two"))+`The service`), false},
@@ -964,7 +1026,19 @@ func TestVerdictSchema(t *testing.T) {
 		{`{"verdict": "changes-requested"}`, true},
 		{`{}`, false},
 		{`[]`, false},
-		{`{"verdict": "failed"}`, false},
+		// a kind is passed, changes-requested, escalate, or one in their form that a later
+		// version adds: a lower-case letter, then lower-case letters, digits and hyphens, at
+		// most 64 characters.
+		{`{"verdict": "failed"}`, true},
+		{`{"verdict": "approve-spend", "points": [{"text": "Approve the spend.", "action": "approve_spend"}]}`, true},
+		{`{"verdict": "` + strings.Repeat("a", 64) + `"}`, true},
+		{`{"verdict": "` + strings.Repeat("a", 65) + `"}`, false},
+		{`{"verdict": "Failed"}`, false},
+		{`{"verdict": "1st"}`, false},
+		{`{"verdict": "-failed"}`, false},
+		{`{"verdict": "approve_spend"}`, false},
+		{`{"verdict": ""}`, false},
+		{`{"verdict": 1}`, false},
 		// points is required with escalate, optional with changes-requested, and absent
 		// with passed.
 		{`{"verdict": "escalate"}`, false},
@@ -994,7 +1068,18 @@ func TestVerdictSchema(t *testing.T) {
 		// text and action are required.
 		{replace(`, "action": "run_again"`, ``), false},
 		{replace(`"text": "The checks script failed on the spec's links.", `, ``), false},
-		{replace(`"action": "run_again"`, `"action": "ask"`), false},
+		// an action is answer, run_again, or one in their form that a later version adds: a
+		// lower-case letter, then lower-case letters, digits and underscores, at most 64
+		// characters. The rules for question and fix are for answer and run_again alone.
+		{replace(`"action": "run_again"`, `"action": "ask"`), true},
+		{replace(`"action": "run_again"`, `"action": "ask", "question": "q4", "fix": "Ask Sam."`), true},
+		{replace(`"action": "run_again"`, `"action": "`+strings.Repeat("a", 64)+`"`), true},
+		{replace(`"action": "run_again"`, `"action": "`+strings.Repeat("a", 65)+`"`), false},
+		{replace(`"action": "run_again"`, `"action": "Ask"`), false},
+		{replace(`"action": "run_again"`, `"action": "run-again"`), false},
+		{replace(`"action": "run_again"`, `"action": "_ask"`), false},
+		{replace(`"action": "run_again"`, `"action": ""`), false},
+		{replace(`"action": "run_again"`, `"action": 1`), false},
 		// question is required with answer and absent with run_again.
 		{replace(`, "question": "q4"`, ``), false},
 		{replace(`"action": "run_again"`, `"action": "run_again", "question": "q4"`), false},
@@ -1014,6 +1099,9 @@ func TestVerdictSchema(t *testing.T) {
 		{text(`One\rsentence.`), false},
 		{text(`One\u0007sentence.`), false},
 		{text(`One ` + rlo + `sentence.`), false},
+		{text(`One\udb40\udc41tag.`), false},
+		{text(`One\u200bspace.`), false},
+		{text(`One\u200djoiner.`), true},
 		{replace(`"text": "The checks script failed on the spec's links."`, `"text": 1`), false},
 		// fix: optional with run_again and absent with answer, with the rules of text
 		{fix(`Fix the link to /docs/start in the spec.`), true},
@@ -1155,6 +1243,9 @@ func TestReviewCommentsSchema(t *testing.T) {
 		{replace(`"Why two steps?"`, `"`+strings.Repeat("a", 2001)+`"`), false},
 		{replace(`"Why two steps?"`, `""`), false},
 		{replace(`"Why two steps?"`, `"Why \u202etwo steps?"`), false},
+		{replace(`"Why two steps?"`, `"Why \udb40\udc41two steps?"`), false},
+		{replace(`"Why two steps?"`, `"Why \u200btwo steps?"`), false},
+		{replace(`"Why two steps?"`, `"Why\ttwo\r\nsteps \u200d?"`), true},
 		{replace(`"text": "Agreed."`, `"text": "`+strings.Repeat("a", 2001)+`"`), false},
 		// by and at
 		{replace(`"by": {"name": "Sam Example"}`, `"by": {"run": 3}`), false},
@@ -1231,6 +1322,9 @@ func TestProposalSourcesSchema(t *testing.T) {
 		{replace(`"ref": "ACC-1042"`, `"ref": "ACC\n1042"`), false},
 		{replace(`"ref": "ACC-1042"`, `"ref": "ACC\t1042"`), false},
 		{replace(`"ref": "ACC-1042"`, `"ref": "ACC-`+rlo+`1042"`), false},
+		{replace(`"ref": "ACC-1042"`, `"ref": "ACC-\udb40\udc411042"`), false},
+		{replace(`"ref": "ACC-1042"`, `"ref": "ACC-\u200b1042"`), false},
+		{replace(`"ref": "ACC-1042"`, `"ref": "ACC-\u200d1042"`), true},
 		{replace(`"ref": "ACC-1042", `, ``), false},
 		// system
 		{replace(`"system": "crm.example.com"`, `"system": "CRM-1.Example.com"`), true},
@@ -1329,6 +1423,12 @@ func TestAcceptanceCriteriaSchema(t *testing.T) {
 		{replace(summary, `"summary": "`+strings.Repeat("a", 2001)+`"`), false},
 		{replace(summary, `"summary": "One.\n\nTwo."`), true},
 		{replace(summary, `"summary": "One.​Two."`), false},
+		{replace(summary, `"summary": "One.\udb40\udc41Two."`), false},
+		{replace(summary, `"summary": "One.\u200dTwo."`), true},
+		{replace(summary, `"summary": "One.\u0600Two."`), false},
+		{replace(text, `"text": "Tab\there, line\nbreak, carriage\rreturn."`), true},
+		{replace(text, `"text": "One\u200btwo."`), false},
+		{replace(check, `"check": "Look\udb40\udc41here."`), false},
 		{replace(summary, `"summary": null`), false},
 		// the criterion's id: ac- and a number from 1 to 9999 with no leading zero
 		{replace(`"ac-1"`, `"ac-9999"`), true},
@@ -1454,6 +1554,10 @@ func TestVerificationSchema(t *testing.T) {
 		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": "`+strings.Repeat("a", 2001)+`"`), false},
 		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": "Seen.\nTwice."`), true},
 		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": "Seen.​"`), false},
+		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": "Seen.\udb40\udc41"`), false},
+		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": "Seen.\u200d\u200c"`), true},
+		{replace(`"evidence": "The price page shows 12.50."`, `"evidence": "Seen,\ttwo\r\nlines."`), true},
+		{replace(`"anthropic"`, `"anthro\udb40\udc41pic"`), false},
 		{replace(`"state": "met"`, `"state": "met", "by": "model"`), false},
 		{replace(matrix, `"matrix": {}`), false},
 		// a criterion id in a row, in not_verified: ac- and a number from 1 to 9999

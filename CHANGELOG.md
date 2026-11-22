@@ -18,6 +18,85 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- `qory destination clone <id>...` clones destinations of a run inside its session: each
+  id from `destinations` in `$QORY_HARNESS_HOME/inputs.json`, at depth 1, through the
+  wall's proxy, into `/tmp/qory-destinations/<system>/<path>`. It prints one line per id,
+  the id and the folder, and clones a destination once per session, at most 100 per
+  session. See [Clone a destination](docs/run.md#clone-a-destination).
+- A factory's `process.yaml` may register the JSON Schema of a run's type settings, the
+  settings of the workspace type that Qory Apiary sends as `type_settings` in the run
+  documents: `type_settings: {json_schema: {…}}`. qory checks the schema as it checks the
+  `json_schema` of an artifact type, and the patterns of both count toward one limit of
+  16 MiB for the file. A schema that does not compile stops the command with
+  `Fix json_schema of type_settings so that it compiles as a JSON Schema.` and the file
+  on the last line. See "Type settings" in `contracts/harness/v1/README.md`.
+- `qory run` from a run code whose documents set `shared_run` runs one session after
+  another, until Qory Apiary ends the run. After each session, once the suite's result is
+  posted and the push step passed, qory sends the next-session request, and joins the next
+  session with its workflow, runtime, model settings, model key and time limit. Each
+  session's harness is composed from the run's sources at session 1's commits; a runtime is
+  installed once per run, at the version the stack pins, with npm's signature checked as
+  for session 1; a Codex session gets a new Codex home; each push step that pushes commits
+  stores a version of `submission`. In a home that the run made, a later session's compose
+  keeps that session's runtime alone. A home from `--home` or `harness.home` keeps every
+  runtime composed in it, so a later Codex session there gets no tier models when the home
+  also has another runtime's tree. The route to qory serves the session that runs, and the
+  harness report lists each session's runtime and tiers in `sessions`. qory sends the
+  request again for 10 minutes after no response, a refusal of the gateway's, Qory Apiary's
+  refusals with a status of 500 or above, and `rate_limited`. Qory Apiary's `run_ended`
+  closes the run as the session ended, and any other refusal of Qory Apiary's closes it
+  `failed`, exit 1. The steps before a later session need a wall and no container of the
+  run kept, and past the setup's limit they close the run `cancelled` with `timeout`, exit
+  124. In such a walled run with a run API, Forager's forwarder checks the POSTs from
+  behind the wall to the run API from session 1 on, also before any session has push
+  checks: the forwarder then passes one request per connection through the wall, and a
+  POST to the run API with a body needs one `Content-Length` and no `Transfer-Encoding`: a
+  chunked body gets a 400.
+- The agent of a walled run gets `QORY_SESSION`, the session's number from 1, which Forager
+  sets at each join: `qory run agent-env` keeps the name, as it keeps `QORY_RUN_ID`.
+- In a home composed for codex alone, a Codex agent with a tier gets the tier's model as
+  `model` and its effort as `model_reasoning_effort` in `agents/<name>.toml`. An effort
+  outside `none`, `low`, `medium`, `high`, `xhigh`, `max` and `ultra` stops the compose
+  with exit 2 and these two lines, which an effort outside the values of claude and
+  copilot agents also gets:
+
+  ```text
+  set tier <t>'s effort to one of <values>
+  <v> is not one for <runtime> agents (from <file>)
+  ```
+
+  A home composed for codex and another runtime writes no tier into the Codex agents,
+  since one tier map serves every runtime, and prints this `skipped` row:
+
+  ```text
+  skipped  tier <tier> for codex  (qory writes tiers into codex agents only in a home composed for codex alone; …)
+  ```
+- A Codex run without a wall runs the harness's hooks. Codex skips a hook of
+  `$CODEX_HOME` with no error unless `hooks.state` has its hash, so the home's
+  `config.toml` has a `trusted_hash` for each `command` hook of `hooks.json` and
+  `config.toml`. An `mcp_tool` hook, and a hook with U+2028 or U+2029 in its command,
+  status message or matcher, gets no hash, and the compose prints
+  `skipped  hooks.<event>[<group>].hooks[<hook>] in <file> for codex` for it. A
+  `CODEX_HOME` set in `harness.launch.codex.env` points Codex at a home other than the
+  one in the keys of the hashes, and Codex skips the hooks. See "Hooks on Codex" in
+  `docs/harness.md`.
+- A stack pins the version of a runtime that `qory run` installs:
+  `runtimes: {codex: {version: 0.167.2}}` in a `qory-stack.yaml` or in the harness
+  section of the checkout's `qory.yaml`, whose pin of a runtime wins over the base's. A
+  runtime that no layer pins installs its latest version, as before. The run reads the
+  pinned version from the registry's runtime cache, the tag `<version>`, or from npm,
+  the version's document, with the same signature and checksum checks. qory stops with
+  an error on a version that does not start with a digit, `latest` among them, a version
+  with `+`, a version longer than 32 characters, a version that YAML reads as a number
+  or a date, such as an unquoted `2.1`, and a runtime other than `claude` and `codex`.
+  qory stops with an error on `harness.runtimes` in the user's `qory.yaml` or
+  `harness.yaml`, and in an ancestor's `qory.yaml` or `harness.yaml` that discovery or
+  `-f` selects to compose; in another ancestor's file, qory leaves the pin unread. A
+  pinned version that the registry does not have stops the run before its session with
+  `Set runtimes.<runtime>.version in <file> to a version the registry has.` and the
+  cause, `The registry has no <runtime> <version>.`; `<file>` is the checkout's
+  `qory.yaml` or `harness.yaml` for a pin of a base fetched over git. A dispatched run
+  prints the cause alone.
 - A write workflow of a stack may set `plan` to an artifact type, such as `build-plan`:
   the type whose launch version sets what the workflow's session may push. A module
   declares the scope check of a plan type in `scope_checks` in its `qory-module.yaml`: one
@@ -49,17 +128,24 @@ release may change what an existing document does, and states it under Upgrading
   module of the checkout's `qory.yaml`, 1 for a module of its base stack). With no note it
   is `{"notes": []}`. It is not the `notes.json` of a push check. See "Notes" in
   `docs/harness.md`.
+- `qory artifact push --decision <note id>` sends the id of the person's note that asked
+  for the version, such as a request for changes, a move or an escalation, as `decision`
+  in `POST artifacts`. A withdrawal takes it too. `qory artifact push` exits 4 for a 422
+  `unknown_decision`, with the fix on line 1. Outside a run, the store keeps no decision.
 - `qory run verdict` proposes a track for the work item: `--track <id>` is the id of a
   track that the gate of the run's stage offers, and `--track-reason <text>` is the
   reason, one sentence on one line of 1 to 300 characters. Pass both or neither. A track's
   id is lower-case words joined by hyphens, at most 40 characters. A track is the `id` and
   the `reason`. A mistake in the id, the reason or the pair exits 2, with the fix on line
-  1; nothing is sent or kept. Outside a run, the kept `verdict.json` has the track. `qory
-  run verdict` exits 4 for every 422 `invalid_artifact` from Qory Apiary, such as a track
-  that the gate does not offer, a point about a question that is not open, or a verdict
-  that breaks the schema. Line 1 of the error is the fix, with at most 98 characters, and
-  Qory Apiary's text follows on line 2. `qory artifact push` still exits 1 for
-  `invalid_artifact`. See The verdict format in `contracts/harness/v1/README.md`.
+  1; nothing is sent or kept. Line 2 of the error for a wrong id shows the id quoted and
+  cut to 40 characters, or, for an id that contains a key or a code, such as `qrk_`, a
+  phrase in its place, as for `--decision`. Outside a run, the kept `verdict.json` has
+  the track. `qory run verdict` exits 4 for every 422 `invalid_artifact` from Qory
+  Apiary, such as a track that the gate does not offer, a point about a question that is
+  not open, or a verdict that breaks the schema. Line 1 of the error is the fix, with at
+  most 98 characters, and Qory Apiary's text follows on line 2. `qory artifact push`
+  still exits 1 for `invalid_artifact`. See The verdict format in
+  `contracts/harness/v1/README.md`.
 - After each push of its push step, qory reports the repositories the push moved to Qory
   Apiary, one entry for each repository with `system`, `path` and the full head commit, in
   push order, at most 64 in a call and at most 65536 bytes in a body. qory sends the report
@@ -107,9 +193,44 @@ release may change what an existing document does, and states it under Upgrading
   the order `read`, `write-no-push`, `write`. A workflow's `access` in a stack takes
   `write-no-push` in both schemas and in the stack check, and documents may have it. A
   `write-no-push` run has a writable checkout, no push step, no submit, and no version
-  of the artifact `branch`. With no wall, it stops with `write_needs_wall`. The error
+  of the artifact `submission`. With no wall, it stops with `write_needs_wall`. The error
   for another workflow value now starts
   `Set workflows.<name>.access to a valid level.`
+- Every run of Codex installs Codex before its session, as a run of Claude Code installs
+  Claude Code: from `shared/runtimes/codex` in the runtime cache of the pool's registry,
+  or of `pool.registry`, or else from npm, where it reads the dist-tag `latest` of
+  `@openai/codex` and the version `<version>-linux-x64` or `-linux-arm64` of the same
+  package. The registry's layer is npm's tarball, unchanged. qory extracts the whole
+  folder `package/vendor/<x86_64 or aarch64>-unknown-linux-musl/`, in its layout, as
+  `<runtimes>/codex/<version>/`, so `bin/codex-code-mode-host`, `codex-resources/bwrap`
+  and `codex-path/rg` are beside `bin/codex`, each mode `0755`, and prints `qory run:
+  installed codex <version>`. A tarball without one of them, or with an empty one, stops
+  the run with `Update qory.` and the missing file. A version's folder without one stops
+  the run with `Remove the version's folder once no run uses it, then run again`. The
+  session starts `bin/codex`, and behind a wall Forager mounts the version's folder
+  read-only at `/qory/runtime/codex`. Before, a session of Codex started
+  the program from the image, which no agent image has.
+- A run from a run key or a run code whose runtime's install fails prints the cause of
+  the failure alone, such as `qory run: npm has no signature of claude 2.1.320`, with no
+  fix line: Qory Apiary shows that output, and the fix line, such as `Update qory.`,
+  advises a person who runs qory. A person's run prints the fix line, then the cause. The
+  refusals of a registry's token realm state the cause in full: `The pool's forager.yaml
+  sets no gateway.server.url, so qory cannot check the registry's token realm <realm>.`
+  and `The registry's token realm is`, then `<realm>,` and `and the instance's token
+  route is <url>/registry/token.` on indented lines. A long value in a cause, such as a
+  URL, a checksum or a path in a tarball, is on a separate indented line. An install
+  error that was one line, such as `Run again: the run's host proxy has no http URL`, has
+  a fix line and a cause line, so a run from a run key or a run code prints only `the run's
+  host proxy has no http URL`.
+- Every install of a runtime checks npm's signature of the version before it reads the
+  tarball, with npm's public keys built into qory: from npm, `dist.signatures`; from a
+  registry's runtime cache, the layer's annotation `dev.qory.runtime.signatures`. A
+  missing or bad signature stops the run with `Check the source of <runtime>'s
+  releases.`; a signature only by a key qory does not have stops it with `Update qory.`;
+  a signature only by an expired key stops it with `Pin a newer version of <runtime>.`
+  for a pinned version, and with `Check the source of <runtime>'s releases.` with no
+  pin. A layer without the annotation stops it with `Ask Qory Apiary's instance admin to
+  check the registry's runtime cache`.
 - Every run of Claude Code installs the runtime's program before its session: from the
   runtime cache of the pool's registry, or of `pool.registry`, or else from npm, through
   the run's host proxy when the run has one. qory reads the registry's `newest`, or npm's
@@ -122,9 +243,10 @@ release may change what an existing document does, and states it under Upgrading
   by the wall's engine program or else `docker`, and removes no version's folder when that
   program fails; a machine with no `docker` has no running container. Two runs that need
   one version read its tarball once. A 503 or 429 from the registry is retried until the
-  registry returns the file or the run ends, with its time limit, a cancel or SIGTERM. At
-  the first retry, and every 5 minutes after, `qory run` prints `<host> has not returned
-  Claude Code <version> (503); check pool.registry`, with `no response` in place of
+  registry returns the file or the run ends, with the limit of the steps before the
+  agent's start, a cancel or SIGTERM. At the first retry, and every 5 minutes after,
+  `qory run` prints `<host> has not returned Claude Code <version> (503); check
+  pool.registry`, with `no response` in place of
   the status when the request got none, and without the version while the run does not
   know it yet. A request waits at most 30 seconds to
   connect, 30 seconds for the TLS handshake, 60 seconds for the response's headers and
@@ -151,14 +273,14 @@ release may change what an existing document does, and states it under Upgrading
   `tools` key keeps the shell. An agent without write tools can still write files through Codex's
   `apply_patch` tool.
 - A run of a work item works on the branch `qory/<work item id>`, at the commit of the
-  artifact `branch` that its stage starts from. The harness still comes from
+  artifact `submission` that its stage starts from. The harness still comes from
   `target_version`. A commit on the branch reaches a run's harness after you merge the
   branch into the target's default branch, the branch that its `HEAD` points to. Qory
   Apiary reads `target_version` there, so the next run's `target_version` contains the
   commit.
 - A write run of a work item ends with a push step: qory commits what the agent left,
   pushes each repository with new commits to `qory/<work item id>`, and stores a new
-  version of the artifact `branch`. The next run in the same stage starts at that commit. A
+  version of the artifact `submission`. The next run in the same stage starts at that commit. A
   session that failed, timed out or was cancelled gets the same step, and its commit and
   version show how it ended. See The push step of a write run in `docs/run.md`.
 - A skill reads its work item and stores what it made with `qory work-item show`, `qory
@@ -226,9 +348,10 @@ release may change what an existing document does, and states it under Upgrading
   503 `push_check_unavailable`, qory run writes the cause on its stderr, and the push
   exits 1. Outside a run, `qory artifact push` runs no check. See The module manifest in
   `contracts/harness/v1/README.md`.
-- Version 1 of the branch format, `contracts/harness/v1/branch.schema.json`: a work
-  item's branch, `qory/<work item id>`, and the commit in each repository. A software
-  factory can use it as the `json_schema` of a custom artifact type `branch`.
+- Version 1 of the submission format, `contracts/harness/v1/submission.schema.json`: what
+  a run submits for a work item, its branch `qory/<work item id>`, the commits in each
+  repository with the step that made each, the verdict, and the draft pull request. A
+  software factory can use it as the `json_schema` of the artifact type `submission`.
 - Version 1 of the acceptance criteria format,
   `contracts/harness/v1/acceptance-criteria.schema.json`: a `summary` and `criteria`, each
   with `id`, `text` and `check` (free text). A removed criterion has `removed` with its
@@ -301,10 +424,6 @@ release may change what an existing document does, and states it under Upgrading
   consecutive lines or 200 characters of a harness file, in the session's log and
   events. A link that leads out of a module stops the run, exit 1. See A hidden harness
   in `docs/run.md` for what is not masked and Forager's limits.
-- Give a workflow of a stack a time limit with `workflows.<name>.time_limit` in its
-  `qory-stack.yaml`, such as `workflows: {example: {time_limit: 45m}}`. A run from a run
-  code takes its time limit from the `time_limit_minutes` of its documents, else from its
-  workflow's `time_limit`, else 3 hours.
 - Declare a workflow's access level with `workflows.<name>.access` in its
   `qory-stack.yaml`, `read` or `write`, and `read` when left out. qory stops on any
   other value.
@@ -397,25 +516,26 @@ release may change what an existing document does, and states it under Upgrading
   since no other user may replace a file in it. qory never writes or removes the file.
   `qory run`, `qory run pool`, `qory run register` and `qory run end` stop with an error
   when the setting is there.
-- A run from a run code whose documents set `target_version` fetches the target's
-  repository, the first entry of `QORY_RUN_REPOSITORIES`, at that commit, by its id, in
-  place of the head of its default branch, onto a local branch with the default branch's
-  name and no upstream. When the documents contain no harness document, the compose reads
-  the checkout's `qory.yaml` or `harness.yaml` as Qory Apiary checked it. Each of these
+- A run from a run code whose documents set `target_version` fetches the repository at
+  the target's `address`, its `system` and `path`, the first entry of
+  `QORY_RUN_REPOSITORIES`, at that commit, by its id, in place of the head of its default
+  branch, onto a local branch with the default branch's name and no upstream. When the
+  documents contain no harness document, the compose reads the checkout's `qory.yaml` or
+  `harness.yaml` as Qory Apiary checked it. Each of these
   stops the run before the compose, exit 1: a target on the run's system that is a later
   entry of `QORY_RUN_REPOSITORIES`, that the list does not contain, or with an empty
   list; a version that is not a commit id; and a commit that the server does not have or
-  does not serve by its id. A target on another system, or a run with no
-  `QORY_RUN_SYSTEM`, does not use `target_version`.
+  does not serve by its id. A target with no address, only an adapter's `collection`,
+  is not fetched and does not use `target_version`, nor does a target on another system
+  or a run with no `QORY_RUN_SYSTEM`.
 - The harness section of a `qory.yaml` that defines a stack, without `extends`, may list
-  `workflows`, with the keys and checks of a `qory-stack.yaml`: `time_limit` and
-  `access`. A section that extends a stack takes the base's workflows, and one that also
+  `workflows`, with the keys and checks of a `qory-stack.yaml`, such as `access`. A
+  section that extends a stack takes the base's workflows, and one that also
   lists `workflows` stops with exit 2, `remove workflows or extends: a harness section
   that extends a stack takes the workflows of its base`.
 - A run from a run code composes a harness document with no `extends`, which defines a
-  stack, for the run's runtime: `run_settings.runtime`, or `claude` when the documents
-  have no run settings. The `workflows.<name>.time_limit` of that stack applies to the
-  run, as a base's does.
+  stack, for the run's runtime, `run_settings.runtime`, with the `access`, `plan` and
+  `tier` of each of its workflows as the run documents set them.
 - `QORY_STATUS_FD=<n>` makes `qory run` also write qory's lines, masked, to the open
   descriptor `<n>`: the `✓`, `✗` and `⚠` lines, every `qory run:` line, Forager's lines
   among them, and the last error line, an error of the flags included, each only when
@@ -564,7 +684,10 @@ release may change what an existing document does, and states it under Upgrading
   setup container of `wall.setup: outside` gets neither the variable nor the route. See The
   route to qory in `docs/run.md`.
 - A session runs the repository's full test suite when the run documents have `full_suite`
-  true. Forager's after step runs it after the agent's container is removed: when HEAD moved,
+  true in `type_settings`. A session runs no suite when `full_suite` is false, when
+  `type_settings` has no `full_suite`, when the documents have no `type_settings`, and when
+  `full_suite` is outside `type_settings`.
+  Forager's after step runs it after the agent's container is removed: when HEAD moved,
   the `full` command of the plan type set in `workflows.<name>.plan` for the run's workflow, in the
   version that the work item had at the launch, runs in a fresh clone of HEAD, in a container
   of the run's image on the run's network, so the run's egress policy applies. A session that
@@ -584,19 +707,272 @@ release may change what an existing document does, and states it under Upgrading
   nothing. If qory cannot post the verdict, the run closes `failed`. A stop of `qory run` during
   the suite closes the run `cancelled`, with the reason `interrupted`. See The full suite in
   `docs/run.md`.
+- A run whose model key the model provider rejected, while another model key of the run
+  is usable, ends with `✗ the run was paused: the model provider rejected a model key,
+  and the run can continue on another key` after the runtime's line, exit 1. When the
+  gateway closed the run, the line is `✗ the run was paused: the model provider rejected
+  a model key, <runtime> was stopped, and the run can continue on another key`. qory
+  closes the run `paused` with the reason `model_key_switch` and the runtime's exit
+  status, and a control plane can continue the run on the other key. `qory run resend`
+  says the end of such a run as `paused: the model provider rejected a model key, and the
+  run can continue on another key`. A run whose model keys the model
+  provider all rejected ends with `✗ the run failed: the model provider rejected every
+  model key` after the runtime's line, exit 1, and qory closes it `failed` with the reason
+  `model_key_unauthorized` and the runtime's exit status. See `docs/run.md`.
+- Version 1 of the review report format, `contracts/harness/v1/review-report.schema.json`:
+  the `report.json` that one reviewer of a review round writes and qory's review round
+  reads. It has `reviewer`, the reviewer's agent name, and `findings`, each `blocking` or
+  `non-blocking`, with `quote`, `problem`, `fix`, `proof` and `point`, a line with at
+  least one character that is not a space. A blocking finding has a `failing check` or a
+  `failing input` as its proof. See The review report format in
+  `contracts/harness/v1/README.md`.
+- Version 1 of the primitives, `contracts/harness/v1/primitives.schema.json`: the `line`,
+  `title`, `text`, `reference`, `link` and `amount` that the schemas of artifact types have in
+  common. A `json_schema` in a `process.yaml` can refer to a definition by the address of
+  the file, such as
+  `https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/title`. qory resolves
+  that address from a built-in copy and reads no file or URL; a reference to any other
+  address fails as before. See The primitives in `contracts/harness/v1/README.md`.
+- An artifact type of a `process.yaml` can have `deliver: {send: end_of_run}` or
+  `deliver: {send: after_gate}`. `deliver` marks a type that Apiary delivers to the
+  target in the run documents, at the end of the run or after the gate of the run's
+  stage passes; a type without `deliver` is stored and never delivered. Only a
+  structured type has `deliver`, with a `size_limit` of at most 786432 bytes, and its
+  `json_schema` has the root `type` `object`, so that no value but an object validates,
+  and a top-level property `target` that is the primitive `reference`, written as a
+  `$ref` to `primitives.schema.json#/$defs/reference`, in an `allOf`, or through a
+  definition under `$defs`, or as a written-out copy of that definition. In a
+  written-out copy, each definition that it refers to under `$defs` is the definition of
+  that name in the primitives. The `target` has no `type` beside the reference but
+  `object`, on the property or in an `allOf` entry. Its name is in the `required` list
+  of the root, and only the root list counts. A schema fails when `$id`, `$anchor` or
+  `$dynamicAnchor` is a key anywhere in it, also as the name of a property or a
+  definition, because `$id` changes where a `$ref` points. It fails when the root
+  `$schema` is anything other than `https://json-schema.org/draft/2020-12/schema`, with or
+  without a final `#`, because draft-07 ignores the keys next to a `$ref`. It fails when
+  the `$ref` that leads to the `target` goes through a `$defs` name with a character
+  other than a letter, a digit, `_` or `-`, because the compiler decodes `%`, `~0` and
+  `~1` and splits a name at `/`.
+  A `deliver` that breaks a rule stops the command with the fix on the first line, at
+  most 100 characters, and the type name on the second line, such as ``Add a top-level
+  `target` of the primitive `reference` to the schema, or remove `deliver`.``
+- A top-level property of a type with `deliver` can have the keyword `x-qory-fill` with
+  one of these values, each on one property at most: `pushed-commits` on a list whose
+  `items` are the primitive `reference` (the commits qory pushed to the target, oldest
+  first), `pushed-head` and `pushed-base` on a `reference` that the property takes
+  through a `$ref`, to the primitives or to a local `$defs` `reference`, with no `type`
+  beside the `$ref` but `object`, `pushed-branch` and `pushed-base-branch` on a string,
+  and `pushed-commits-left-out` on an integer. qory stops the command with the fix on
+  the first line when `x-qory-fill` is on `target`, below the top level, on a property
+  of another shape, a value that qory does not fill, or in a type without `deliver`.
+- A stage of the `process` of a `process.yaml` can have `outputs`, a list of objects
+  with `type`, the name of an entry of `artifact_types`, and `required`, `true` or
+  `false`, `false` when left out. An output has no other key. qory stops the command
+  with the fix on the first line when a stage has an output type that `artifact_types`
+  does not list, or when a stage lists a type twice; the message has the stage and the
+  type.
 
 ### Changed
 
-- A push that landed with no version stored, and a push that fails as a branch that moved,
-  give one way out in the line of `qory run`: `delete branch qory/<work item id> of <path>
-  on <system>`. Deleting it loses the commits on that branch that no version has. The next
-  run creates the branch at `target_version` when no version exists, and starts from the
-  last version otherwise.
-- The lines that stopped a run on a stored branch version with a fix for Qory Apiary
-  (a ref, a file, a format, a commit that is missing, is no commit, differs in `.qory` or
-  fails to check out) now state the fact first: `Version <n> of the artifact branch has a
+- A read run whose documents contain a harness document and whose inputs list
+  `destinations`, such as an Explore run, fetches nothing before its session; the agent
+  clones the destinations it needs with `qory destination clone`. A run with no
+  `destinations`, such as Build or Verify, and a run that may write, which also reads its
+  branch and runs its push step, fetch as before. A read run with `destinations` whose
+  documents contain no harness document fetches its target alone, for the harness of the
+  target's repository.
+- On Claude Code, a read workflow's run allows `Bash(/qory/qory destination *)` and
+  `Read(//tmp/qory-destinations/**)`, adds `/tmp/qory-destinations` to
+  `permissions.additionalDirectories`, and gets that folder, new and empty with mode 700,
+  before the agent starts.
+- qory reads the run documents, the pool's answers from Qory Apiary, the answer to the
+  next-session request, an integration's description and Forager's `runtimes.json` without
+  a member that their contract does not define, and matches each member's name by exact
+  case. Documents with such a member, such as `run_id`, start the run. A document whose
+  `must_understand` lists a member that qory does not read stops as one that breaks its
+  schema; for the next-session answer, the run closes `failed`, exit 1. qory reads the
+  agent's `verdict.json` and the run API's answers by exact case too, and checks no
+  `must_understand` in them.
+- The verdict format takes a verdict kind and a point action that a later version adds:
+  a kind of lower-case letters, digits and hyphens, and an action of lower-case letters,
+  digits and underscores, each starting with a letter and at most 64 characters. The
+  submission's `verdict` takes such a kind too. qory passes a kind it does not know on
+  unchanged, and takes it as not passed, so no draft follows. Over a red full suite, or a
+  suite that did not start, such a kind becomes `escalate` with the agent's points and the
+  suite's point. `qory run verdict` takes only `passed`, `changes-requested` and
+  `escalate`, and only the actions `answer` and `run_again`.
+- `qory run pool` acts on a signed 403 or 409 from Qory Apiary whose body it cannot read
+  by its status alone: it keeps the dispatch and sends the release again, or `dispatched`
+  again while the lease lasts. A machine end stops on a signed 400, 403 or 404.
+- An `artifact_types` message whose first line has more than 98 characters shows each
+  long key or type name shortened on that line and in full on its last line.
+- `qory work-item show`, `qory artifact pull` (`index.json`, the files of a version and
+  their names) and the message of `qory artifact push --withdraw` for a version that a
+  person uploaded write each hidden character as `<U+XXXX>`. A hidden character is a
+  control or format character except newline, tab, the zero width joiner and non-joiner,
+  or a line or paragraph separator. Qory Apiary keeps the stored text unchanged. `.json`
+  files stay valid JSON, any other file that is not valid UTF-8 or has a NUL byte stays as
+  it is, and an escaped file is downloaded again on each pull.
+- A run from a run code runs the step `workflow`, in place of `explore`: it starts the
+  workflow that the run documents set, whichever workflow of the process Qory Apiary
+  starts. The documents name what the run is for in `subject`, with a `kind`, such as
+  `work_item` or `ticket`, and an `id`, in place of `work_item`, and may set a
+  `trigger`, such as `take_in`, which qory reads and changes nothing for. qory checks
+  `inputs.domain` and `inputs.work_item.id` only for a subject of the kind `work_item`,
+  and only such a run works on the branch `qory/<work item id>`. Documents with the step
+  `explore` or the member `work_item` stop the run after the redemption, exit 1, with `it
+  breaks documents.schema.json`. Documents of a step other than `workflow` and
+  `prebuild`, which stopped with `update qory: … for the steps explore and prebuild
+  only`, and documents with neither `workflow` nor `harness_hidden`, which stopped with
+  `set a workflow for the workspace in Qory Apiary, then take the work item in again:
+  …`, stop with `it breaks documents.schema.json` too.
+- The `config.toml` of a Codex home, and of a walled Codex run, sets
+  `web_search = "disabled"`. Without the key, Codex 0.169.0 turns web search on: cached,
+  or live in a run with `--sandbox danger-full-access`, such as a walled run.
+- The `config.toml` of a Codex home, and of a walled Codex run, sets
+  `features.unified_exec_tty = false`. A shell started with a terminal takes commands
+  through `write_stdin`, for which Codex runs no `PreToolUse` hook. A Codex agent can no
+  longer start an interactive shell with a terminal.
+- qory stops every Codex run, walled or not, before the agent starts, when its Codex
+  arguments before `--` contain `--dangerously-bypass-hook-trust` or `--trust`, each also
+  with `=`, set `hooks`, `features.hooks`, `features.codex_hooks`,
+  `features.unified_exec_tty` or `projects` with `-c` or `--config`, a key under one, such
+  as `hooks.Stop`, or the table `features`, or pass `hooks`, `codex_hooks` or
+  `unified_exec_tty` to `--enable` or `--disable`. The error has two lines, ``Remove the
+  `<flag>` flag and its value from the run's Codex arguments.`` and ``In this run, qory
+  reserves `<key>`; the run takes no value for it from the arguments.``, where `<flag>` is
+  `-c`, `--config`, `--enable` or `--disable` as typed and `<key>` is the key, such as
+  `hooks.Stop`, or `features.<feature>` for `--enable` and `--disable`. For the table
+  `features` in a run without a wall, the second line is `` `features` is a table that
+  contains `features.hooks`, which qory reserves in this run. `` The key is on the second
+  line, so the first line does not grow with the key. `--trust` stops the run with
+  ``Remove `--trust` from the run's Codex arguments.`` and the next line `` `--trust`
+  saves trust for a project folder with no trust setting, and Codex then reads the
+  folder's `.codex/config.toml`, which can set `features.hooks = false`. `` `codex exec
+  --trust` writes that trust into `$CODEX_HOME/config.toml`. Before, a run without a wall
+  stopped on most of them at Forager's check, with Forager's lines, and passed a key under
+  `hooks`. A walled run stopped on `hooks.state` and `hooks={…}`, and passed the other
+  keys under `hooks`, such as `hooks.Stop`. Every run passed `--trust`.
+- A run from a run code whose workflow documents contain no `run_settings` stops before
+  anything is installed or fetched, with `The run settings set no runtime, so the run
+  did not start; the code is used.` and `qory runs one of claude and codex.` Until now,
+  such a run started on `claude`. Workflow documents start an agent session, so they
+  require `run_settings` with a `runtime`. Documents whose `run_settings` are null, or
+  whose `runtime` is missing, empty or null, stop with the same line, where they stopped
+  with `it breaks documents.schema.json`. A workflow runs on the runtime of the
+  workspace, or of the workflow's settings when they set one, which Qory Apiary sends. A
+  prebuild needs no runtime and runs as before.
+- A run from a run code runs only on `claude` and `codex`, the runtimes that have a
+  descriptor in Forager's `runtimes.json` and that qory installs. On any other runtime,
+  such as `gemini`, `opencode` or `cursor`, it stops before anything is fetched, with `qory
+  runs a run code's workflow on one of claude and codex,` and the next line `and not on
+  <runtime>; the code is used`. Until now, a run on `gemini`, `opencode` or `cursor`
+  started, with no install of the runtime.
+- Three texts name what each key is. `qory run pool` with a key not enrolled for a pool
+  stops with `Enrol an access key with a code made for the pool: this key was enrolled
+  without one.` A git source that is not https in a run from a control plane stops with
+  the fix alone on line 1, `use an https URL for <source> in <file>.`; the example URL
+  and the cause follow on lines 2 and 3, and for ssh the cause is `ssh would sign in
+  with your private keys in ~/.ssh, outside the gateway.` With a hidden harness, line 1
+  is `use an https URL for <source>, then take the work item in again.` and line 2 the
+  cause. The help of `qory access-key
+  enrol` says "this machine's access key", and that enrol stops with an error when
+  `access-key-secret` exists. `docs/run.md`, `docs/harness.md` and the harness contract
+  README call the harness keys of a machine's `qory.yaml` "machine harness settings".
+- The push step stores a version of the artifact type `submission`, in place of `branch`,
+  one for each pushing session, with the verdict `none` when the session wrote none. Such a
+  session is the whole review round.
+  The step checks the head of the branch on the forge before it pushes. A head that is not
+  the commit the run expected ends the run `failed` with the code `push_head_changed`, after a
+  session that passed, failed or timed out. The push replaces the branch only when its head
+  is a head that the work item's record has for a cancelled run (one head for each push)
+  and that descends from the start commit, with a lease on that head. qory fetches
+  the history of the branch head only when a cancelled run recorded that head, and then
+  checks that it descends from the start commit. qory stops on a head below, above or
+  beside a recorded head, with no fetch. A run starts at the newest commit that an earlier run
+  pushed and a person did not cancel.
+- The submission has `base.branch` for each repository the run pushed: the name of the
+  repository's default branch, read when the run fetched it. A name of more than 255
+  characters is left out.
+- A module manifest can declare `submit_program`, a command of the module that opens the
+  draft pull request. A composed harness has one; a second declaration stops the compose.
+- A session hands its title, description and the step of each commit to the submit step in
+  the file at the path in `QORY_SUBMISSION_HANDOFF`. A commit with no step is `unreviewed`. qory
+  reads the file inside the checkout: a link as the file, or a link that leads out of the
+  checkout, ends the read. qory drops each of these, with a line that states the cause and
+  the values: a title with a control character; a title with no character that is not a
+  space, U+200C or U+200D; a title, description or step that is over a limit of the
+  submission format; a description with a NUL character or a line that is a marker of the
+  draft's block (`<!-- qory:start -->` or `<!-- qory:end -->`); a step with a character that
+  stops a title; and a step whose key is not a full lower-case commit id. One rule covers a
+  title, a step and the name of a machine step: a control character, a format character
+  other than U+200C and U+200D, and U+2028 and U+2029 stop a title or a step, and a name
+  loses them. U+200C and U+200D, as in an emoji sequence, stay.
+- qory adds `/.qory/handoff/` to the checkout's `.git/info/exclude` for a run on a work
+  item's branch, so `git add -A` and `git commit -a` leave the hand-off file out of a commit.
+  A commit of the run that has a path under `.qory/handoff/`, in any letter case, as
+  `git add -f` makes one, stops the push step before any push, and the run closes `failed`.
+- A run from a run code starts no submit program, relay, container or write token for the
+  forge's API: the push step pushes and stores the submission, with the draft `no-program`,
+  and the forge's adapter opens the draft pull request from it. The `submit_program` of the
+  composed harness is for a run with neither a run code nor a run key (a run with a run key and
+  no run code pushes nothing locally and runs no program). For each repository, qory pushes
+  the checked head of `qory/run-<run id>` to the remote origin's one push address with the
+  person's git login, after the checks of every repository and before any program. qory
+  pushes to `origin` by its name, so git's `insteadOf` rules apply once. It pushes nothing,
+  and runs no program, when the remote has several push addresses or an address that is not
+  a host and a repository path of a forge. Then it runs the program once for each repository,
+  on the person's machine, outside the wall, with the person's login of the forge's command
+  line, in a new session with no terminal, with the person's environment without any `QORY_`
+  variable, and with `GIT_TERMINAL_PROMPT=0` and `GH_PROMPT_DISABLED=1`. The program never
+  pushes. A run whose session did not pass, or that wrote no hand-off text, gets the draft
+  `none`. For each repository whose program returned a draft, `qory run` prints
+  `Draft: <address>` as its last lines. The program gets the inputs `QORY_SUBMIT_*` and
+  prints plain lines: the five `draft_` lines and a `commit_url` line for each commit. qory
+  stores them as the draft and the commit addresses, checks each value, and leaves out a line
+  that it cannot use. A program that ends with status 3 means that the person has no login of
+  the forge's command line: the draft is `{"none": "login-needed", "exit": 3}`, qory prints the
+  login command that the program prints as the first line of its standard error, and the
+  branch stays pushed. A program that runs past 120 seconds is `program-timeout`. The
+  submission format has the reason `login-needed`, the exit 0 for `program-failed`, and the
+  draft states `closed` and `merged`. In this build no push check is registered, so a run with
+  no run code and no run key pushes nothing, runs no program and prints `qory run: Push each
+  branch by hand: the key and scope push checks of qory run are not registered.`, then one
+  `Branch: <branch> in <folder>.` line for each repository with commits. A remote with
+  several push addresses gets `qory run: Remove the extra push addresses of remote origin, so
+  it has one.`, how to list the configured addresses with the file of each, how to remove
+  the `pushurl` values of each file that `--show-origin` shows (`git config --file <file>
+  --unset-all remote.origin.pushurl`, and a hand edit for a file whose path git prints in double
+  quotes), what to do for a value that shows as `command line:` (unset `GIT_CONFIG_COUNT` and
+  `GIT_CONFIG_PARAMETERS`, with the fish form, then run qory again), and `git remote set-url
+  --push origin <address>`. A push that landed, followed by a failure to list the run's commits,
+  gets `qory run: Open a draft by hand if you want one: qory pushed the branch but could not
+  list commits.`, and the next line is that qory ran no program for that repository. A second
+  run does the work again on a new branch. See The submit program in `docs/run.md`.
+- A push that landed with no version stored has one way out in the line of `qory run`:
+  `delete branch qory/<work item id> of <path> on <system>`. The line also has this way out
+  when the list of the run's commits fails after the push landed. A branch whose head is not the
+  commit the run expected stops the step before any push, with the line `Set the branch to the
+  expected commit or delete it` and the branch, the head and the expected commit on the next
+  line. To go on, do one of the two, then take the work item in again. Moving the branch back
+  works when the `Expected:` line shows `the start commit`; with `this run's last
+  push` it works only when Qory Apiary recorded that push, and otherwise the next run stops at
+  the head check again, so delete the branch. Line 3 of the text is the loss: either way, the
+  commits on the branch that no version has are lost. A branch that is not on the forge cannot be deleted: its
+  line starts with `Create the branch at the expected commit on the forge`, has
+  `Head: none`, and has the `git push` command that creates the branch. The next run creates
+  a deleted branch at `target_version` when no version exists, and starts from the last
+  version otherwise.
+- The lines that stopped a run on a stored version of the artifact submission with a fix for
+  Qory Apiary (a ref, a file, a format, a commit that is missing, is no commit, differs in `.qory` or
+  fails to check out) now state the fact first: `Version <n> of the artifact submission has a
   ref other than <ref>, so the run did not start; the code is used`. They no longer name a
   fix in Qory Apiary, because only a run stores a version.
+- A run stops before the agent starts, with the line `Report this run to the instance admin of
+  Qory Apiary.` and a second line `The list of pushed commits has <value>, which is not a
+  full commit id, so the run did not start; the code is used`, when the work item's list of
+  pushed commits has a value that is not a full commit id. qory passes only full commit ids
+  to git.
 - The middle model tier is named `balanced` in place of `fast`. The tiers are `light`,
   `balanced` and `thinking`. `${qory:balanced}`, `--tier balanced=<model id>`,
   `--tier-effort balanced=<effort>`, `harness.tiers.balanced`, a workflow's `tier: balanced`
@@ -604,11 +980,15 @@ release may change what an existing document does, and states it under Upgrading
   refuses `fast` as it refuses any name that is not a tier, with the list of the tiers.
 - A run from a run code reads its time limit from `time_limit_minutes` at the top of the
   run's documents. The documents have no `run_settings.time_limit_minutes` any more, and
-  qory stops a run whose documents have one. A run whose documents set no
-  `time_limit_minutes` keeps the limit of its workflow, else 3 hours. The documents can
-  also contain `shared_run` and `full_suite`. With `full_suite` true, the session runs the full
-  test suite when it ends, as The full suite in `docs/run.md` describes; qory reads `shared_run`
-  and changes nothing for it.
+  qory stops a run whose documents have one. `time_limit_minutes` is the only time limit
+  of the run's session: a stack's workflow sets none. When the run documents have no
+  `time_limit_minutes`, qory sets no time limit for the session. Qory Apiary writes 180
+  minutes for a workflow with no Time limit. The limit counts from the agent's start, as
+  `--timeout` does. At the limit the session stops, and the
+  full suite's after step and the push step still run. The documents can
+  also contain `shared_run` and `type_settings`. With `full_suite` true in `type_settings`,
+  the session runs the full test suite when it ends, as The full suite in `docs/run.md`
+  describes; qory reads `shared_run` and changes nothing for it.
 - The push step of a write run pushes through the run's push proxy, which sets the run
   configuration's push credentials alone, and the run's proxy no longer adds push
   credentials. A run with no push credential stops at the push with `Contact
@@ -705,15 +1085,39 @@ release may change what an existing document does, and states it under Upgrading
   newest version that the run API's artifact index does not mark `cancelled`. A version
   that a cancelled run made counts for no stage, and an artifact whose versions are all
   cancelled gets no folder. The start commit of a run skips a cancelled version of the
-  artifact `branch` too. Before, all three took the newest version, cancelled or not. An
+  artifact `submission` too. Before, all three took the newest version, cancelled or not. An
   index without the field `cancelled` reads as no version cancelled.
+- qory builds with Forager 57a8deb5 and integrations e4bf534a.
+  - In a run configuration from a control plane, the run's model key is
+    `default_model_provider_credential_name`, which was `model_credential`, and each API
+    credential has a `group`. In the next-session answer, a session's model key is
+    `model_provider_credential_name`.
+  - A run configuration whose API credential has `chosen` stops the run,
+    `run_configuration_invalid`. When the active key reaches its limit, the gateway moves
+    the run to a key with no known reset first, then to the key that resets soonest.
+    Before, the key with `chosen` came first whenever it was usable.
+  - In a run without a wall, qory prints the error for a Codex argument on two lines:
+    the fix, which contains the flag, then the cause. See `docs/run.md`.
+  - Forager stops a run without a wall before Codex starts, exit 1, when `-c`,
+    `--config`, `--enable` or `--disable` sets `features.hooks`, `features.codex_hooks`
+    or `features.unified_exec_tty`. qory stops these arguments first, with the lines of
+    a walled run: see the entry "qory stops every Codex run, walled or not" above.
+  - Each session's environment has `QORY_SESSION`, the session's number in the run,
+    counted from 1. Without a wall, Forager's value replaces any other. A walled run that
+    passes `QORY_SESSION` by `wall.env`, `--env` or the harness's `env` does not start,
+    `variable_reserved`, as for any other `QORY_` name.
+- qory builds with Forager 92ccf768. The gateway does not start when a machine
+  credential in `forager.yaml` has a path in `paths` that matches no request, such as a
+  path with a `.` or `..` segment, and its line has the path. A run that the gateway
+  closes because the model provider rejected a model key ends with the reason
+  `model_key_switch` or `model_key_unauthorized`, two reasons of Forager's contract.
 - qory builds with Forager f344b7a7.
   - A run keeps its wall only when a container of the run may still run; a network or
     folder of the wall that could not be removed no longer keeps it.
   - A session of Claude Code starts the program that qory installed, from
     `<runtimes>/claude/<version>`. Behind a wall, Forager mounts that folder read-only at
     `/qory/runtime/claude`, and `dev.qory.session.started` has the installed version as
-    `runtime_version`. A session of Codex starts from the image as before.
+    `runtime_version`.
   - Forager sets `DISABLE_AUTOUPDATER=1` in every launch of Claude Code, so it does not
     update itself. A value of it from the run, the machine or the harness no longer
     applies.
@@ -734,6 +1138,51 @@ release may change what an existing document does, and states it under Upgrading
     `user:pw@registry.example/agent@sha256:…`, shows as `registry.example/agent@sha256:…`
     in qory's lines, errors and the record. The manifest check no longer sends the
     login as a path to Docker Hub's registry.
+
+- A person's walled run of Claude Code starts Claude Code on an empty configuration folder,
+  as a walled run given a run key does: `CLAUDE_CONFIG_DIR` is `/tmp/qory-agent-home`, and
+  its `projects` folder links to the run's transcript folder. Before, Claude Code read
+  `~/.claude` and `~/.claude.json` in the image's `HOME`. A `CLAUDE_CONFIG_DIR` in
+  `harness.launch.claude.env` no longer applies behind a wall. Claude Code gets none of the
+  image's values of the variables qory removes on a run given a run key, such as
+  `ANTHROPIC_*`, `CLAUDE_*` and `NODE_OPTIONS`, and the run stops when the image has
+  `/etc/claude-code`. A read run also gets `/tmp/qory-artifacts` new and empty for its
+  artifact files, and stops when the image has something at that path. An unwalled run is
+  unchanged. See Claude Code behind a wall in `docs/run.md`.
+- On a walled run of Claude Code whose `ANTHROPIC_API_KEY` is the gateway's placeholder,
+  qory writes `.claude.json` with the approval of that placeholder into the empty
+  configuration folder, so an interactive Claude Code starts without asking you to
+  approve the key.
+- A walled run starts `codex exec` with `--sandbox danger-full-access` after `exec`,
+  unless an argument before `--` sets a sandbox mode, bypasses one, or is
+  `--approve-for-me` or `--not-so-yolo`, which Codex refuses beside `--sandbox`. Inside
+  the wall every other sandbox mode of Codex fails before it runs a command. The prompt
+  of a walled `codex exec` mentions the skill by its path,
+  `[$<name>](/var/lib/qory-codex-home/skills/<name>/SKILL.md)`, not `$<name>`, when the
+  composed harness has that skill. An unwalled run is unchanged.
+- A walled Codex run starts Codex on a new home: `CODEX_HOME` is
+  `/var/lib/qory-codex-home`, where qory binds `<user cache>/qory/runs/<run
+  id>/codex-home` writable for Codex's sessions, temporary files and state database. qory
+  writes `config.toml` with its additions, which mark untrusted the checkout, the working
+  folder and each folder that a `-C` or `--cd` argument names, `hooks.json` with no hook,
+  an empty `.env`, `environments.toml` and `AGENTS.override.md`, the harness's
+  `AGENTS.md`, and copies of `rules/`, `skills/` and `agents/` into `<user
+  cache>/qory/runs/<run id>/codex-fixed`, and binds each read-only at its path in the
+  home. qory writes the harness's Codex hooks, those of `settings/codex/hooks.json` and
+  then those of `settings/codex/config.toml`, into `hooks.json` of the folder
+  `codex-fixed/etc-codex`, mode 0755, and binds that folder read-only at `/etc/codex`, in
+  place of anything the image has there. Codex 0.170.0 runs those hooks as managed: with
+  no stored hash, and also when a `hooks.state` setting turns them off. A walled Codex run
+  copies the composed home's `skills/`, `rules/` and `agents/`
+  with every link replaced by the file or folder it leads to, since Codex 0.167.2 passes
+  over a `SKILL.md` that is a link. A link whose target lies outside the composed home,
+  the folders of the harness's modules and qory's module cache fails the run with ``Remove
+  the link `<path>` from the harness.`` and the next line ``It leads to `<target>`,
+  outside the harness's modules, and a Codex run copies only files inside them.`` qory
+  removes both folders when the run ends. Before, `CODEX_HOME` was the runtime's directory
+  of the composed home, which a walled run binds read-only. A `CODEX_HOME` in
+  `harness.launch.codex.env` no longer applies behind a wall. An unwalled run is
+  unchanged. See Codex behind a wall in `docs/run.md`.
 - `qory gateway` keeps its runs when SIGINT or SIGTERM stops it: a gateway started again
   on the same directory within 120 seconds continues them, and the agent sessions behind
   it go on. Before, a run open at a gateway that stopped was over. The directory is
@@ -967,10 +1416,12 @@ release may change what an existing document does, and states it under Upgrading
   the image of `wall.prebuild_image`, on the host before a run; a missing prebuild image
   fails the prebuild with the engine's error for the pull. See The engine proxy in
   `docs/run.md`.
-- The line of a run from a run code whose time limit came before the runtime started
-  contains `the workspace's harness` for a harness document that defines a stack, and `the
-  checkout's harness or the base it extends` for a run whose documents contain no
-  harness, in place of `the base of the checkout's harness, when it has one`.
+- The steps of a run before the agent's start, from the fetch of its repositories to the
+  setup commands, may take 30 minutes together, and no setting changes that. A run past
+  the limit closes `cancelled` with the reason `timeout`, exits 124, and prints a fix for
+  the step that was running, then `the run was cancelled during <step>:` and `the steps
+  before <runtime> starts may take at most 30 minutes`. A run from a control plane prints
+  these two lines alone. See Time limits in `docs/run.md`.
 - A run with a run key or a run code fetches every git source of its harness through the
   run's stack proxy: the stack, its modules, and the modules of the checkout's file,
   also when the checkout's file is the whole harness. The run's host proxy, with the
@@ -1043,11 +1494,12 @@ release may change what an existing document does, and states it under Upgrading
   `claimed`, and no run starts for it.
   While the pool runs, the release is sent again after the same waits as `gone`, until
   Qory Apiary releases the dispatch or returns 410 `gone`, 409 `lease_expired`, 409
-  `machine_exists`, which `gone` follows, or a signed 400, 403 or 404. A release left
-  when the pool stops is sent at its next start. A restart of the pool stops a run left
-  from a crash of the pool, removes the containers and networks of its wall, and
-  reports its machine as gone. It sends SIGTERM to each process of the run's session,
-  then SIGKILL to each one still there 30 s later while the run still holds its lock.
+  `machine_exists`, which `gone` follows, a signed 400 or 404, or a 403 that reads as
+  `forbidden`. A release left when the pool stops is sent at its next start. A restart
+  of the pool stops a run left from a crash of the pool, removes the containers and
+  networks of its wall, and reports its machine as gone. It sends SIGTERM to each
+  process of the run's session, then SIGKILL to each one still there 30 s later while
+  the run still holds its lock.
   It signals a session only when it can prove that the session belongs to the run;
   otherwise it keeps the run and prints why. The pool section of `forager.yaml` takes
   `runs` (how many runs this host runs at once; 1 when not set), `registry` and
@@ -1100,11 +1552,11 @@ release may change what an existing document does, and states it under Upgrading
   `qory run: composed <n> entries from <m> modules for <runtime>` on stderr. You no longer
   run `qory harness compose` before `qory run`.
 - `qory run` opens the run at its gateway before it composes the harness, and closes the
-  run with the run's outcome once the session ends. `--timeout` counts from the open, so
-  it covers the compose and the session. A compose that fails closes the run as failed
+  run with the run's outcome once the session ends. `--timeout` counts from the agent's
+  start, so it covers the session alone. A compose that fails closes the run as failed
   with no session started (`no_session`), and qory prints the path of the run's record
-  after the error line. A signal or the time limit before the agent starts cancels the
-  run, exit 1 or 124.
+  after the error line. A signal, or the limit of the steps before the agent's start,
+  cancels the run before the agent starts, exit 1 or 124.
 - The record's `dev.qory.session.started` lists the harness's git sources, each with the
   full commit the compose used.
 - Given a run key, `qory run` reads a module or a stack that a file in the checkout lists
@@ -1184,7 +1636,8 @@ release may change what an existing document does, and states it under Upgrading
   commands, in place of `preparation`.
 - `qory run agent-env` makes the agent's home of a dispatched walled run of Claude Code,
   after the setup, and its error lines start with the fix, such as `qory run agent-env:
-  remove /tmp/qory-agent-home from the image and from the setup commands: …`.
+  remove /tmp/qory-agent-home from the image and from the setup commands`, then the cause
+  on the next line.
 - Behind a wall, and for every run through a separate gateway, the gateway reaches the
   gateway's machine and a private network address, such as `10.0.0.5`, only for a host
   that `gateway.egress.allow` of the gateway's `forager.yaml` lists by name, and that the
@@ -1211,6 +1664,123 @@ release may change what an existing document does, and states it under Upgrading
 - Compose refuses a Claude Code settings `env` that sets one of 10 model or effort
   variables, such as `ANTHROPIC_MODEL`. It refuses them the same way in the
   configuration's `env`, in `harness.launch.claude.env` and in a module's `env` export.
+- Compose refuses a Codex `settings/codex/config.toml` that sets `model_provider`,
+  `model_providers`, `projects`, `hooks.state`, `features`, `analytics`, `otel`, `notify`,
+  `web_search`, `feedback.enabled`, `check_for_update_on_startup`, `openai_base_url`,
+  `chatgpt_base_url`, `responses_api_metadata`, a key of the form
+  `experimental_realtime_*_base_url`, `profile`, `profiles`, `cli_auth_credentials_store`,
+  `allow_login_shell`, `model_instructions_file`, `experimental_compact_prompt_file`,
+  `model_catalog_json`, `js_repl_node_path`, `sqlite_home` or `log_dir`, with ``Remove the
+  reserved key from `settings/codex/config.toml`.`` and the next line ``qory reserves
+  `<key>`; a Codex run takes no value for it from the harness.`` The key on the second
+  line has each control character written as an escape, such as `\n`. A fragment may
+  still set the other keys of `hooks`, such as `hooks.Stop`.
+- A walled Codex run refuses Codex arguments before `--` that set one of those keys or
+  `model_reasoning_effort`, a key under one, or a table above one, such as `-c
+  features.shell_snapshot=true` or `--config model_providers={}`, in the forms `--config`,
+  `--config=`, `-c`, `-c<key>=<value>` and `-c=<key>=<value>`, with ``Remove the `<flag>`
+  flag and its value from the run's Codex arguments.`` and the next line ``In this run,
+  qory reserves `<key>`; the run takes no value for it from the arguments.``, where
+  `<flag>` is `-c` or `--config` as typed. For a table above a reserved key, such as
+  `feedback`, the next line is `` `feedback` is a table that contains `feedback.enabled`,
+  which qory reserves in this run. `` The run stops before the agent starts, with exit
+  status 1. Forager puts its `--config` flags first, and Codex takes the last one for a
+  key. An unwalled run gets Forager's shorter check, in the entry for unwalled Codex runs.
+- A walled Codex run refuses `--oss` and `--local-provider` before `--`, with ``Remove
+  `<flag>` from the run's Codex arguments.`` and the next line ``A Codex run takes its
+  model provider from qory and Forager, not from the arguments.``, and `--profile` in the
+  forms `--profile <name>`, `--profile=<name>`, `-p <name>`, `-p<name>` and `-p=<name>`,
+  with ``Remove `--profile` from the run's Codex arguments.`` and the next line ``A Codex
+  run takes its settings from qory and Forager, not from a profile.`` The run stops before
+  the agent starts, with exit status 1. An unwalled run gets Forager's shorter check, in
+  the entry for unwalled Codex runs. A run of another runtime is unchanged.
+- A walled Codex run refuses `--enable <feature>` and `--disable <feature>` before `--`,
+  also as `--enable=<feature>`, for every feature other than `hooks`, `codex_hooks` and
+  `unified_exec_tty`, the legacy name `connectors` too: Codex reads them as `--config
+  features.<feature>=true` or `false`. The text is ``Remove the `--enable` flag and its
+  value from the run's Codex arguments.`` and the next line ``A walled Codex run takes no
+  feature from its arguments, `<feature>` included.``, or the same with `--disable`. For
+  `hooks`, `codex_hooks` and `unified_exec_tty`, the next line is ``In this run, qory
+  reserves `features.<feature>`; the run takes no value for it from the arguments.``
+- A walled Codex run refuses `--ignore-user-config` before `--`, with ``Remove
+  `--ignore-user-config` from the run's Codex arguments.`` and the next line ``A Codex run
+  takes its settings from qory and Forager, not from the arguments.``, and `--search`,
+  with ``Remove `--search` from the run's Codex arguments.`` and the next line ``A Codex
+  run takes its web search setting from qory and Forager, not from the arguments.``
+- A Codex run, walled or not, stops on `--dangerously-bypass-hook-trust` before `--`,
+  with ``Remove `--dangerously-bypass-hook-trust` from the run's Codex arguments.`` and
+  the next line ``A Codex run takes its hook trust from qory and Forager, not from the
+  arguments.`` A walled Codex run stops on `--remote` and `--remote-auth-token-env`, also
+  with `=`, with ``Remove `--remote` from the run's Codex arguments.`` and the next line
+  ``A Codex run takes its app server from qory and Forager, not from the arguments.``
+  (`--remote-auth-token-env` likewise).
+- A walled Codex run refuses `--config` keys at `skills` or `cloud.skills`, under one,
+  or above one, such as `-c skills.bundled.enabled=true` or `-c cloud={}`, with the
+  `--config` line.
+- An unwalled Codex run stops before Codex starts, with exit status 1, when a Codex
+  argument before `--` sets a key Forager sets for Codex, such as `model_provider` or
+  `web_search`, or `model_providers`, `profile`, `profiles`, `responses_api_metadata`,
+  `openai_base_url`, `chatgpt_base_url`, `experimental_realtime_*_base_url`, `skills` or
+  `cloud.skills`, a key under one or a table above one; when it enables or disables
+  `plugins`, `apps` or `connectors`; or when it is `--oss`, `--local-provider`,
+  `--profile`, `-p`, `--search`, `--ignore-user-config` or `--remote`. qory prints
+  Forager's two lines, such as ``✗ remove the -c that sets model_provider from the
+  launch's arguments`` and the next line ``the session sets that setting for Codex, or the
+  setting changes where Codex sends its requests`` for `-c model_provider=x`, or
+  ``✗ remove the --config pair that sets model_provider from the launch's arguments`` and
+  the next line ``the session sets model_provider, and a later pair overrides the session's
+  value`` for `--config model_provider=x`. Before, an
+  unwalled run passed every argument unchanged.
+- A refusal of a walled Codex run's arguments writes each control character of the key
+  or feature it repeats as an escape, such as `\n`.
+- A walled Codex run on an image with a link at `/etc/codex` stops before Codex starts.
+  Docker binds qory's folder at the link's target, so a link to `/var/lib/qory-codex-home`
+  would show the writable home there. Forager reads the target of each bind in the image
+  before it starts the agent's container and stops the run with ``wall docker: make
+  "/etc/codex" a directory or file in the image, not a symbolic link``; the run closes as
+  failed and qory run exits with 1. A file or a folder at `/etc/codex` passes.
+- The line for an image with no `sh` reads ``the setup of a walled run runs sh from these
+  folders``, in place of ``the git session of a walled run``.
+- Compose accepts `settings/codex/read-access.rules`, Codex execpolicy rules for a run
+  whose access is `read`. It merges the file into no target file and places it in no
+  home. A walled read run on Codex writes it to `read-access.rules` in the `rules/`
+  folder of the Codex home; a run with any other access gets none. Several modules'
+  files are joined in module order. Any other file under `settings/` that is neither
+  `.json` nor `.toml` is still refused. See `contracts/harness/v1/README.md`.
+- The home of a walled Codex run disables, by name, every skill that no
+  `Skill(harness:<name>)` rule in `permissions.allow` of the harness's
+  `settings/claude/settings.json` allows: each skill in the home and in the checkout's
+  `.codex/skills` and `.agents/skills`, and every skill of the checkout by its path,
+  whatever its name. `Skill(harness:*)` allows every skill of the harness. It turns off
+  the skills Codex ships with `skills.bundled.enabled = false`, so Codex 0.170.0 installs
+  no system skills into the writable home, and a cloud's skills. See the codex entry
+  in `contracts/harness/v1/README.md`.
+- Compose refuses a Codex `settings/codex/config.toml` or `settings/codex/hooks.json` with
+  a hook whose `timeout` or `additionalContextLimit` is negative or fractional, with ``Set
+  `<key>` of the `<event>` hook to a whole number of 0 or more.`` and the next line ``The
+  hook is in the harness's `settings/codex/<file>`, and Codex ignores the whole file
+  otherwise.`` Codex 0.167.2 starts with its defaults when `config.toml` has such a
+  number, and drops every hook of a `hooks.json` that has one. A float such as 2.0 counts
+  as fractional.
+- Compose stops on a Codex `settings/codex/config.toml` or `settings/codex/hooks.json` with
+  a hook group or a hook that Codex 0.170.0 cannot decode, such as a `command` hook with no
+  `command` text, with ``Fix `hooks.<event>[<group>].hooks[<hook>]` in
+  `settings/codex/<file>` of module <name>.`` and the next line ``<cause>, and Codex reads
+  no hook of a file with such a hook.`` The group and the hook are numbered in that
+  module's file. For a module name too long for the first line, the second line starts
+  with ``The file is in module <name>.`` Codex reads no hook of a `hooks.json` with one
+  such hook. A walled Codex run makes the same check before it writes the hooks of
+  `/etc/codex`.
+- Compose refuses a module that ships `files/codex/auth.json`, Codex's login file, with
+  ``Remove `files/codex/auth.json` from module <name>.`` and the next line ``A Codex run
+  takes its model key from the run, not from a file.``
+- Compose refuses a module that ships `files/codex/hooks.json`, `files/codex/.env`,
+  `files/codex/environments.toml` or `files/codex/AGENTS.override.md`, with ``Remove
+  `files/codex/<path>` from module <name>.`` and the next line ``qory writes it for every
+  walled Codex run.`` It refuses a module that ships `files/codex/rules/read-access.rules`
+  with ``Remove `files/codex/rules/read-access.rules` from module <name>.`` and the next
+  line ``qory writes it for a walled Codex run that only reads, from the harness's
+  `settings/codex/read-access.rules`.``
 - A walled `qory run` given a run key does not start when `--env` or `wall.env` names a
   variable the runtime reads its model key from: `ANTHROPIC_API_KEY`,
   `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_AUTH_TOKEN` for Claude Code. An unwalled run,
@@ -1228,6 +1798,26 @@ release may change what an existing document does, and states it under Upgrading
   1024 entries, more than 4096 values, nesting deeper than 64 levels, or more than 256
   KiB, and a description that is not valid UTF-8, holds a `\u` escape of a lone
   surrogate or repeats a member.
+- Every qory command that describes an integration checks the description against the
+  integration contract of the `github.com/qoryai/integrations` commit qory is built with.
+  What changes for a description:
+  - `vendor`, `egress_hosts`, the `model_provider` role, and the `source` role's `apply`,
+    `item_noun`, `collection_noun`, `items`, `comments`, `submissions`, `targets`,
+    `guide`, `secrets` and `credential_scope` pass the check.
+  - A credential host that starts with `*.` fails the check.
+  - A `model_provider` role without the contract's shape fails the check. Before, any
+    object passed.
+  - A description with no `program_version` and a role other than `model_provider` fails
+    the check with `value must be 'model_provider'`, where it failed with `missing
+    property 'program_version'`. A data description, with no `program_version`, the one
+    role `model_provider` and no `writeOnly` setting, passes the check, and the command
+    then ends with an error, because it plays no role qory expands.
+  - A settings `$schema` that is not a URI fails the check with `is not valid uri`, where
+    qory printed `the settings schema is written in …`.
+  - A settings schema whose `$vocabulary` key, `patternProperties` key, `$id`, `$ref`,
+    `$dynamicRef` or `pattern` is not valid fails the check, where qory printed `the
+    settings schema does not compile`.
+  - Each rule of a failed check is cut at 200 characters, with `...` after it.
 - `qory run` given a run key starts Claude Code with `--setting-sources user`,
   `--strict-mcp-config`, and the harness's MCP list or an empty one. Behind a wall,
   Claude Code's `CLAUDE_CONFIG_DIR` is an empty folder qory makes after the commands the
@@ -1289,6 +1879,68 @@ release may change what an existing document does, and states it under Upgrading
   workflow, such as `agents/demo-author` and `capture-demos`, and the fix: add a module
   that fills the role, or drop the workflow. The other failures of the same check follow
   it in the same error. Before, the line showed only the skill and the agent.
+- The Codex directory of a home, `codex`, contains the skills as folders and regular
+  files copied from the modules, not as links. Each skill is copied within the limits of
+  a copy of one module entry, leaves out `.git`, and keeps each file's permission bits
+  without write for group and others. A skill edit reaches a Codex run on the
+  next compose. Until then `qory harness compose --check` exits 6 and names the changed
+  file, such as `codex/skills/review/SKILL.md  changed`.
+- A skill with a link to a folder that contains the link, such as `self -> .` or a link
+  to the module's folder, stops every compose that includes Codex with `copy <path> for
+  the Codex home: the folder contains itself through a link`.
+- The copy of `rules` and `agents` into a walled Codex run's home takes at most 10,000
+  files, directories and links, 1 GiB in all and 64 MiB a file, and leaves out `.git`.
+  Past a limit it fails with ``Ship fewer files in the modules.`` and the next line
+  ``codex/<folder> contains more than 10,000 files, directories and links, the most a
+  walled Codex run takes.``, ``Ship fewer files in the modules.`` and the next line ``The
+  files of codex/<folder> add up to more than 1 GiB, the most a walled Codex run takes.``
+  or ``Ship codex/<path> under 64 MiB.`` and the next line ``The file is larger than 64
+  MiB, the most a walled Codex run takes for one file.``
+- The character rule of the contract schemas is one for a line and one for a text. A line
+  has no control character, no U+2028 or U+2029, and no format character (Unicode
+  category Cf) except U+200C and U+200D, the joiners that emoji sequences need. A text
+  keeps tab, line feed and carriage return as its only control characters and has the same
+  other stops. Until this change, the schemas of the questions, acceptance criteria,
+  verification, review comments, proposal sources and verdict formats listed the stopped
+  characters themselves, and the lists stopped at U+FFFF: U+0600 and a tag character such
+  as U+E0041 passed. Each `$defs` `line` and `text` has the pattern of the primitives.
+  The checks of `qory run verdict` and of the review round stop the same characters.
+  The `point` of a finding in `review-report.schema.json` is a `line` too: a tab, U+200B
+  and U+E0041 in a point fail the report format.
+- The hand-off drops a `description` that has a character that a text does not have: a control
+  character other than tab, line feed and carriage return, U+2028, U+2029, or a Cf character
+  other than U+200C and U+200D, such as U+200B or the tag character U+E0041. It prints
+  `Remove the character U+200B at character 4 of the description. qory dropped the
+  text.`, and the commit is `unreviewed`. Until this change, the run stored the
+  description and the submission then failed the check of the format.
+- The step leaves out each `draft_title` line of a submit program whose title has a character
+  that a title does not have, such as U+200B or a tag character, or has no character that is
+  not a space, U+200C or U+200D. It lists the line as a line that qory cannot use, with the
+  cause and the character as a code point, and the draft is `program-failed` as for any draft
+  line that qory leaves out. After a timeout, a program that did not start or an exit status
+  other than 0, 1 or 2, the step lists no line, because qory reads none. Until this
+  change, the step stored such a title and the submission then failed the check of the
+  format.
+- The submission format stops the same characters. The title of the text and the title of a
+  draft are a line with a character that is not a space, U+200C or U+200D; a step is a line;
+  the description is a text. Until this change, the title stopped only the control
+  characters U+0000 to U+001F and U+007F, and a step, a description and the title of a
+  draft had no rule.
+- A stack, a stage name or a workflow in a `process.yaml` that has U+200B, U+2028, U+2029
+  or another character that a line does not have is stopped, with the fix `Set stack in
+  process.yaml to one line of text.` and the cause `The value has the character U+200B,
+  which a line of text does not have.` Until this change, only the control characters were
+  stopped.
+- The patterns of the primitives write the characters above U+FFFF, such as the tag
+  characters, as surrogate pairs. YAML reads no surrogate pair, so in a `process.yaml`
+  write each pair as `\UXXXXXXXX` in a double-quoted string, such as `\U000E0041`, when you
+  paste a schema of `contracts/harness/v1/` into a `json_schema`.
+- The patterns of the contract schemas and of the primitives write the control characters
+  as the regex escapes `\x00-\x1f` and `\x7f-\x9f`, and the branch name pattern of
+  `submission.schema.json` writes `\x00-\x20\x7f` the same way. A pattern written with
+  the JSON escape `\u0000` decodes to a raw control character, and a reader fails on a
+  file that has one. The patterns accept and stop the same characters as before. A test
+  fails when a pattern of a contract schema has a raw control character.
 
 ### Removed
 
@@ -1390,8 +2042,30 @@ release may change what an existing document does, and states it under Upgrading
   A git URL with a password in its user part prints as `https://user:(hidden)@host/…`.
   `qory harness launch` and its `--json` line print the values as written, since a person
   copies that line to run it.
+- A Codex run outside the wall loads every skill of the harness. Codex 0.167.2 skips a
+  `SKILL.md` that is a link, and the Codex home had the `SKILL.md` of a skill with a
+  reference in another of its files as a link.
 
 ### Security
+
+- These errors and lines print "(a value that contains a run key)", or the phrase for
+  the kind of key or code, in place of a value that contains `qak_`, `qrk_`, `qecr_` or
+  an enrolment code's prefix, in any letter case; line 1 is otherwise as before, and a
+  wrong value without one prints as before:
+  - `qory run verdict` with a wrong verdict, `qory artifact push` with a wrong type or
+    `--name`, and `qory artifact pull <type> --version N` with no version N;
+  - `unknown command`, for `qory <arg>` and for a stray argument of a command that
+    takes none, and `Unknown help topic` of `qory help <arg>`;
+  - a flag's value that is not an int, a bool or a duration, and an unknown flag, as
+    `--<value>`, `-<value>` or `---<value>`;
+  - the file errors of `qory artifact push <file>`, of `--withdraw` with files, and of
+    `qory run verdict escalate --points`;
+  - the errors of `qory harness compose -f`, `qory worktree add -f` and `qory run -f`
+    that printed the file's path or name, and the compose's `qory` and `retired` rows;
+  - an error reading the harness report of `--home`, also for `qory run`;
+  - `qory gateway --listen`, also in the cause of a failed lookup of its host;
+  - a read-write `--mount` that contains qory's state directory;
+  - the line of `qory run end` with a `--reason` that contains a key.
 
 - qory builds with Go 1.27.4, and go.mod requires Go 1.27.4. Go 1.27.4's `crypto/x509`
   returns an error for the intermediate certificates that Go no longer trusts
@@ -1417,8 +2091,8 @@ release may change what an existing document does, and states it under Upgrading
   `wall.engine_proxy_file`, so the engine pulls each run's image through the run's
   gateway.
 - A walled run's image step holds an exclusive lock of `wall.engine_proxy_file`, waiting
-  for it within the run's time limit, so one run at a time pulls through the engine's
-  proxy. Replace the file only while no run is going.
+  for it within the limit of the steps before the agent's start, so one run at a time
+  pulls through the engine's proxy. Replace the file only while no run is going.
 - `qory run` prints `***` in place of a URL's `X-Amz-Signature`, `X-Amz-Security-Token`,
   `Signature`, `sig`, `token` or `access_token` value in its `qory run: fetched` lines,
   in the errors of a fetch and in the last error line. A run given a run key or a run

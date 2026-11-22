@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -155,6 +156,15 @@ type Exclude struct {
 	Listed string
 }
 
+// HooksFragment is the hooks of one module's Codex settings fragment.
+type HooksFragment struct {
+	// Module is the module's name, and File the fragment's file, config.toml or
+	// hooks.json.
+	Module, File string
+	// Hooks is the value of the fragment's hooks key, as decoded.
+	Hooks any
+}
+
 // Result is a composed stack: what a renderer writes and what the report records.
 type Result struct {
 	// Stack is the stack that was composed.
@@ -166,7 +176,24 @@ type Result struct {
 	// Excludes are the entries the modules left out, in module order, by kind.
 	Excludes []Exclude
 	// Settings are the merged fragments: per runtime, per target file, in module order.
+	// [CodexReadRules] is not among them.
 	Settings map[string]map[string]map[string]any
+	// CodexReadRules is every module's settings/codex/read-access.rules, Codex
+	// execpolicy rules for a run whose access is read, joined in module order, each
+	// ending in a newline; nil when no module ships one. Compose merges the file into
+	// no target file, and no render places it in a home: the Codex renderer's
+	// WriteWalledHome writes it to the rules folder of a walled read run's home.
+	CodexReadRules []byte
+	// CodexHooksJSON are the bytes of every module's settings/codex/hooks.json fragment,
+	// as written, in module order; nil when no module ships one. The fragments are also
+	// merged into Settings like any other; the Codex renderer reads these to tell a
+	// number such as 2.0, which Codex refuses, from 2, which the merge cannot.
+	CodexHooksJSON [][]byte
+	// CodexHooks are the hooks of every module's settings/codex/config.toml and
+	// settings/codex/hooks.json fragment that has a hooks key, as decoded, before the
+	// merge, in module order. The Codex renderer checks each one, so a hook that Codex
+	// cannot read is found by its module and its place in that module's file.
+	CodexHooks []HooksFragment
 	// MCP contains the composed MCP servers by name, each the object its module's
 	// mcp/<name>.json contains, with every $QORY_HARNESS_HOME as written, before
 	// substitution. [Result.MCPFor] renders it for a home.
@@ -205,6 +232,9 @@ type Result struct {
 	// sorted by type, one per type; nil when no module declares one. [Result.PushChecksFor]
 	// renders them for a home.
 	PushChecks []PushCheck
+	// SubmitProgram is the program of the submit step that a module declares; nil when no
+	// module declares one. [Result.SubmitProgramFor] renders it for a home.
+	SubmitProgram *SubmitProgram
 	// ScopeChecks are the scope checks the modules of the base stack declare, by the
 	// artifact type of a plan; nil when no module declares one. A module that a checkout
 	// adds to the base declares none that counts, since the repository under work must
@@ -214,6 +244,9 @@ type Result struct {
 	// checked against the base stack; nil when it lists none. A build writes them into
 	// hooks.json.
 	Hooks []Hook
+	// Cache is the folder git sources are fetched to, [Options.Cache] or
+	// [source.CacheDir]; "" when neither is known.
+	Cache string
 	// roots are the module roots the compose opened, which [Result.Close] closes.
 	roots []*os.Root
 	// setBy is the module that set each settings leaf, keyed
@@ -241,6 +274,9 @@ type Options struct {
 	// Git, when set, fetches every git source through a run's stack proxy, see
 	// [source.Git]; nil fetches with the person's git.
 	Git *source.Git
+	// Context, when set, stops every git command of the compose once it ends, see
+	// [source.Options.Context]; nil stops none.
+	Context context.Context
 	// Env are the configuration's variables, written over what the modules export.
 	Env map[string]string
 	// Base is the base stack [LoadBase] resolved, recorded in the result and enforced on
@@ -288,7 +324,11 @@ func Compose(p *stack.Stack) (*Result, error) { return ComposeWith(p, Options{})
 // be fetched a [*source.FetchError]. The package comment has the order of the rules and
 // the merge semantics.
 func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
-	res := &Result{Stack: p, Base: opts.Base, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, Exported: map[string]string{}, setBy: map[string]string{}}
+	cache := opts.Cache
+	if cache == "" {
+		cache, _ = source.CacheDir()
+	}
+	res := &Result{Stack: p, Base: opts.Base, Cache: cache, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, Exported: map[string]string{}, setBy: map[string]string{}}
 	defer func() {
 		if err != nil {
 			res.Close()
@@ -304,13 +344,14 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	// declared is every entry, as <kind>/<name>, that the modules of the stack whose
 	// workflows the compose checks compose, see [workflowsShipped].
 	declared := map[string]bool{}
-	for _, pl := range p.Modules {
-		ps := p.SourceOf(pl)
+	// open resolves the module pl at ps and reads its manifest. who names the module in
+	// a message.
+	open := func(pl stack.Module, ps stack.Source) (openedModule, error) {
 		who := "module " + accesskey.ShownName(pl.Name, false)
 		if pl.Name == "" {
 			who = "module at " + ps.Shown()
 		}
-		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo, Git: opts.Git}
+		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Context: opts.Context, Memo: opts.Memo, Git: opts.Git}
 		if opts.Git != nil && opts.Git.Named != nil {
 			so.Name = opts.Git.Named.Module(pl.Name)
 		}
@@ -327,7 +368,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			if pl.Name == "" {
 				fix = "Check the source of a module in the stack.\n  The module is at " + ps.Shown() + "."
 			}
-			return nil, fmt.Errorf("%s\n  %w", fix, exports.HideError(err))
+			return openedModule{}, fmt.Errorf("%s\n  %w", fix, exports.HideError(err))
 		}
 		o := openedModule{pl: pl, ps: ps, src: src}
 		if opts.Copies != nil {
@@ -345,26 +386,40 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			o.m, err = module.ReadManifest(src.Dir)
 		}
 		if err != nil {
-			return nil, module.Prefixed(who, err)
+			return openedModule{}, module.Prefixed(who, err)
 		}
 		if afterManifest != nil {
 			afterManifest(src.Dir)
 		}
 		if pl.Name != "" && o.m.Name != pl.Name {
-			return nil, exports.Refuse(fmt.Sprintf("Use one name for the module in %s and in its %s.", listedIn(p, pl), module.ManifestName),
+			return openedModule{}, exports.Refuse(fmt.Sprintf("Use one name for the module in %s and in its %s.", listedIn(p, pl), module.ManifestName),
 				fmt.Sprintf("The module %s at %s has the name %s in its %s.", accesskey.ShownName(pl.Name, false), ps.Shown(), accesskey.ShownName(o.m.Name, false), module.ManifestName))
 		}
+		return o, nil
+	}
+	// add checks the module o against the modules before it, and appends it.
+	add := func(o openedModule) error {
 		if other, ok := dirs[o.m.Name]; ok {
-			return nil, exports.Refuse(fmt.Sprintf("Remove one of the two sources of module %s.", accesskey.ShownName(o.m.Name, false)),
-				fmt.Sprintf("Module %s is composed from %s and from %s.", accesskey.ShownName(o.m.Name, false), other, ps.Shown()))
+			return exports.Refuse(fmt.Sprintf("Remove one of the two sources of module %s.", accesskey.ShownName(o.m.Name, false)),
+				fmt.Sprintf("Module %s is composed from %s and from %s.", accesskey.ShownName(o.m.Name, false), other, o.ps.Shown()))
 		}
-		dirs[o.m.Name] = ps.Shown()
-		if !pl.Base && opts.Base != nil {
+		dirs[o.m.Name] = o.ps.Shown()
+		if !o.pl.Base && opts.Base != nil {
 			if err := checkProvides(o.m, opts.Base); err != nil {
-				return nil, err
+				return err
 			}
 		}
 		opened = append(opened, o)
+		return nil
+	}
+	for _, pl := range p.Modules {
+		o, err := open(pl, p.SourceOf(pl))
+		if err != nil {
+			return nil, err
+		}
+		if err := add(o); err != nil {
+			return nil, err
+		}
 	}
 	// The roles before the selection: a provided entry that the providing module's exclude
 	// lists provides nothing, and a role that two modules provide keeps the name of the
@@ -438,6 +493,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		if err := addPushChecks(res, checkers, l.Dir, root, name, m.PushChecks); err != nil {
 			return nil, err
 		}
+		if err := addSubmitProgram(res, l.Dir, root, name, m.SubmitProgram); err != nil {
+			return nil, err
+		}
 		// A module that a checkout adds declares no scope check that counts.
 		if pl.Base || opts.Base == nil {
 			if err := addScopeChecks(res, l.Dir, root, name, m.ScopeChecks); err != nil {
@@ -464,6 +522,24 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 				res.Settings[runtime] = map[string]map[string]any{}
 			}
 			for file, path := range files {
+				if runtime == "codex" && file == CodexReadRulesName {
+					data, err := readFile(path)
+					if err != nil {
+						return nil, exports.HideError(err)
+					}
+					if len(data) > 0 && data[len(data)-1] != '\n' {
+						data = append(data, '\n')
+					}
+					res.CodexReadRules = append(res.CodexReadRules, data...)
+					continue
+				}
+				if runtime == "codex" && file == "hooks.json" {
+					data, err := readFile(path)
+					if err != nil {
+						return nil, exports.HideError(err)
+					}
+					res.CodexHooksJSON = append(res.CodexHooksJSON, data)
+				}
 				if res.Settings[runtime][file] == nil {
 					res.Settings[runtime][file] = map[string]any{}
 				}
@@ -617,6 +693,66 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 		res.PushChecks = append(res.PushChecks, PushCheck{Type: c.Type, Module: name, Command: command, Reads: c.Reads})
 	}
 	return nil
+}
+
+// SubmitProgram is the program of the submit step that the composed harness declares.
+type SubmitProgram struct {
+	// Module is the module that declares the program.
+	Module string `json:"module"`
+	// Command is the program and its arguments. The program is
+	// $QORY_HARNESS_HOME/modules/<module>/<path>, before substitution.
+	Command []string `json:"command"`
+}
+
+// addSubmitProgram sets the submit program of the module name at dir in the result. A
+// second module that declares one fails the compose, and so does a program that is not a
+// file in the module, read through root when it is not nil, and one in an entry the
+// module's exclude or only leaves out.
+func addSubmitProgram(res *Result, dir string, root *os.Root, name string, program *module.SubmitProgram) error {
+	if program == nil {
+		return nil
+	}
+	if res.SubmitProgram != nil {
+		return exports.Errorf("Remove submit_program from module %s or module %s.\n  A composed harness has one submit program, and both modules declare one.", shown(res.SubmitProgram.Module), shown(name))
+	}
+	if root == nil {
+		opened, err := os.OpenRoot(dir)
+		if err != nil {
+			return exports.HideError(err)
+		}
+		defer opened.Close()
+		root = opened
+	}
+	path := program.Command[0]
+	shownProgram := exports.Value(filepath.ToSlash(path), false)
+	info, err := root.Stat(path)
+	if err != nil {
+		return exports.Errorf("Add %s to module %s, or change its submit_program.\n  Module %s has no file at %s.", shownProgram, shown(name), shown(name), shownProgram)
+	}
+	if !info.Mode().IsRegular() {
+		return exports.Errorf("Set the submit_program of module %s to a program file.\n  %s is not a file.", shown(name), shownProgram)
+	}
+	if e, ok := excludedProgram(res, dir, name, path); ok {
+		return exports.Errorf("%s\n  The submit_program of module %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
+			altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), shown(name), e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
+	}
+	command := append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(path)}, program.Command[1:]...)
+	res.SubmitProgram = &SubmitProgram{Module: name, Command: command}
+	return nil
+}
+
+// SubmitProgramFor is a copy of the submit program rendered for a home, with every
+// $QORY_HARNESS_HOME in the command replaced the way [Result.PushChecksFor] replaces it;
+// nil when no module declares one.
+func (r *Result) SubmitProgramFor(home string) *SubmitProgram {
+	if r.SubmitProgram == nil {
+		return nil
+	}
+	command := make([]string, len(r.SubmitProgram.Command))
+	for i, word := range r.SubmitProgram.Command {
+		command[i] = ForHome(word, home).(string)
+	}
+	return &SubmitProgram{Module: r.SubmitProgram.Module, Command: command}
 }
 
 // duplicatePushCheck is the refusal for a type that the modules first and second both
@@ -1688,6 +1824,10 @@ func collisions(owners map[string][]string, modules []Module, base *Base, checko
 	return e
 }
 
+// CodexReadRulesName is the one file under settings/codex/ that is no fragment: Codex
+// execpolicy rules for a read run, kept as [Result.CodexReadRules].
+const CodexReadRulesName = "read-access.rules"
+
 // mergeFile decodes one settings fragment of the named module, read with readFile, and
 // folds it into the result's target file for the runtime. The extension decides the format, and a TOML
 // document is normalized to the types the JSON decoder produces. The top-level key
@@ -1718,6 +1858,9 @@ func mergeFile(res *Result, runtime, file, path, modName string, decided map[str
 	default:
 		return exports.Refuse(fmt.Sprintf("Rename the settings fragment of module %s to end in .json or .toml.", shown(modName)),
 			"The file is "+exports.HidePath(path)+".")
+	}
+	if hooks, ok := src["hooks"]; ok && runtime == "codex" && (file == "config.toml" || file == "hooks.json") {
+		res.CodexHooks = append(res.CodexHooks, HooksFragment{Module: modName, File: file, Hooks: hooks})
 	}
 	m := &merger{file: "settings/" + runtime + "/" + file, module: modName, setBy: res.setBy}
 	dst := res.Settings[runtime][file]
@@ -1890,6 +2033,25 @@ func (r *Result) SettingsFor(runtime, file, home string) map[string]any {
 		src = map[string]any{}
 	}
 	return ForHome(src, home).(map[string]any)
+}
+
+// SourceDirs are the folders the compose read its modules from: each module's Dir and,
+// when it differs, its RealDir, in module order without repeats, then [Result.Cache]
+// when it is known. qory copies a file that a link in a Codex home leads to only when it
+// lies in the composed home or in one of them.
+func (r *Result) SourceDirs() []string {
+	var dirs []string
+	for _, m := range r.Modules {
+		for _, d := range []string{m.Dir, m.RealDir} {
+			if d != "" && !slices.Contains(dirs, d) {
+				dirs = append(dirs, d)
+			}
+		}
+	}
+	if r.Cache != "" && !slices.Contains(dirs, r.Cache) {
+		dirs = append(dirs, r.Cache)
+	}
+	return dirs
 }
 
 // MCPFor is a copy of the composed MCP servers rendered for a home, name to object, with

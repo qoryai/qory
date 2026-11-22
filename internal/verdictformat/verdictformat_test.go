@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
+	"github.com/qoryai/qory/internal/primitives"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/verdictformat"
 )
@@ -110,6 +113,7 @@ func TestPointsStopsAtTheFirstBrokenRule(t *testing.T) {
 		{text(`One\u0007sentence.`), "Remove the character U+0007 from the text of point 2: the contract's $defs line excludes it."},
 		{text("One \u202esentence."), "Remove the character U+202E from the text of point 2: the contract's $defs line excludes it."},
 		{two(`{"text": "a", "action": "ask"}`), `Set the action of point 2 to answer or run_again. The action is "ask".`},
+		{two(`{"text": "a", "action": "approve_spend"}`), `Set the action of point 2 to answer or run_again. The action is "approve_spend".`},
 		{two(`{"text": "a", "action": 3}`), `Set the action of point 2 to answer or run_again. The action is 3.`},
 		{two(`{"text": "a", "action": "answer"}`), "Add question, the id of an open question, to point 2: a point with the action answer has one."},
 		{two(`{"text": "a", "action": "run_again", "question": "q4"}`), "Remove question from point 2: a point with the action run_again has none."},
@@ -140,7 +144,9 @@ func TestPointsStopsAtTheFirstBrokenRule(t *testing.T) {
 			continue
 		}
 		doc := map[string]any{"verdict": "escalate", "points": points}
-		if err := schema.Validate(doc); (err == nil) != (c.want == "") {
+		// The schema takes any action of its form; Points takes answer and run_again alone.
+		takes := c.want == "" || strings.HasSuffix(c.want, `The action is "ask".`) || strings.HasSuffix(c.want, `The action is "approve_spend".`)
+		if err := schema.Validate(doc); (err == nil) != takes {
 			t.Errorf("%s: the schema's result is %v, Points' is %q", c.file, err, c.want)
 		}
 	}
@@ -200,7 +206,19 @@ func TestCheck(t *testing.T) {
 		{`{"verdict": "escalate"}`, false},
 		{`{"verdict": "passed", "points": [` + runAgainPoint + `]}`, false},
 		{`{"verdict": "passed", "gaps": "Add the empty cart."}`, false},
-		{`{"verdict": "maybe"}`, false},
+		{`{"verdict": "maybe"}`, true},
+		{`{"verdict": "approve-spend", "points": [{"text": "Approve the spend.", "action": "approve_spend", "question": "q1", "fix": "Approve it."}]}`, true},
+		{`{"verdict": "escalate", "points": [{"text": "Approve the spend.", "action": "approve_spend"}]}`, true},
+		{`{"verdict": "changes-requested", "points": [{"text": "Approve the spend.", "action": "approve_spend"}]}`, false},
+		{`{"verdict": "escalate", "points": [{"text": "a", "action": "run_again", "question": "q1"}]}`, false},
+		{`{"verdict": "Passed"}`, false},
+		{`{"verdict": "1st"}`, false},
+		{`{"verdict": "approve_spend"}`, false},
+		{`{"verdict": ""}`, false},
+		{`{"verdict": "` + strings.Repeat("a", 65) + `"}`, false},
+		{`{"verdict": "` + strings.Repeat("a", 64) + `"}`, true},
+		{`{"verdict": "escalate", "points": [{"text": "a", "action": "run-again"}]}`, false},
+		{`{"verdict": "escalate", "points": [{"text": "a", "action": "` + strings.Repeat("a", 65) + `"}]}`, false},
 		{`{"verdict": "passed", "track": {"id": "small-change", "reason": "The change touches one file."}}`, true},
 		{`{"verdict": "escalate", "points": [` + answerPoint + `], "track": {"id": "standard", "reason": "A person decides."}}`, true},
 		{`{"verdict": "passed", "track": {"id": "small-change", "kind": "A text that the product shows", "reason": "One file."}}`, false},
@@ -226,20 +244,60 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-// TestExcludedIsTheSchemasCharacters keeps [verdictformat.Excluded] and the pattern of
-// the schema's $defs line in step, tab, line feed and carriage return included,
-// character by character, through U+FFFF and for a character past it.
-func TestExcludedIsTheSchemasCharacters(t *testing.T) {
+// TestValidKindIsTheSchemasKind keeps [verdictformat.ValidKind] and the schema's verdict in
+// step: a kind the schema takes is valid, and one it does not take is not. Known is true for
+// the three kinds of this version alone.
+func TestValidKindIsTheSchemasKind(t *testing.T) {
+	for _, kind := range []string{"passed", "changes-requested", "escalate", "approve-spend", "a", "a1-", strings.Repeat("a", 64),
+		"", "Passed", "1a", "-a", "a_b", "a b", strings.Repeat("a", 65), "é"} {
+		doc := `{"verdict": ` + strconv.Quote(kind) + `}`
+		if kind == "escalate" {
+			doc = `{"verdict": "escalate", "points": [` + runAgainPoint + `]}`
+		}
+		if valid := verdictformat.Check([]byte(doc)) == nil; valid != verdictformat.ValidKind(kind) {
+			t.Errorf("%q: the schema takes it: %v, ValidKind: %v", kind, valid, !valid)
+		}
+	}
+	for kind, known := range map[string]bool{"passed": true, "changes-requested": true, "escalate": true, "approve-spend": false, "none": false} {
+		if verdictformat.Known(kind) != known {
+			t.Errorf("Known(%q) is %v", kind, !known)
+		}
+	}
+}
+
+// TestLineRuleIsTheSchemasCharacters keeps [primitives.StopsLine] and the pattern of the
+// schema's $defs line in step, tab, line feed and carriage return included, for every
+// code point that is not a surrogate, the tag characters past U+FFFF too.
+func TestLineRuleIsTheSchemasCharacters(t *testing.T) {
 	schema := compiled(t)
-	for r := rune(0); r <= 0x10000; r++ {
+	for r := rune(0); r <= unicode.MaxRune; r++ {
 		if r >= 0xd800 && r <= 0xdfff {
 			continue
 		}
 		doc := map[string]any{"verdict": "escalate", "points": []any{
 			map[string]any{"text": "a" + string(r), "action": "run_again"},
 		}}
-		if passed := schema.Validate(doc) == nil; passed == verdictformat.Excluded(r) {
-			t.Errorf("%U: the schema passes it: %v, Excluded: %v", r, passed, verdictformat.Excluded(r))
+		if passed := schema.Validate(doc) == nil; passed == primitives.StopsLine(r) {
+			t.Errorf("%U: the schema passes it: %v, StopsLine: %v", r, passed, primitives.StopsLine(r))
+		}
+	}
+}
+
+// TestPointsWithATagOrAZeroWidthCharacterAreStopped is a point whose text has a tag
+// character or a zero width space: the schema stops it, and a joiner in an emoji sequence
+// passes.
+func TestPointsWithATagOrAZeroWidthCharacterAreStopped(t *testing.T) {
+	schema := compiled(t)
+	family := "\U0001F468\u200d\U0001F469"
+	for text, valid := range map[string]bool{
+		"Fix a\U000E0041b": false, "Fix a\u200bb": false, "Fix a\u0600b": false,
+		"Fix a\u200cb": true, "Fix " + family: true,
+	} {
+		doc := map[string]any{"verdict": "escalate", "points": []any{
+			map[string]any{"text": text, "action": "run_again"},
+		}}
+		if got := schema.Validate(doc) == nil; got != valid {
+			t.Errorf("%q: the schema's result is %v", text, got)
 		}
 	}
 }

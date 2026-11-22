@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qory.dev/contracts/harness/v1/submission.schema.json",
+  "title": "The submission format, version 1",
+  "description": "What a run submits for a work item: its branch, the commits in each repository, the verdict, and the draft pull request. The file of a version of the artifact type submission, which only qory's submit step writes.",
+  "type": "object",
+  "required": ["ref", "verdict", "repositories"],
+  "additionalProperties": false,
+  "properties": {
+    "ref": {"description": "The branch's name, the same in each repository: qory/ followed by the work item's id.", "type": "string", "pattern": "^qory/wi_[A-Za-z0-9_-]{1,64}$"},
+    "verdict": {"description": "The work item's newest verdict at the end of the run, when this run wrote it: its kind in the form of verdict.schema.json's verdict, such as passed, changes-requested or escalate, or none.", "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "maxLength": 64},
+    "text": {
+      "description": "The title and the description of the draft pull request, from the session's hand-off file. Absent when the session wrote none.",
+      "type": "object",
+      "required": ["title", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {"description": "One line of text with a character that shows, as $defs title defines it.", "type": "string", "minLength": 1, "maxLength": 256, "allOf": [{"$ref": "#/$defs/line"}, {"$ref": "#/$defs/visible"}]},
+        "description": {"description": "Markdown, as $defs text defines it.", "type": "string", "maxLength": 20000, "$ref": "#/$defs/text"}
+      }
+    },
+    "repositories": {
+      "description": "Each repository with the commit of the branch in it, at least one.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["system", "path", "commit", "draft"],
+        "additionalProperties": false,
+        "properties": {
+          "system": {"description": "The host the repository is on, such as github.com: a lower-case host name of at most 253 characters.", "type": "string", "pattern": "^[a-z0-9.-]{0,252}[a-z0-9-]$"},
+          "path": {
+            "description": "The repository's path on the host, such as acme/web: at most 200 characters of segments joined by slashes, with no ., .. or .git segment.",
+            "type": "string",
+            "maxLength": 200,
+            "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+            "not": {"pattern": "(^|/)(\\.\\.?|\\.[Gg][Ii][Tt])(/|$)"}
+          },
+          "commit": {"description": "The head of the branch: a full commit id, 40 or 64 lower-case hexadecimal digits.", "$ref": "#/$defs/commit"},
+          "commit_url": {"description": "The forge's address of the head. The submit program writes it.", "type": "string", "minLength": 1},
+          "base": {
+            "description": "The commit the run started at.",
+            "type": "object",
+            "required": ["commit"],
+            "additionalProperties": false,
+            "properties": {
+              "commit": {"$ref": "#/$defs/commit"},
+              "branch": {
+                "description": "The name of the repository's default branch when the run started: the branch that a pull request of the run is based on. A branch name that git accepts after refs/heads/, at most 255 characters. Absent when qory did not read it.",
+                "type": "string",
+                "maxLength": 255,
+                "pattern": "^[^\\x00-\\x20\\x7f~^:?*\\[\\\\/-][^\\x00-\\x20\\x7f~^:?*\\[\\\\]*$",
+                "not": {"pattern": "\\.\\.|//|@\\{|(^|/)\\.|\\.lock(/|$)|[./]$"}
+              },
+              "commit_url": {"type": "string", "minLength": 1}
+            }
+          },
+          "commits": {
+            "description": "Each commit from the base to the head, oldest first, with the ledger step that made it. The last one is the head.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["commit", "step"],
+              "additionalProperties": false,
+              "properties": {"commit": {"$ref": "#/$defs/commit"}, "step": {"type": "string", "minLength": 1, "maxLength": 128, "$ref": "#/$defs/line"}, "commit_url": {"type": "string", "minLength": 1}}
+            }
+          },
+          "draft": {
+            "description": "The draft pull request, or the reason there is none.",
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["number", "url", "title", "state", "action"],
+                "additionalProperties": false,
+                "properties": {
+                  "number": {"type": "integer", "minimum": 1},
+                  "url": {"type": "string", "minLength": 1},
+                  "title": {"description": "One line of text with a character that shows, as $defs title defines it.", "type": "string", "allOf": [{"$ref": "#/$defs/line"}, {"$ref": "#/$defs/visible"}]},
+                  "state": {"enum": ["draft", "open", "closed", "merged"]},
+                  "action": {"enum": ["opened", "updated", "kept"]}
+                }
+              },
+              {
+                "type": "object",
+                "required": ["none"],
+                "additionalProperties": false,
+                "properties": {
+                  "none": {"enum": ["not-passed", "no-text", "escalated", "no-program", "program-failed", "program-timeout", "login-needed"]},
+                  "exit": {"enum": [0, 1, 2, 3]}
+                },
+                "allOf": [
+                  {"if": {"properties": {"none": {"const": "program-failed"}}}, "then": {"required": ["exit"], "properties": {"exit": {"enum": [0, 1, 2]}}}},
+                  {"if": {"properties": {"none": {"const": "login-needed"}}}, "then": {"required": ["exit"], "properties": {"exit": {"const": 3}}}},
+                  {"if": {"properties": {"none": {"enum": ["not-passed", "no-text", "escalated", "no-program", "program-timeout"]}}}, "then": {"not": {"required": ["exit"]}}}
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "commit": {"description": "A full commit id: 40 or 64 lower-case hexadecimal digits.", "type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"},
+    "line": {
+      "description": "One line of text: no control character (so no tab, line feed or carriage return), no U+2028 or U+2029, and no format character (Unicode category Cf) but U+200C and U+200D, the joiners of emoji. The pattern is the one of $defs line in primitives.schema.json.",
+      "type": "string",
+      "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\ud804\udcbd\ud804\udccd\ud80d\udc30-\ud80d\udc3f\ud82f\udca0-\ud82f\udca3\ud834\udd73-\ud834\udd7a\udb40\udc01\udb40\udc20-\udb40\udc7f]*$"
+    },
+    "text": {
+      "description": "Markdown that may span lines. Of the control characters it has only tab, line feed and carriage return, and it has no U+2028, U+2029 or format character (Unicode category Cf) but U+200C and U+200D, the joiners of emoji. The pattern is the one of $defs text in primitives.schema.json.",
+      "type": "string",
+      "pattern": "^[^\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f-\\x9f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\ud804\udcbd\ud804\udccd\ud80d\udc30-\ud80d\udc3f\ud82f\udca0-\ud82f\udca3\ud834\udd73-\ud834\udd7a\udb40\udc01\udb40\udc20-\udb40\udc7f]*$"
+    },
+    "visible": {
+      "description": "A title has a character other than spaces and joiners (U+200C, U+200D). The pattern is the one in $defs title of primitives.schema.json.",
+      "pattern": "[^ \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u200c\u200d]"
+    }
+  }
+}

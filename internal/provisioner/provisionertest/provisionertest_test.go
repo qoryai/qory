@@ -80,7 +80,7 @@ func TestTheFakeChecksRequestsInOrder(t *testing.T) {
 		{"revision 2", s.Pool, claimAt(now), func(h http.Header) { h.Set("X-Qory-Contract-Version", "2") }, 400, true, "unsupported_contract_version"},
 		{"revision 3", s.Pool, claimAt(now), func(h http.Header) { h.Set("X-Qory-Contract-Version", "3") }, 400, true, "unsupported_contract_version"},
 		{"no revision", s.Pool, claimAt(now), func(h http.Header) { h.Del("X-Qory-Contract-Version") }, 400, true, "unsupported_contract_version"},
-		{"a member the schema does not define", s.Pool, []byte(`{"version":1,"time":"` + now.UTC().Format(time.RFC3339) + `","wait_seconds":0,"x":1}`), nil, 400, true, "invalid_request"},
+		{"a member the schema does not define", s.Pool, []byte(`{"version":1,"time":"` + now.UTC().Format(time.RFC3339) + `","wait_seconds":0,"x":1}`), nil, 204, true, ""},
 		{"a member twice", s.Pool, []byte(`{"version":1,"version":1,"time":"` + now.UTC().Format(time.RFC3339) + `","wait_seconds":0}`), nil, 400, true, "invalid_request"},
 		{"a fraction", s.Pool, []byte(`{"version":1,"time":"` + now.UTC().Format(time.RFC3339) + `","wait_seconds":0.0}`), nil, 400, true, "invalid_request"},
 		{"a time behind", s.Pool, claimAt(now.Add(-301 * time.Second)), nil, 401, false, "unauthorized"},
@@ -185,7 +185,7 @@ func TestTheFakeTakesOneMachineLog(t *testing.T) {
 	}
 	cl.RunCode.Clear()
 	path := "/v1/dispatches/" + cl.DispatchID + "/machine-log"
-	for _, name := range []string{"machine-log-log-nul.json", "machine-log-undefined-member.json", "machine-log-version-2.json", "machine-log-without-log.json"} {
+	for _, name := range []string{"machine-log-log-nul.json", "machine-log-version-2.json", "machine-log-without-log.json"} {
 		b, err := fs.ReadFile(contracts.ProvisionerFS, "fixtures/invalid/"+name)
 		if err != nil {
 			t.Fatal(err)
@@ -194,7 +194,8 @@ func TestTheFakeTakesOneMachineLog(t *testing.T) {
 			t.Errorf("%s: %d signed %v %s", name, status, signed, body)
 		}
 	}
-	whole, err := fs.ReadFile(contracts.ProvisionerFS, "fixtures/machine-log/whole.json")
+	// The whole log with a member the schema does not define, gzip, which the fake takes.
+	whole, err := fs.ReadFile(contracts.ProvisionerFS, "fixtures/closed/machine-log-undefined-member.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,9 +219,9 @@ func TestTheFakeTakesOneMachineLog(t *testing.T) {
 
 // TestTheFakeTakesMachineEnds posts the contract's machine-end fixtures to a claimed
 // dispatch at the fixtures' time: each invalid one is a signed 400 invalid_request, and
-// each valid one a signed 204 that the fake records, in order. A machine end of an
-// unknown dispatch is a signed 403 forbidden, and a 503 unavailable scripted for the
-// route is answered signed.
+// each valid one, one with a member the schema does not define among them, a signed 204
+// that the fake records, in order. A machine end of an unknown dispatch is a signed 403
+// forbidden, and a 503 unavailable scripted for the route is answered signed.
 func TestTheFakeTakesMachineEnds(t *testing.T) {
 	s := provisionertest.New(t)
 	now := time.Date(2026, 10, 15, 12, 10, 0, 0, time.UTC)
@@ -240,17 +241,17 @@ func TestTheFakeTakesMachineEnds(t *testing.T) {
 		}
 		return b
 	}
-	for _, name := range []string{"machine-end-undefined-member.json", "machine-end-unknown-state.json", "machine-end-version-2.json", "machine-end-without-state.json"} {
+	for _, name := range []string{"machine-end-unknown-state.json", "machine-end-version-2.json", "machine-end-without-state.json"} {
 		if status, signed, body := post(t, s, s.Pool, path, read("invalid/"+name), nil); status != 400 || !signed || !strings.Contains(body, `"invalid_request"`) {
 			t.Errorf("%s: %d signed %v %s", name, status, signed, body)
 		}
 	}
-	for _, name := range []string{"deleting", "delete-failed", "gone"} {
-		if status, signed, _ := post(t, s, s.Pool, path, read("machine-end/"+name+".json"), nil); status != 204 || !signed {
+	for _, name := range []string{"machine-end/deleting.json", "machine-end/delete-failed.json", "machine-end/gone.json", "closed/machine-end-undefined-member.json"} {
+		if status, signed, _ := post(t, s, s.Pool, path, read(name), nil); status != 204 || !signed {
 			t.Errorf("%s: %d signed %v", name, status, signed)
 		}
 	}
-	if d, _ := s.Dispatch(cl.DispatchID); strings.Join(d.MachineEnds, " ") != "deleting delete_failed gone" {
+	if d, _ := s.Dispatch(cl.DispatchID); strings.Join(d.MachineEnds, " ") != "deleting delete_failed gone gone" {
 		t.Errorf("the fake recorded %q", d.MachineEnds)
 	}
 	gone := read("machine-end/gone.json")

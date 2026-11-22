@@ -1,0 +1,4 @@
+Set runtimes.claude.version to an exact version, or remove runtimes.claude.
+  An exact version starts with a digit, followed by up to 31 letters, digits, . or -. A runtime with no pin installs its latest version.
+  The value is "v2.1.300".
+  runtimes.claude is in stack/qory-stack.yaml.

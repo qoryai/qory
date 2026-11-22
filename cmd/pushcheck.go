@@ -117,10 +117,14 @@ func (p *runPushChecks) current() *pushcheck.Checker {
 }
 
 // set turns on the check of each POST of the run API from behind the wall of run, with
-// [runPushChecks.runAPICheck], when the load found push checks; with none, it sets no
-// check. Call it after the load and before the run's setup and join.
-func (p *runPushChecks) set(run openedRun) error {
-	if p.current() == nil {
+// [runPushChecks.runAPICheck], when the load found push checks or always is true; with
+// neither, it sets no check. Forager sets no check once a join passed its checks, so a run
+// of several sessions with a run API, see [hasRunAPI], sets it with always, and a later
+// session's checks turn on in [runPushChecks.next]; until then the check passes every
+// POST. Forager's SetRunAPICheck fails for a run with no run API, so such a run sets no
+// check without push checks. Call it after the load and before the run's setup and join.
+func (p *runPushChecks) set(run openedRun, always bool) error {
+	if p.current() == nil && !always {
 		return nil
 	}
 	if err := run.SetRunAPICheck(p.runAPICheck); err != nil {
@@ -173,6 +177,32 @@ func (p *runPushChecks) load(ctx context.Context, run openedRun, home, runID str
 	defer p.mu.Unlock()
 	p.checker = checker
 	return func() { os.RemoveAll(checker.Dir) }, nil
+}
+
+// next makes the checks follow a later session of the run, whose home qory run composed
+// again at home, after [runPushChecks.load] and [runPushChecks.set] ran for session 1: the
+// checker reads the push checks of that home and the session's inputs.json, which
+// [runPushChecks.inputs] and [runPushChecks.inputsData] have by now. No session runs in
+// between, so no check reads the checker while it changes. A run whose session 1 loaded no
+// checker loads one here: set turned on the check before session 1, see
+// [runPushChecks.set], and the check reads the checker of the latest session.
+func (p *runPushChecks) next(ctx context.Context, run openedRun, home, runID string, spec *runSpec, controlPlane bool) (done func(), err error) {
+	c := p.current()
+	if c == nil {
+		return p.load(ctx, run, home, runID, spec, controlPlane)
+	}
+	checks, err := loadPushChecks(home)
+	var unread *pushcheck.UnreadError
+	if p.fromCode && errors.As(err, &unread) {
+		return func() {}, fmt.Errorf(textChecksUnreadFromCode, unread.File, unread.Cause)
+	}
+	if err != nil {
+		return func() {}, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	c.Checks, c.Inputs, c.InputsData = checks, p.inputs, p.inputsData
+	return func() {}, nil
 }
 
 // pushChecker is the checker of [runPushChecks.load], nil for a home with no push check
@@ -344,7 +374,8 @@ const textNotesNotList = "Contact support: the notes in the run API's response a
 // artifactsForCheck is the fetch of a push check through client: the work item's notes
 // as notes.json, the artifact index, and the newest version of each artifact of the
 // types that is neither cancelled nor a withdrawal, laid out as qory artifact pull writes
-// them into its store. For a withdrawn name that is the version before the withdrawal, so
+// them into its store, with raw bytes and names where the pull escapes hidden
+// characters. For a withdrawn name that is the version before the withdrawal, so
 // a later push of the name is checked against what it had before; qory artifact pull
 // leaves the name out.
 func artifactsForCheck(client *runapi.Client) pushcheck.Fetch {
@@ -397,19 +428,19 @@ func checkNotes(raw json.RawMessage) ([]byte, error) {
 	return trimmed, nil
 }
 
-// checkBranchVersion runs the push check of the artifact type branch on content, the
+// checkSubmissionVersion runs the push check of the artifact type submission on content, the
 // file of the push step's version of branch at ref, before the step stores it. A check
 // that does not pass is the step's error: the step's fix line, then the check's line and
 // its findings, each a line of qory run. So is a check that could not run.
-func checkBranchVersion(ctx context.Context, checks *runPushChecks, branch *preparation.WorkBranch, ref string, content []byte) error {
-	failed, err := checks.check(ctx, branchType, []pushcheck.File{{Name: branchFile, Content: content}})
+func checkSubmissionVersion(ctx context.Context, checks *runPushChecks, branch *preparation.WorkBranch, ref string, content []byte) error {
+	failed, err := checks.check(ctx, submissionType, []pushcheck.File{{Name: submissionFile, Content: content}})
 	if err != nil {
 		return fmt.Errorf(textNotStored, branch.DeleteBranch(), ref, shownError(err))
 	}
 	if failed == nil {
 		return nil
 	}
-	lines := []string{fmt.Sprintf(textNotStored, branch.DeleteBranch(), ref, fmt.Sprintf(textNotChecked, branchType)), failed.Step}
+	lines := []string{fmt.Sprintf(textNotStored, branch.DeleteBranch(), ref, fmt.Sprintf(textNotChecked, submissionType)), failed.Step}
 	lines = append(lines, failed.Findings...)
 	return errors.New(strings.Join(lines, "\nqory run: "))
 }

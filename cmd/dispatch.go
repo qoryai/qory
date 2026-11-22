@@ -25,7 +25,17 @@ func dispatchedArgs(rt render.Runtime, args []string) []string {
 	return args
 }
 
-// withAgentHome is the fixed variables of a dispatched walled run of a runtime that is a
+// walledArgs are the launch arguments of a walled run of rt whose composed harness home is
+// home: the runtime's [render.Walled] arguments or its refusal of args, and args as given
+// for a runtime that is none.
+func walledArgs(rt render.Runtime, args []string, home string) ([]string, error) {
+	if w, ok := rt.(render.Walled); ok {
+		return w.WalledArgs(args, home)
+	}
+	return args, nil
+}
+
+// withAgentHome is the fixed variables of a walled run of a runtime that is a
 // [render.AgentHomer], with its variable, name, pointing at [preparation.AgentHome],
 // which qory run agent-env makes new and empty as the last step before the agent starts
 // when name is [preparation.EnvAgentHome], Claude Code's.
@@ -39,7 +49,7 @@ func withAgentHome(fixed []string, name string) []string {
 	return out
 }
 
-// transcriptLinkFor is the transcript link of a dispatched walled run whose renderer is
+// transcriptLinkFor is the transcript link of a walled run whose renderer is
 // a [render.TranscriptLinker] and whose runtime rt has a descriptor with resume: the
 // renderer's folder, linked to resume.prefix without its ~/ and its last /, where Forager
 // binds the run's transcript folder below HOME. It makes the checks Forager makes before
@@ -144,10 +154,10 @@ func removeRunHome(home string, report func(string)) {
 }
 
 // locateRun is [locate] for qory run and qory run resend: given a run key or a run code,
-// keyed, the checkout's qory.yaml sets no machine key, harness.launch and env among
-// them, as under extends, so the repository a dispatched run works on does not configure
-// how it starts. composes is set for qory run, which composes the harness: the home is
-// outside the checkout unless --home or harness.home puts it inside, see
+// keyed, the checkout's qory.yaml sets no env key and no machine harness setting, such
+// as harness.launch, as under extends, so the repository a dispatched run works on does
+// not configure how it starts. composes is set for qory run, which composes the harness:
+// the home is outside the checkout unless --home or harness.home puts it inside, see
 // [withCacheHome], and a home inside the checkout or inside the working directory stops
 // the run with [homeInFolder] before any other check of the home, and before anything
 // is written. Without keyed, walled reports whether the configuration starts a wall: a run

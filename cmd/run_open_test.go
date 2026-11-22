@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -128,16 +129,20 @@ func TestRunClosesARunWhoseComposeFails(t *testing.T) {
 	}
 }
 
-// TestRunCancelsARunAtItsLimitBeforeTheJoin is a run whose time limit passes after the
-// compose and before the session joins: the limit counts from the open, so the run is
-// cancelled with the reason timeout, no agent starts, and qory exits 124.
-func TestRunCancelsARunAtItsLimitBeforeTheJoin(t *testing.T) {
+// TestRunCancelsARunWhoseSetupPassesItsLimit is a run whose setup passes its limit, made
+// 1s here, after the compose and before the session joins: the run is cancelled with the
+// reason timeout, no agent starts, qory names the compose, the step that ran last, and
+// exits 124. The session's time limit of 1h does not change it.
+func TestRunCancelsARunWhoseSetupPassesItsLimit(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
+	defer cmd.SetSetupLimit(time.Second)()
 	defer cmd.SetBeforeJoin(func() { time.Sleep(1200 * time.Millisecond) })()
-	out, err := run(t, "run", "claude", "--timeout", "1s")
-	line := "✗ give the run a longer --timeout: the run was cancelled at its time limit of 1s, before claude started\nqory run: the record is in "
+	out, err := run(t, "run", "claude", "--timeout", "1h")
+	line := "✗ check the connection to the harness's git hosts, or use fewer or smaller modules\n" +
+		"  the run was cancelled during the compose of the harness:\n" +
+		"  the steps before claude starts may take at most 1s\nqory run: the record is in "
 	if cmd.ExitCode(err) != 124 || !strings.Contains(out, line) {
 		t.Fatalf("%v (exit %d), want %q\n%s", err, cmd.ExitCode(err), line, out)
 	}
@@ -151,22 +156,66 @@ func TestRunCancelsARunAtItsLimitBeforeTheJoin(t *testing.T) {
 	}
 }
 
-// TestRunPassesTheJoinTheTimeLeft is a run with a limit of 1h: the session joins with the
-// time left of it, which the compose took a part of.
-func TestRunPassesTheJoinTheTimeLeft(t *testing.T) {
+// TestRunStopsAComposeAtTheSetupLimit is a run whose harness lists a module at a git
+// host that takes the connection and never answers, with a setup limit of 1s and a
+// git.timeout of 30s: the setup's limit stops the compose's git, so the run ends within
+// 15s, cancelled with the reason timeout, exit 124, with the line that names the compose.
+// A compose that ran to its end would take the 30s of git.timeout.
+func TestRunStopsAComposeAtTheSetupLimit(t *testing.T) {
+	root := newCheckout(t)
+	fakeLaunch(t, fakeRuntime(t))
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			t.Cleanup(func() { conn.Close() })
+		}
+	}()
+	writeOwnStack(t, root, "apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - source: {git: \"http://"+l.Addr().String()+"/acme/harness\", ref: main, path: modules/core}\n")
+	machineConfig(t, "git:\n  timeout: 30s\n")
+	defer cmd.SetSetupLimit(time.Second)()
+	start := time.Now()
+	out, err := run(t, "run", "claude")
+	if took := time.Since(start); took > 15*time.Second {
+		t.Errorf("the run ended after %s, with a setup limit of 1s", took)
+	}
+	line := "✗ check the connection to the harness's git hosts, or use fewer or smaller modules\n" +
+		"  the run was cancelled during the compose of the harness:\n" +
+		"  the steps before the agent starts may take at most 1s\nqory run: the record is in "
+	if cmd.ExitCode(err) != 124 || !strings.Contains(out, line) {
+		t.Fatalf("%v (exit %d), want %q\n%s", err, cmd.ExitCode(err), line, out)
+	}
+	rec := sessionRecord(t, root)
+	if state, reason, exit := endOf(dataOf(rec, "dev.qory.run.exited")); state != "cancelled" || reason != "timeout" || exit != 124 {
+		t.Errorf("run.exited is %s, %q, %v", state, reason, exit)
+	}
+}
+
+// TestRunPassesTheJoinItsWholeTimeLimit is a run with a limit of 1s whose setup takes
+// 1.2s: the limit counts from the agent's start, so the session joins with the whole of
+// it, and the setup's time is not taken from it.
+func TestRunPassesTheJoinItsWholeTimeLimit(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
 	composedForFake(t, root, fakeRuntime(t))
-	defer cmd.SetBeforeJoin(func() { time.Sleep(100 * time.Millisecond) })()
+	defer cmd.SetBeforeJoin(func() { time.Sleep(1200 * time.Millisecond) })()
 	var left []time.Duration
 	defer cmd.SetJoinSession(func(s session.SessionSpec) { left = append(left, s.Timeout) })()
-	out, err := run(t, "run", "claude", "--timeout", "1h")
-	if cmd.ExitCode(err) != 3 || len(left) != 1 {
+	out, err := run(t, "run", "claude", "--timeout", "1s")
+	if len(left) != 1 {
 		t.Fatalf("%d joins, %v (exit %d)\n%s", len(left), err, cmd.ExitCode(err), out)
 	}
-	if left[0] >= time.Hour-100*time.Millisecond || left[0] < time.Hour-time.Minute {
-		t.Errorf("the join's time limit is %s, want what is left of 1h", left[0])
+	if left[0] != time.Second {
+		t.Errorf("the join's time limit is %s, want the whole 1s", left[0])
 	}
+	lacks(t, out, "before claude started")
 }
 
 // TestRunCancelsARunStoppedBeforeTheJoin is SIGTERM to qory run after the compose and

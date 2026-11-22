@@ -20,8 +20,8 @@ var proxyVariables = []string{"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROX
 // caVariables are the variables that point a program at authorities.
 var caVariables = []string{"SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS"}
 
-// Dropped reports whether name is one whose image value the agent of a dispatched
-// walled run of Claude Code does not get, unless it has one of [agentenv.Prefixes] and
+// Dropped reports whether name is one whose image value the agent of a walled run of
+// Claude Code does not get, unless it has one of [agentenv.Prefixes] and
 // holds the gateway's placeholder, see [AgentEnv]: a name [agentenv.Widens] reports, a
 // proxy variable in upper or lower case, or a variable that points at authorities. The
 // agent keeps the values Forager, the wall and the server set. Dropping them guards
@@ -45,7 +45,7 @@ func prefixed(name string) bool {
 // [keptIfCA] before a name the wall sets only when the run has an authority.
 const keptIfCA = "ca "
 
-// KeptNames is the file of the names a dispatched walled run keeps: always, the names
+// KeptNames is the file of the names a walled run of Claude Code keeps: always, the names
 // Forager sets for the run, and ca, the names the wall sets when the run has an
 // authority. Each list is sorted, and a name is written once.
 func KeptNames(always, ca []string) []byte {

@@ -25,8 +25,9 @@ import (
 // moves to each new version, and the tag <version>. Each is an OCI image index with one
 // image manifest for linux/amd64 and one for linux/arm64. Each manifest has the
 // artifactType application/vnd.qory.runtime.v1, the empty config, and one layer: npm's
-// tarball as it was published, with npm's checksum in its annotation
-// dev.qory.runtime.integrity.
+// tarball of the platform's build as it was published, with npm's checksum in its
+// annotation dev.qory.runtime.integrity. For Codex that is the tarball of
+// @openai/codex@<version>-linux-x64 or -linux-arm64, see [npmPackages].
 
 // The media types and annotations of the registry's runtime cache.
 const (
@@ -37,6 +38,9 @@ const (
 	artifactType   = "application/vnd.qory.runtime.v1"
 	annotVersion   = "org.opencontainers.image.version"
 	annotIntegrity = "dev.qory.runtime.integrity"
+	// annotSignatures is npm's signatures of the layer's tarball, a JSON array of
+	// {"keyid": "<keyid>", "sig": "<sig>"} in npm's order, see [decodeSignatures].
+	annotSignatures = "dev.qory.runtime.signatures"
 	// newestTag is the tag that moves to each new version.
 	newestTag = "newest"
 )
@@ -65,7 +69,9 @@ var ErrNotCached = errors.New("the registry has no copy of the runtime")
 //
 // It reads newest, then the image manifest of linux/arch by its digest, then <version>
 // from newest's annotation org.opencontainers.image.version, which must have newest's
-// digest, then the manifest of linux/arch again: see [registry.resolve] for why. The
+// digest, then the manifest of linux/arch again: see [registry.resolve] for why. For a
+// pinned version it reads the tag <version> and then the manifest of linux/arch, see
+// [registry.resolvePinned]; a 404 of that tag is a [*NotPublishedError]. The
 // release's Open reads the layer by its digest, and its reader returns an error when the
 // bytes do not match the layer's size or sha256 digest; Install checks the sha512
 // checksum on top. A 401 with a Bearer
@@ -76,12 +82,29 @@ var ErrNotCached = errors.New("the registry has no copy of the runtime")
 // the instance, and the run's proxy sets the run's credentials on a request by its host.
 // With no instance, "", no realm is taken.
 func RegistryFetch(client *http.Client, host, arch, instance string) Fetch {
-	return func(ctx context.Context, runtime string) (Release, error) {
+	return func(ctx context.Context, runtime, pinned string) (Release, error) {
 		if arch != "amd64" && arch != "arm64" {
 			return Release{}, fmt.Errorf("Run on an amd64 or arm64 machine\nThe registry has %s for linux/amd64 and linux/arm64, and this machine is %s", runtime, arch)
 		}
+		if _, ok := npmPackages[runtime]; !ok {
+			return Release{}, fmt.Errorf("Install %s some other way\nqory installs only %s", runtime, strings.Join(Runtimes(), " and "))
+		}
 		r := &registry{client: client, host: host, instance: instance, runtime: runtime, repository: "shared/runtimes/" + runtime}
-		return r.resolve(ctx, arch)
+		var rel Release
+		var err error
+		if pinned == "" {
+			rel, err = r.resolve(ctx, arch)
+		} else {
+			rel, err = r.resolvePinned(ctx, arch, pinned)
+		}
+		if err != nil {
+			return Release{}, err
+		}
+		// RegistryFetch returned at its start for a runtime or an architecture with no package.
+		signed, _ := signedName(runtime, rel.Version, arch)
+		rel.Signed = signed
+		rel.Program, rel.Folder = layout(runtime, arch)
+		return rel, nil
 	}
 }
 
@@ -150,14 +173,14 @@ func (r *registry) resolve(ctx context.Context, arch string) (Release, error) {
 	var status *statusError
 	if errors.As(err, &status) && status.status == http.StatusNotFound {
 		return Release{}, &notCachedError{text: fmt.Sprintf("Check that the instance's registry reaches the publisher of %s, then run again\n"+
-			"The registry has never held %s and could not fetch it: %s.", r.runtime, r.runtime, status)}
+			"The registry has never held %s and could not fetch it:\n  %s.", r.runtime, r.runtime, status)}
 	}
 	if err != nil {
 		return Release{}, err
 	}
 	index, err := decode(body, mediaIndex)
 	if err != nil {
-		return Release{}, fmt.Errorf(textCache+"%s:%s is not a runtime's image index: %w", r.repository, newestTag, err)
+		return Release{}, fmt.Errorf(textCache+"%s:%s is not a runtime's image index:\n  %w", r.repository, newestTag, err)
 	}
 	version := index.Annotations[annotVersion]
 	if !versionShape.MatchString(version) {
@@ -168,7 +191,7 @@ func (r *registry) resolve(ctx context.Context, arch string) (Release, error) {
 	if err != nil {
 		return Release{}, err
 	}
-	layer, err := r.platformLayer(ctx, entry, version, arch)
+	layer, sigs, err := r.platformLayer(ctx, entry, version, arch)
 	if err != nil {
 		return Release{}, err
 	}
@@ -179,15 +202,51 @@ func (r *registry) resolve(ctx context.Context, arch string) (Release, error) {
 		return Release{}, err
 	}
 	if again != digest {
-		return Release{}, fmt.Errorf(textCache+"%s:%s has the digest %s, and :%s has %s", r.repository, version, again, newestTag, digest)
+		return Release{}, fmt.Errorf(textCache+"%s:%s has the digest\n  %s,\n  and :%s has\n  %s", r.repository, version, again, newestTag, digest)
 	}
-	if _, err := r.platformLayer(ctx, entry, version, arch); err != nil {
+	if _, _, err := r.platformLayer(ctx, entry, version, arch); err != nil {
 		return Release{}, err
 	}
 	return Release{
-		Version:   version,
-		Integrity: layer.Annotations[annotIntegrity],
-		Open:      func(ctx context.Context) (io.ReadCloser, error) { return r.blob(ctx, layer, version) },
+		Version:    version,
+		Integrity:  layer.Annotations[annotIntegrity],
+		Signatures: sigs,
+		Open:       func(ctx context.Context) (io.ReadCloser, error) { return r.blob(ctx, layer, version) },
+	}, nil
+}
+
+// resolvePinned reads the tag version, then the manifest of linux/arch by its digest,
+// and returns the release. The read of the platform's manifest keeps the tag in the
+// registry, as for [registry.resolve]. A 404 of the tag is a [*NotPublishedError].
+func (r *registry) resolvePinned(ctx context.Context, arch, version string) (Release, error) {
+	body, _, err := r.manifest(ctx, version, version)
+	var status *statusError
+	if errors.As(err, &status) && status.status == http.StatusNotFound {
+		return Release{}, &NotPublishedError{Runtime: r.runtime, Version: version}
+	}
+	if err != nil {
+		return Release{}, err
+	}
+	index, err := decode(body, mediaIndex)
+	if err != nil {
+		return Release{}, fmt.Errorf(textCache+"%s:%s is not a runtime's image index:\n  %w", r.repository, version, err)
+	}
+	if got := index.Annotations[annotVersion]; got != version {
+		return Release{}, fmt.Errorf(textCache+"%s:%s has the version %q", r.repository, version, got)
+	}
+	entry, err := r.platform(index, version, arch)
+	if err != nil {
+		return Release{}, err
+	}
+	layer, sigs, err := r.platformLayer(ctx, entry, version, arch)
+	if err != nil {
+		return Release{}, err
+	}
+	return Release{
+		Version:    version,
+		Integrity:  layer.Annotations[annotIntegrity],
+		Signatures: sigs,
+		Open:       func(ctx context.Context) (io.ReadCloser, error) { return r.blob(ctx, layer, version) },
 	}, nil
 }
 
@@ -206,52 +265,59 @@ func (r *registry) platform(index manifest, version, arch string) (descriptor, e
 }
 
 // platformLayer reads the manifest of entry, the image manifest of version for
-// linux/arch, by its digest, and returns its layer.
-func (r *registry) platformLayer(ctx context.Context, entry descriptor, version, arch string) (descriptor, error) {
+// linux/arch, by its digest, and returns its layer and npm's signatures of it.
+func (r *registry) platformLayer(ctx context.Context, entry descriptor, version, arch string) (descriptor, []Signature, error) {
 	what := fmt.Sprintf("the manifest of %s %s for linux/%s", r.runtime, version, arch)
 	body, digest, err := r.manifest(ctx, entry.Digest, version)
 	if err != nil {
-		return descriptor{}, err
+		return descriptor{}, nil, err
 	}
 	if digest != entry.Digest || entry.Size != int64(len(body)) {
-		return descriptor{}, fmt.Errorf(textCache+"%s does not match its digest %s", upper(what), entry.Digest)
+		return descriptor{}, nil, fmt.Errorf(textCache+"%s does not match its digest\n  %s", upper(what), entry.Digest)
 	}
 	m, err := decode(body, mediaManifest)
 	if err != nil {
-		return descriptor{}, fmt.Errorf(textCache+"%s is not a runtime's: %w", upper(what), err)
+		return descriptor{}, nil, fmt.Errorf(textCache+"%s is not a runtime's:\n  %w", upper(what), err)
 	}
-	layer, err := runtimeLayer(m, version)
+	layer, sigs, err := runtimeLayer(m, version)
 	if err != nil {
-		return descriptor{}, fmt.Errorf(textCache+"%s is not a runtime's: %w", upper(what), err)
+		return descriptor{}, nil, fmt.Errorf(textCache+"%s is not a runtime's:\n  %w", upper(what), err)
 	}
-	return layer, nil
+	return layer, sigs, nil
 }
 
 // runtimeLayer is the one layer of m, a runtime's manifest of version, with the
-// annotation dev.qory.runtime.integrity, which Install checks.
-func runtimeLayer(m manifest, version string) (descriptor, error) {
+// annotations dev.qory.runtime.integrity and dev.qory.runtime.signatures, which Install
+// checks, and the signatures, decoded strictly, see [decodeSignatures].
+func runtimeLayer(m manifest, version string) (descriptor, []Signature, error) {
 	switch {
 	case m.ArtifactType != artifactType:
-		return descriptor{}, fmt.Errorf("its artifactType is %q, not %s", m.ArtifactType, artifactType)
+		return descriptor{}, nil, fmt.Errorf("its artifactType is %q, not %s", m.ArtifactType, artifactType)
 	case m.Config == nil || m.Config.MediaType != mediaEmpty:
-		return descriptor{}, errors.New("its config is not the empty config")
+		return descriptor{}, nil, errors.New("its config is not the empty config")
 	case m.Annotations[annotVersion] != version:
-		return descriptor{}, fmt.Errorf("its version is %q", m.Annotations[annotVersion])
+		return descriptor{}, nil, fmt.Errorf("its version is %q", m.Annotations[annotVersion])
 	case len(m.Layers) != 1:
-		return descriptor{}, fmt.Errorf("it has %d layers, not one", len(m.Layers))
+		return descriptor{}, nil, fmt.Errorf("it has %d layers, not one", len(m.Layers))
 	}
 	l := m.Layers[0]
 	switch {
 	case l.MediaType != mediaLayer:
-		return descriptor{}, fmt.Errorf("its layer's media type is %q, not %s", l.MediaType, mediaLayer)
+		return descriptor{}, nil, fmt.Errorf("its layer's media type is %q, not %s", l.MediaType, mediaLayer)
 	case !digestShape.MatchString(l.Digest):
-		return descriptor{}, errors.New("its layer's digest is not sha256: and 64 lower-case hexadecimal digits")
+		return descriptor{}, nil, errors.New("its layer's digest is not sha256: and 64 lower-case hexadecimal digits")
 	case l.Size < 1 || l.Size > maxTarball:
-		return descriptor{}, fmt.Errorf("its layer's size is %d bytes, and a runtime's layer has 1 to %d", l.Size, maxTarball)
+		return descriptor{}, nil, fmt.Errorf("its layer's size is %d bytes, and a runtime's layer has 1 to %d", l.Size, maxTarball)
 	case l.Annotations[annotIntegrity] == "":
-		return descriptor{}, fmt.Errorf("its layer has no %s", annotIntegrity)
+		return descriptor{}, nil, fmt.Errorf("its layer has no %s", annotIntegrity)
+	case l.Annotations[annotSignatures] == "":
+		return descriptor{}, nil, fmt.Errorf("its layer has no %s", annotSignatures)
 	}
-	return l, nil
+	sigs, err := decodeSignatures([]byte(l.Annotations[annotSignatures]), true)
+	if err != nil {
+		return descriptor{}, nil, fmt.Errorf("its layer's %s is not npm's signatures:\n  %w", annotSignatures, err)
+	}
+	return l, sigs, nil
 }
 
 // decode reads body as JSON of the media type want.
@@ -289,7 +355,7 @@ func (r *registry) manifest(ctx context.Context, ref, version string) ([]byte, s
 	sum := sha256.Sum256(body)
 	digest := "sha256:" + hex.EncodeToString(sum[:])
 	if got := resp.Header.Get("Docker-Content-Digest"); got != "" && got != digest {
-		return nil, "", fmt.Errorf(textCache+"%s has the digest %s, and the registry sent %q", upper(what), digest, got)
+		return nil, "", fmt.Errorf(textCache+"%s has the digest\n  %s,\n  and the registry sent %q", upper(what), digest, got)
 	}
 	return body, digest, nil
 }
@@ -334,7 +400,7 @@ func (b *checkedBlob) Read(p []byte) (int, error) {
 			return n, &checkError{fmt.Errorf(textCache+"%s has %d bytes, and its manifest lists %d", upper(b.what), b.n, b.layer.Size)}
 		}
 		if "sha256:"+hex.EncodeToString(b.h.Sum(nil)) != b.layer.Digest {
-			return n, &checkError{fmt.Errorf(textCache+"%s does not match its digest %s", upper(b.what), b.layer.Digest)}
+			return n, &checkError{fmt.Errorf(textCache+"%s does not match its digest\n  %s", upper(b.what), b.layer.Digest)}
 		}
 	}
 	return n, err
@@ -348,8 +414,8 @@ func (b *checkedBlob) Close() error { return b.body.Close() }
 // seconds replaces the wait, up to 30 seconds. The registry waits only 30 seconds for
 // its cache to start serving, so a first fill of a version, two tarballs of about
 // 170 MB with up to 10 minutes each, gets 503 until it is done. The tries of one fetch
-// go on until the registry returns the file or the fetch's context ends: the run's time limit,
-// its cancel or SIGTERM. A test replaces the wait.
+// go on until the registry returns the file or the fetch's context ends: the end of the
+// run's setup, its cancel or SIGTERM. A test replaces the wait.
 var (
 	retryWaits = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 	retryEvery = 15 * time.Second
@@ -456,8 +522,11 @@ func (r *registry) note(ctx context.Context, version, answer string) {
 
 // displayName is the runtime's name as a person reads it.
 func displayName(runtime string) string {
-	if runtime == "claude" {
+	switch runtime {
+	case "claude":
 		return "Claude Code"
+	case "codex":
+		return "Codex"
 	}
 	return runtime
 }
@@ -492,9 +561,9 @@ func (r *registry) refused(what string, status int, location string) error {
 // failed is the error of the request what that got no response.
 func (r *registry) failed(what string, err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("Run again with more time\nThe run ended before the registry at %s returned %s: %w", r.host, what, err)
+		return fmt.Errorf("Run again with more time\nThe run ended before the registry at %s returned\n  %s: %w", r.host, what, err)
 	}
-	return fmt.Errorf("Check that the run's proxy reaches the registry at %s\n%s failed: %w", r.host, what, err)
+	return fmt.Errorf("Check that the run's proxy reaches the registry at %s\n%s failed:\n  %w", r.host, what, err)
 }
 
 // tokenFor gets a pull token for the repository from the realm of the first Bearer
@@ -506,22 +575,22 @@ func (r *registry) failed(what string, err error) error {
 func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, error) {
 	params, ok := bearer(challenges)
 	if !ok {
-		return "", fmt.Errorf("Check that the registry at %s returns a Bearer challenge\nIt returned 401 with no Bearer challenge", r.host)
+		return "", fmt.Errorf("Check that the registry at %s returns a Bearer challenge\nThe registry\n  at %s\n  returned 401 with no Bearer challenge", r.host, r.host)
 	}
 	realm, err := url.Parse(params["realm"])
 	if err != nil || realm.Host == "" || realm.User != nil ||
 		realm.Scheme != "https" && (realm.Scheme != "http" || scheme(realm.Host) != "http") {
-		return "", fmt.Errorf("Check the registry at %s\nThe realm of its Bearer challenge is not an https URL, or http on loopback", r.host)
+		return "", fmt.Errorf("Check the registry at %s\nThe registry at %s returned a Bearer challenge whose realm\n  is not an https URL, or http on loopback", r.host, r.host)
 	}
 	if r.instance == "" {
-		return "", fmt.Errorf("Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe realm is %s, and the run has no address of Qory Apiary to check it against.", realm.Redacted())
+		return "", fmt.Errorf("Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe pool's forager.yaml sets no gateway.server.url, so qory cannot check the registry's token realm %s.", realm.Redacted())
 	}
 	want, err := tokenRoute(r.instance)
 	if err != nil {
 		return "", err
 	}
 	if !sameRoute(realm, want) {
-		return "", fmt.Errorf("Ask Qory Apiary's instance admin to put the registry's token realm at %s\nIt is %s", want.Redacted(), realm.Redacted())
+		return "", fmt.Errorf("Ask Qory Apiary's instance admin to put the registry's token realm at %s\nThe registry's token realm is\n  %s,\n  and the instance's token route is %s.", want.Redacted(), realm.Redacted(), want.Redacted())
 	}
 	// The request is to the instance's token route, with the service and the scope alone:
 	// nothing else of the realm, such as its query or fragment, goes with it.
@@ -550,7 +619,7 @@ func (r *registry) tokenFor(ctx context.Context, challenges []string) (string, e
 		AccessToken string `json:"access_token"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, maxToken)).Decode(&reply) != nil || reply.Token == "" && reply.AccessToken == "" {
-		return "", fmt.Errorf("Check the token realm at %s\nIts response contains no token", realm.Host)
+		return "", fmt.Errorf("Check the token realm at %s\nThe response of the token realm\n  at %s\n  contains no token", realm.Host, realm.Host)
 	}
 	if reply.Token == "" {
 		return reply.AccessToken, nil
@@ -567,11 +636,11 @@ const tokenPath = "/registry/token"
 func tokenRoute(instance string) (*url.URL, error) {
 	u, err := url.Parse(instance)
 	if err != nil || u.Host == "" || u.User != nil || u.Scheme != "https" && u.Scheme != "http" {
-		return nil, errors.New("Set the address of Qory Apiary to an https URL\nThe run's address of Qory Apiary is not one.")
+		return nil, errors.New("Set the address of Qory Apiary to an https URL\nThe run's address of Qory Apiary is not an http or https URL\n  with a host and no user")
 	}
 	if strings.TrimSuffix(u.Path, "/") != "" {
 		// [CheckInstance] refuses a path too: the route is on the instance's host.
-		return nil, fmt.Errorf("Set gateway.server.url in forager.yaml to an address with no path\nThe address is %q.", instance)
+		return nil, fmt.Errorf("Set gateway.server.url in forager.yaml to an address with no path\nThe address of Qory Apiary has a path:\n  %q", instance)
 	}
 	return &url.URL{Scheme: u.Scheme, Host: u.Host, Path: tokenPath}, nil
 }
@@ -700,22 +769,22 @@ func refusedConnect(err error) bool { return connectRefusal(err) != nil }
 func ProxyClient(proxyURL, caBundle string) (*http.Client, error) {
 	u, err := url.Parse(proxyURL)
 	if err != nil || u.Scheme != "http" || u.Host == "" {
-		return nil, errors.New("Run again: the run's host proxy has no http URL")
+		return nil, errors.New("Run again\nThe run's host proxy has no http URL")
 	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if caBundle != "" {
 		f, err := os.Open(caBundle)
 		if err != nil {
-			return nil, fmt.Errorf("Run again: the run's CA bundle cannot be read: %w", err)
+			return nil, fmt.Errorf("Run again\nThe run's CA bundle cannot be read: %w", err)
 		}
 		pem, err := io.ReadAll(io.LimitReader(f, maxBundle))
 		f.Close()
 		if err != nil {
-			return nil, fmt.Errorf("Run again: the run's CA bundle cannot be read: %w", err)
+			return nil, fmt.Errorf("Run again\nThe run's CA bundle cannot be read: %w", err)
 		}
 		roots := x509.NewCertPool()
 		if !roots.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("Run again: the run's CA bundle %s has no certificate", caBundle)
+			return nil, fmt.Errorf("Run again\nThe run's CA bundle\n  %s\n  has no certificate", caBundle)
 		}
 		tlsConfig.RootCAs = roots
 	}

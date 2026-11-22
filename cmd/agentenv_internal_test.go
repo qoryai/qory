@@ -55,7 +55,7 @@ func TestTheAgentEnvKeepsTheNamesForagerSets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range []string{"HTTP_PROXY", "https_proxy", "NO_PROXY", "QORY_RUN_SOCKET", "QORY_RUN_ID", "QORY_HARNESS_HOME", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR", "ca SSL_CERT_FILE", "ca NODE_EXTRA_CA_CERTS"} {
+	for _, n := range []string{"HTTP_PROXY", "https_proxy", "NO_PROXY", "QORY_RUN_SOCKET", "QORY_RUN_ID", "QORY_SESSION", "QORY_HARNESS_HOME", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR", "ca SSL_CERT_FILE", "ca NODE_EXTRA_CA_CERTS"} {
 		if !strings.Contains("\n"+string(data), "\n"+n+"\n") {
 			t.Errorf("the file lacks %s:\n%s", n, data)
 		}
@@ -111,12 +111,13 @@ func TestTheAgentEnvRefusesWhatItCannotRead(t *testing.T) {
 	}
 }
 
-// TestTheAgentEnvKeepsTheStartKeysEndpoint is a dispatched walled run of Claude Code
-// whose start key sets ANTHROPIC_BASE_URL, the variable its descriptor's
-// model.endpoint.variable names, and whose sources set no value of it, so the resolved
-// variables list no entry for it: the verb keeps the endpoint Forager set and the key's
-// placeholder, and still drops another ANTHROPIC_ name.
-func TestTheAgentEnvKeepsTheStartKeysEndpoint(t *testing.T) {
+// TestTheAgentEnvKeepsTheDefaultModelProviderCredentialsEndpoint is a dispatched walled
+// run of Claude Code whose default model provider credential sets ANTHROPIC_BASE_URL,
+// the variable its descriptor's model.endpoint.variable names, and whose sources set no
+// value of it, so the resolved variables list no entry for it: the verb keeps the
+// endpoint Forager set and the key's placeholder, and still drops another ANTHROPIC_
+// name.
+func TestTheAgentEnvKeepsTheDefaultModelProviderCredentialsEndpoint(t *testing.T) {
 	rt, err := catalog.Lookup("claude", "")
 	if err != nil {
 		t.Fatal(err)

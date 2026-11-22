@@ -349,6 +349,45 @@ func TestForceReplacesWhatGitCanRestore(t *testing.T) {
 	}
 }
 
+// TestForeignFileAtTheCodexConfigLink is a regular file at .codex/config.toml, where the
+// link step writes a link into the home: the next link step stops with a plain
+// ForeignPathError at that path, and with force with one for an untracked file, and the
+// file stays.
+func TestForeignFileAtTheCodexConfigLink(t *testing.T) {
+	res, root, home := composeFixture(t, "codex")
+	codex := lookup(t, "codex")
+	if err := render.Build(res, home, codex); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := render.LinkInto(codex, res, root, home, false); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, ".codex", "config.toml")
+	if !isLink(t, path) {
+		t.Fatal(".codex/config.toml is not a link after the first link step")
+	}
+	// The link goes first, because writing through it would land in the home.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	write(t, path, "model = \"theirs\"\n")
+	var foreign *render.ForeignPathError
+	_, err := render.LinkInto(codex, res, root, home, false)
+	if !errorsAs(err, &foreign) || foreign.Reason != "" || foreign.Path != path {
+		t.Fatalf("err = %v, want a plain ForeignPathError at %s", err, path)
+	}
+	_, err = render.LinkInto(codex, res, root, home, true)
+	if !errorsAs(err, &foreign) || foreign.Reason != "is not tracked in git" || foreign.Path != path {
+		t.Fatalf("with force: err = %v, want a ForeignPathError for an untracked file at %s", err, path)
+	}
+	if isLink(t, path) {
+		t.Fatal(".codex/config.toml is a link after the two stopped link steps")
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != "model = \"theirs\"\n" {
+		t.Errorf(".codex/config.toml = %q, %v, want the file as written", data, err)
+	}
+}
+
 // TestBuildLinksEveryModule is what a hook or a server reaches through
 // $QORY_HARNESS_HOME/modules/<name>: the module's own directory, whole.
 func TestBuildLinksEveryModule(t *testing.T) {

@@ -1,0 +1,1 @@
+forge $QORY_HARNESS_HOME/modules/forge/bin/open-draft --strict

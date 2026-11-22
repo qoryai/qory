@@ -19,7 +19,7 @@ import (
 	"github.com/qoryai/qory/internal/ui"
 )
 
-// launchFaultRun opens the suite of a walled write run with full_suite true, whose build plan is
+// launchFaultRun opens the suite of a walled write run with fullSuite true, whose build plan is
 // plan ("" for none) and whose folder has a .git folder unless noGit, and returns the run.
 func launchFaultRun(t *testing.T, h helperRun, plan string, noGit bool) {
 	t.Helper()
