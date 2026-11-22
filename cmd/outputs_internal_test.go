@@ -337,7 +337,7 @@ func TestClearOutboxRemovesTheOutboxAlone(t *testing.T) {
 	write(filepath.Join(outside, "outbox", "reply.json"))
 	link(outside, filepath.Join(qoryLink, ".qory"))
 	err := clearOutbox(qoryLink)
-	if err == nil || !strings.HasPrefix(err.Error(), "Remove .qory/outbox, then take the work item in again: ") || !exists(filepath.Join(outside, "outbox", "reply.json")) {
+	if err == nil || !strings.HasPrefix(err.Error(), "Remove .qory/outbox, then start the run again: ") || !exists(filepath.Join(outside, "outbox", "reply.json")) {
 		t.Errorf("a .qory that is a link: %v", err)
 	}
 }

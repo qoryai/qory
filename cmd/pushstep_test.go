@@ -1642,7 +1642,7 @@ func TestAQoryLinkStopsTheRunBeforeTheSession(t *testing.T) {
 	if *outbox != "" || r.err == nil {
 		t.Fatalf("%v, the session's outbox %q, want the run to stop before the session", r.err, *outbox)
 	}
-	wants(t, r.err.Error(), "Remove .qory/outbox, then take the work item in again: a session starts with no outbox.\n  Emptying the outbox in ", " failed: .qory is not a folder; the code is used")
+	wants(t, r.err.Error(), "Remove .qory/outbox, then start the run again: a session starts with no outbox.\n  Emptying the outbox in ", " failed: .qory is not a folder. The run code is used up.")
 	if _, err := os.Stat(filepath.Join(outside, "outbox", "reply", "reply.json")); err != nil {
 		t.Errorf("the outbox outside is gone: %v", err)
 	}

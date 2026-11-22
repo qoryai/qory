@@ -335,7 +335,7 @@ release may change what an existing document does, and states it under Upgrading
   ones, before the push with the local head, so an output that fails pushes nothing, and
   again after the push. qory removes the outbox before each session, so an output that a
   failed session or an earlier run left is never stored; a `.qory` that is a link stops the
-  run with `Remove .qory/outbox, then take the work item in again: a session starts with no
+  run with `Remove .qory/outbox, then start the run again: a session starts with no
   outbox.` A type of the outputs or of `deliver` whose `json_schema` does not convert
   to JSON stops the run: `Report the run to the instance admin of Qory Apiary: an output's
   schema does not convert.` A run with no repository stores its outputs alone, in the step `store
@@ -802,9 +802,8 @@ release may change what an existing document does, and states it under Upgrading
   in `push_checks` and `scope_checks` of a module, in `plan` of a workflow, in `qory
   artifact`, and in the output types of a stage at the start of a run. The contract
   schemas and the messages state the rule. The message of `qory artifact` has the rule on
-  line 1, `Set the type to lowercase letters and digits in groups joined by single
-  hyphens.`, and `It starts with a letter and has at most 64 bytes. The value is <value>.`
-  on line 2.
+  line 1, `Set type to lowercase letters, digits and single hyphens, a letter first and
+  no hyphen last.`, and `It has 1 to 64 characters. The value is <value>.` on line 2.
 - A read run whose documents contain a harness document and whose inputs list
   `destinations`, such as an Explore run, fetches nothing before its session; the agent
   clones the destinations it needs with `qory destination clone`. A run with no
