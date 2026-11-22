@@ -13,7 +13,6 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/integration"
-	"github.com/qoryai/qory/internal/submission"
 )
 
 // The words of the checkout of a work item's branch. Each is one format string.
@@ -38,7 +37,7 @@ type WorkBranch struct {
 	// Version is the entries of the submission version the run read, nil with none, with the
 	// commit of each repository that a [Push] of the run pushed. It may have repositories
 	// that the run does not list, and those are not fetched.
-	Version []submission.Repository
+	Version []Repository
 	// Pushed is, per repository, the newest commit pushed by a run that a person did not
 	// cancel, from the work item's record of pushed commits; the run starts there instead of
 	// at Version when that commit descends from the commit of Version, or from the
@@ -190,14 +189,14 @@ func (b *WorkBranch) startOf(ctx context.Context, git gitRunner, dest, system, p
 
 // withStart is version with the commit of the repository path on system set to commit,
 // as a new entry when it has none: the commit a run starts at.
-func withStart(version []submission.Repository, system, path, commit string) []submission.Repository {
+func withStart(version []Repository, system, path, commit string) []Repository {
 	for i := range version {
 		if version[i].System == system && sameRepository(system == ForgeGitHub, version[i].Path, path) {
-			version[i] = submission.Repository{System: system, Path: path, Commit: commit}
+			version[i] = Repository{System: system, Path: path, Commit: commit}
 			return version
 		}
 	}
-	return append(version, submission.Repository{System: system, Path: path, Commit: commit})
+	return append(version, Repository{System: system, Path: path, Commit: commit})
 }
 
 // branchNoCommit is [textBranchNoCommit] for commit of path on system, with git's line.

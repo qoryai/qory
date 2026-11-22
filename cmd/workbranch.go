@@ -89,7 +89,7 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, deadline time.T
 		return nil, fmt.Errorf("%w%s", err, codeUsed)
 	}
 
-	branch := &preparation.WorkBranch{Ref: submission.Name(r.workItem)}
+	branch := &preparation.WorkBranch{Ref: preparation.WorkItemRef(r.workItem)}
 
 	version, err := chosenSubmission(snapshot, index)
 	if err != nil {
@@ -117,7 +117,7 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, deadline time.T
 	// A repository starts at the commit of the version; its commits, links and draft
 	// belong to the run that wrote it.
 	for _, r := range document.Repositories {
-		branch.Version = append(branch.Version, submission.Repository{System: r.System, Path: r.Path, Commit: r.Commit})
+		branch.Version = append(branch.Version, preparation.Repository{System: r.System, Path: r.Path, Commit: r.Commit})
 	}
 
 	if err := pushedStarts(branch, snapshot.PushedCommits); err != nil {
@@ -138,7 +138,7 @@ func pushedStarts(branch *preparation.WorkBranch, pushed []runapi.PushedEntry) e
 	order := [][2]string{}
 
 	for _, entry := range pushed {
-		if !submission.CommitID(entry.Commit) {
+		if !preparation.CommitID(entry.Commit) {
 			return fmt.Errorf("Report this run to the instance admin of Qory Apiary.\n"+
 				"  The list of pushed commits has %s, which is not a full commit id, so the run did not start%s", shownText(entry.Commit), codeUsed)
 		}

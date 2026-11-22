@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
-
-	"github.com/qoryai/qory/internal/submission"
 )
 
 // bareCommit makes a commit on top of parent in the bare repository bare, with the tree of
@@ -269,7 +267,7 @@ func TestARunStartsAtTheNewestPushedCommitThatDescends(t *testing.T) {
 			pushed := bareCommit(t, bare, "qory/wi_1", parent, "an earlier run")
 			b := &WorkBranch{Ref: testRef, Pushed: []Landed{{System: "git.example.com", Path: "acme/shop", Commit: pushed}}}
 			if c.version {
-				b.Version = []submission.Repository{{System: "git.example.com", Path: "acme/shop", Commit: target}}
+				b.Version = []Repository{{System: "git.example.com", Path: "acme/shop", Commit: target}}
 			}
 			if _, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: target, Branch: b}); err != nil {
 				t.Fatal(err)

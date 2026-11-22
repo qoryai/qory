@@ -22,7 +22,6 @@ import (
 	"github.com/qoryai/qory/internal/integration"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/render"
-	"github.com/qoryai/qory/internal/submission"
 )
 
 // The words of the push step of a write run. Each is one format string.
@@ -122,7 +121,7 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 // An agent that was killed can leave .git/index.lock, which would stop the commit. After
 // the checks, [clearIndexLocks] removes that one file of each repository when
 // agentStopped is true, and stops the push when a lock is there and it is false.
-func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message string, read, p proxygit.Proxy, agentStopped bool, report io.Writer) ([]submission.Repository, error) {
+func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message string, read, p proxygit.Proxy, agentStopped bool, report io.Writer) ([]Repository, error) {
 	b.landed = nil
 	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
 	dir, err := filepath.Abs(dir)
@@ -226,14 +225,14 @@ func listFailed(b *WorkBranch, err error) error {
 // runCommits lists the commits from start, not included, to head, included, of the
 // repository at dir, oldest first, as the commits of a submission with no step: the
 // caller sets each step.
-func runCommits(ctx context.Context, git gitRunner, dir, start, head string) ([]submission.Commit, error) {
+func runCommits(ctx context.Context, git gitRunner, dir, start, head string) ([]Commit, error) {
 	out, err := git(ctx, dir, "rev-list", "--reverse", start+".."+head)
 	if err != nil {
 		return nil, err
 	}
-	var commits []submission.Commit
+	var commits []Commit
 	for _, c := range strings.Fields(out) {
-		commits = append(commits, submission.Commit{Commit: c})
+		commits = append(commits, Commit{Commit: c})
 	}
 	return commits, nil
 }
@@ -704,8 +703,8 @@ func baseBranch(name string) string {
 // base and commits, or with a new entry when it has none. The entries compare as
 // [WorkBranch.CommitOf] compares them. A set entry keeps no program output of an earlier
 // version: the commit URLs and the draft are written again at the submit step.
-func withCommit(version []submission.Repository, system, path, head, base, branch string, commits []submission.Commit) []submission.Repository {
-	entry := submission.Repository{System: system, Path: path, Commit: head, Base: &submission.Base{Commit: base, Branch: branch}, Commits: commits}
+func withCommit(version []Repository, system, path, head, base, branch string, commits []Commit) []Repository {
+	entry := Repository{System: system, Path: path, Commit: head, Base: &Base{Commit: base, Branch: branch}, Commits: commits}
 	for i := range version {
 		if version[i].System == system && sameRepository(system == ForgeGitHub, version[i].Path, path) {
 			entry.Path = version[i].Path

@@ -398,12 +398,12 @@ func noDraftReason(verdict string, text *submission.Text) string {
 // its draft as [noDraftReason] has it. repositories are the entries of
 // [preparation.WorkBranch.Version]: a repository that this run did not push has its commit
 // alone.
-func assembleSubmission(branch *preparation.WorkBranch, repositories []submission.Repository, verdict string, h *handoff) *submission.Submission {
+func assembleSubmission(branch *preparation.WorkBranch, repositories []preparation.Repository, verdict string, h *handoff) *submission.Submission {
 	text := h.text()
 	doc := &submission.Submission{Ref: branch.Ref, Verdict: verdict, Text: text}
 	reason := noDraftReason(verdict, text)
 	for _, r := range repositories {
-		entry := submission.Repository{System: r.System, Path: r.Path, Commit: r.Commit, Base: r.Base, Draft: submission.None(reason, 0)}
+		entry := submission.Repository{System: r.System, Path: r.Path, Commit: r.Commit, Base: &submission.Base{Commit: r.Base.Commit, Branch: r.Base.Branch}, Draft: submission.None(reason, 0)}
 		for _, c := range r.Commits {
 			entry.Commits = append(entry.Commits, submission.Commit{Commit: c.Commit, Step: h.stepOf(c.Commit)})
 		}

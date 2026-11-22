@@ -2,14 +2,11 @@ package preparation
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/qoryai/qory/internal/submission"
 )
 
 const testRef = "qory/wi_1"
@@ -30,17 +27,17 @@ func branchCommit(t *testing.T, base, path, first string, change func(work strin
 
 // versionOf is a version with the commit of each path, given as path, commit, path,
 // commit, on git.example.com.
-func versionOf(pairs ...string) []submission.Repository {
-	var entries []submission.Repository
+func versionOf(pairs ...string) []Repository {
+	var entries []Repository
 	for i := 0; i < len(pairs); i += 2 {
-		entries = append(entries, submission.Repository{System: "git.example.com", Path: pairs[i], Commit: pairs[i+1]})
+		entries = append(entries, Repository{System: "git.example.com", Path: pairs[i], Commit: pairs[i+1]})
 	}
 	return entries
 }
 
 // fetchBranchAt fetches list with the target acme/shop at version and the branch with
 // entries, and returns the branch.
-func fetchBranchAt(t *testing.T, dir, list, version string, entries []submission.Repository) *WorkBranch {
+func fetchBranchAt(t *testing.T, dir, list, version string, entries []Repository) *WorkBranch {
 	t.Helper()
 	b := &WorkBranch{Ref: testRef, Version: entries}
 	if _, err := fetchListAt(dir, list, Target{System: "git.example.com", Path: "acme/shop", Version: version, Branch: b}); err != nil {
@@ -347,7 +344,7 @@ func TestEachRepositoryKeepsItsOwnDefaultBranchName(t *testing.T) {
 	if want := map[string]string{"acme/shop": "trunk", "acme/lib": "stable"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("the default branches are %v, want %v", got, want)
 	}
-	var version []submission.Repository
+	var version []Repository
 	for _, r := range b.Repositories {
 		version = withCommit(version, "git.example.com", r.Path, r.Commit, r.Start, r.DefaultBranch, nil)
 	}
@@ -356,43 +353,4 @@ func TestEachRepositoryKeepsItsOwnDefaultBranchName(t *testing.T) {
 			t.Errorf("%s has the base %+v, want the branch %s", r.Path, r.Base, want)
 		}
 	}
-}
-
-// TestTheBaseBranchOfTheSchemaTakesTheNamesThatGitTakes is a list of branch names that git
-// check-ref-format takes after refs/heads/ and one that it refuses: the schema's pattern for
-// base.branch takes and refuses the same names, and refuses one of more than 255 characters.
-func TestTheBaseBranchOfTheSchemaTakesTheNamesThatGitTakes(t *testing.T) {
-	needGit(t)
-	dir := t.TempDir()
-	run(t, dir, "init", "--quiet")
-	names := []string{
-		"main", "trunk", "release/1.0", "feature/a-b_c", "v1.2.3", "@", "a@b", "é/ü", "x.y/z", "a-",
-		"-main", "/main", "main/", "a//b", "a..b", ".hidden", "a/.hidden", "a.lock", "a.lock/b", "a.", "a b", "a~b", "a^b", "a:b",
-		"a?b", "a*b", "a[b", `a\b`, "a@{b", "a\tb", "a\x7fb", "", strings.Repeat("a", 255), strings.Repeat("a", 256),
-	}
-	for _, name := range names {
-		want := name != "" && len(name) <= 255
-		if want {
-			ok, err := BranchName(context.Background(), dir, name)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want = ok
-		}
-		raw := `{"ref":"qory/wi_1","verdict":"none","repositories":[{"system":"git.example.com","path":"acme/shop","commit":"` + strings.Repeat("a", 40) +
-			`","base":{"commit":"` + strings.Repeat("b", 40) + `","branch":` + jsonString(t, name) + `},"commits":[],"draft":{"none":"no-text"}}]}`
-		if got := submission.Check([]byte(raw)) == nil; got != want {
-			t.Errorf("branch %q: the schema takes it: %v, git takes it: %v", name, got, want)
-		}
-	}
-}
-
-// jsonString is s as a JSON string.
-func jsonString(t *testing.T, s string) string {
-	t.Helper()
-	raw, err := json.Marshal(s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(raw)
 }

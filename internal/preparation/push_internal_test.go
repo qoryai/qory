@@ -17,7 +17,6 @@ import (
 
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/proxygit"
-	"github.com/qoryai/qory/internal/submission"
 )
 
 // onBranch fetches acme/shop, and acme/lib when list has it, and checks out the branch,
@@ -51,20 +50,23 @@ func onBranchIn(t *testing.T, list string) (string, *WorkBranch, string) {
 	return dir, b, base
 }
 
+// pushed is what [Push] returned: the repositories it moved.
+type pushed struct{ Repositories []Repository }
+
 // pushOf is [Push] of b in dir, with the message "Changes left", which returns the lines
 // it printed too.
-func pushOf(dir string, b *WorkBranch) (*submission.Submission, string, error) {
+func pushOf(dir string, b *WorkBranch) (*pushed, string, error) {
 	return pushWith(dir, b, true)
 }
 
 // pushWith is [pushOf] with agentStopped set.
-func pushWith(dir string, b *WorkBranch, agentStopped bool) (*submission.Submission, string, error) {
+func pushWith(dir string, b *WorkBranch, agentStopped bool) (*pushed, string, error) {
 	var report strings.Builder
 	repositories, err := Push(context.Background(), dir, os.Environ(), b, "Changes left", testProxy, testProxy, agentStopped, &report)
 	if repositories == nil {
 		return nil, report.String(), err
 	}
-	return &submission.Submission{Repositories: repositories}, report.String(), err
+	return &pushed{Repositories: repositories}, report.String(), err
 }
 
 // TestAfterTheRunTheCheckTakesWhatTheFetchWrote is a repository qory fetched: the check
@@ -174,16 +176,16 @@ func TestNoChangeAfterGitAddsCommitsNothing(t *testing.T) {
 // TestWithCommit replaces the entry of a repository, in any letter case on github.com,
 // with the run's base and commits, and adds one for a repository that has none.
 func TestWithCommit(t *testing.T) {
-	entry := func(system, path, commit string) submission.Repository {
-		return submission.Repository{System: system, Path: path, Commit: commit}
+	entry := func(system, path, commit string) Repository {
+		return Repository{System: system, Path: path, Commit: commit}
 	}
-	commits := []submission.Commit{{Commit: "b1"}, {Commit: "c"}}
-	pushed := func(system, path string) submission.Repository {
-		return submission.Repository{System: system, Path: path, Commit: "c", Base: &submission.Base{Commit: "a", Branch: "main"}, Commits: commits}
+	commits := []Commit{{Commit: "b1"}, {Commit: "c"}}
+	pushed := func(system, path string) Repository {
+		return Repository{System: system, Path: path, Commit: "c", Base: &Base{Commit: "a", Branch: "main"}, Commits: commits}
 	}
-	version := []submission.Repository{entry("github.com", "Acme/Shop", "a"), entry("github.com", "acme/lib", "b")}
+	version := []Repository{entry("github.com", "Acme/Shop", "a"), entry("github.com", "acme/lib", "b")}
 	got := withCommit(slices.Clone(version), "github.com", "acme/shop", "c", "a", "main", commits)
-	if want := []submission.Repository{pushed("github.com", "Acme/Shop"), entry("github.com", "acme/lib", "b")}; !reflect.DeepEqual(got, want) {
+	if want := []Repository{pushed("github.com", "Acme/Shop"), entry("github.com", "acme/lib", "b")}; !reflect.DeepEqual(got, want) {
 		t.Errorf("replaced: %+v, want %+v", got, want)
 	}
 	got = withCommit(slices.Clone(version), "git.example.com", "Acme/Shop", "c", "a", "main", commits)

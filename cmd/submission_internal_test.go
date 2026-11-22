@@ -157,7 +157,7 @@ func TestAHandoffPartOverTheFormatsLimitIsDropped(t *testing.T) {
 				t.Errorf("the steps are %v, want %d", h.Steps, len(c.steps))
 			}
 			branch := &preparation.WorkBranch{Ref: "qory/wi_1"}
-			repositories := []submission.Repository{{System: "git.example.com", Path: "acme/shop", Commit: commitB, Base: &submission.Base{Commit: commitA}, Commits: []submission.Commit{{Commit: commitA}, {Commit: commitB}}}}
+			repositories := []preparation.Repository{{System: "git.example.com", Path: "acme/shop", Commit: commitB, Base: &preparation.Base{Commit: commitA}, Commits: []preparation.Commit{{Commit: commitA}, {Commit: commitB}}}}
 			raw, err := json.Marshal(assembleSubmission(branch, repositories, submission.VerdictPassed, h))
 			if err != nil {
 				t.Fatal(err)
@@ -173,7 +173,7 @@ func TestAHandoffPartOverTheFormatsLimitIsDropped(t *testing.T) {
 // run did not make: the document has the steps of the run's commits alone.
 func TestAStepOfACommitOutsideTheRangeIsNotUsed(t *testing.T) {
 	branch := &preparation.WorkBranch{Ref: "qory/wi_1"}
-	repositories := []submission.Repository{{System: "git.example.com", Path: "acme/shop", Commit: commitB, Base: &submission.Base{Commit: commitA}, Commits: []submission.Commit{{Commit: commitB}}}}
+	repositories := []preparation.Repository{{System: "git.example.com", Path: "acme/shop", Commit: commitB, Base: &preparation.Base{Commit: commitA}, Commits: []preparation.Commit{{Commit: commitB}}}}
 	h := &handoff{Steps: map[string]string{commitA: "base", commitC: "later", commitB: "implement"}}
 	raw, err := json.Marshal(assembleSubmission(branch, repositories, submission.VerdictNone, h))
 	if err != nil {
@@ -189,9 +189,9 @@ func TestAStepOfACommitOutsideTheRangeIsNotUsed(t *testing.T) {
 // hand-off at all.
 func TestACommitWithNoStepIsUnreviewed(t *testing.T) {
 	branch := &preparation.WorkBranch{Ref: "qory/wi_1"}
-	repositories := []submission.Repository{{
-		System: "git.example.com", Path: "acme/shop", Commit: commitC, Base: &submission.Base{Commit: commitA},
-		Commits: []submission.Commit{{Commit: commitB}, {Commit: commitC}},
+	repositories := []preparation.Repository{{
+		System: "git.example.com", Path: "acme/shop", Commit: commitC, Base: &preparation.Base{Commit: commitA},
+		Commits: []preparation.Commit{{Commit: commitB}, {Commit: commitC}},
 	}}
 	h := &handoff{Steps: map[string]string{commitB: "implement"}}
 	doc := assembleSubmission(branch, repositories, submission.VerdictPassed, h)
@@ -211,7 +211,7 @@ func TestACommitWithNoStepIsUnreviewed(t *testing.T) {
 // text and no program running; and the document of each passes the contract's schema.
 func TestTheDraftIsNoneWithItsReason(t *testing.T) {
 	branch := &preparation.WorkBranch{Ref: "qory/wi_1"}
-	repositories := []submission.Repository{{System: "git.example.com", Path: "acme/shop", Commit: commitC, Base: &submission.Base{Commit: commitA}, Commits: []submission.Commit{{Commit: commitC}}}}
+	repositories := []preparation.Repository{{System: "git.example.com", Path: "acme/shop", Commit: commitC, Base: &preparation.Base{Commit: commitA}, Commits: []preparation.Commit{{Commit: commitC}}}}
 	text := &handoff{Text: &submission.Text{Title: "Add a page"}}
 	for name, c := range map[string]struct {
 		verdict string
