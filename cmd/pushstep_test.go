@@ -3214,6 +3214,52 @@ func TestARunWithNoRepositoryStoresItsReply(t *testing.T) {
 	}
 }
 
+// TestARunWithNoRepositoryThatFailsItsOutputCheckStoresNothing is the run of
+// [TestARunWithNoRepositoryStoresItsReply] whose session writes no reply, which the stage
+// requires, or a reply whose text is not a string: qory stores nothing, and the run closes
+// failed with the end code outputs_invalid and the line of the check.
+func TestARunWithNoRepositoryThatFailsItsOutputCheckStoresNothing(t *testing.T) {
+	for name, c := range map[string]struct{ reply, line string }{
+		"missing":       {line: "Write reply to the outbox: the stage requires it and the session wrote none."},
+		"breaks schema": {reply: `{"text":5}`, line: "Fix the reply output: it breaks its schema at "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, outbox := replyRepo(t)
+			p.mountsOf = func(spec session.SessionSpec) {
+				*outbox = outboxOf(spec)
+				if *outbox != "" && c.reply != "" {
+					writeFile(t, filepath.Join(*outbox, "reply", "reply.json"), c.reply)
+				}
+			}
+			r := p.run(t, nil, nil)
+			r.wantsClose(t, event.StateFailed, 1)
+			r.wantsReason(t, string(contracts.EndCodeOutputsInvalid))
+			if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
+				t.Errorf("%d POST and %d versions stored, want none", posts, stored)
+			}
+			wants(t, r.out, c.line)
+		})
+	}
+}
+
+// TestARunWithNoRepositoryWhoseStoreFailsHasNoEndCode is the run of
+// [TestARunWithNoRepositoryStoresItsReply] whose POST of the version gets a 400: the reply
+// passed its check, so the run closes failed with no end code and the line of the store.
+func TestARunWithNoRepositoryWhoseStoreFailsHasNoEndCode(t *testing.T) {
+	p, _ := replyRepo(t)
+	p.api.post = func(_ int, w http.ResponseWriter) (bool, bool) {
+		failing(w, http.StatusBadRequest, "invalid_request", "")
+		return true, false
+	}
+	r := p.run(t, nil, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	r.wantsReason(t, "")
+	if _, _, stored := p.api.counts(); stored != 0 {
+		t.Errorf("%d versions stored, want 0", stored)
+	}
+	wants(t, r.out, "output reply was not stored")
+}
+
 // TestARunWithNoRepositoryStopsWhenItCannotReadItsWorkItem is the run of
 // [TestARunWithNoRepositoryStoresItsReply] whose GET /work-item ends with a 500: the run
 // stops before its session with the line of the read, and stores nothing.

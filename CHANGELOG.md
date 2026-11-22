@@ -28,10 +28,10 @@ release may change what an existing document does, and states it under Upgrading
   codes of the run outcome contract of the integrations repository. The line qory prints has
   the cause alone. When the next-session request gets a refusal or a status below 500
   other than 429 with no coded refusal, from Qory Apiary or the gateway, or no answer, the
-  run closes `failed` with `next_session_failed`. An output check before the push that
-  finds a required output missing, or an output that fails its read, fill, schema or size
-  check, closes the run `failed` with `outputs_invalid`; the same failure after the push
-  has no end code.
+  run closes `failed` with `next_session_failed`. An output check before the push, or
+  before any version is stored in a run with no repository, that finds a required output
+  missing, or an output that fails its read, fill, schema or size check, closes the run
+  `failed` with `outputs_invalid`; the same failure after the push has no end code.
 - `qory destination clone <id>...` clones destinations of a run inside its session: each
   id from `destinations` in `$QORY_HARNESS_HOME/inputs.json`, at depth 1, through the
   wall's proxy, into `/tmp/qory-destinations/<system>/<path>`. It prints one line per id,

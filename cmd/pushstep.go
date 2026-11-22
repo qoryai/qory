@@ -436,15 +436,18 @@ func (o *runOutputs) store(ctx context.Context, w io.Writer, client *runapi.Clie
 		return nil
 	}
 	// The check before the push passed on the version the push leaves, so an error here is
-	// of a pushed head that differs from the local head: the branch has no version.
-	ready, missing, err := o.ready(w, recordOf(branch, o.target), note)
+	// of a pushed head that differs from the local head: the branch has no version, and the
+	// run closes with no end code. A run with no branch pushes nothing, so its outputs that
+	// fail here close it outputs_invalid, as before a push.
+	ready, err := o.checked(ctx, w, client, runID, recordOf(branch, o.target), note)
 	if err != nil {
-		return withDeleteBranch(branch, err)
-	}
-	if len(missing) > 0 {
-		if err := missingOutput(ctx, client, runID, o.types, missing); err != nil {
-			return withDeleteBranch(branch, err)
+		if branch == nil {
+			return err
 		}
+		if invalid := (*outputsInvalid)(nil); errors.As(err, &invalid) {
+			err = invalid.err
+		}
+		return withDeleteBranch(branch, err)
 	}
 	for _, r := range ready {
 		if err := checkOutputVersion(ctx, checks, branch, r.push); err != nil {
@@ -515,29 +518,39 @@ var outputsBeforePush = (*runOutputs).beforePush
 // beforePush reads, fills and checks each output of the stage, as [runOutputs.store] does
 // after the push, with what version moves, the version of the branch ref that the push
 // leaves, and stops on a required output that neither the outbox nor a version of the run
-// runID has. It prints nothing and stores nothing. A nil o checks nothing. An output that
-// fails, or is missing, is an [*outputsInvalid]; a failed read of the run's versions is not.
+// runID has. It prints nothing and stores nothing. A nil o checks nothing.
 func (o *runOutputs) beforePush(ctx context.Context, client *runapi.Client, runID, ref string, version []preparation.Repository) error {
 	if o == nil {
 		return nil
 	}
-	_, missing, err := o.ready(io.Discard, recordIn(version, ref, o.target), "")
-	if err != nil {
-		return &outputsInvalid{err}
-	}
-	if len(missing) == 0 {
-		return nil
-	}
-	err = missingOutput(ctx, client, runID, o.types, missing)
-	if errors.As(err, new(*outputMissingError)) {
-		return &outputsInvalid{err}
-	}
+	_, err := o.checked(ctx, io.Discard, client, runID, recordIn(version, ref, o.target), "")
 	return err
 }
 
-// outputsInvalid is the error of an output that fails [runOutputs.beforePush], before the
-// push: its line, and the end code outputs_invalid. The same failure after the push, in
-// [runOutputs.store], has no end code: the push landed.
+// checked is [runOutputs.ready] for rec and note, with the check of [missingOutput] on the
+// required outputs that the outbox does not have. An output that fails, or is missing, is an
+// [*outputsInvalid]; a failed read of the run's versions is not.
+func (o *runOutputs) checked(ctx context.Context, w io.Writer, client *runapi.Client, runID string, rec *pushRecord, note string) ([]readyOutput, error) {
+	ready, missing, err := o.ready(w, rec, note)
+	if err != nil {
+		return nil, &outputsInvalid{err}
+	}
+	if len(missing) == 0 {
+		return ready, nil
+	}
+	err = missingOutput(ctx, client, runID, o.types, missing)
+	switch {
+	case errors.As(err, new(*outputMissingError)):
+		return nil, &outputsInvalid{err}
+	case err != nil:
+		return nil, err
+	}
+	return ready, nil
+}
+
+// outputsInvalid is the error of an output that fails [runOutputs.checked] before the push, or
+// in a run with no branch before any version is stored: its line, and the end code
+// outputs_invalid. The same failure after a push, in [runOutputs.store], has no end code.
 type outputsInvalid struct{ err error }
 
 func (e *outputsInvalid) Error() string { return e.err.Error() }

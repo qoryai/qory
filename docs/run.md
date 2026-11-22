@@ -3316,8 +3316,12 @@ commits stay in the working folder, the forge gets none of them, and the run clo
 with the end code `outputs_invalid`. A failed read of the run's versions in that check
 closes the run `failed` with no end code. An output that fails after the push adds the line
 `Before the round, delete branch qory/<work item id> of <path> on <system>.`, indented by
-two spaces, and the run closes `failed` with no end code. An output that fails one of these
-stops the step before any version is stored:
+two spaces, and the run closes `failed` with no end code. A run with no repository checks
+its outputs once, before it stores any version: an output that fails, or a required output
+that no session wrote, closes the run `failed` with the end code `outputs_invalid`. A failed
+read of the run's versions, a failed store and any failure after a version was stored close
+the run `failed` with no end code. An output that fails one of these stops the step before
+any version is stored:
 
 1. qory reads the files, at most the type's `size_limit` in all, or 10 MiB for a type with
    none. A type's folder of more than 100 entries stops the read before any file is read,
@@ -3363,8 +3367,9 @@ run has no repository to push.` for each output that it stores, such as `qory ru
 reply output; the run has no repository to push.`
 
 Each of these lines fails the step, and the run closes `failed`, exit 1. Before the push of
-a run with a branch, the run closes with the end code `outputs_invalid`; after the push, and
-in a run with no repository, with no end code. `<type>` is the output's type:
+a run with a branch, and before any version is stored in a run with no repository, the run
+closes with the end code `outputs_invalid`; after the push, with no end code. `<type>` is the
+output's type:
 
 - `Write <type> to the outbox: the stage requires it and the session wrote none.`, then
   indented by two spaces `.qory/outbox/<type>/<type>.json` for a type with a `json_schema`,
