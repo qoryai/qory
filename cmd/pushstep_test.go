@@ -1431,8 +1431,8 @@ func notPushed(t *testing.T, p *pushRepo, r pushed) {
 
 // TestALinkedOutboxFolderIsNotRead is a session that links .qory/outbox/pull-request to a
 // folder of this machine that has a pull-request.json with a title: the run stores no
-// version, fails with the line that says the output is unreadable and the end code
-// outputs_invalid, and prints nothing of the host's file.
+// version, pushes nothing, fails with the line that says the output is unreadable and the end
+// code outputs_invalid, and prints nothing of the host's file.
 func TestALinkedOutboxFolderIsNotRead(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.noOutput = true
@@ -1455,6 +1455,7 @@ func TestALinkedOutboxFolderIsNotRead(t *testing.T) {
 	}
 	wants(t, r.out, "Fix the pull-request output so that qory can read it.\n  ")
 	lacks(t, r.out, "From the host")
+	notPushed(t, p, r)
 }
 
 // TestTheOutboxIsNeverInAPushedCommit is a session that writes its output to the outbox and

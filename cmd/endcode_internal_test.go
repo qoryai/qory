@@ -73,8 +73,9 @@ func TestForagersCloseTakesTheEndCodes(t *testing.T) {
 
 // TestForagersCloseTakesTheEndCodesAfterAJoin is a run that Forager opens at a gateway in this
 // process, where a session joined and then the run closes failed with each end code of the list
-// as the reason, with exit code 1, or -1 for next_session_failed as qory closes it: the gateway takes the code after a join, as it does
-// before one, and Close returns the reason as given.
+// as the reason, with exit code 1, or -1 for next_session_failed as qory closes it: the
+// gateway takes the code after a join, as it does before one, and Close returns the reason as
+// given.
 func TestForagersCloseTakesTheEndCodesAfterAJoin(t *testing.T) {
 	for _, code := range []contracts.EndCode{
 		contracts.EndCodePushCredentialMissing, contracts.EndCodePushRefused,

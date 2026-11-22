@@ -2924,14 +2924,14 @@ doubles. Then:
   or an answer whose `must_understand` lists a member that qory does not read: the run
   closes `failed`, exit 1, with no end code as the reason, since Qory Apiary answered. A
   refusal of Qory Apiary's, and a status below 500 other than 429 with no refusal, print the
-  cause alone: `qory run: The next-session request after session <n> failed.`, then `Qory Apiary returned <status>:
-  <message or code>` or `The gateway returned <status>: <message or name of the status>`.
-  No answer after 10 minutes, and an answer that qory does not read, print a line that
-  starts with its fix. An answer with `"branch": "main"` and `"must_understand":
-  ["/branch"]` gets `qory run: Update qory.`, then `The answer to the next-session request
-  after session <n> does not pass qory's checks.` and `The answer does not pass them: its
-  must_understand lists a member of next-session-answer.schema.json that qory does not
-  read.`
+  cause alone: `qory run: The next-session request after session <n> failed.`, then `Qory
+  Apiary returned <status>: <message or code>` or `The gateway returned <status>: <message
+  or name of the status>`. No answer after 10 minutes, and an answer that qory does not
+  read, print a line that starts with its fix. An answer with `"branch": "main"` and
+  `"must_understand": ["/branch"]` gets `qory run: Update qory.`, then `The answer to the
+  next-session request after session <n> does not pass qory's checks.` and `The answer does
+  not pass them: its must_understand lists a member of next-session-answer.schema.json that
+  qory does not read.`
 - A stop while qory waits to send the request again, or during the steps before the next
   session: the run closes `cancelled` with the reason `interrupted`, exit 1, with `✗ the
   run was cancelled: qory run got <signal> before session <n> started`.
