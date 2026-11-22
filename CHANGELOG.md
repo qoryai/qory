@@ -18,6 +18,25 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- Before the first push after a session of a write run from a run code, `qory run` checks
+  the commits of each repository whose head is past the session's start, on a fresh clone
+  that has no ref or hook the agent wrote. For a workflow with a `plan`, the scope check
+  that a module declares for the plan type runs in the push checks' container with
+  `--base <session start> --artifacts <launch snapshot>`; a workflow with no `plan` may
+  commit no file outside `.qory/`. A failure in one repository stops every push: exit 1, a
+  changed file with no plan, and a check past 30 seconds end `push_scope_refused`; exit 2
+  or 3 and a home with no scope check for the type `harness_invalid`; a failed clone
+  `repository_check_failed`; and a failed engine `machine_setup_invalid`. See docs/run.md,
+  §The scope check before the push.
+- Each session of a run from Qory Apiary gets a launch snapshot: the newest version of its
+  plan type that is neither cancelled nor a withdrawal and the approved version of each
+  other type, in the run directory and in `start-artifacts/` of the read-only inputs
+  folder. A fetch that fails stops the session with `run_api_failed`. `inputs.json` has
+  the snapshot's folder in `qory.start_artifacts` and the start commit of each repository
+  in `qory.start_commits`. Session 1 writes `inputs.json` after the branch switch and the
+  setup.
+- A walled session whose `--mount` or `wall.mounts` is at or inside the read-only inputs
+  folder stops before its setup: a run from a run code with `machine_setup_invalid`.
 - A run from a run code whose step fails closes `failed` with an end code as the reason,
   where it closed with no reason before: `push_credential_missing` for a run configuration
   with no push credential, `push_refused` for a push that got 403, `push_not_recorded` for a
@@ -121,7 +140,7 @@ release may change what an existing document does, and states it under Upgrading
   workflow is not an artifact type, when a workflow with a `plan` has an access other
   than `write`, and when no module of the base stack declares a scope check for the type
   of a `plan`. A module that a checkout adds to the base declares none that counts.
-  `qory run` does not read `scope_checks`.
+  The push step of `qory run` runs the scope check of the plan type.
 - The full suite of a session runs the `full` row of the plan type set in
   `workflows.<name>.plan` for the run's workflow, from the file `<type>.md` of the launch
   version, no longer the `build-plan` by name. A plan type with no `Commands` table or no `full`
@@ -1164,6 +1183,9 @@ release may change what an existing document does, and states it under Upgrading
   cancelled gets no folder. The start commit of a run skips a cancelled version of the
   target's artifact too. Before, all three took the newest version, cancelled or not. An
   index without the field `cancelled` reads as no version cancelled.
+- qory builds with integrations 2a6a8996. The cause of the end code `push_scope_refused`
+  includes any file outside `.qory/` that a session with no plan changes, unless the scope
+  check that a module declares in `scope_checks` allows it.
 - qory builds with Forager 3a8876d8 and integrations effc22aa. The run documents have
   `deliver` in place of `submit`.
 - qory builds with Forager 57a8deb5 and integrations e4bf534a.

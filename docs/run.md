@@ -2119,10 +2119,25 @@ the run stops as it does for documents that break the schema. Only a run whose s
   temporary folder, which qory removes when the run ends. Behind a wall, `in/` is mounted
   read-only at the same path. The file has the inputs' members as they came, then one
   member that qory adds once the harness is composed, `qory`:
-  `{"harness_extensions": {…}, "outputs": […]}`. `harness_extensions` is the harness
+  `{"harness_extensions": {…}, "outputs": […], "start_commits": […], "start_artifacts": "…"}`.
+  `harness_extensions` is the harness
   report's `extensions`, or `{}` when the harness has none. `outputs` is the outputs of the
   work item's stage, or `[]` for none and for a run with no run API (see [The outputs of a
-  session](#the-outputs-of-a-session)). The workflow reads them from the path after its
+  session](#the-outputs-of-a-session)). `start_commits` has, for each repository of the
+  run's branch, `{"path": <the repository's folder, absolute>, "commit": <the commit the
+  session starts at>}`, `[]` for a run with no branch; and `start_artifacts` is the folder
+  of the session's launch snapshot, `<in>/start-artifacts` (see [The scope check before the
+  push](#the-scope-check-before-the-push)). Session 1 writes the file after the branch
+  switch and the setup, so its start commits are those the agent starts at; a later
+  session writes it before it starts, with the commits that the last push landed. A walled
+  session whose `--mount` or `wall.mounts` is at or inside `in/` stops before its setup:
+  for a run from a run code with `machine_setup_invalid` and `qory run: A wall mount is at
+  or inside the read-only inputs folder, so the session did not start.`, for a run with a
+  run key with `qory run: Remove the mount at or inside the read-only inputs folder from
+  wall.mounts or --mount.`; the mount and `in/` follow on two lines. A launch snapshot whose
+  fetch fails stops the session with `run_api_failed` and `qory run: The fetch of the
+  session's start artifacts failed, so the agent did not start.`, with the cause on the
+  next line. The workflow reads them from the path after its
   name in the prompt,
   and a push check gets the same path after `--inputs` (see Push checks in
   `contracts/harness/v1/README.md`). qory also writes the same bytes to `inputs.json` in
@@ -2130,7 +2145,7 @@ the run stops as it does for documents that break the schema. Only a run whose s
   `$QORY_HARNESS_HOME/inputs.json`. In a home from `--home` or `harness.home`, qory removes
   that copy when the run ends, also after a failure or a stop; a home for that run alone goes
   as a whole. A run with a run key and no run code gets the same files, with the member `qory`
-  alone, since it has no inputs: `{"qory": {"harness_extensions": {…}, "outputs": []}}` in
+  alone, since it has no inputs: `{"qory": {"harness_extensions": {…}, "outputs": [], "start_commits": […], "start_artifacts": "…"}}` in
   `in/` (read-only
   behind a wall), in the composed home, and after `--inputs` of its push checks.
   A home that already has `inputs.json` stops the run with exit 1: `Remove inputs.json from
@@ -3023,7 +3038,10 @@ The step does this, in order:
    commits that fails stops the step before any push: `qory run: Start the run again: the
    list of the run's commits failed.`, then `Listing the commits of <path> from commit
    <start> to <head> failed: <error>. qory pushed nothing. The run code is used up.`
-   indented by two spaces. After a session that succeeded, qory then reads,
+   indented by two spaces. qory then checks the scope of the commits of each repository
+   whose `HEAD` is past the session's start, on a fresh clone, see [The scope check before
+   the push](#the-scope-check-before-the-push): a repository that fails stops the step
+   before any push, in any repository. After a session that succeeded, qory then reads,
    fills and checks the session's outputs with the heads that the push would leave, see [The
    outputs of a session](#the-outputs-of-a-session): an output that fails stops the step
    before any push, and the run closes `failed` with the end code `outputs_invalid`.
@@ -6274,8 +6292,56 @@ A stack in which no workflow has a `plan` needs no scope check: `qory harness co
 succeeds, and a `scope_checks` of a module is still read and checked.
 
 `qory run` reads `plan` for the full suite: the suite command is the `full` row of the plan
-type's launch version (see [The full suite](#the-full-suite)). It reads no `scope_checks`: a run
-runs no scope check, and the push step does not read the plan type.
+type's launch version (see [The full suite](#the-full-suite)), and for the scope check of the
+push step.
+
+#### The scope check before the push
+
+Before the first `git push` after a session of a write run from a run code, qory checks the
+commits of each repository whose head is past the session's start: `Start` for session 1,
+and the commit that the last push landed for a later session. A failure in one repository
+stops the push of every repository, and the commits stay local.
+
+1. qory makes a fresh clone of the repository's commits in the run directory: `git init`
+   with no template, then a fetch of the head alone, by its id, with no tag and no ref, and
+   a checkout of it, detached. The clone has no branch, remote branch or hook that the
+   agent wrote. A head that does not descend from the session's start stops the push.
+2. A workflow with no `plan` may commit no file outside `.qory/`: the first commit that
+   changes another file stops the push.
+3. Otherwise qory runs the scope check of the plan type, from `scope-checks.json` in the
+   home, as `<command> --base <session start> --artifacts /qory-push-check/files`. It
+   runs in a container from the wall's default image, as a push check does: no network, every capability dropped, the clone
+   read-only as the working folder, `/qory-push-check/artifacts`, and the session's
+   launch snapshot read-only at `/qory-push-check/files`. The check runs as the clone's
+   owner: qory's uid:gid, or, for qory as root, the wall's `user` when its uid is not 0,
+   else `65534:65534`, after qory gives that user the clone and the snapshot's copy.
+   A session with no version of its plan type still runs the check, on a snapshot with
+   no plan.
+
+The launch snapshot is what the session's agent read at its start: the newest version of
+the plan type that is neither cancelled nor a withdrawal, and the approved version of each
+other artifact type, with an `index.json` that lists only those versions. qory fetches it
+into the run directory before the session starts, and copies it to `start-artifacts/` of
+the read-only inputs folder; `inputs.json` has its path in `qory.start_artifacts`, and the
+session's start in `qory.start_commits`.
+A plan version that the agent pushes during the session is not in it.
+
+Each failure ends the run failed, with its end code:
+
+| Case | End code | Line 1 |
+|---|---|---|
+| The check exits 1 | `push_scope_refused` | `qory run: The commits do not pass the scope check of the session's plan, so qory pushed nothing.` |
+| A workflow with no `plan` changes a file | `push_scope_refused` | `qory run: This workflow has no plan, so its commits may change no file; qory pushed nothing.` |
+| The check runs past 30 seconds | `push_scope_refused` | `qory run: The scope check of the session's plan did not end within 30 seconds; qory pushed nothing.` |
+| The check exits 2, 3 or another code | `harness_invalid` | `qory run: The scope check of the session's plan ended with an error, so qory pushed nothing.` |
+| The home has no scope check for the plan type | `harness_invalid` | `qory run: qory could not run the scope check of the session's plan, so it pushed nothing.` |
+| The clone fails | `repository_check_failed` | the same as the row before |
+| The engine fails, or the program does not start | `machine_setup_invalid` | the same as the row before |
+
+Line 2 has the repository: for exit 1 also the plan type and the commits, followed by at
+most 50 lines of the check; for a workflow with no `plan` the workflow, the commit and the
+file; for an error, `  Cause: ` and the cause. A run with no control plane has no run API
+and runs no scope check.
 
 ### Qory's images
 
