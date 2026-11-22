@@ -142,6 +142,18 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("Check the logs of the run's gateway. %s returned %s.", e.Request, status)
 }
 
+// CallError is the error of a request to the run API that was sent and failed: an error
+// status ([*Error]), a request with no response, or a response that is not the run API's
+// answer. Error returns the text of the cause unchanged. A request that the client never
+// sent, such as a version over [MaxBody], is not a CallError.
+type CallError struct{ err error }
+
+// Error returns the text of the cause.
+func (e *CallError) Error() string { return e.err.Error() }
+
+// Unwrap returns the cause.
+func (e *CallError) Unwrap() error { return e.err }
+
 // HasCode reports whether err is an [Error] with code.
 func HasCode(err error, code string) bool {
 	var apiError *Error
