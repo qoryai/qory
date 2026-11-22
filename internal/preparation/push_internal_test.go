@@ -92,23 +92,6 @@ func TestAfterTheRunTheCheckTakesWhatTheFetchWrote(t *testing.T) {
 	}
 }
 
-// TestAFurtherRepositoryIsCheckedBeforeAnyCommit is a key in a further repository's
-// configuration: the target's change is not committed, and nothing is pushed.
-func TestAFurtherRepositoryIsCheckedBeforeAnyCommit(t *testing.T) {
-	dir, b := onBranch(t, "acme/shop,acme/lib")
-	head := run(t, dir, "rev-parse", "HEAD")
-	write(t, filepath.Join(dir, "left.txt"), "left\n")
-	lib := filepath.Join(dir, filepath.FromSlash(b.Repositories[1].Dir))
-	run(t, lib, "config", "core.sshCommand", "/bin/false")
-	_, _, err := pushOf(dir, b)
-	if err == nil || !strings.Contains(err.Error(), "the check of repository acme/lib failed") || !strings.Contains(err.Error(), "core.sshcommand") {
-		t.Fatalf("Push: %v", err)
-	}
-	if got := run(t, dir, "rev-parse", "HEAD"); got != head {
-		t.Errorf("HEAD moved to %s", got)
-	}
-}
-
 // TestAStopHasACauseFitForAfterTheRun is each stop of the check: its line for a run that
 // has not started tells the reader to start in a new tree, and the line after the agent
 // exited does not.
@@ -769,21 +752,15 @@ func TestAFailedPushPrintsTheForgeAndTheCommits(t *testing.T) {
 	}
 }
 
-// inEachRepository runs body for the target and for a further repository of a run of two:
-// folder is the repository the case is about, and left a file there that the agent left.
-func inEachRepository(t *testing.T, body func(t *testing.T, dir, folder string, b *WorkBranch, path string)) {
+// inTheTarget runs body, in the subtest target, for the target of a run of two repositories:
+// folder is the target's folder, with a file left.txt that the agent left.
+func inTheTarget(t *testing.T, body func(t *testing.T, dir, folder string, b *WorkBranch, path string)) {
 	t.Helper()
-	for name, c := range map[string]struct{ repository, path string }{
-		"target":  {"", "acme/shop"},
-		"further": {filepath.Join(filepath.FromSlash(Repositories), "acme", "lib"), "acme/lib"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			dir, b := onBranch(t, "acme/shop,acme/lib")
-			folder := filepath.Join(dir, c.repository)
-			write(t, filepath.Join(folder, "left.txt"), "left\n")
-			body(t, dir, folder, b, c.path)
-		})
-	}
+	t.Run("target", func(t *testing.T) {
+		dir, b := onBranch(t, "acme/shop,acme/lib")
+		write(t, filepath.Join(dir, "left.txt"), "left\n")
+		body(t, dir, dir, b, "acme/shop")
+	})
 }
 
 // committedLeft reports whether the repository at folder has a commit of the run on HEAD.
@@ -795,7 +772,7 @@ func committedLeft(t *testing.T, folder string) bool {
 // TestAStaleIndexLockDoesNotLoseTheWork is an agent that was killed in a git command, whose
 // stop is proven: qory removes the lock, and the commit and the push go on.
 func TestAStaleIndexLockDoesNotLoseTheWork(t *testing.T) {
-	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, path string) {
+	inTheTarget(t, func(t *testing.T, dir, folder string, b *WorkBranch, path string) {
 		write(t, indexLock(folder), "")
 		_, lines, err := pushWith(dir, b, true)
 		if err != nil {
@@ -815,9 +792,9 @@ func TestAStaleIndexLockDoesNotLoseTheWork(t *testing.T) {
 }
 
 // TestAnIndexLockFailsTheStepWhileTheStopIsNotProven is a lock with an agent that may run:
-// it stays, and nothing is committed in any repository.
+// it stays, and nothing is committed.
 func TestAnIndexLockFailsTheStepWhileTheStopIsNotProven(t *testing.T) {
-	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, path string) {
+	inTheTarget(t, func(t *testing.T, dir, folder string, b *WorkBranch, path string) {
 		write(t, indexLock(folder), "")
 		_, _, err := pushWith(dir, b, false)
 		want := "repository " + path + " has .git/index.lock and the stop of the agent is not proven"
@@ -838,7 +815,7 @@ func TestAnIndexLockFailsTheStepWhileTheStopIsNotProven(t *testing.T) {
 
 // TestNoLockIsNeededWhileTheStopIsNotProven is a run with no lock: the step goes on.
 func TestNoLockIsNeededWhileTheStopIsNotProven(t *testing.T) {
-	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
+	inTheTarget(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
 		if _, _, err := pushWith(dir, b, false); err != nil {
 			t.Fatal(err)
 		}
@@ -850,7 +827,7 @@ func TestNoLockIsNeededWhileTheStopIsNotProven(t *testing.T) {
 
 // TestAnIndexLockThatIsNoFileStaysAndFailsTheStep is a directory at the name of the lock.
 func TestAnIndexLockThatIsNoFileStaysAndFailsTheStep(t *testing.T) {
-	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, path string) {
+	inTheTarget(t, func(t *testing.T, dir, folder string, b *WorkBranch, path string) {
 		if err := os.Mkdir(indexLock(folder), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -868,7 +845,7 @@ func TestAnIndexLockThatIsNoFileStaysAndFailsTheStep(t *testing.T) {
 // TestAnIndexLockThatIsALinkStaysAndFailsTheCheck is a link at the name of the lock, which
 // the safety check stops before qory looks at the lock: the link and its target stay.
 func TestAnIndexLockThatIsALinkStaysAndFailsTheCheck(t *testing.T) {
-	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
+	inTheTarget(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
 		target := filepath.Join(t.TempDir(), "kept")
 		write(t, target, "kept\n")
 		if err := os.Symlink(target, indexLock(folder)); err != nil {
@@ -887,13 +864,12 @@ func TestAnIndexLockThatIsALinkStaysAndFailsTheCheck(t *testing.T) {
 	})
 }
 
-// TestAFailedCheckLeavesTheLock is a lock in one repository and a key in another that the
-// safety check stops: qory removes nothing.
+// TestAFailedCheckLeavesTheLock is a lock and a key that the safety check stops: qory
+// removes nothing.
 func TestAFailedCheckLeavesTheLock(t *testing.T) {
-	dir, b := onBranch(t, "acme/shop,acme/lib")
+	dir, b := onBranch(t, "acme/shop")
 	write(t, indexLock(dir), "")
-	further := filepath.Join(dir, filepath.FromSlash(Repositories), "acme", "lib")
-	run(t, further, "config", "filter.x.clean", "false")
+	run(t, dir, "config", "filter.x.clean", "false")
 	if _, _, err := pushWith(dir, b, true); err == nil || !strings.Contains(err.Error(), "the check of repository") {
 		t.Fatalf("the error is %v, want the safety check's", err)
 	}
@@ -902,27 +878,10 @@ func TestAFailedCheckLeavesTheLock(t *testing.T) {
 	}
 }
 
-// TestALaterLockThatFailsLeavesTheEarlierLock is a lock in the target and a directory at
-// the name of the lock in a further repository: qory removes neither.
-func TestALaterLockThatFailsLeavesTheEarlierLock(t *testing.T) {
-	dir, b := onBranch(t, "acme/shop,acme/lib")
-	write(t, indexLock(dir), "")
-	further := filepath.Join(dir, filepath.FromSlash(Repositories), "acme", "lib")
-	if err := os.Mkdir(indexLock(further), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := pushWith(dir, b, true); err == nil {
-		t.Fatal("no error")
-	}
-	if _, err := os.Lstat(indexLock(dir)); err != nil {
-		t.Errorf("the target's lock is gone: %v", err)
-	}
-}
-
-// TestNoOtherLockIsRemoved is a lock of another name, in each repository: it stays, and the
-// commit that needs it fails.
+// TestNoOtherLockIsRemoved is a lock of another name: it stays, and the commit that needs it
+// fails.
 func TestNoOtherLockIsRemoved(t *testing.T) {
-	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
+	inTheTarget(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
 		other := filepath.Join(folder, ".git", "HEAD.lock")
 		write(t, other, "")
 		_, _, err := pushWith(dir, b, true)
@@ -988,7 +947,7 @@ func TestAGitlinkOfAnotherRepositoryRunsNoProgram(t *testing.T) {
 // committed in the repository above it.
 func TestAGitWithoutPartsStopsBeforeAnyGit(t *testing.T) {
 	for _, part := range []string{"HEAD", "objects", "refs"} {
-		inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
+		inTheTarget(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
 			parent := filepath.Dir(dir)
 			run(t, parent, "init", "--quiet", "-b", "main")
 			write(t, filepath.Join(parent, "above.txt"), "above\n")
@@ -1023,7 +982,8 @@ func TestAStepGitTakesNoFolderAbove(t *testing.T) {
 }
 
 // TestALinkOnTheWayToAFurtherRepositoryStops is a further repository, or a folder above it,
-// replaced by a link to a repository outside the working folder: nothing there is committed.
+// replaced by a link to a repository outside the working folder: the check of a further
+// repository, which comes before any git of [readsAhead] there, stops.
 func TestALinkOnTheWayToAFurtherRepositoryStops(t *testing.T) {
 	for name, up := range map[string]int{"the repository": 0, "the folder above it": 1, ".qory/repositories": 2} {
 		t.Run(name, func(t *testing.T) {
@@ -1040,14 +1000,9 @@ func TestALinkOnTheWayToAFurtherRepositoryStops(t *testing.T) {
 			if err := os.Symlink(outside, at); err != nil {
 				t.Fatal(err)
 			}
-			write(t, filepath.Join(lib, "dirty.txt"), "a file outside the working folder\n")
-			head := run(t, lib, "rev-parse", "HEAD")
-			_, _, err := pushOf(dir, b)
-			if err == nil || !strings.Contains(err.Error(), "it has the link ") {
+			err := safeFurther(context.Background(), dir, lib, true)
+			if err == nil || !strings.Contains(err.Error(), "git would read and write through that link") {
 				t.Fatalf("the error is %v", err)
-			}
-			if got := run(t, lib, "rev-parse", "HEAD"); got != head {
-				t.Errorf("qory committed outside the working folder: %s", got)
 			}
 		})
 	}
@@ -1056,7 +1011,7 @@ func TestALinkOnTheWayToAFurtherRepositoryStops(t *testing.T) {
 // TestAGraftStopsTheStep is a commit with no link to the start that info/grafts gives the
 // start as its parent, so that the check of the fast-forward would pass.
 func TestAGraftStopsTheStep(t *testing.T) {
-	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
+	inTheTarget(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
 		tree := run(t, folder, "write-tree")
 		forged := run(t, folder, "commit-tree", tree, "-m", "unrelated")
 		start := run(t, folder, "rev-parse", "HEAD")
@@ -1075,7 +1030,7 @@ func TestAGraftStopsTheStep(t *testing.T) {
 // TestTheIdentityOfTheAgentDoesNotStopThePush is an agent that set user.name and user.email
 // to commit, and the commit of qory, which does not use them.
 func TestTheIdentityOfTheAgentDoesNotStopThePush(t *testing.T) {
-	inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
+	inTheTarget(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
 		run(t, folder, "config", "user.name", "Agent")
 		run(t, folder, "config", "user.email", "agent@example.com")
 		if _, _, err := pushOf(dir, b); err != nil {
@@ -1090,7 +1045,7 @@ func TestTheIdentityOfTheAgentDoesNotStopThePush(t *testing.T) {
 // TestOtherKeysOfTheUserSectionStop is a key that looks like the identity's and is not one.
 func TestOtherKeysOfTheUserSectionStop(t *testing.T) {
 	for _, key := range []string{"user.signingkey", "user.x.name", "author.name"} {
-		inEachRepository(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
+		inTheTarget(t, func(t *testing.T, dir, folder string, b *WorkBranch, _ string) {
 			run(t, folder, "config", key, "a value")
 			if _, _, err := pushOf(dir, b); err == nil || !strings.Contains(err.Error(), "the check stops on each key") {
 				t.Fatalf("%s: the error is %v", key, err)
@@ -1158,23 +1113,6 @@ func TestAPasswordInGitsOutputIsHidden(t *testing.T) {
 	}
 }
 
-// TestACommitThatFailsInAFurtherRepositoryPushesNothing is a commit that fails in the
-// further repository, after the target's commit: no repository reaches its branch.
-func TestACommitThatFailsInAFurtherRepositoryPushesNothing(t *testing.T) {
-	dir, b := onBranch(t, "acme/shop,acme/lib")
-	further := filepath.Join(dir, filepath.FromSlash(b.Repositories[1].Dir))
-	write(t, filepath.Join(dir, "left.txt"), "left\n")
-	write(t, filepath.Join(further, "left.txt"), "left\n")
-	write(t, filepath.Join(further, ".git", "HEAD.lock"), "")
-	_, _, err := pushOf(dir, b)
-	if err == nil || !strings.Contains(err.Error(), "the commit of what the agent left in acme/lib failed") {
-		t.Fatalf("the error is %v", err)
-	}
-	if got := b.PushedPaths(); got != "" {
-		t.Errorf("qory pushed %s", got)
-	}
-}
-
 // TestABaseBranchOverTheFormatsLimitIsLeftOut is a default branch name of 256 characters: the
 // base has no branch, so the version passes the format's check after the push landed.
 func TestABaseBranchOverTheFormatsLimitIsLeftOut(t *testing.T) {
@@ -1223,14 +1161,12 @@ func TestACheckThatFailsPushesNothing(t *testing.T) {
 	}
 }
 
-// TestACheckThatFailsPushesNoRepository is a run with a target and a further repository, and
-// a change left in each: the check gets the version with the local head of both, after both
-// are committed and listed, and when it fails the forge has the branch in neither.
+// TestACheckThatFailsPushesNoRepository is a run with a change left in the target: the check
+// gets the version with the target's local head, after the commit and the list, and when it
+// fails the forge has no branch.
 func TestACheckThatFailsPushesNoRepository(t *testing.T) {
 	dir, b, base := onBranchIn(t, "acme/shop,acme/lib")
-	lib := filepath.Join(dir, filepath.FromSlash(b.Repositories[1].Dir))
 	write(t, filepath.Join(dir, "left.txt"), "left\n")
-	write(t, filepath.Join(lib, "left.txt"), "left\n")
 	stop := errors.New("qory run: the check failed")
 	var got []Repository
 	_, _, err := pushChecked(dir, b, true, func(version []Repository) error {
@@ -1240,19 +1176,12 @@ func TestACheckThatFailsPushesNoRepository(t *testing.T) {
 	if !errors.Is(err, stop) {
 		t.Fatalf("Push: %v", err)
 	}
-	heads := map[string]string{"acme/shop": run(t, dir, "rev-parse", "HEAD"), "acme/lib": run(t, lib, "rev-parse", "HEAD")}
-	if len(got) != 2 {
-		t.Fatalf("the check got %+v, want both repositories", got)
+	head := run(t, dir, "rev-parse", "HEAD")
+	if len(got) != 1 || got[0].Path != "acme/shop" || got[0].Commit != head || len(got[0].Commits) != 1 || got[0].Commits[0].Commit != head {
+		t.Errorf("the check got %+v, want acme/shop at the local head %s", got, head)
 	}
-	for _, r := range got {
-		if r.Commit != heads[r.Path] || len(r.Commits) != 1 || r.Commits[0].Commit != heads[r.Path] {
-			t.Errorf("the check got %s at %s with %+v, want the local head %s", r.Path, r.Commit, r.Commits, heads[r.Path])
-		}
-	}
-	for path := range heads {
-		if out := run(t, filepath.Join(base, filepath.FromSlash(path)+".git"), "branch", "--list", b.Ref); out != "" {
-			t.Errorf("the forge has the branch in %s: %q", path, out)
-		}
+	if out := run(t, filepath.Join(base, "acme", "shop.git"), "branch", "--list", b.Ref); out != "" {
+		t.Errorf("the forge has the branch: %q", out)
 	}
 }
 

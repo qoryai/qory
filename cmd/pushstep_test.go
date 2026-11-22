@@ -384,7 +384,8 @@ func failing(w http.ResponseWriter, status int, code, retry string) {
 
 // pushRepo is a run's repository on a stand-in forge that takes a push, with the fixture
 // of a write run. h is the run's working folder and run directory, and repositories is
-// the list of the run configuration.
+// the run's list: the target acme/site, then the documents' read targets. The run
+// configuration lists [decoyRepositories], which the run does not read.
 type pushRepo struct {
 	h            *hostFetch
 	api          *pushAPI
@@ -436,6 +437,8 @@ type pushRepo struct {
 	stackProxy  bool
 	// noOutput has the session write no pull-request output to its outbox.
 	noOutput bool
+	// noSystem gives the run configuration no QORY_RUN_SYSTEM.
+	noSystem bool
 }
 
 // outboxOf is qory.outbox of the session's $QORY_HARNESS_HOME/inputs.json, "" with no file
@@ -582,6 +585,8 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 		d["harness_hidden"] = false
 		d["run_settings"] = map[string]any{"runtime": "claude"}
 		d["deliver"] = []any{map[string]any{"type": "pull-request", "send": "after_gate"}}
+		_, reads, _ := strings.Cut(p.repositories, ",")
+		d["read_targets"] = readTargets(reads)
 		if p.change != nil {
 			p.change(d)
 		}
@@ -614,7 +619,7 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	t.Setenv("QORY_RUN_KEY", "")
 	var got pushed
 	nowhere := cmd.Nowhere{
-		System: proxygittest.Host, Repositories: p.repositories, RunAPI: p.api.base(),
+		System: proxygittest.Host, Repositories: decoyRepositories, RunAPI: p.api.base(),
 		Proxy: p.h.server.Proxy.URL, CABundle: p.h.server.Proxy.CABundle, Dir: p.h.runDir,
 		StackProxy: p.h.server.Stack.URL, StackCABundle: p.h.server.Stack.CABundle,
 		RemoveSetup: p.removeSetup, HostProxyErr: p.proxyErr, PushProxyErr: p.proxyErr, NoPushProxy: p.noPush, OnCall: p.onCall,
@@ -651,6 +656,9 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 	}
 	if p.stackProxy {
 		nowhere.StackProxy, nowhere.StackCABundle = p.h.server.Proxy.URL, p.h.server.Proxy.CABundle
+	}
+	if p.noSystem {
+		nowhere.System = ""
 	}
 	closes, calls, restore := cmd.OpenNowhereWith(nowhere)
 	defer restore()
@@ -2129,10 +2137,13 @@ func TestASecondRunStartsAtThePushedCommit(t *testing.T) {
 	}
 }
 
-// TestAWalledRunPushes is a walled run of two repositories: the check of the settings of a
-// place the run used passes after the session, both branches reach the forge, and one version
-// is stored, for the documents' target.
-func TestAWalledRunPushes(t *testing.T) {
+// TestAWalledRunPushesItsTargetAlone is a walled run with the read target acme/lib, whose
+// read-only checkout has a new commit, and a change in the target: the check of the settings
+// of a place the run used passes after the session, the target's branch reaches the forge
+// and acme/lib's does not, a line says that acme/lib's commits were not kept, and one
+// version is stored, for the documents' target. The run configuration lists acme/other,
+// which is not fetched.
+func TestAWalledRunPushesItsTargetAlone(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
 	libBare := filepath.Join(p.h.server.Root, "acme", "lib.git")
@@ -2140,11 +2151,29 @@ func TestAWalledRunPushes(t *testing.T) {
 	p.repositories = "acme/site,acme/lib"
 	r := p.run(t, func(dir string) {
 		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
-		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
+		lib := filepath.Join(dir, ".qory", "repositories", "acme", "lib")
+		writeFile(t, filepath.Join(lib, "left.txt"), "left\n")
+		proxygittest.Git(t, lib, "add", "-A")
+		proxygittest.Git(t, lib, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "agent")
 	}, nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
-	if p.branchHead(t) == "" || proxygittest.Git(t, libBare, "for-each-ref", "--format=%(objectname)", "refs/heads/qory/"+workItem) == "" {
-		t.Errorf("a branch is missing on the forge\n%s", r.out)
+	if p.branchHead(t) == "" {
+		t.Errorf("the target's branch is missing on the forge\n%s", r.out)
+	}
+	if refs := proxygittest.Git(t, libBare, "for-each-ref", "refs/heads/"); strings.Contains(refs, "qory/") {
+		t.Errorf("the read target has the branch: %s\n%s", refs, r.out)
+	}
+	lacks(t, r.out, " to acme/lib at ")
+	wants(t, r.out, "qory run: The commits in a read-only repository were not kept: a run changes only its target.\n"+
+		"  The repository is acme/lib.\n")
+	fetch := ""
+	for _, e := range r.steps {
+		if e.Type == "step_started" && e.Kind == event.StepFetch {
+			fetch = e.Name
+		}
+	}
+	if !strings.HasPrefix(fetch, "fetch "+proxygittest.Host+"/acme/site and 1 read-only repository") {
+		t.Errorf("the fetch step is %q, want it with and 1 read-only repository", fetch)
 	}
 	if posts, _, _ := p.api.counts(); posts != 1 {
 		t.Fatalf("%d POST, want 1\n%s", posts, r.out)
@@ -2514,10 +2543,11 @@ func TestAnAgentsCommitOfQoryAndALinkKeepsTheNextRun(t *testing.T) {
 	}
 }
 
-// TestAWalledRunRemovesAStaleIndexLock is a killed walled agent that left .git/index.lock,
-// in the target and in a further repository: the join proved its stop, so the push goes on.
+// TestAWalledRunRemovesAStaleIndexLock is a killed walled agent that left .git/index.lock in
+// the target, beside a read target: the join proved its stop, so the push goes on. A read
+// target's checkout is not touched, see the preparation's tests.
 func TestAWalledRunRemovesAStaleIndexLock(t *testing.T) {
-	for name, folder := range map[string]string{"target": "", "further": filepath.Join(".qory", "repositories", "acme", "lib")} {
+	for name, folder := range map[string]string{"target": ""} {
 		t.Run(name, func(t *testing.T) {
 			p := walledPush(t)
 			p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
@@ -2615,96 +2645,6 @@ func TestTheMessageOfAnUnverifiedAnswerIsPrintedAsItIs(t *testing.T) {
 	r := p.run(t, writesAndCommits(t), nil)
 	r.wantsClose(t, event.StateFailed, 1)
 	wants(t, r.out, "the version of the artifact pull-request was not stored: "+message+"; the code is used")
-}
-
-// TestASecondRepositoryThatFailsGivesTheFix is a run of two repositories whose first push
-// landed and whose second failed: no version is stored, and the line has the fix for
-// the first and the fix of the second.
-func TestASecondRepositoryThatFailsGivesTheFix(t *testing.T) {
-	p := newPushRepo(t, "write")
-	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
-	bare := filepath.Join(p.h.server.Root, "acme", "lib.git")
-	proxygittest.Git(t, bare, "config", "http.receivepack", "true")
-	writeFile(t, filepath.Join(bare, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n")
-	if err := os.Chmod(filepath.Join(bare, "hooks", "pre-receive"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	p.repositories = "acme/site,acme/lib"
-	r := p.run(t, func(dir string) {
-		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
-		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
-	}, nil)
-	r.wantsClose(t, event.StateFailed, 1)
-	wants(t, r.out, "qory run: "+deleteBranch+"\n  qory pushed acme/site and stored no version, because the push of the next repository failed: change the rule on "+proxygittest.Host)
-	if p.branchHead(t) == "" {
-		t.Error("the first repository has no branch")
-	}
-	if posts, _, _ := p.api.counts(); posts != 0 {
-		t.Errorf("%d POST went out", posts)
-	}
-}
-
-// TestASecondRepositoryWhoseHeadMovedEndsTheRunWithPushHeadChanged is a run of two
-// repositories whose first push landed and whose second repository got its branch from
-// another push meanwhile: the second push is rejected as a moved head, no version is stored,
-// and the run closes failed with the code push_head_changed, not as a plain failure.
-func TestASecondRepositoryWhoseHeadMovedEndsTheRunWithPushHeadChanged(t *testing.T) {
-	p := newPushRepo(t, "write")
-	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
-	lib := filepath.Join(p.h.server.Root, "acme", "lib.git")
-	proxygittest.Git(t, lib, "config", "http.receivepack", "true")
-	tree := proxygittest.Git(t, lib, "rev-parse", "main^{tree}")
-	moved := proxygittest.Git(t, lib, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit-tree", tree, "-m", "Another push")
-	hook := filepath.Join(p.bare, "hooks", "post-receive")
-	writeFile(t, hook, "#!/bin/sh\ngit --git-dir="+lib+" update-ref refs/heads/qory/"+workItem+" "+moved+"\n")
-	if err := os.Chmod(hook, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	p.repositories = "acme/site,acme/lib"
-	r := p.run(t, func(dir string) {
-		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
-		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
-	}, nil)
-	r.wantsClose(t, event.StateFailed, 1)
-	if got := r.closes[0].Reason; got != string(contracts.EndCodePushHeadChanged) {
-		t.Errorf("the run closed with the reason %q, want %q", got, contracts.EndCodePushHeadChanged)
-	}
-	wants(t, r.out, "qory run: "+deleteBranch+"\n  qory pushed acme/site and stored no version, because the push of the next repository failed: Set the branch to the expected commit or delete it; its head is not that commit.")
-	if got := proxygittest.Git(t, lib, "rev-parse", "refs/heads/qory/"+workItem); got != moved {
-		t.Errorf("the second repository's branch is at %s, want %s", got, moved)
-	}
-	if posts, _, _ := p.api.counts(); posts != 0 {
-		t.Errorf("%d POST went out", posts)
-	}
-}
-
-// TestASecondRepositoryThatGets403EndsTheRunWithPushRefused is a run of two repositories
-// whose first push landed and whose second push got 403 from the push proxy: no version is
-// stored, and the run closes failed with the code push_refused, which the error of the
-// second push has under the line of the pushed repository.
-func TestASecondRepositoryThatGets403EndsTheRunWithPushRefused(t *testing.T) {
-	p := newPushRepo(t, "write")
-	p.h.server.Repository(t, "acme/lib", "main", map[string]string{"lib.txt": "lib\n"})
-	lib := filepath.Join(p.h.server.Root, "acme", "lib.git")
-	proxygittest.Git(t, lib, "config", "http.receivepack", "true")
-	p.h.server.Refuse("/acme/lib.git/git-receive-pack")
-	p.repositories = "acme/site,acme/lib"
-	r := p.run(t, func(dir string) {
-		writeFile(t, filepath.Join(dir, "left.txt"), "left\n")
-		writeFile(t, filepath.Join(dir, ".qory", "repositories", "acme", "lib", "left.txt"), "left\n")
-	}, nil)
-	r.wantsClose(t, event.StateFailed, 1)
-	r.wantsReason(t, string(contracts.EndCodePushRefused))
-	wants(t, r.out, "qory run: "+deleteBranch+"\n  qory pushed acme/site and stored no version, because the push of the next repository failed: The push was refused (403).")
-	if p.branchHead(t) == "" {
-		t.Error("the first repository has no branch")
-	}
-	if got := proxygittest.Git(t, lib, "for-each-ref", "refs/heads/qory/"); got != "" {
-		t.Errorf("the second repository has the branch: %s", got)
-	}
-	if posts, _, _ := p.api.counts(); posts != 0 {
-		t.Errorf("%d POST went out", posts)
-	}
 }
 
 // hangingPost makes each POST of a version stay open with no response, as a run API that
@@ -3456,4 +3396,72 @@ func replyRepoWith(t *testing.T, process string) (*pushRepo, *string) {
 		}
 	}
 	return p, outbox
+}
+
+// TestARunWithNoSystemStoresNoOutputThatQoryFillsFromThePush is a write run from a run code
+// whose documents set the target acme/site, whose stage requires pull-request, and whose
+// run configuration has no QORY_RUN_SYSTEM: the run fetches and pushes nothing, so the
+// pull-request output, whose head and base qory fills from the push, gets no version and
+// its line. The run does not stop there: it closes succeeded with exit 0.
+func TestARunWithNoSystemStoresNoOutputThatQoryFillsFromThePush(t *testing.T) {
+	p, outbox := replyRepoWith(t, pullRequestProcess)
+	p.noSystem = true
+	p.api.outputs = `[{"type":"pull-request","required":true,"version":null,"check":"missing"}]`
+	change := p.change
+	p.change = func(d map[string]any) {
+		change(d)
+		target := map[string]any{"collection": "R_1001", "address": map[string]any{"system": proxygittest.Host, "path": "acme/site"}}
+		d["target"], d["inputs"].(map[string]any)["target"] = target, target
+		d["deliver"] = []any{map[string]any{"type": "pull-request", "send": "after_gate"}}
+	}
+	p.mountsOf = func(spec session.SessionSpec) {
+		*outbox = outboxOf(spec)
+		if *outbox != "" {
+			writeFile(t, filepath.Join(*outbox, "pull-request", "pull-request.json"), `{"title":"Add a file"}`)
+		}
+	}
+	r := p.run(t, nil, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if r.closes[0].Reason != "" {
+		t.Errorf("the run closed with the reason %q, want none", r.closes[0].Reason)
+	}
+	wants(t, r.out, "qory run: stored no pull-request output: the run pushed no commits to the target.\n  Target: git.test/acme/site\n")
+	lacks(t, r.out, "qory run: fetched acme/site", "qory run: pushed ")
+	if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
+		t.Errorf("%d POST and %d versions stored, want none", posts, stored)
+	}
+	if head := p.branchHead(t); head != "" {
+		t.Errorf("the forge has the branch at %s", head)
+	}
+}
+
+// TestAWriteRunWithReadTargetsAndNoTargetPushesNothing is a write run whose documents set a
+// target with no address, the read target acme/site and a harness document, and whose agent
+// commits in acme/site's read-only checkout: the run has no work item's branch, so its step
+// stores the outputs alone, and acme/site gets no branch.
+func TestAWriteRunWithReadTargetsAndNoTargetPushesNothing(t *testing.T) {
+	files := harnessFiles(t, "write")
+	p := newPushRepo(t, "write")
+	p.repositories = "acme/site"
+	p.change = func(d map[string]any) {
+		target := map[string]any{"collection": "profile-7"}
+		d["target"], d["inputs"].(map[string]any)["target"] = target, target
+		d["read_targets"] = readTargets("acme/site")
+		d["harness"] = servedHarness(t, p.h, files)
+		delete(d, "deliver")
+	}
+	r := p.run(t, func(dir string) {
+		site := filepath.Join(dir, ".qory", "repositories", "acme", "site")
+		writeFile(t, filepath.Join(site, "left.txt"), "left\n")
+		proxygittest.Git(t, site, "add", "-A")
+		proxygittest.Git(t, site, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "agent")
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	wants(t, r.out, "qory run: fetched 1 read-only repository in ", "the run has no repository to push")
+	if name, state := r.step(); name != "store the outputs" || state != event.StateSucceeded {
+		t.Errorf("the step %q ended %q, want store the outputs, succeeded\n%s", name, state, r.out)
+	}
+	if refs := proxygittest.Git(t, p.bare, "for-each-ref", "refs/heads/"); strings.Contains(refs, "qory/") {
+		t.Errorf("the read target has the branch: %s\n%s", refs, r.out)
+	}
 }

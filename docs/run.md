@@ -192,16 +192,21 @@ compose:
   read: the compose pins no git source to a commit that the report lists, removes no link
   that it lists, and adds none of its replaced paths to the new report.
 
-When the run configuration lists repositories, `qory run` fetches them on this machine
-once the run is open, before the compose: the run's repository into the working folder,
-which is an empty folder or an empty git working tree, and each further one under
-`.qory/repositories`. Each fetch is at depth one, over https only, through the run's host
+When a run has repositories, `qory run` fetches them on this machine once the run is open,
+before the compose: the run's repository into the working folder, which is an empty folder
+or an empty git working tree, and each further one under `.qory/repositories`. A run from a
+run code takes them from its documents: the repository of `target`, then the repository of
+each entry of `read_targets`, see [What the run takes from the
+response](#what-the-run-takes-from-the-response). Any other run takes them from
+`QORY_RUN_REPOSITORIES` of the run configuration.
+Each fetch is at depth one, over https only, through the run's host
 proxy on the run's gateway, which adds the credential the run configuration has for the
 host, with git's hooks off and no credential helper, so no token is on this machine. qory
 closes the host proxy once the repositories are fetched. The compose then fetches the harness's git
 sources through the run's stack proxy, which gets none of those credentials. `qory run`
 prints one line for the repositories, with `and 1 further repository` when there are
-two, and then one line for each git source of the compose:
+two, or `and 1 read-only repository` in a run from a run code, and then one line for each
+git source of the compose:
 
 ```text
 qory run: fetched example-org/shop at 0d62793fbf11 in 3.2s
@@ -581,9 +586,10 @@ how it ended:
    With a bad file the run has no such step, qory prints one line, and the run goes on. A
    name loses its terminal escape sequences, its control characters, its format characters
    other than U+200C and U+200D, and U+2028 and U+2029, and is cut to 100 characters.
-2. When the run configuration lists repositories, the fetch, named after the run's
-   repository, such as `fetch github.com/example-org/shop`, with `and 1 further
-   repository` when there are two.
+2. When the run has repositories, the fetch, named after the run's repository, such as
+   `fetch github.com/example-org/shop`, with `and 1 further repository` when there are
+   two. A run from a run code has `and 1 read-only repository` in its place, and with read
+   targets and no target, the step is `fetch 2 read-only repositories`.
 3. The compose, `compose the harness for claude`, or `compose the harness` when you name
    no runtime. The step ends once `qory run` has read the agent's launch from the
    composed home.
@@ -2120,48 +2126,46 @@ the run stops as it does for documents that break the schema. Only a run whose s
   read-only at the same path. The file has the inputs' members as they came, then one
   member that qory adds once the harness is composed, `qory`:
   `{"harness_extensions": {…}, "outputs": […], "outbox": "…", "start_commits": […], "start_artifacts": "…"}`.
-  `harness_extensions` is the harness
-  report's `extensions`, or `{}` when the harness has none. `outputs` is the outputs of the
-  work item's stage, or `[]` for none and for a run with no run API, and `outbox` the
-  absolute path of the session's outbox, left out for a run with no outbox (see [The outputs
-  of a session](#the-outputs-of-a-session)). `start_commits` has, for each repository of the
-  run's branch, `{"path": <the repository's folder, absolute>, "commit": <the commit the
-  session starts at>}`, `[]` for a run with no branch; and `start_artifacts` is the folder
-  of the session's launch snapshot, `<in>/start-artifacts` (see [The scope check before the
+  `harness_extensions` is the harness report's `extensions`, or `{}` when the harness has
+  none. `outputs` is the outputs of the work item's stage, or `[]` for none and for a run
+  with no run API, and `outbox` the absolute path of the session's outbox, left out for a
+  run with no outbox (see [The outputs of a session](#the-outputs-of-a-session)).
+  `start_commits` has, for each repository of the run's branch that the run may push,
+  `{"path": <the repository's folder, absolute>, "commit": <the commit the session starts
+  at>}`, `[]` for a run with no branch; and `start_artifacts` is the folder of the session's
+  launch snapshot, `<in>/start-artifacts` (see [The scope check before the
   push](#the-scope-check-before-the-push)). Session 1 writes the file after the branch
-  switch and the setup, so its start commits are those the agent starts at; a later
-  session writes it before it starts, with the commits that the last push landed. A walled
-  session whose `--mount` or `wall.mounts` is at or inside `in/` stops before its setup:
-  for a run from a run code with `machine_setup_invalid` and `qory run: A wall mount is at
-  or inside the read-only inputs folder, so the session did not start.`, for a run with a
-  run key with `qory run: Remove the mount at or inside the read-only inputs folder from
-  wall.mounts or --mount.`; the mount and `in/` follow on two lines. A launch snapshot whose
-  fetch fails stops the session with `run_api_failed` and `qory run: The fetch of the
-  session's start artifacts failed, so the agent did not start.`, with the cause on the
-  next line. A launch snapshot whose folders on this machine cannot be removed, made or
-  copied stops the session with `machine_setup_invalid` and `qory run: copying the
-  session's start artifacts on this machine failed, so the agent did not start.`, with
-  the cause on the next line. The workflow reads them from the path after its
-  name in the prompt,
-  and a push check gets the same path after `--inputs` (see Push checks in
-  `contracts/harness/v1/README.md`). qory also writes the same bytes to `inputs.json` in
-  the composed home, mode 0644, so the harness's hooks read them as
-  `$QORY_HARNESS_HOME/inputs.json`. In a home from `--home` or `harness.home`, qory removes
-  that copy when the run ends, also after a failure or a stop; a home for that run alone goes
-  as a whole. A run with a run key and no run code gets the same files, with the member `qory`
-  alone, since it has no inputs: `{"qory": {"harness_extensions": {…}, "outputs": [], "start_commits": […], "start_artifacts": "…"}}` in
-  `in/` (read-only
-  behind a wall), in the composed home, and after `--inputs` of its push checks. A run with
-  neither a run code nor a run key, whose composed harness has a submit program (see [The
-  submit program](#the-submit-program)), gets the file with the member `qory` alone in the
-  composed home only, `[]` as its `start_commits`, `""` as its `start_artifacts`, and
-  `qory.outbox` when it has an outbox; its push checks get no `--inputs`.
-  A home that already has `inputs.json` stops the run with exit 1: `Remove inputs.json from
-  the home, or omit --home and harness.home, then take the work item in again.` Inputs that
-  have a member `qory` stop the run before
-  it opens, with exit 1: `remove the input qory: qory adds that member to inputs.json; the
-  code is used`, and so do inputs that are not a JSON object: `ask Qory Apiary's instance
-  admin: the run code's inputs are not a JSON object; the code is used`;
+  switch and the setup, so its start commits are those the agent starts at; a later session
+  writes it before it starts, with the commits that the last push landed. A walled session
+  whose `--mount` or `wall.mounts` is at or inside `in/` stops before its setup: for a run
+  from a run code with `machine_setup_invalid` and `qory run: A wall mount is at or inside
+  the read-only inputs folder, so the session did not start.`, for a run with a run key with
+  `qory run: Remove the mount at or inside the read-only inputs folder from wall.mounts or
+  --mount.`; the mount and `in/` follow on two lines. A launch snapshot whose fetch fails
+  stops the session with `run_api_failed` and `qory run: The fetch of the session's start
+  artifacts failed, so the agent did not start.`, with the cause on the next line. A launch
+  snapshot whose folders on this machine cannot be removed, made or copied stops the session
+  with `machine_setup_invalid` and `qory run: copying the session's start artifacts on this
+  machine failed, so the agent did not start.`, with the cause on the next line. The
+  workflow reads them from the path after its name in the prompt, and a push check gets the
+  same path after `--inputs` (see Push checks in `contracts/harness/v1/README.md`). qory
+  also writes the same bytes to `inputs.json` in the composed home, mode 0644, so the
+  harness's hooks read them as `$QORY_HARNESS_HOME/inputs.json`. In a home from `--home` or
+  `harness.home`, qory removes that copy when the run ends, also after a failure or a stop;
+  a home for that run alone goes as a whole. A run with a run key and no run code gets the
+  same files, with the member `qory` alone, since it has no inputs: `{"qory":
+  {"harness_extensions": {…}, "outputs": [], "start_commits": […], "start_artifacts": "…"}}`
+  in `in/` (read-only behind a wall), in the composed home, and after `--inputs` of its push
+  checks. A run with neither a run code nor a run key, whose composed harness has a submit
+  program (see [The submit program](#the-submit-program)), gets the file with the member
+  `qory` alone in the composed home only, `[]` as its `start_commits`, `""` as its
+  `start_artifacts`, and `qory.outbox` when it has an outbox; its push checks get no
+  `--inputs`. A home that already has `inputs.json` stops the run with exit 1: `Remove
+  inputs.json from the home, or omit --home and harness.home, then take the work item in
+  again.` Inputs that have a member `qory` stop the run before it opens, with exit 1:
+  `remove the input qory: qory adds that member to inputs.json; the code is used`, and so do
+  inputs that are not a JSON object: `ask Qory Apiary's instance admin: the run code's
+  inputs are not a JSON object; the code is used`;
 - starts the runtime with its headless start: the arguments that run one prompt with no
   terminal, write the session's output to stdout and exit. The prompt invokes the
   first of these that the runtime can start: the skill `workflow-<workflow>`, the command
@@ -2244,18 +2248,43 @@ target, qory reads only the address: for the fetch, and for the `<harness>` of t
 `workflow_not_in_harness` line. A target with no address, such as a place that is not on
 a host, is not fetched.
 
+The documents' `read_targets` are the places that the run only reads. qory fetches the
+repository of each one with an address under `.qory/repositories/<path>`, after the
+target's, and never pushes it. qory does not read `QORY_RUN_REPOSITORIES` for a run from a
+run code. The read targets follow these rules:
+
+- A read target with no address is not fetched, and the run goes on.
+- A repository that the documents list twice, under two collections or as the target too,
+  is fetched once.
+- A read target on another host than `QORY_RUN_SYSTEM`, or on github.com of another owner
+  than the first repository, stops the run before any fetch, and so does a read target
+  inside another.
+- With read targets and no target on `QORY_RUN_SYSTEM`, the working folder gets no
+  repository: each read target goes under `.qory/repositories`, the working folder stays an
+  empty repository, and the run pushes nothing. A working folder with files stops the run
+  with `The working folder contains files, so the run did not start; the code is used`, or
+  `The working folder has files and no .git, so the run did not start; the code is used`
+  when it has no `.git`.
+- A run with no `QORY_RUN_SYSTEM`, such as one of a workspace that is not a software
+  factory, fetches no read target: its read targets are places in another system, and the
+  run goes on.
+- The setup container gets the list in `QORY_RUN_REPOSITORIES`: the target first, then
+  the read targets. `qory run prepare` takes a list of up to 4220 bytes, a target and 20
+  read targets of 200 characters each. A longer list stops the setup with `The run's
+  repository list is longer than 4220 bytes, so the setup did not start`.
+
 The documents of a run with a target may set `target_version`: the version at which Qory
 Apiary checked the target for a harness file. When the `system` of the target's address
-is `QORY_RUN_SYSTEM`, the target is the run's repository: Qory Apiary lists the address's
-`path` first in `QORY_RUN_REPOSITORIES`, compared in any letter case on github.com. qory
+is `QORY_RUN_SYSTEM`, the target is the run's repository, in the working folder. qory
 fetches that repository at the version, which must be a full commit id, by its id, in
 place of the head of its default branch. The fetch goes through the run's gateway at
 depth one, and the working folder is on a local branch with the default branch's name,
 at that commit, with no upstream, so a bare `git push` or `git pull` has no upstream to
 use. The fetch line shows the commit: `qory run: fetched example-org/shop at
 4b8e2f1a9c7d in 1.4s`. When the documents contain no harness document, the compose reads
-the checkout's `qory.yaml` or `harness.yaml` as that commit has it. The further
-repositories are fetched at the head of their default branches.
+the checkout's `qory.yaml` or `harness.yaml` as that commit has it. The read targets are
+fetched at the head of their default branches, or at the commit that the version of the
+work item's branch lists for one.
 
 When the target has no address, its address is on another system than
 `QORY_RUN_SYSTEM`, or `QORY_RUN_SYSTEM` is not set, qory does not use `target_version`.
@@ -2288,8 +2317,8 @@ run, has exactly one top-level `reference` whose `collection` is the target's an
 `address.path` is that commit. qory checks the run's commits newest first. A newer commit
 that no version confirms, such as one that a later session of a shared run pushed before it
 failed, counts as a cancelled run's commit: the run does not move to it, and the push
-replaces it with a lease. The further repositories start at the head of their default
-branches.
+replaces it with a lease. A read target starts at the commit that the version lists for its
+repository, and at the head of its default branch when the version lists none.
 
 Then the run moves to the newest commit of the repository that an earlier run pushed, when
 a person did not cancel that run and the commit descends from the start commit. qory reads
@@ -2298,8 +2327,9 @@ commit of the work item's earlier runs, ordered by run number and then by push o
 marks the commits of cancelled runs. A commit of a cancelled run, and a commit that does not descend from the start
 commit, moves the run nowhere.
 
-qory composes the harness at `target_version`, with the further repositories at their
-default branches, before it checks out the work item's branch. When the documents contain
+qory composes the harness at `target_version`, with the read targets at the heads of their
+default branches, before it checks out the work item's branch. A read target whose version
+lists a commit moves to that commit then. When the documents contain
 no harness document, the compose reads the checkout's `qory.yaml` or `harness.yaml`, the
 modules it lists by a path and every file of those modules as `target_version` has them.
 It reads `harness.extensions`, such as `command_limits_minutes`, the `qory` version
@@ -2363,14 +2393,18 @@ run](#the-push-step-of-a-write-run).
 Each of these stops the run before the compose, exit 1, and the run's record shows the
 run as failed with no session. `<commit>` is the commit's first 12 characters:
 
-- `report this run to the instance admin of Qory Apiary: the run's documents set the
-  target <path>, but the run configuration lists it after another repository; the target
-  must be the first repository of the run configuration; the code is used`, before any
-  fetch
-- `report this run to the instance admin of Qory Apiary: the run's documents set the
-  target <path>, but the run configuration does not list it; the target must be the
-  first repository of the run configuration; the code is used`, before any fetch, also
-  when the run configuration lists no repository
+- `A read target is on another host, so the run did not start; the code is used`, before
+  any fetch, with the read target and the two hosts on line 2
+- `A read target is of another owner, so the run did not start; the code is used`, before
+  any fetch, on github.com
+- `A read target is inside another, so the run did not start; the code is used`, before
+  any fetch
+- `The working folder has .qory/repositories, so the run did not start; the code is used`,
+  and `The working folder's .qory is not a folder, so the run did not start; the code is
+  used`, before the fetch of the read targets
+- `A target is not a repository path, so the run did not start; the code is used`, and the
+  same for a read target, before any fetch, with the path on line 2; on github.com, `A
+  target is not owner/name, so the run did not start; the code is used`
 - `ask Qory Apiary's instance admin to check the adapter of the target: the run's
   documents set the target version <version>, and qory fetches a target at a version
   only when the version is a commit id of 40 or 64 hex digits; the code is used`, before
@@ -2394,9 +2428,14 @@ is set to, with no agent:
    `set a run configuration for the run's workspace in Qory Apiary: a prebuild runs under
    its policy alone, and the run's policy is <source>`, where `<source>` is `the gateway's
    machine's`, `none` or `not recorded`.
-2. qory fetches the run's repositories through the run's host proxy into an empty working
-   folder under `pool/runs/<run id>` in qory's state directory. git runs on this machine
-   for the fetch, outside the wall.
+2. qory fetches the repository of the documents' target through the run's host proxy into
+   an empty working folder under `pool/runs/<run id>` in qory's state directory. git runs
+   on this machine for the fetch, outside the wall. A target that is not a repository on
+   the run's host stops the prebuild with `The run's target is not a repository, so the
+   prebuild did not start`, then `The target has no address on <host>, the host of the
+   run's repositories, and a prebuild builds a repository.` indented by two spaces. With
+   no `QORY_RUN_SYSTEM`, line 2 is `The run has no host for its repositories, and a
+   prebuild builds a repository.`
 3. One session joins the run, with qory's helper, `qory run prebuild-step`, as its
    command, the working folder as its folder and a writable `out` folder beside it. The
    session gets none of this machine's variables and no model key.
@@ -2985,8 +3024,19 @@ of the work item starts at the newest commit that a run
 pushed and a person did not cancel, see [What the run takes from the response](#what-the-run-takes-from-the-response). The step runs after each session of the run, once the agent exited, and before the
 next session or the run's close. A setup container is gone by then: qory removes it before the step, in the wall step `remove the setup
 container`, so no process in it writes the working folder after the check. Its kind is `push` and its name is `push qory/<work item
-id> to <system>/<path>`, followed by ` and 1 further repository` or ` and <n> further
-repositories` for a run with more repositories. A write run with no branch, such as a run
+id> to <system>/<path>`. A read target of the documents is fetched and not pushed: the step
+checks, commits and pushes no read target, and the version it stores has no entry of one.
+When the agent made commits in a read target, the step prints, once in the run and before
+the push of the target, which goes on:
+
+```text
+qory run: The commits in a read-only repository were not kept: a run changes only its target.
+  The repository is <path>.
+```
+
+`<path>` is the read target's path on its host, such as `acme/lib`. A read target whose
+`.git` does not pass the check of a further repository gets no line.
+A write run with no branch, such as a run
 with no repository, gets the step to store its outputs alone, with the name `store the
 outputs`: it pushes nothing, and opens no push proxy and no host proxy.
 
@@ -3008,23 +3058,23 @@ A run has no step in these cases, and what the agent left stays in the working f
   and is deleted with it, so nothing reaches the branch.
 - A run on a machine that is lost: nothing is left to run the step.
 
-The step does this, in order:
+The step does this, in order, for the target, the one repository it pushes. The step leaves
+each read target's checkout as the agent left it: no check, commit or push.
 
-1. qory checks each repository again, because the agent could write to each `.git`. The
+1. qory checks the target again, because the agent could write to its `.git`. The
    check stops on a key in a configuration file in `.git` that neither `git init` nor the
    fetch writes, apart from `user.name` and `user.email` in `.git/config`, which the commit
    of this step does not use, on such a file that is not a regular file, on `alternates`, on
    `info/grafts`, on a `commondir` file, on a `.git` with no `HEAD`, `objects` or `refs`,
-   on a link in `.git` or on the way to a further repository, and on a hard link in `.git`
-   outside `objects`.
-2. qory removes `.git/index.lock` of each repository, a file that an agent killed in a git
+   on a link in `.git`, and on a hard link in `.git` outside `objects`.
+2. qory removes `.git/index.lock` of the target, a file that an agent killed in a git
    command leaves behind, and prints `qory run: removed .git/index.lock of <path>, which the
    agent left when it stopped`. qory does this only for a walled run, whose container the
    session removed: when it could not, the run's push proxy does not open, and the step
    runs no git. With an agent on the host, the stop of the agent is not proven, and a lock
    fails the step. qory removes only that file, and only as a regular file in a `.git`
    directory, so a link stops the check and any other lock stays.
-3. qory commits what the agent left in each repository, with the message `Changes left by
+3. qory commits what the agent left in the target, with the message `Changes left by
    run <run number>` and the author and committer `qory <qory@localhost>`. A new file is in
    the commit unless git ignores it through `.gitignore` or `.git/info/exclude`. `.qory`
    and the links into it stay out, also when the agent staged them. When a commit of the
@@ -3037,33 +3087,31 @@ The step does this, in order:
    container, qory records each changed path and its content, and commits a path only if
    the agent changed it again. With `wall.setup: inside`, the setup runs in the agent's
    container, so what it changed counts as what the agent left. No hook in `.git` runs.
-   The commits of all repositories come before the first push, so a failed commit pushes
-   nothing.
-4. qory checks each commit from the start commit to `HEAD`, merges included, in each
-   repository. A commit that has a path under `.qory/outbox/`, in any letter case such as
-   `.QORY/Outbox/`, as `git add -f` makes one, stops the step before any push, in any repository, and the run closes `failed`. qory
-   prints `qory run: Keep .qory/outbox/ out of the commits of this run; qory pushed
-   nothing.`, then four lines indented by two spaces: `A commit of this run has a path under
-   .qory/outbox/.`, `Repository <system>/<path>.`, `Commit <commit>.` and `Path <path>.` A commit that added the path and a later commit that
-   removed it counts too, since the push would send the file in the history. A list of the
-   commits that fails stops the step before any push: `qory run: Start the run again: the
-   list of the run's commits failed.`, then `Listing the commits of <path> from commit
-   <start> to <head> failed: <error>. qory pushed nothing. The run code is used up.`
-   indented by two spaces. qory then checks the scope of the commits of each repository
-   whose `HEAD` is past the session's start, on a fresh clone, see [The scope check before
-   the push](#the-scope-check-before-the-push): a repository that fails stops the step
-   before any push, in any repository. After a session that succeeded, qory then reads,
-   fills and checks the session's outputs with the heads that the push would leave, see [The
-   outputs of a session](#the-outputs-of-a-session): an output that fails stops the step
-   before any push, and the run closes `failed` with the end code `outputs_invalid`.
-5. qory checks the head of the branch on the forge, for each repository whose `HEAD` is past
-   the commit the run expected: see [The head check](#the-head-check). When one
-   repository fails the check, qory pushes nothing in any repository.
-6. qory pushes each of these repositories to `refs/heads/qory/<work item id>`, through the
-   run's push proxy: a fast-forward push, or a push with a lease where the head check requires
-   one. It prints `qory run: pushed qory/<work item id> to <path> at <commit>`, where
-   `<commit>` is the commit's first 12 characters. With no new commit in any repository,
-   it prints `qory run: no new commits to push`, and pushes nothing.
+   A failed commit pushes nothing.
+4. qory checks each commit from the start commit to `HEAD`, merges included. A commit that
+   has a path under `.qory/outbox/`, in any letter case such as `.QORY/Outbox/`, as `git add
+   -f` makes one, stops the step before the push, and the run closes `failed`. qory prints
+   `qory run: Keep .qory/outbox/ out of the commits of this run; qory pushed nothing.`, then
+   four lines indented by two spaces: `A commit of this run has a path under
+   .qory/outbox/.`, `Repository <system>/<path>.`, `Commit <commit>.` and `Path <path>.` A
+   commit that added the path and a later commit that removed it counts too, since the push
+   would send the file in the history. A list of the commits that fails stops the step
+   before any push: `qory run: Start the run again: the list of the run's commits failed.`,
+   then `Listing the commits of <path> from commit <start> to <head> failed: <error>. qory
+   pushed nothing. The run code is used up.` indented by two spaces. When `HEAD` is past the
+   session's start, qory then checks the scope of the commits on a fresh clone, see [The
+   scope check before the push](#the-scope-check-before-the-push): a failure stops the step
+   before the push. After a session that succeeded, qory then reads, fills and checks the
+   session's outputs with the heads that the push would leave, see [The outputs of a
+   session](#the-outputs-of-a-session): an output that fails stops the step before any push,
+   and the run closes `failed` with the end code `outputs_invalid`.
+5. When `HEAD` is past the commit the run expected, qory checks the head of the branch on the
+   forge: see [The head check](#the-head-check). A failure stops the step before the push.
+6. qory pushes the target to `refs/heads/qory/<work item id>`, through the run's push proxy:
+   a fast-forward push, or a push with a lease where the head check requires one. It prints
+   `qory run: pushed qory/<work item id> to <path> at <commit>`, where `<commit>` is the
+   commit's first 12 characters. With no new commit, it prints `qory run: no new commits to
+   push`, and pushes nothing.
 7. After a session that succeeded, qory stores a version of each output of the outbox, see
    [The outputs of a session](#the-outputs-of-a-session). After a 429, qory waits for
    `Retry-After`, at most 60 seconds, and sends the request again, at most 5 requests in
@@ -3229,17 +3277,14 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   again. The store had no response: <error>; the code is used`
 - the lines of [The outputs of a session](#the-outputs-of-a-session), when an output of the
   outbox cannot be read, filled or checked, or a required output is missing
-- `delete branch qory/<work item id> of <path> on <system>`, then a line indented by two
-  spaces: `qory pushed <path> and stored no version, because the push of the next
-  repository failed: <line of that failure>`
 
 #### The head check
 
-Before any push, qory reads the head of `refs/heads/qory/<work item id>` on the forge, for
-each repository whose `HEAD` is past the commit the run expected. The expected commit is the
+Before the push, qory reads the head of `refs/heads/qory/<work item id>` on the forge, when
+the target's `HEAD` is past the commit the run expected. The expected commit is the
 start commit, or, after a push of this run, the commit of its last push. qory reads through
 the run's host proxy, with the read credential, because the push proxy has the push
-credential alone. The result of each repository is one of these:
+credential alone. The result is one of these:
 
 - The head is the expected commit: qory pushes with no lease.
 - The branch is not on the forge, and the run started at the checkout at `target_version`
@@ -3256,7 +3301,7 @@ credential alone. The result of each repository is one of these:
   those commits only while the branch is still at the head qory read.
 - Any other head (an unrecorded head, a recorded head after the run's first push, or a
   recorded head that does not descend from the start commit) or the branch missing where the
-  run did not start at the checkout: qory pushes nothing in any repository, and the step
+  run did not start at the checkout: qory pushes nothing, and the step
   fails with the line in the list above, which starts with `Set the branch to the
   expected commit or delete it`, or with `Create the branch at the expected commit on the
   forge` for a missing branch.
@@ -4441,11 +4486,12 @@ through the wall's proxy, which reads with the run's read credential.
 
 qory fetches before the session, as for a run with no `destinations`, in two cases:
 
-- The run's access is `write` or `write-no-push`. qory fetches the target and each further
-  repository of the run configuration, reads the run's branch, and runs its push step.
-- The run's documents contain no harness document. qory fetches the target alone, the first
-  repository of the run configuration, since it composes the harness of the target's
-  repository. The setup gets that list too, in `QORY_RUN_REPOSITORIES`.
+- The run's access is `write` or `write-no-push`. qory fetches the target and each read
+  target of the documents, reads the run's branch, and runs its push step, which pushes the
+  target alone.
+- The run's documents contain no harness document. qory fetches the target alone, with no
+  read target, since it composes the harness of the target's repository. The setup gets
+  that list too, in `QORY_RUN_REPOSITORIES`.
 
 These calls exit 2 and clone nothing, with the fix on line 1:
 
@@ -4464,11 +4510,11 @@ the id and no path of the machine:
 | Line 1 | When |
 | ------ | ---- |
 | `Give the integration access to <id> in Qory Apiary, then click Run Explore again.` | The host returned 401, 403 or 404. Line 2 is `The host returned <status> to the clone.` |
-| `Ask the instance admin of Qory Apiary to let the proxy reach the host of <id>.` | The wall's proxy returned 403 or 407. |
+| `qory destination clone: The proxy cannot reach <id>'s host, so nothing was cloned.` | The wall's proxy returned 403 or 407. |
 | `Run Explore again later: the clone of <id> failed: <cause>.` | Any other failed clone. The cause contains no URL. |
-| `Ask the instance admin of Qory Apiary to check the machine: it cannot store <id>.` | A folder of the clone or its `.git` is a link or a file, the clone's folder has files and no clone, or qory cannot make a folder. Line 2 has the path and the cause. When `PATH` has no git, line 2 is `git is not on PATH`. The id is the call's first. For a record of the clones that is not a list of ids, `the clones` stands in place of the id. |
-| `Ask the instance admin of Qory Apiary to fix the destinations of this run: they are malformed.` | The destinations do not have the shape of the explore inputs. Line 2 has the cause. |
-| `Ask the instance admin of Qory Apiary to separate destination <id> from another.` | The path of `<id>` lies inside the path of another destination on the same system, or contains it. Line 2 has both ids. qory clones neither, so no clone lands in another one's folder. |
+| `qory destination clone: The machine cannot store <id>, so nothing was cloned.` | A folder of the clone or its `.git` is a link or a file, the clone's folder has files and no clone, or qory cannot make a folder. Line 2 has the path and the cause. When `PATH` has no git, line 2 is `git is not on PATH`. The id is the call's first. For a record of the clones that is not a list of ids, `the clones` stands in place of the id. |
+| `qory destination clone: The run's destinations do not match their schema, so nothing was cloned.` | The destinations do not have the shape of the explore inputs. Line 2 has the cause. |
+| `qory destination clone: Destination <id> is inside another, so nothing was cloned.` | The path of `<id>` lies inside the path of another destination on the same system, or contains it. Line 2 has both ids. qory clones neither, so no clone lands in another one's folder. |
 
 The count of 100 is per session: the record of the clones is in the session's container.
 A `git clone` that the agent runs itself reaches only what the run's read credential
@@ -6313,10 +6359,10 @@ push step.
 
 #### The scope check before the push
 
-Before the first `git push` after a session of a write run from a run code, qory checks the
-commits of each repository whose head is past the session's start: `Start` for session 1,
-and the commit that the last push landed for a later session. A failure in one repository
-stops the push of every repository, and the commits stay local.
+Before the `git push` after a session of a write run from a run code, qory checks the
+target's commits when its head is past the session's start: `Start` for session 1, and the
+commit that the last push landed for a later session. A read target is not checked. A
+failure stops the push, and the commits stay local.
 
 1. qory makes a fresh clone of the repository's commits in the run directory: `git init`
    with no template, then a fetch of the head alone, by its id, with no tag and no ref, and

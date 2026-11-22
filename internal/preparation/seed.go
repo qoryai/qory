@@ -40,7 +40,10 @@ var notCopied = []string{".git", checkout.Dir}
 
 // Prepare is what qory run prepare does with the run's code inside the wall, before the
 // start commands: with [EnvRepositories] unset or empty it does nothing and returns
-// false. Otherwise it checks the list as [Check] does, and when seed, a prebuilt image's
+// false. Otherwise it checks the list as [Check] does, with the bound [maxSetupList] in
+// place of [maxList], since qory sets the list of a run code from its documents: a run
+// whose run configuration sets the list has it checked at [maxList] by the fetch before
+// the setup starts. When seed, a prebuilt image's
 // copy of the run's repository such as [Seed], is there, it adds the copy's files that
 // the fetched commit does not track to dir, the working folder qory run fetched the
 // run's repository into, as [fromSeed] has it, and prints a line that says so on report.
@@ -51,7 +54,7 @@ func Prepare(ctx context.Context, dir, seed string, getenv func(string) string, 
 		return false, nil
 	}
 	system := getenv(EnvSystem)
-	paths, err := Check(system, list)
+	paths, err := checkList(system, list, maxSetupList, fmt.Sprintf(textSetupTooLong, maxSetupList))
 	if err != nil {
 		return false, err
 	}

@@ -14,8 +14,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode/utf8"
+	"sync"
 
+	"github.com/qoryai/integrations/contracts"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/spf13/cobra"
 
 	"github.com/qoryai/qory/internal/exports"
@@ -61,10 +63,10 @@ const (
 	textNotRepository   = "Clone only a repository: the address of %s is not a repository path."
 	textConnection      = "Give the integration access to %s in Qory Apiary, then click Run Explore again.\n  The host returned %s to the clone."
 	textCloneAgain      = "Run Explore again later: the clone of %s failed: %s."
-	textMachine         = "Ask the instance admin of Qory Apiary to check the machine: it cannot store %s.\n  %s"
-	textBadDestinations = "Ask the instance admin of Qory Apiary to fix the destinations of this run: they are malformed.\n  %s"
-	textNest            = "Ask the instance admin of Qory Apiary to separate destination %s from another.\n  %s and %s nest: one path lies inside the other."
-	textProxyBlocks     = "Ask the instance admin of Qory Apiary to let the proxy reach the host of %s."
+	textMachine         = "qory destination clone: The machine cannot store %s, so nothing was cloned.\n  %s"
+	textBadDestinations = "qory destination clone: The run's destinations do not match their schema, so nothing was cloned.\n  %s"
+	textNest            = "qory destination clone: Destination %s is inside another, so nothing was cloned.\n  %s and %s nest: one path lies inside the other."
+	textProxyBlocks     = "qory destination clone: The proxy cannot reach %s's host, so nothing was cloned."
 )
 
 // allClones is the word of [textMachine] for a record that is not a list of ids,
@@ -82,25 +84,14 @@ var errNoDestinations = errors.New(textNoDestinations)
 // letters other than i, l, o and u.
 var destinationID = regexp.MustCompile(`^tg_[0-9a-hjkmnp-tv-z]{16}$`)
 
-// The forms of a destination's target, as the integration contract's definitions have them.
-var (
-	systemName = regexp.MustCompile(`^[a-z0-9.-]{1,253}$`)
-	noControl  = regexp.MustCompile(`^[^\x00-\x1f\x7f]+$`)
-)
+// destinationsSchema is the schema of the destinations of the explore inputs, explore/v1
+// inputs.schema.json at properties.destinations, compiled once.
+var destinationsSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
+	return contracts.CompileExplore(destinationsSchemaName)
+})
 
-// destination is one entry of the inputs' destinations: id, and the target, a collection
-// and an address, nil for a place with none. Each member matches by its exact name, and
-// a member that the schema does not define is read and not used.
-type destination struct {
-	ID     string `json:"id,case:strict"`
-	Target struct {
-		Collection string `json:"collection,case:strict"`
-		Address    *struct {
-			System string `json:"system,case:strict"`
-			Path   string `json:"path,case:strict"`
-		} `json:"address,case:strict"`
-	} `json:"target,case:strict"`
-}
+// destinationsSchemaName is the place of [destinationsSchema] in the explore contract.
+const destinationsSchemaName = "inputs.schema.json#/properties/destinations"
 
 // errNotObject is the error of inputs that are not a JSON object.
 var errNotObject = errors.New("inputs.json is not a JSON object")
@@ -128,14 +119,14 @@ func listedDestinations(inputs []byte) []json.RawMessage {
 }
 
 // readDestinations reads the destinations of the inputs at path, $QORY_HARNESS_HOME's
-// inputs.json, and checks each as the explore inputs' schema has it: 1 to 250 entries,
-// each with an id of [destinationID], no id twice, a collection of 1 to 200 characters,
-// and an address, when it has one, with a system of [systemName] and a path of 1 to 200
-// characters with no control character. A missing file, inputs with no destinations
-// and an empty or null list are [errNoDestinations], as [listedDestinations] has them.
-//
-// shortcut: reads destinations with a local reader, until qory pins integrations at T-30's merge, then use the contract's reader
-func readDestinations(path string) ([]destination, error) {
+// inputs.json, as [contracts.Destination] entries, checked against the explore inputs'
+// schema of destinations, [destinationsSchema]: 1 to 250 entries, no two equal, each with
+// an id of [destinationID], a collection of 1 to 200 characters, and an address, when it
+// has one, with a host name for its system and a path of 1 to 200 characters with no
+// control character, { or }. The schema cannot check that no two entries have the same
+// id, so readDestinations checks it. A missing file, inputs with no destinations and an
+// empty or null list are [errNoDestinations], as [listedDestinations] has them.
+func readDestinations(path string) ([]contracts.Destination, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, errNoDestinations
@@ -147,37 +138,61 @@ func readDestinations(path string) ([]destination, error) {
 	if err != nil {
 		return nil, err
 	}
-	if raw == nil {
-		return nil, errNoDestinations
-	}
-	var entries []destination
-	if err := json.Unmarshal(raw, &entries); err != nil {
+	var entries []json.RawMessage
+	if raw != nil && json.Unmarshal(raw, &entries) != nil {
 		return nil, errors.New("destinations is not an array of objects")
 	}
 	if len(entries) == 0 {
 		return nil, errNoDestinations
 	}
-	if len(entries) > 250 {
-		return nil, fmt.Errorf("destinations has %d entries, not 1 to 250", len(entries))
+	s, err := destinationsSchema()
+	if err != nil {
+		return nil, fmt.Errorf("the explore contract's schema %s does not compile", destinationsSchemaName)
 	}
-	for i, d := range entries {
-		n := i + 1
-		switch {
-		case !destinationID.MatchString(d.ID):
-			return nil, fmt.Errorf("entry %d has no id of the form tg_ and 16 characters", n)
-		case slices.ContainsFunc(entries[:i], func(e destination) bool { return e.ID == d.ID }):
-			return nil, fmt.Errorf("entry %d has the id of an entry before it", n)
-		case d.Target.Collection == "" || utf8.RuneCountInString(d.Target.Collection) > 200:
-			return nil, fmt.Errorf("entry %d has no collection of 1 to 200 characters", n)
-		case d.Target.Address == nil:
-			continue
-		case !systemName.MatchString(d.Target.Address.System):
-			return nil, fmt.Errorf("entry %d has no system that is a host name", n)
-		case !noControl.MatchString(d.Target.Address.Path) || utf8.RuneCountInString(d.Target.Address.Path) > 200:
-			return nil, fmt.Errorf("entry %d has no path of 1 to 200 characters without a control character", n)
+	value, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		return nil, errors.New("destinations is not one JSON value")
+	}
+	var broken *jsonschema.ValidationError
+	if err := s.Validate(value); errors.As(err, &broken) {
+		return nil, brokenDestinations(broken)
+	} else if err != nil {
+		return nil, err
+	}
+	var list []contracts.Destination
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, errors.New("destinations is not an array of destinations")
+	}
+	for i, d := range list {
+		if slices.ContainsFunc(list[:i], func(e contracts.Destination) bool { return e.ID == d.ID }) {
+			return nil, fmt.Errorf("entry %d has the id of an entry before it", i+1)
 		}
 	}
-	return entries, nil
+	return list, nil
+}
+
+// brokenDestinations is the cause of destinations that break [destinationsSchema], from
+// e, the schema's error: the entry and the place in it of the first rule broken, by its
+// JSON pointer, and the list for a rule of the whole list, such as its length.
+func brokenDestinations(e *jsonschema.ValidationError) error {
+	for len(e.Causes) > 0 {
+		e = e.Causes[0]
+	}
+	if len(e.InstanceLocation) == 0 {
+		return fmt.Errorf("destinations does not match explore/v1 %s", destinationsSchemaName)
+	}
+	entry, err := strconv.Atoi(e.InstanceLocation[0])
+	if err != nil {
+		return fmt.Errorf("destinations does not match explore/v1 %s", destinationsSchemaName)
+	}
+	at := ""
+	for _, part := range e.InstanceLocation[1:] {
+		at += "/" + integration.Printable(part)
+	}
+	if at == "" {
+		return fmt.Errorf("entry %d does not match the schema of a destination", entry+1)
+	}
+	return fmt.Errorf("entry %d does not match the schema of a destination at %s", entry+1, at)
 }
 
 // shownID is arg, an argument of qory destination clone, as a line shows it: printable,
@@ -199,8 +214,8 @@ type clone struct{ id, system, path, dir, rel string }
 // destination whose path lies inside the path of another one on the same system, or
 // contains it, stops with [textNest]: its clone would put one repository's folder inside
 // another's, where a link that the outer repository commits could lead out of root.
-func cloneOf(arg string, list []destination, root string) (clone, error) {
-	i := slices.IndexFunc(list, func(d destination) bool { return d.ID == arg })
+func cloneOf(arg string, list []contracts.Destination, root string) (clone, error) {
+	i := slices.IndexFunc(list, func(d contracts.Destination) bool { return d.ID == arg })
 	if i < 0 {
 		return clone{}, input(fmt.Errorf(textNotDestination, shownID(arg)))
 	}

@@ -18,7 +18,8 @@
 //     whether the open made its record. With [Settings.MachineSteps], the run's machine
 //     step comes right after the open, before the check of the policy.
 //  2. The fetch, in qory run's process: through the run's host proxy, [preparation.RunPrebuild]
-//     fetches the run's repositories into work, as qory run does once a run is open. The
+//     fetches the repository of the documents' target into work, as qory run does once a
+//     run is open. The
 //     fetch has [fetchTimeout], counted from the open. Every git of the fetch starts from
 //     the environment of [child.Env], so git is found on its PATH.
 //  3. The commit: [Commit] reads it from work/.git, with no git run.
@@ -101,23 +102,26 @@ const (
 
 // The words of the fetch and of the close. Each is one format string.
 const (
-	textNoRepositories = "list the run's repositories in %s in the run configuration: a prebuild fetches them, and the variable is empty"
-	textNoKey          = "give the prebuild its run key: it has none"
-	textNotOpened      = "check that this machine reaches the run's gateway: the run did not open there: %s"
-	textNoHostProxy    = "check that qory run can listen on a port of 127.0.0.1: the run's host proxy, through which qory run fetches the run's code, did not open: %s"
-	textNotClosed      = "update qory: the run could not be closed: %s"
-	textClosedBefore   = "check the run's record in Qory Apiary: the gateway closed the run as %s before qory run closed it"
-	textNoRecord       = "check that this machine can write qory run's state directory: the run opened and made no record"
-	textNotReported    = "update qory: the build's result could not be written to the run: %v"
-	textPlaceSecret    = "ask Qory Apiary's instance admin: the run's %s contains qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_, which start a secret, and qory writes no image with them to dev.qory.run.built"
-	textPlaceCase      = "ask Qory Apiary's instance admin: the run's %s has upper-case letters, and qory writes images to dev.qory.run.built by lower-case references alone"
-	textUndelivered    = "check that this machine reaches the run's gateway: %s of the run did not reach it; %s/undelivered contains them"
-	textNotServer      = "set a run configuration for the run's workspace in Qory Apiary: a prebuild runs under its policy alone, and the run's policy is %s"
-	textNotRegistry    = "set pool.registry to the registry of Qory Apiary's QORY_REGISTRY, or ask its instance admin: the run's %s is not under %s"
-	textNotJoined      = "check the wall and wall.prebuild_image in the run configuration's forager.yaml: the prebuild's session behind the wall did not start: %s"
-	textNoResult       = "check the prebuild's lines behind the wall: its result, out/" + ResultFile + ", could not be read: %s"
-	textStepExited     = "check the prebuild's lines behind the wall: the step %s and wrote no error"
-	textResultPlace    = "check the prebuild's lines behind the wall: its result has the image %s for the run's %s, which is %s"
+	// textNoTarget and textNoSystem are the cause alone, since a prebuild is a dispatched
+	// run.
+	textNoTarget     = "The run's target is not a repository, so the prebuild did not start\n  The target has no address on %s, the host of the run's repositories, and a prebuild builds a repository."
+	textNoSystem     = "The run's target is not a repository, so the prebuild did not start\n  The run has no host for its repositories, and a prebuild builds a repository."
+	textNoKey        = "give the prebuild its run key: it has none"
+	textNotOpened    = "check that this machine reaches the run's gateway: the run did not open there: %s"
+	textNoHostProxy  = "check that qory run can listen on a port of 127.0.0.1: the run's host proxy, through which qory run fetches the run's code, did not open: %s"
+	textNotClosed    = "update qory: the run could not be closed: %s"
+	textClosedBefore = "check the run's record in Qory Apiary: the gateway closed the run as %s before qory run closed it"
+	textNoRecord     = "check that this machine can write qory run's state directory: the run opened and made no record"
+	textNotReported  = "update qory: the build's result could not be written to the run: %v"
+	textPlaceSecret  = "ask Qory Apiary's instance admin: the run's %s contains qak_, qrk_, qecr_, qecn_, qecp_, qecg_ or qeci_, which start a secret, and qory writes no image with them to dev.qory.run.built"
+	textPlaceCase    = "ask Qory Apiary's instance admin: the run's %s has upper-case letters, and qory writes images to dev.qory.run.built by lower-case references alone"
+	textUndelivered  = "check that this machine reaches the run's gateway: %s of the run did not reach it; %s/undelivered contains them"
+	textNotServer    = "set a run configuration for the run's workspace in Qory Apiary: a prebuild runs under its policy alone, and the run's policy is %s"
+	textNotRegistry  = "set pool.registry to the registry of Qory Apiary's QORY_REGISTRY, or ask its instance admin: the run's %s is not under %s"
+	textNotJoined    = "check the wall and wall.prebuild_image in the run configuration's forager.yaml: the prebuild's session behind the wall did not start: %s"
+	textNoResult     = "check the prebuild's lines behind the wall: its result, out/" + ResultFile + ", could not be read: %s"
+	textStepExited   = "check the prebuild's lines behind the wall: the step %s and wrote no error"
+	textResultPlace  = "check the prebuild's lines behind the wall: its result has the image %s for the run's %s, which is %s"
 )
 
 // undeliveredError is a close that left n events of the run that its gateway did not
@@ -189,9 +193,9 @@ type Settings struct {
 	MachineSteps string
 	// Open opens the run at its gateway; nil is [session.Open]. A test replaces it.
 	Open func(ctx context.Context, spec session.OpenSpec) (Opened, error)
-	// Fetch fetches the run's repositories, as [preparation.RunPrebuild]; nil is
+	// Fetch fetches the target's repository, as [preparation.RunPrebuild]; nil is
 	// preparation.RunPrebuild. A test replaces it.
-	Fetch func(ctx context.Context, dir string, base []string, getenv func(string) string, p proxygit.Proxy, report io.Writer) (bool, error)
+	Fetch func(ctx context.Context, dir string, base []string, getenv func(string) string, at preparation.Target, p proxygit.Proxy, report io.Writer) (bool, error)
 	// Git is the git binary that makes work an empty working tree; empty is git. A name
 	// with no path separator is found on the PATH every command gets, as
 	// [child.Program] has it.
@@ -214,6 +218,9 @@ type Run struct {
 	// Inputs are the documents' inputs, the bytes as they came: exactly version, 1,
 	// and environment_ref.
 	Inputs []byte
+	// Target is the documents' target, nil for none: the prebuild fetches the repository
+	// at its address, on the run's system.
+	Target *contracts.Target
 	// ImageDestination is the documents' image_destination: where the target image is
 	// pushed, as <ImageDestination>:<RunID>.
 	ImageDestination string
@@ -241,10 +248,8 @@ type Opened interface {
 	StartStep(kind, name string) (*session.Step, error)
 	// Join runs the step's session behind the wall, as [session.Run.Join].
 	Join(ctx context.Context, spec session.SessionSpec) (*session.Result, error)
-	// System and Repositories are the server's values of [preparation.EnvSystem] and
-	// [preparation.EnvRepositories], "" when it sets none.
+	// System is the server's value of [preparation.EnvSystem], "" when it sets none.
 	System() string
-	Repositories() string
 	// Built writes the run's dev.qory.run.built, as [session.Run.Built].
 	Built(b session.Built) error
 	Close(ctx context.Context, out session.Outcome) (*session.Closed, error)
@@ -528,7 +533,7 @@ func (s Settings) fetch(ctx context.Context, r Run, work, state, record string) 
 	if source := policySourceOf(record); source != policyFetched {
 		return run, out, fmt.Errorf(textNotServer, policyShown(source))
 	}
-	fetchErr := s.fetchThrough(fetchCtx, run, r.RunID, work, state)
+	fetchErr := s.fetchThrough(fetchCtx, run, r, work, state)
 	switch {
 	case fetchErr == nil:
 	case errors.Is(context.Cause(fetchCtx), errFetchLimit):
@@ -558,11 +563,13 @@ func (s Settings) closeRun(ctx context.Context, run Opened, out session.Outcome,
 	return nil
 }
 
-// fetchThrough fetches the repositories of the open run into work through the run's
-// host proxy, which it closes before it returns, with a line for what it fetched, and
-// git started from the environment of [child.Env] with XDG_STATE_HOME at state. A run
-// configuration that lists no repository is an error: a prebuild builds a repository.
-func (s Settings) fetchThrough(ctx context.Context, run Opened, runID, work, state string) error {
+// fetchThrough fetches the repository of r's target into work through the run's host
+// proxy, which it closes before it returns, with a line for what it fetched, and git
+// started from the environment of [child.Env] with XDG_STATE_HOME at state. The host is
+// the run's system. A target that is not a repository on that system is an error: a
+// prebuild builds a repository.
+func (s Settings) fetchThrough(ctx context.Context, run Opened, r Run, work, state string) error {
+	runID := r.RunID
 	h, err := run.HostProxy()
 	if err != nil {
 		return fmt.Errorf(textNoHostProxy, integration.Printable(exports.HideURLError(err).Error()))
@@ -573,26 +580,29 @@ func (s Settings) fetchThrough(ctx context.Context, run Opened, runID, work, sta
 		fetch = preparation.RunPrebuild
 	}
 	values := func(name string) string {
-		switch name {
-		case preparation.EnvSystem:
+		if name == preparation.EnvSystem {
 			return run.System()
-		case preparation.EnvRepositories:
-			return run.Repositories()
 		}
 		return ""
+	}
+	var at preparation.Target
+	if r.Target != nil && r.Target.Address != nil {
+		at.System, at.Path = r.Target.Address.System, r.Target.Address.Path
 	}
 	// The fetch's lines and errors start with qory run's prefix, which the prebuild's
 	// lines leave out: the run id comes first there.
 	log := s.logf()
 	lines, flush := maskedLines(child.NewLineWriter("", func(line string) { log(runID + ": " + strings.TrimPrefix(line, fetchPrefix)) }))
 	p := proxygit.Proxy{URL: h.ProxyURL, CABundle: h.CABundle}
-	fetched, err := fetch(ctx, work, child.Env(s.RunConfig, state, explore.RunsDir(s.State)), values, p, lines)
+	fetched, err := fetch(ctx, work, child.Env(s.RunConfig, state, explore.RunsDir(s.State)), values, at, p, lines)
 	flush()
 	switch {
 	case err != nil:
 		return errors.New(proxygit.Hide(strings.TrimPrefix(err.Error(), fetchPrefix), &p))
+	case !fetched && run.System() == "":
+		return errors.New(textNoSystem)
 	case !fetched:
-		return fmt.Errorf(textNoRepositories, preparation.EnvRepositories)
+		return fmt.Errorf(textNoTarget, integration.Printable(exports.Value(run.System(), false)))
 	}
 	return nil
 }

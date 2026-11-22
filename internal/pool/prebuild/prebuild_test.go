@@ -25,11 +25,13 @@ import (
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
+	"github.com/qoryai/integrations/contracts"
 	"golang.org/x/sys/unix"
 
 	"github.com/qoryai/qory/internal/pool/explore"
 	"github.com/qoryai/qory/internal/pool/prebuild"
 	devimage "github.com/qoryai/qory/internal/prebuild"
+	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/proxygit"
 	"github.com/qoryai/qory/internal/testenv"
 )
@@ -66,6 +68,9 @@ type script struct {
 	// of 50 ms. HostProxy "fail" makes the host proxy fail to open.
 	Fetch     string
 	HostProxy string
+	// NoSystem makes the run's host of its repositories "", as for a run configuration
+	// that sets no QORY_RUN_SYSTEM.
+	NoSystem bool
 	// Head is what the fetch leaves in work/.git: "branch", a loose ref, "packed", a
 	// packed ref, "detached", or "garbage"; Commit is the id it leaves.
 	Head   string
@@ -372,8 +377,12 @@ func (r *fakeRun) StartStep(string, string) (*session.Step, error) {
 	return nil, errors.New("the run is closed")
 }
 
-func (r *fakeRun) System() string       { return "github.com" }
-func (r *fakeRun) Repositories() string { return "acme/shop" }
+func (r *fakeRun) System() string {
+	if r.e.script.NoSystem {
+		return ""
+	}
+	return "github.com"
+}
 
 func (r *fakeRun) Close(_ context.Context, out session.Outcome) (*session.Closed, error) {
 	r.closed = append(r.closed, out)
@@ -425,9 +434,9 @@ func (e *env) open(ctx context.Context, spec session.OpenSpec) (prebuild.Opened,
 }
 
 // fetch is the fake fetch, in this process.
-func (e *env) fetch(ctx context.Context, dir string, base []string, getenv func(string) string, p proxygit.Proxy, out io.Writer) (bool, error) {
+func (e *env) fetch(ctx context.Context, dir string, base []string, getenv func(string) string, at preparation.Target, p proxygit.Proxy, out io.Writer) (bool, error) {
 	e.mu.Lock()
-	e.fetched = append(e.fetched, fetched{dir: dir, base: base, system: getenv("QORY_RUN_SYSTEM"), list: getenv("QORY_RUN_REPOSITORIES"), proxy: p})
+	e.fetched = append(e.fetched, fetched{dir: dir, base: base, system: getenv("QORY_RUN_SYSTEM"), list: getenv("QORY_RUN_REPOSITORIES"), at: at, proxy: p})
 	e.mu.Unlock()
 	switch e.script.Fetch {
 	case "fail":
@@ -523,6 +532,7 @@ func (e *env) ready() {
 // fetched is what the fake fetch was given.
 type fetched struct {
 	dir, system, list string
+	at                preparation.Target
 	base              []string
 	proxy             proxygit.Proxy
 }
@@ -723,7 +733,8 @@ func (e *env) launchIn(t *testing.T, parent context.Context, stop bool) (prebuil
 // testRun is the test's run with the key's holder h: with the environment_destination,
 // or with environment_image envImage when that is set.
 func testRun(h *holder, envImage string) prebuild.Run {
-	r := prebuild.Run{RunID: testRunID, Key: h, Inputs: []byte(testInputs), ImageDestination: testDestination, EnvironmentImage: envImage}
+	target := &contracts.Target{Collection: "repositories", Address: &contracts.TargetAddress{System: "github.com", Path: "acme/shop"}}
+	r := prebuild.Run{RunID: testRunID, Key: h, Inputs: []byte(testInputs), Target: target, ImageDestination: testDestination, EnvironmentImage: envImage}
 	if envImage == "" {
 		r.EnvironmentDestination = testEnvironmentDestination
 	}
@@ -952,7 +963,8 @@ func TestLaunchFetchErrors(t *testing.T) {
 	}{
 		{func(e *env) { e.script.Open, e.script.Record = "fail", false }, "check that this machine reaches the run's gateway: the run did not open there: the gateway refused the run request: run_not_found"},
 		{func(e *env) { e.script.HostProxy = "fail" }, "check that qory run can listen on a port of 127.0.0.1: the run's host proxy, through which qory run fetches the run's code, did not open: listen tcp 127.0.0.1:0: no port"},
-		{func(e *env) { e.script.Fetch = "none" }, "list the run's repositories in QORY_RUN_REPOSITORIES in the run configuration: a prebuild fetches them, and the variable is empty"},
+		{func(e *env) { e.script.Fetch = "none" }, "The run's target is not a repository, so the prebuild did not start\n  The target has no address on github.com, the host of the run's repositories, and a prebuild builds a repository."},
+		{func(e *env) { e.script.Fetch, e.script.NoSystem = "none", true }, "The run's target is not a repository, so the prebuild did not start\n  The run has no host for its repositories, and a prebuild builds a repository."},
 		{func(e *env) { e.script.Close = "fail" }, "update qory: the run could not be closed: the run is closed already"},
 		{func(e *env) { e.script.Close = "gateway" }, "check the run's record in Qory Apiary: the gateway closed the run as failed before qory run closed it"},
 	} {
@@ -1128,7 +1140,9 @@ func TestLaunchCommands(t *testing.T) {
 	if !res.Record {
 		t.Error("no record")
 	}
-	if len(e.fetched) != 1 || e.fetched[0].dir != work || e.fetched[0].system != "github.com" || e.fetched[0].list != "acme/shop" ||
+	// The fetch takes the documents' target alone, and no getenv value lists a repository.
+	if len(e.fetched) != 1 || e.fetched[0].dir != work || e.fetched[0].system != "github.com" || e.fetched[0].list != "" ||
+		e.fetched[0].at.System != "github.com" || e.fetched[0].at.Path != "acme/shop" || e.fetched[0].at.Reads != nil ||
 		e.fetched[0].proxy != (proxygit.Proxy{URL: fakeProxy, CABundle: "/run/ca-bundle.pem"}) || e.run.proxies != 1 {
 		t.Errorf("the fetch was given %+v", e.fetched)
 	}

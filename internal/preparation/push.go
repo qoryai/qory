@@ -28,8 +28,10 @@ import (
 
 // The words of the push step of a write run. Each is one format string.
 const (
-	textNoNewCommits     = "qory run: no new commits to push"
-	textPushed           = "qory run: pushed %s to %s at %s"
+	textNoNewCommits = "qory run: no new commits to push"
+	textPushed       = "qory run: pushed %s to %s at %s"
+	// textReadAhead is the cause alone: the push goes on without the read target's commits.
+	textReadAhead        = "qory run: The commits in a read-only repository were not kept: a run changes only its target.\n  The repository is %s."
 	textForgeLine        = "qory run: remote: %s"
 	textNestedRepository = "qory run: have the agent leave plain files in %s of %s to push them: that folder is a repository, so qory left it out of the commit, and what it has stays in the working folder"
 	textLockRemoved      = "qory run: removed .git/index.lock of %s, which the agent left when it stopped"
@@ -46,7 +48,6 @@ const (
 	textNotFastForward   = "qory run: take the work item in again in Qory Apiary, and keep the run's commits on top of commit %[3]s: HEAD of %[1]s is at %[2]s, which does not descend from it, so a push would not be a fast-forward; the code is used"
 	textDeleteBranch     = "delete branch %[1]s of %[2]s on %[3]s"
 	textListFailed       = "qory run: Start the run again: the list of the run's commits failed.\n  Listing the commits of %s from commit %s to %s failed: %s. qory pushed nothing."
-	textPushedNoVersion  = "qory run: %s\n  qory pushed %s and stored no version, because the push of the next repository failed: %s"
 	textPushRefused      = "qory run: change the rule on %[3]s that stops a push to %[1]s of %[2]s, then take the work item in again: the push failed: %[4]s; the code is used"
 	textPushForbidden    = "qory run: The push was refused (403).\n  One of these most likely stopped it:\n  1. The run's push proxy refuses a push that is not a plain push to the push_ref of the push credential (for example a signed push or a push with push options), and qory pushes to refs/heads/%[3]s (wall:push-ref).\n  2. The run's push credential has no item for /%[1]s.git/git-receive-pack on %[2]s, and the push proxy refuses every other host and path.\n  3. The forge stopped the push: its permission for the push credential, or a branch rule.\n  The push of %[1]s to %[2]s returned 403: %[4]s; the code is used"
 	textPushNoCredential = "qory run: give the run's credential for %[2]s write access to %[1]s, then take the work item in again: the push through the run's gateway failed: %[3]s; the code is used"
@@ -97,39 +98,40 @@ func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 	}
 }
 
-// Push commits what the agent left in each repository of b, in dir, the working folder,
-// and pushes each repository whose HEAD is past its [WorkRepository.Commit] to the branch
-// b.Ref as a fast-forward, by the URL qory builds, through the run's push proxy p. Before
-// the first push, it reads the head of the branch at the forge of each such repository
-// through the read proxy and compares it with [WorkRepository.Commit], see [checkHead]: a
-// head that is not the expected one stops every push with a [*HeadChanged], and a head
-// that cancelled runs left is replaced with a lease on it. It returns the repositories of
-// the new version, nil when no repository has new commits: [WorkBranch.Version] with the
-// commit of each repository pushed replaced, or added for one with no entry, and its base
-// and commits from [WorkRepository.Start]. It prints a line on report for each repository
-// pushed.
+// Push commits what the agent left in the run's target, the first repository of b, in dir,
+// the working folder, and pushes it, when its HEAD is past its [WorkRepository.Commit], to
+// the branch b.Ref as a fast-forward, by the URL qory builds, through the run's push proxy
+// p. Before the push, it reads the head of the branch at the forge through the read proxy
+// and compares it with [WorkRepository.Commit], see [checkHead]: a head that is not the
+// expected one stops the push with a [*HeadChanged], and a head that cancelled runs left
+// is replaced with a lease on it. It returns the repositories of the new version, nil when
+// the target has no new commits: [WorkBranch.Version] with the target's commit replaced,
+// or added when it has no entry, and its base and commits from [WorkRepository.Start]. It
+// prints a line on report when it pushed.
 // Each push that lands sets the repository's [WorkRepository.Commit] and its entry of
 // [WorkBranch.Version] to the commit pushed, so a later Push of the same run, after a
 // later session, pushes only the commits past it, and pushes nothing when there are none.
 // [WorkBranch.PushedPaths] lists the repositories of the last Push alone.
 //
-// Before any git writes, [safeAfterRun] checks the target and [safeFurther] each further
-// repository, since the agent could write each .git. Every git runs with the environment
+// A further repository, a read target, [WorkRepository.ReadOnly], is skipped in each step:
+// it is not checked, committed or pushed, and the version has no entry of it. A target that
+// is a read target, in a run with no target, is skipped too. [readsAhead] prints a line for
+// each read target with commits past its [WorkRepository.Start]. Before any git writes,
+// [safeAfterRun] checks the target, since the agent could write its .git. Every git runs with the environment
 // [proxygit.Env] makes, so it reads no system or global configuration file, and with
 // [proxygit.Hardened], which turns off the hooks in .git, fsmonitor and credential
 // helpers. No option turns a filter off: the check stops on each key that git init and
 // the fetch do not write, filter keys among them, so a filter stays out only while no
-// process writes .git/config after the check. The commits of every repository come
-// before the first push, so a failed commit pushes nothing. A path that [RecordSetup]
+// process writes .git/config after the check. A path that [RecordSetup]
 // recorded and that is as the setup left it stays out of the commit.
 //
 // An agent that was killed can leave .git/index.lock, which would stop the commit. After
-// the checks, [clearIndexLocks] removes that one file of each repository when
+// the checks, [clearIndexLocks] removes that one file of the target when
 // agentStopped is true, and stops the push when a lock is there and it is false.
 //
-// After the commits and before the head check, check, when not nil, gets the version that
-// the push leaves when every repository lands, [WorkBranch.Version] when none has new
-// commits. An error of check stops every push and is Push's error: the commits stay local.
+// After the commit and before the head check, check, when not nil, gets the version that
+// the push leaves when the target lands, [WorkBranch.Version] when it has no new commits.
+// An error of check stops the push and is Push's error: the commits stay local.
 func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message string, read, p proxygit.Proxy, agentStopped bool, check func(version []Repository) error, report io.Writer) ([]Repository, error) {
 	// A Push that stops before its first push leaves no repository of an earlier Push listed.
 	b.landed, b.pushed = nil, nil
@@ -138,24 +140,32 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 	if err != nil {
 		return nil, local(err)
 	}
+	// work is the index in b.Repositories of the repository the push may move: the target,
+	// the first, unless it is a read target. A run changes only its target, so a further
+	// repository is checked, committed and pushed in no step here.
+	var work []int
+	if len(b.Repositories) > 0 && !b.Repositories[0].ReadOnly {
+		work = []int{0}
+	}
+	readsAhead(ctx, dir, b, report)
 	folders := make([]string, len(b.Repositories))
-	for i, r := range b.Repositories {
+	for _, i := range work {
+		r := b.Repositories[i]
 		folders[i] = filepath.Join(dir, filepath.FromSlash(r.Dir))
-		if i > 0 {
-			if err := safeFurther(ctx, dir, folders[i], true); err != nil {
-				return nil, notSafe(r, err)
-			}
-			continue
-		}
 		if err := safeAfterRun(ctx, folders[i]); err != nil {
 			return nil, notSafe(r, err)
 		}
 	}
-	if err := clearIndexLocks(b.Repositories, folders, agentStopped, report); err != nil {
+	repositories, workFolders := make([]WorkRepository, len(work)), make([]string, len(work))
+	for n, i := range work {
+		repositories[n], workFolders[n] = b.Repositories[i], folders[i]
+	}
+	if err := clearIndexLocks(repositories, workFolders, agentStopped, report); err != nil {
 		return nil, err
 	}
 	heads := make([]string, len(b.Repositories))
-	for i, r := range b.Repositories {
+	for _, i := range work {
+		r := b.Repositories[i]
 		if err := commitLeft(ctx, folders[i], r, b.setupChanges[r.Dir], message, report); err != nil {
 			return nil, fmt.Errorf(textNoCommitLeft, shownPath(r.Path), integration.Printable(exports.HideURLError(err).Error()))
 		}
@@ -172,10 +182,9 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			return nil, err
 		}
 	}
-	// The commits of each repository are listed before the first push, so a list that
-	// fails pushes nothing.
+	// The target's commits are listed before the push, so a list that fails pushes nothing.
 	commits := make([][]Commit, len(b.Repositories))
-	version := slices.Clone(b.Version)
+	version := b.withoutReads(b.Version)
 	for i, r := range b.Repositories {
 		if heads[i] == "" {
 			continue
@@ -207,9 +216,6 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 			continue
 		}
 		if err := pushTo(ctx, stepGit(&p, ""), readGit, folders[i], b, r, heads[i], leases[i], report); err != nil {
-			if len(b.pushed) > 0 {
-				return nil, &pushedNoVersion{text: fmt.Sprintf(textPushedNoVersion, b.DeleteBranch(), b.PushedPaths(), strings.TrimPrefix(err.Error(), "qory run: ")), err: err}
-			}
 			return nil, err
 		}
 		b.pushed = append(b.pushed, shownPath(r.Path))
@@ -223,20 +229,19 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 		fmt.Fprintln(report, textNoNewCommits)
 		return nil, nil
 	}
-	return slices.Clone(b.Version), nil
+	return b.withoutReads(b.Version), nil
 }
 
-// pushedNoVersion is the error of a push that failed after an earlier repository landed: its
-// text is [textPushedNoVersion], and it unwraps to the push's error, so a [*HeadChanged] of
-// the later repository is still found.
-type pushedNoVersion struct {
-	text string
-	err  error
+// withoutReads is a copy of version with no entry of a repository of b that is a read
+// target, [WorkRepository.ReadOnly]: the version that [Push] leaves covers the
+// repositories it may push alone.
+func (b *WorkBranch) withoutReads(version []Repository) []Repository {
+	return slices.DeleteFunc(slices.Clone(version), func(v Repository) bool {
+		return v.System == b.system && slices.ContainsFunc(b.Repositories, func(r WorkRepository) bool {
+			return r.ReadOnly && sameRepository(b.system == ForgeGitHub, r.Path, v.Path)
+		})
+	})
 }
-
-func (e *pushedNoVersion) Error() string { return e.text }
-
-func (e *pushedNoVersion) Unwrap() error { return e.err }
 
 // listFailed is the error of a list of the commits of the repository r from start to head
 // that failed with err, before any push: [textListFailedFromCode] for a run from a run code,
@@ -580,6 +585,32 @@ func addEntry(sum io.Writer, path string) error {
 		fmt.Fprintf(sum, "other %s\x00", info.Mode().Type())
 	}
 	return nil
+}
+
+// readsAhead prints [textReadAhead] on report for each read target of b, in the working
+// folder dir, whose HEAD has a commit that its [WorkRepository.Start] does not have, once per
+// run: b records each read target it printed. git runs there only after [safeFurther] passed.
+// shortcut: a read target that fails that check, or whose git fails, gets no line; check it
+// in a container if a run must report those too.
+func readsAhead(ctx context.Context, dir string, b *WorkBranch, report io.Writer) {
+	for _, r := range b.Repositories {
+		if !r.ReadOnly || b.readsShown[r.Dir] {
+			continue
+		}
+		folder := filepath.Join(dir, filepath.FromSlash(r.Dir))
+		if safeFurther(ctx, dir, folder, true) != nil {
+			continue
+		}
+		out, err := stepGit(noRemote, "")(ctx, folder, "rev-list", "--max-count=1", "HEAD", "^"+r.Start)
+		if err != nil || strings.TrimSpace(out) == "" {
+			continue
+		}
+		if b.readsShown == nil {
+			b.readsShown = map[string]bool{}
+		}
+		b.readsShown[r.Dir] = true
+		fmt.Fprintf(report, textReadAhead+"\n", shownPath(r.Path))
+	}
 }
 
 // headPast is HEAD of the repository r at dir when it is past [WorkRepository.Commit], ""

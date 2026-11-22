@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -120,6 +121,11 @@ func TestARunCodeForAPrebuildRunsTheBuild(t *testing.T) {
 			if r.RunID != keyRunID || got.key != key || string(r.Inputs) != string(doc.Inputs) ||
 				r.ImageDestination != doc.ImageDestination || r.EnvironmentDestination != doc.EnvironmentDestination || r.EnvironmentImage != doc.EnvironmentImage || r.LargestImageBytes != wantLargest(doc) {
 				t.Errorf("the prebuild's run is %+v, by the run key %v; want the documents' %+v", r, got.key == key, doc)
+			}
+			// The prebuild fetches the repository of the documents' target, and no list of the
+			// run configuration.
+			if doc.Target == nil || !reflect.DeepEqual(r.Target, doc.Target) {
+				t.Errorf("the prebuild's target is %+v, want the documents' %+v", r.Target, doc.Target)
 			}
 			s := got.settings
 			config, state := os.Getenv("XDG_CONFIG_HOME"), filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory")
