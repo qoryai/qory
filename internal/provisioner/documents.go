@@ -27,14 +27,19 @@ var compiledDocuments = sync.OnceValues(func() (*jsonschema.Schema, error) {
 
 // ReadDocuments reads documents, the documents object of a run code's signed
 // redemption, run/v1 documents.schema.json. The schema checks the bytes before they are
-// decoded. A documents object with a run_key or a run_code member is refused before
+// decoded, and the documents are read as [readChecked] reads them: a member that the
+// contract does not define is not read, and a must_understand that lists one ends the
+// read. A documents object with a run_key or a run_code member is refused before
 // that, so the value of such a member is never decoded or copied. Then the rules the
 // schema states and cannot check are checked: the inputs, compacted, are at most
 // contracts.MaxInputs bytes; run_settings is checked as [checkRunSettings] describes; and for
-// the step explore, inputs.domain must be the domain and inputs.work_item.id the work
-// item's id, as the explore inputs schema states. Inputs are the documents' bytes,
-// which the run reads unchanged. The error contains a member's name, the schema's name
-// or a byte count, never a value of documents.
+// a subject of the kind work_item, inputs.domain must be the domain and
+// inputs.work_item.id the subject's id, as documents.schema.json states. A subject of
+// another kind has no such rule. Inputs are the documents' bytes, which the run reads
+// unchanged. The rules of [contracts.Documents.Check] are checked after the schema, and
+// documents that break one get a [*BrokenRule]. The error contains a member's name, the
+// schema's name or a byte count, and a [*BrokenRule] a deliver type, never another value
+// of documents.
 func ReadDocuments(documents json.RawMessage) (contracts.Documents, error) {
 	v := jsontext.Value(documents)
 	if !v.IsValid() {
@@ -56,47 +61,52 @@ func ReadDocuments(documents json.RawMessage) (contracts.Documents, error) {
 	if err := readChecked(s, documentsSchema, documents, &doc); err != nil {
 		return contracts.Documents{}, err
 	}
+	if doc.Check() != nil {
+		return contracts.Documents{}, &BrokenRule{Detail: brokenRuleDetail(doc)}
+	}
 	var inputs bytes.Buffer
 	if json.Compact(&inputs, doc.Inputs) != nil || inputs.Len() > contracts.MaxInputs {
 		return contracts.Documents{}, fmt.Errorf("its inputs are larger than %d bytes", contracts.MaxInputs)
 	}
-	if err := checkRunSettings(documentsSchema, doc.Step, doc.RunSettings); err != nil {
+	// run_settings comes only for the step workflow, which the schema checks too.
+	if doc.RunSettings != nil && doc.Step != StepWorkflow {
+		return contracts.Documents{}, fmt.Errorf("it breaks %s", documentsSchema)
+	}
+	if err := checkRunSettings(documentsSchema, doc.RunSettings); err != nil {
 		return contracts.Documents{}, err
 	}
-	if doc.Step == StepExplore {
+	if doc.Subject != nil && doc.Subject.Kind == SubjectWorkItem {
+		// case:strict: inputs may contain members beside these, so a decode that ignores
+		// letter case would read a later DOMAIN in place of domain.
 		var in struct {
-			Domain   string `json:"domain"`
+			Domain   string `json:"domain,case:strict"`
 			WorkItem *struct {
-				ID string `json:"id"`
-			} `json:"work_item"`
+				ID string `json:"id,case:strict"`
+			} `json:"work_item,case:strict"`
 		}
 		switch {
 		case json.Unmarshal(doc.Inputs, &in) != nil:
-			return contracts.Documents{}, errors.New("its inputs do not read as the explore step's inputs")
+			return contracts.Documents{}, errors.New("its inputs do not read as the inputs of a work item's run")
 		case in.Domain != doc.Domain:
 			return contracts.Documents{}, errors.New("its inputs.domain is not its domain")
-		case in.WorkItem == nil || doc.WorkItem == nil || in.WorkItem.ID != doc.WorkItem.ID:
-			return contracts.Documents{}, errors.New("its inputs.work_item.id is not its work item's id")
+		case in.WorkItem == nil || in.WorkItem.ID != doc.Subject.ID:
+			return contracts.Documents{}, errors.New("its inputs.work_item.id is not its subject's id")
 		}
 	}
 	return doc, nil
 }
 
-// checkRunSettings checks rs, the run_settings of documents of the schema name already
-// checked. It checks again that run_settings comes only for the step explore, which the
-// schema checks too. It then checks the rules the schema states and cannot check: the
-// ids in provider_models are unique, effort is listed for model, each tier's model is
+// checkRunSettings checks rs, the model settings of a document of the schema name already
+// checked, for the rules the schema states and cannot check: the ids in provider_models
+// are unique, effort is listed for model, each tier's model is
 // listed, and each tier's effort is listed for that tier's model. The schema checks each
 // value with Go's regexp, whose $ matches only at the end of the text, so a value with a
 // trailing line feed is refused there.
-func checkRunSettings(name, step string, rs *contracts.RunSettings) error {
+func checkRunSettings(name string, rs *contracts.RunSettings) error {
 	if rs == nil {
 		return nil
 	}
 	broken := fmt.Errorf("it breaks %s", name)
-	if step != StepExplore {
-		return broken
-	}
 	efforts := make(map[string][]string, len(rs.ProviderModels))
 	for _, m := range rs.ProviderModels {
 		if _, twice := efforts[m.ID]; twice {
@@ -119,4 +129,45 @@ func checkRunSettings(name, step string, rs *contracts.RunSettings) error {
 		}
 	}
 	return nil
+}
+
+// BrokenRule is the error of documents that pass the schema and break a rule of
+// [contracts.Documents.Check]: its text is that of documents that break the schema, and
+// Detail is the rule, for a line under it.
+type BrokenRule struct {
+	Detail string
+}
+
+func (e *BrokenRule) Error() string { return "it breaks " + documentsSchema }
+
+// The details of a [BrokenRule]. textDeliverTwice has the type, which the schema's
+// pattern keeps to lower-case letters, digits and hyphens, cut to [maxShownType]
+// characters.
+const (
+	textDeliverTwice = "deliver lists %s twice"
+	textEntryTwice   = "read_targets or the destinations list one entry twice"
+	maxShownType     = 19
+)
+
+// brokenRuleDetail is the detail of doc, documents that [contracts.Documents.Check]
+// stops: [textDeliverTwice] for the first type that deliver repeats, else
+// [textEntryTwice]. It reads no message of Check.
+func brokenRuleDetail(doc contracts.Documents) string {
+	seen := make(map[string]bool, len(doc.Deliver))
+	for _, d := range doc.Deliver {
+		if seen[d.Type] {
+			return fmt.Sprintf(textDeliverTwice, ShownType(d.Type))
+		}
+		seen[d.Type] = true
+	}
+	return textEntryTwice
+}
+
+// ShownType is the artifact type name typ as a text shows it: its first [maxShownType]
+// characters.
+func ShownType(typ string) string {
+	if r := []rune(typ); len(r) > maxShownType {
+		return string(r[:maxShownType])
+	}
+	return typ
 }

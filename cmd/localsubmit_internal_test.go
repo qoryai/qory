@@ -1,0 +1,249 @@
+package cmd
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/qoryai/qory/internal/runcopy"
+)
+
+// TestThePushArgumentsAreTheCheckedCommitToTheNamedRemote is the git arguments of a local push: the
+// commit and not the branch name, the remote origin by its name and not its address, and the options that stop a force,
+// the person's pre-push hook, a submodule push and the tags that follow the commit.
+func TestThePushArgumentsAreTheCheckedCommitToTheNamedRemote(t *testing.T) {
+	repo := localRepository{Dir: "/work/app", Head: "cccccccccccccccccccccccccccccccccccccccc", Branch: "qory/run-1", PushURL: "https://git.example.com/acme/app.git"}
+	want := []string{"-C", "/work/app", "push", "--quiet", "--no-verify", "--no-recurse-submodules", "--no-follow-tags", "--",
+		"origin", "cccccccccccccccccccccccccccccccccccccccc:refs/heads/qory/run-1"}
+	if got := pushArgs(repo); !slices.Equal(got, want) {
+		t.Errorf("the arguments are %q, want %q", got, want)
+	}
+	for _, arg := range pushArgs(repo) {
+		if arg == "--force" || arg == "-f" || arg == repo.PushURL {
+			t.Errorf("the arguments have %q", arg)
+		}
+	}
+}
+
+// TestOnlyTheAddressOfAForgeHasASystemAndAPath is the push addresses that qory takes the system and
+// the path of the checks and the program from: a host and a repository path of a forge, over
+// https, http, ssh, git or the scp form. A file address, an ext address, a path, an address with no
+// host, a host with no dot and a path with a dot segment are refused.
+func TestOnlyTheAddressOfAForgeHasASystemAndAPath(t *testing.T) {
+	for _, c := range []struct {
+		address, system, path string
+	}{
+		{"https://github.com/acme/shop.git", "github.com", "acme/shop"},
+		{"https://user:pw@GitHub.com:8443/acme/shop", "github.com", "acme/shop"},
+		{"ssh://git@gitlab.example.org/group/sub/shop.git", "gitlab.example.org", "group/sub/shop"},
+		{"git@github.com:acme/shop.git", "github.com", "acme/shop"},
+		{"git://git.example.com/acme/shop", "git.example.com", "acme/shop"},
+		{"file:///srv/git/shop.git", "", ""},
+		{"file://host.example.com/srv/shop.git", "", ""},
+		{"ext::sh -c touch% /tmp/x", "", ""},
+		{"/srv/git/shop.git", "", ""},
+		{"../shop.git", "", ""},
+		{"C:/repos/shop.git", "", ""},
+		{"https://localhost/acme/shop.git", "", ""},
+		{"https://git.example.com/shop.git", "", ""},
+		{"https://git.example.com/acme/../shop.git", "", ""},
+		{"https://git.example.com/acme/shop name.git", "", ""},
+		{"https:///acme/shop.git", "", ""},
+	} {
+		system, path, ok := remoteSystemPath(c.address)
+		if ok != (c.system != "") || system != c.system || path != c.path {
+			t.Errorf("%q gives %q, %q, %v, want %q and %q", c.address, system, path, ok, c.system, c.path)
+		}
+	}
+}
+
+// TestEveryGitOfTheLocalStepRunsWithNoPrompt checks the push and the reads without running a git
+// that could read the person's credential helper: the push keeps the person's configuration, so
+// it has no -c credential.helper, and its environment has GIT_TERMINAL_PROMPT=0 as the last
+// setting, whatever the person's shell has. The same holds for the git of the reads.
+func TestEveryGitOfTheLocalStepRunsWithNoPrompt(t *testing.T) {
+	t.Setenv("GIT_TERMINAL_PROMPT", "1")
+	repo := localRepository{Dir: "/work", PushURL: "https://git.example.com/acme/app.git", Branch: "qory/run-1", Head: strings.Repeat("a", 40)}
+	for name, env := range map[string][]string{"push": pushCommand(context.Background(), repo).Env, "reads": localGitEnv()} {
+		var prompts []string
+		for _, kv := range env {
+			if strings.HasPrefix(kv, "GIT_TERMINAL_PROMPT=") {
+				prompts = append(prompts, kv)
+			}
+		}
+		if !slices.Equal(prompts, []string{"GIT_TERMINAL_PROMPT=0"}) {
+			t.Errorf("the %s environment has %q, want GIT_TERMINAL_PROMPT=0 once", name, prompts)
+		}
+	}
+	if args := pushArgs(repo); slices.Contains(args, "-c") {
+		t.Errorf("the push has %q, want the person's git configuration, with no -c", args)
+	}
+}
+
+// TestThePrintedCommandsRemoveEveryPushURLValue takes the commands from [textLocalPushURLs]
+// and runs them in a repository with pushurl values in the repository file and in
+// ~/.config/git/config beside an existing ~/.gitconfig: no value is left afterwards.
+func TestThePrintedCommandsRemoveEveryPushURLValue(t *testing.T) {
+	list := regexp.MustCompile(`git config --show-origin --get-all remote\.origin\.pushurl`).FindString(textLocalPushURLs)
+	remove := regexp.MustCompile(`git config [^\n]*--unset-all remote\.origin\.pushurl`).FindString(textLocalPushURLs)
+	if list == "" || remove == "" {
+		t.Fatalf("the text has no list command %q or remove command %q:\n%s", list, remove, textLocalPushURLs)
+	}
+	home, repo := t.TempDir(), t.TempDir()
+	for file, content := range map[string]string{
+		".gitconfig":         "[user]\n\tname = a\n",
+		".config/git/config": "[remote \"origin\"]\n\tpushurl = https://git.example.com/acme/xdg.git\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(home, file)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, file), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, "GIT_CONFIG_") || strings.HasPrefix(kv, "XDG_CONFIG_HOME=")
+	})
+	// git returns the output and the error, because git config exits with 1 when no value is left.
+	git := func(args ...string) (string, error) {
+		c := exec.Command("git", args...)
+		c.Dir = repo
+		c.Env = append(slices.Clone(env), "HOME="+home, "GIT_CONFIG_NOSYSTEM=1")
+		out, err := c.CombinedOutput()
+		return string(out), err
+	}
+	for _, args := range [][]string{
+		{"init", "--quiet"},
+		{"config", "--add", "remote.origin.pushurl", "https://git.example.com/acme/one.git"},
+		{"config", "--add", "remote.origin.pushurl", "https://git.example.com/acme/two.git"},
+	} {
+		if out, err := git(args...); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	listed, err := git(strings.Fields(list)[1:]...)
+	if err != nil || strings.Count(listed, "\n") != 3 {
+		t.Fatalf("%q has the error %v and the output %q, want 3 values", list, err, listed)
+	}
+	// The paths of the test have no character that git quotes, so each is the text after file:.
+	files := []string{}
+	for line := range strings.Lines(listed) {
+		file, _, _ := strings.Cut(strings.TrimPrefix(line, "file:"), "\t")
+		if !slices.Contains(files, file) {
+			files = append(files, file)
+		}
+	}
+	if !strings.Contains(remove, "<file>") {
+		files = []string{""}
+	}
+	for _, file := range files {
+		args := strings.Fields(remove)[1:]
+		for i, arg := range args {
+			if arg == "<file>" {
+				args[i] = file
+			}
+		}
+		if out, err := git(args...); err != nil {
+			t.Fatalf("%q with the file %q: %v\n%s", remove, file, err, out)
+		}
+	}
+	if left, _ := git("config", "--get-all", "remote.origin.pushurl"); left != "" {
+		t.Errorf("%q leaves the values %q, want none", remove, left)
+	}
+}
+
+// TestThePrintedUnsetCommandRemovesAPushAddressOfTheEnvironment takes the unset command from
+// [textLocalPushURLs] and runs it with sh in an environment that adds a push address: one
+// address is left afterwards, where two are before.
+func TestThePrintedUnsetCommandRemovesAPushAddressOfTheEnvironment(t *testing.T) {
+	unset := strings.TrimSpace(regexp.MustCompile(`unset (?:GIT_CONFIG_[A-Z_]+ ?)+`).FindString(textLocalPushURLs))
+	if unset == "" {
+		t.Fatalf("the text has no unset command:\n%s", textLocalPushURLs)
+	}
+	repo := t.TempDir()
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, "GIT_CONFIG_") || strings.HasPrefix(kv, "XDG_CONFIG_HOME=")
+	})
+	env = append(env, "HOME="+repo, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=remote.origin.pushurl", "GIT_CONFIG_VALUE_0=https://git.example.com/acme/env.git",
+		"GIT_CONFIG_PARAMETERS='remote.origin.pushurl=https://git.example.com/acme/parameters.git'")
+	addresses := func(script string) string {
+		c := exec.Command("sh", "-c", script)
+		c.Dir = repo
+		c.Env = env
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", script, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	// The setup runs in a shell without the variables, so the repository file has one address.
+	addresses("unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS; git init --quiet && " +
+		"git remote add origin https://git.example.com/acme/app.git && " +
+		"git config remote.origin.pushurl https://git.example.com/acme/keep.git")
+	const get = "git remote get-url --push --all origin"
+	if before := addresses(get); strings.Count(before, "\n") < 1 {
+		t.Fatalf("the environment adds no address, so the test shows nothing:\n%s", before)
+	}
+	if after := addresses(unset + "; " + get); after != "https://git.example.com/acme/keep.git" {
+		t.Errorf("%q leaves the addresses %q, want only the address of the repository file", unset, after)
+	}
+}
+
+// TestALocalRunWhoseListOfCommitsFailsSaysNoRunCode is the submit step of a local run whose start
+// commit the repository does not have, so the list of the run's commits fails: the lines have the
+// fix and the cause, and no words about a run code, which a local run does not have. No check
+// runs. The step cuts each line at 200 characters, and git's cause here cuts the end of line 2,
+// so [preparation.OutboxCommitted]'s test checks the end of the text.
+func TestALocalRunWhoseListOfCommitsFailsSaysNoRunCode(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Chdir(t.TempDir())
+	root := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		c := exec.Command("git", append([]string{"-c", "user.name=a", "-c", "user.email=a@example.com"}, args...)...)
+		c.Dir = root
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	git("init", "--quiet", "-b", "main")
+	git("commit", "--quiet", "--allow-empty", "-m", "start")
+	git("branch", "qory/run-1")
+	git("remote", "add", "origin", "https://git.example.com/acme/app.git")
+	for _, name := range requiredPushChecks {
+		before, had := localPushChecks[name]
+		registerPushCheck(name, func(context.Context, localRepository) error {
+			t.Error("a check ran")
+			return nil
+		})
+		t.Cleanup(func() {
+			if had {
+				localPushChecks[name] = before
+			} else {
+				delete(localPushChecks, name)
+			}
+		})
+	}
+	c := &runCopy{root: root, repos: []runcopy.Repository{{Base: strings.Repeat("1", 40)}}, landed: map[string]string{"": "qory/run-1"}}
+	var out strings.Builder
+	if drafts := c.submitLocal(context.Background(), &out, nil, true); drafts != nil {
+		t.Errorf("the step returned the drafts %q", drafts)
+	}
+	lines := out.String()
+	want := "qory run: Start the run again: the list of the run's commits failed.\n  Listing the commits of acme/app from commit 111111111111 to "
+	if !strings.HasPrefix(lines, want) {
+		t.Errorf("the lines are %q, want the start %q", lines, want)
+	}
+	if strings.Contains(strings.ToLower(lines), "run code") {
+		t.Errorf("the lines of a local run name a run code: %q", lines)
+	}
+}

@@ -1,10 +1,10 @@
 package stack
 
 import (
+	"maps"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"gopkg.in/yaml.v3"
@@ -15,21 +15,19 @@ func withWorkflows(body string) string {
 	return valid + "workflows:\n" + body
 }
 
-// TestLoadReadsTheWorkflows reads each workflow's time_limit as a duration, and a
-// workflow with no time_limit, or none listed, as no limit.
+// TestLoadReadsTheWorkflows reads each workflow listed by its name, and a stack with
+// none listed as no workflows.
 func TestLoadReadsTheWorkflows(t *testing.T) {
 	isolate(t)
-	p, err := Load(write(t, withWorkflows("  hello:\n    time_limit: 7h\n  review-pr:\n    time_limit: 45m\n  plain: {}\n")))
+	p, err := Load(write(t, withWorkflows("  hello:\n    access: write\n  review-pr: {}\n  plain: {}\n")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]time.Duration{"hello": 7 * time.Hour, "review-pr": 45 * time.Minute, "plain": 0, "none": 0} {
-		if got := p.TimeLimitOf(name); got != want {
-			t.Errorf("%s: %v, want %v", name, got, want)
-		}
+	if got, want := slices.Sorted(maps.Keys(p.Workflows)), []string{"hello", "plain", "review-pr"}; !slices.Equal(got, want) {
+		t.Errorf("workflows %q, want %q", got, want)
 	}
 	p, err = Load(write(t, valid))
-	if err != nil || p.Workflows != nil || p.TimeLimitOf("hello") != 0 {
+	if err != nil || p.Workflows != nil {
 		t.Errorf("no workflows: %+v, %v", p, err)
 	}
 }
@@ -40,7 +38,7 @@ func TestLoadReadsTheAccess(t *testing.T) {
 	isolate(t)
 	p, err := Load(write(t, withWorkflows("  fix:\n    access: write\n"+
 		"  stage:\n    access: write-no-push\n  review:\n    access: read\n"+
-		"  plain:\n    time_limit: 45m\n")))
+		"  plain: {}\n")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +96,7 @@ func TestLoadReadsTheTier(t *testing.T) {
 	isolate(t)
 	p, err := Load(write(t, withWorkflows("  deep:\n    tier: thinking\n"+
 		"  quick:\n    tier: balanced\n  small:\n    tier: light\n"+
-		"  plain:\n    access: write\n    time_limit: 45m\n")))
+		"  plain:\n    access: write\n")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +107,7 @@ func TestLoadReadsTheTier(t *testing.T) {
 			t.Errorf("%s: tier %q, want %q", name, got, want)
 		}
 	}
-	if p.AccessOf("plain") != AccessWrite || p.TimeLimitOf("plain") != 45*time.Minute {
+	if p.AccessOf("plain") != AccessWrite {
 		t.Errorf("plain: %+v", p.Workflows["plain"])
 	}
 	p, err = Load(write(t, valid))
@@ -128,16 +126,68 @@ func TestLoadRefusesATierThatIsNoTier(t *testing.T) {
 		want := "Set workflows.hello.tier to a valid tier.\n" +
 			"  The tiers are light, balanced, and thinking.\n  The value is \"" + value + "\".\n" +
 			"  workflows.hello is in " + path + "."
-		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("%q: %v, want %q", value, err, want)
+		if err == nil || err.Error() != want {
+			t.Errorf("%q:\n%v\nwant:\n%s", value, err, want)
 		}
 	}
 }
 
-// TestLoadRefusesABrokenWorkflow refuses a workflow name outside the contract's form, a
-// time_limit that is no duration or not above zero, an access other than read,
-// write-no-push or write,
-// and a key a workflow does not have.
+// TestLoadReadsThePlan reads the plan of a write workflow as written, and a workflow with
+// no plan, or none listed, as none.
+func TestLoadReadsThePlan(t *testing.T) {
+	isolate(t)
+	p, err := Load(write(t, withWorkflows("  build:\n    access: write\n    plan: change-plan\n"+
+		"  fix:\n    access: write\n    plan: a1\n    tier: thinking\n"+
+		"  plain:\n    access: write\n  review:\n    access: read\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"build": "change-plan", "fix": "a1", "plain": "", "review": "", "none": "",
+	} {
+		if got := p.Workflows[name].Plan; got != want {
+			t.Errorf("%s: plan %q, want %q", name, got, want)
+		}
+	}
+}
+
+// TestLoadRefusesAPlanOnAWorkflowThatDoesNotWrite refuses a plan on a workflow whose
+// access is read, write-no-push, or left out, with the fix first, the access, and the file
+// last. The error is compared whole.
+func TestLoadRefusesAPlanOnAWorkflowThatDoesNotWrite(t *testing.T) {
+	isolate(t)
+	for _, c := range []struct{ access, level string }{{"", "read"}, {"    access: read\n", "read"}, {"    access: write-no-push\n", "write-no-push"}} {
+		path := write(t, withWorkflows("  hello:\n"+c.access+"    plan: change-plan\n"))
+		_, err := Load(path)
+		want := "Remove `plan` from hello, or set its access to write.\n" +
+			"  Only a workflow with access write has a plan, and the access of hello is " + c.level + ".\n" +
+			"  workflows.hello is in " + path + "."
+		if err == nil || err.Error() != want {
+			t.Errorf("access %q:\n%v\nwant:\n%s", c.access, err, want)
+		}
+	}
+}
+
+// TestLoadRefusesAPlanThatIsNoArtifactType refuses a plan that has not the form of an
+// artifact type, with the fix first and the file last.
+func TestLoadRefusesAPlanThatIsNoArtifactType(t *testing.T) {
+	isolate(t)
+	for _, value := range []string{"Change-Plan", "change_plan", "-plan", "plan-", "a--b", strings.Repeat("a", 65), "${qory:light}"} {
+		path := write(t, withWorkflows("  hello:\n    access: write\n    plan: \""+value+"\"\n"))
+		_, err := Load(path)
+		want := "Set workflows.hello.plan to an artifact type.\n" +
+			"  An artifact type is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.\n" +
+			"  The value is \"" + value + "\".\n  workflows.hello is in " + path + "."
+		if err == nil || err.Error() != want {
+			t.Errorf("%q:\n%v\nwant:\n%s", value, err, want)
+		}
+	}
+}
+
+// TestLoadRefusesABrokenWorkflow is Load ending with an error for a workflow name outside
+// the contract's form, an access other than read, write-no-push or write, and a key a
+// workflow does not have, time_limit among them: a dispatched run's time limit comes only
+// from Qory Apiary.
 func TestLoadRefusesABrokenWorkflow(t *testing.T) {
 	isolate(t)
 	for _, c := range []struct {
@@ -145,16 +195,13 @@ func TestLoadRefusesABrokenWorkflow(t *testing.T) {
 	}{
 		{"  Hello: {}\n", "Rename the workflow \"Hello\".\n  A workflow name is a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most.\n  workflows is in {path}."},
 		{"  hello_there: {}\n", "Rename the workflow \"hello_there\".\n  A workflow name is a lower-case letter, then up to 54 lower-case letters, digits, and hyphens, 55 characters at most.\n  workflows is in {path}."},
-		{"  hello:\n    time_limit: 7 hours\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"7 hours\"."},
-		{"  hello:\n    time_limit: 0s\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"0s\"."},
-		{"  hello:\n    time_limit: -1h\n", "to a duration above zero, such as 7h or 45m.\n  The value is \"-1h\"."},
 		{"  hello:\n    access: admin\n", "Set workflows.hello.access to a valid level.\n" +
 			"  The levels are read, write-no-push, and write.\n  The value is \"admin\".\n" +
 			"  workflows.hello is in {path}."},
 		{"  hello:\n    access: Write\n", "Set workflows.hello.access to a valid level.\n" +
 			"  The levels are read, write-no-push, and write.\n  The value is \"Write\".\n" +
 			"  workflows.hello is in {path}."},
-		{"  hello:\n    access: write\n    time_limit: 0s\n", "Set workflows.hello.time_limit to a duration above zero"},
+		{"  hello:\n    access: write\n    time_limit: 45m\n", `Key "time_limit" is not one qory-stack.yaml reads.`},
 		{"  hello:\n    tier: fastest\n", "Set workflows.hello.tier to a valid tier.\n" +
 			"  The tiers are light, balanced, and thinking.\n  The value is \"fastest\".\n" +
 			"  workflows.hello is in {path}."},
@@ -172,21 +219,20 @@ func TestLoadRefusesABrokenWorkflow(t *testing.T) {
 // stack that composes has the base's workflows.
 func TestExtendTakesTheBaseWorkflows(t *testing.T) {
 	base := &Stack{Modules: []Module{{Name: "core", Source: Source{Path: "modules/core"}}}, Extending: &Extending{},
-		Workflows: map[string]Workflow{"hello": {TimeLimitText: "7h", TimeLimit: 7 * time.Hour, Access: AccessWrite}}, Root: "/repo", File: "/repo/qory-stack.yaml"}
+		Workflows: map[string]Workflow{"hello": {Access: AccessWrite}}, Root: "/repo", File: "/repo/qory-stack.yaml"}
 	p := &Stack{Extends: Source{Path: "../base"}, File: "/app/qory-stack.yaml"}
 	out, err := Extend(base, p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.TimeLimitOf("hello") != 7*time.Hour || out.AccessOf("hello") != AccessWrite {
+	if out.AccessOf("hello") != AccessWrite {
 		t.Errorf("workflows %+v", out.Workflows)
 	}
 }
 
 // TestTheSchemaTakesTheWorkflows validates stacks with workflows against
-// stack.schema.json: a time_limit in Go's duration form above zero passes, and a
-// workflow name, a time_limit or an access that Load refuses, a zero time_limit among
-// them, fails.
+// stack.schema.json: a workflow name or an access that Load stops on fails, and so does
+// a time_limit, which a workflow does not have.
 func TestTheSchemaTakesTheWorkflows(t *testing.T) {
 	s, err := jsonschema.NewCompiler().Compile("../../contracts/harness/v1/stack.schema.json")
 	if err != nil {
@@ -196,16 +242,11 @@ func TestTheSchemaTakesTheWorkflows(t *testing.T) {
 		body  string
 		valid bool
 	}{
-		{"  hello:\n    time_limit: 7h\n", true},
-		{"  hello:\n    time_limit: 1h30m\n", true},
 		{"  hello: {}\n", true},
 		{"  Hello: {}\n", false},
-		{"  hello:\n    time_limit: 7 hours\n", false},
-		{"  hello:\n    time_limit: 0s\n", false},
-		{"  hello:\n    time_limit: 0h0m\n", false},
-		{"  hello:\n    time_limit: 0.5s\n", true},
+		{"  hello:\n    time_limit: 7h\n", false},
 		{"  hello:\n    access: read\n", true},
-		{"  hello:\n    access: write\n    time_limit: 7h\n", true},
+		{"  hello:\n    access: write\n    time_limit: 7h\n", false},
 		{"  hello:\n    access: write-no-push\n", true},
 		{"  hello:\n    access: admin\n", false},
 		{"  hello:\n    access: Write\n", false},
@@ -214,6 +255,16 @@ func TestTheSchemaTakesTheWorkflows(t *testing.T) {
 		{"  hello:\n    tier: thinking\n    access: read\n", true},
 		{"  hello:\n    tier: fastest\n", false},
 		{"  hello:\n    tier: Thinking\n", false},
+		{"  hello:\n    access: write\n    plan: change-plan\n", true},
+		{"  hello:\n    access: write\n    plan: " + strings.Repeat("a", 64) + "\n", true},
+		{"  hello:\n    access: write\n    plan: Change-Plan\n", false},
+		{"  hello:\n    access: write\n    plan: a--b\n", false},
+		{"  hello:\n    access: write\n    plan: " + strings.Repeat("a", 65) + "\n", false},
+		{"  hello:\n    access: write\n    plan: \"\"\n", false},
+		{"  hello:\n    access: write\n    plan: 3\n", false},
+		{"  hello:\n    plan: change-plan\n", false},
+		{"  hello:\n    access: read\n    plan: change-plan\n", false},
+		{"  hello:\n    access: write-no-push\n    plan: change-plan\n", false},
 		{"  hello:\n    prompt: x\n", false},
 	} {
 		var doc any
@@ -233,11 +284,11 @@ func TestNewComposeReadsTheWorkflowsOfADefinedStack(t *testing.T) {
 	defined := func(w map[string]Workflow) *Stack {
 		return &Stack{Target: Target{Runtimes: Runtimes{"claude"}}, Modules: []Module{{Name: "app"}}, Workflows: w}
 	}
-	p, err := compose(t, defined(map[string]Workflow{"fix": {Access: AccessWrite, TimeLimitText: "45m"}, "review": {}}))
+	p, err := compose(t, defined(map[string]Workflow{"fix": {Access: AccessWrite}, "review": {}}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.AccessOf("fix") != AccessWrite || p.TimeLimitOf("fix") != 45*time.Minute || p.AccessOf("review") != AccessRead || p.TimeLimitOf("review") != 0 {
+	if p.AccessOf("fix") != AccessWrite || p.AccessOf("review") != AccessRead {
 		t.Errorf("workflows %+v", p.Workflows)
 	}
 	for _, c := range []struct {
@@ -247,8 +298,6 @@ func TestNewComposeReadsTheWorkflowsOfADefinedStack(t *testing.T) {
 		{Workflow{Access: "admin"}, "to a valid level.\n" +
 			"  The levels are read, write-no-push, and write.\n" +
 			"  The value is \"admin\".\n  workflows.fix is in "},
-		{Workflow{TimeLimitText: "7 hours"}, "to a duration above zero, such as 7h or 45m.\n  The value is \"7 hours\".\n  workflows.fix is in "},
-		{Workflow{TimeLimitText: "0s"}, "to a duration above zero, such as 7h or 45m.\n  The value is \"0s\".\n  workflows.fix is in "},
 	} {
 		if _, err := compose(t, defined(map[string]Workflow{"fix": c.w})); err == nil || !strings.HasPrefix(err.Error(), "Set workflows.fix.") || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%+v: %v, want %q", c.w, err, c.want)

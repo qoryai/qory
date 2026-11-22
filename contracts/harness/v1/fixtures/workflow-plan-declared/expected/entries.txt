@@ -1,0 +1,3 @@
+skills/fix core
+skills/review core
+skills/stage core

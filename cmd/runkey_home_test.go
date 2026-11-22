@@ -225,7 +225,7 @@ func TestARunKeyGetsInputsWithTheQoryMemberAlone(t *testing.T) {
 			if checkErr != nil || refusal != nil {
 				t.Fatalf("the push of spec got %+v, %v, want it to pass\n%s", refusal, checkErr, checkLog(t, log))
 			}
-			const want = `{"qory":{"harness_extensions":{"software-factory":{"command_limits_minutes":{"test":10}}}}}` + "\n"
+			const want = `{"qory":{"harness_extensions":{"software-factory":{"command_limits_minutes":{"test":10}}},"outputs":[]}}` + "\n"
 			if string(in.written) != want || string(in.copied) != want {
 				t.Errorf("inputs.json is %q and its copy in the home %q, want %q", in.written, in.copied, want)
 			}

@@ -1,0 +1,3 @@
+Set scope_checks.build-plan to the program's path inside the module, then its arguments.
+  The value is not a list, or the list is empty.
+  The manifest is modules/core/qory-module.yaml.

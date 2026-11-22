@@ -5,5 +5,4 @@ modules:
     source: {path: modules/core}
 extending: {}
 workflows:
-  review:
-    time_limit: 45m
+  review: {}

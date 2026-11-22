@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/cmd"
 	"github.com/qoryai/qory/internal/checkout"
@@ -110,6 +111,7 @@ type harnessRun struct {
 	joined    bool
 	events    []cmd.StepEvent
 	calls     []string
+	closes    []session.Outcome
 	commit    string
 	tools     string
 	server    *proxygittest.Server
@@ -242,10 +244,10 @@ func (c codeHarness) run(t *testing.T) harnessRun {
 	if !c.perRunHome && !slices.Contains(args, "--home") {
 		args = append(args, "--home", filepath.Join(tempDir(t), "home"))
 	}
-	_, calls, restore := cmd.OpenNowhereWith(nowhere)
+	closes, calls, restore := cmd.OpenNowhereWith(nowhere)
 	defer restore()
 	r.out, r.err = run(t, args...)
-	r.calls = calls()
+	r.calls, r.closes = calls(), closes()
 	return r
 }
 
@@ -316,14 +318,15 @@ func (r harnessRun) noHarnessFile(t *testing.T) {
 // fetches the base and the module through the run's stack proxy, which it closes before
 // the join, and opens no host proxy. Every line, step event and spec shows the names,
 // never an address, a ref or a path in the run's sources, and the harness list for the
-// session's start line has the names with their commits. The base's
-// workflows.hello.time_limit is the session's time limit.
+// session's start line has the names with their commits. The documents'
+// time_limit_minutes, 300, is the session's time limit.
 func TestARunCodeComposesTheWorkspacesHarnessThroughTheStackProxy(t *testing.T) {
 	r := codeHarness{
 		stack: func(s string) string {
-			return withTools(toolsURL, toolsRef)(s) + "workflows:\n  hello:\n    time_limit: 5h\n    access: write\n"
+			return withTools(toolsURL, toolsRef)(s) + "workflows:\n  hello:\n    access: write\n"
 		},
-		tools: toolsModule(),
+		change: func(d map[string]any) { d["time_limit_minutes"] = 300 },
+		tools:  toolsModule(),
 		before: func() []string {
 			writeFile(t, "qory.yaml", "harness:\n  modules:\n    - name: other\n      source: {path: ./nowhere}\n")
 			return nil
@@ -366,45 +369,87 @@ func TestARunCodeComposesTheWorkspacesHarnessThroughTheStackProxy(t *testing.T) 
 	if json.Unmarshal(data, &doc) != nil || statErr != nil || st.Mode().Perm() != 0o600 || doc.Harness.Extends.Git != r.url || doc.Harness.Extends.Ref != namedRef || doc.Harness.Extends.Path != r.folder {
 		t.Errorf("harness.yaml (%v) has:\n%s", statErr, data)
 	}
-	if r.spec.Timeout <= 5*time.Hour-time.Minute || r.spec.Timeout > 5*time.Hour {
-		t.Errorf("the time limit left is %v, want 5h less the time before the join", r.spec.Timeout)
+	if r.spec.Timeout != 5*time.Hour {
+		t.Errorf("the time limit is %v, want the whole 5h", r.spec.Timeout)
 	}
 	r.noAddress(t)
 }
 
 // TestARunCodeComposesAHarnessDocumentThatDefinesAStack is a run from a run code whose
 // documents contain a harness document with no extends, which defines a stack of the
-// module hello and its workflow hello, with a time_limit of 4h. qory composes it for
-// run_settings.runtime, or for claude, the default runtime, when the documents have no
-// run settings, though the document has no target. The workflow's time_limit is the
-// session's time limit, and no text shows an address.
+// module hello and its workflow hello, with access write, plan build-plan and tier
+// thinking, once with run_settings naming claude and once naming codex. The module hello
+// declares a scope check for build-plan. qory writes the plan and the tier to
+// harness.yaml, composes it for that runtime, though the document has no target, and
+// starts that runtime's program. The documents' time_limit_minutes, 45, is the session's
+// time limit, and no text shows an address.
 func TestARunCodeComposesAHarnessDocumentThatDefinesAStack(t *testing.T) {
-	for name, settings := range map[string]any{"run settings": map[string]any{"runtime": "claude"}, "no run settings": nil} {
-		t.Run(name, func(t *testing.T) {
+	for _, runtime := range []string{"claude", "codex"} {
+		t.Run(runtime, func(t *testing.T) {
 			r := codeHarness{
-				defines: map[string]any{"hello": map[string]any{"time_limit": "4h", "access": "write"}},
+				defines: map[string]any{"hello": helloWithPlan},
+				// Codex starts a workflow by its skill, and the module hello ships a command.
+				files: map[string]string{
+					"examples/hello/modules/hello/skills/workflow-hello/SKILL.md": "---\nname: workflow-hello\ndescription: Say hello.\n---\n\nSay hello.\n",
+					"examples/hello/modules/hello/qory-module.yaml":               helloScopeCheck,
+					"examples/hello/modules/hello/checks/check.js":                "process.exit(0)\n",
+				},
 				change: func(d map[string]any) {
-					if settings != nil {
-						d["run_settings"] = settings
-					}
+					d["time_limit_minutes"] = 45
+					d["run_settings"] = map[string]any{"runtime": runtime}
 				},
 			}.run(t)
 			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}
 			wants(t, r.out,
-				"qory run: the run "+keyRunID+" starts the workflow hello of "+workspaceHarness+" on claude\n",
+				"qory run: the run "+keyRunID+" starts the workflow hello of "+workspaceHarness+" on "+runtime+"\n",
 				"qory run: fetched the module hello at "+r.commit[:12]+" in ",
 				"qory run: composed ")
+			if program := r.spec.Command + " " + strings.Join(r.spec.Args, " "); !strings.Contains(program, "/"+runtime+" ") && !strings.HasPrefix(program, runtime+" ") {
+				t.Errorf("the session starts %q, want %s", program, runtime)
+			}
 			if want := []session.HarnessSource{{Source: "module hello", Commit: r.commit}}; !slices.Equal(r.spec.Harness, want) {
 				t.Errorf("the harness list is %+v, want %+v", r.spec.Harness, want)
 			}
-			if r.spec.Timeout <= 4*time.Hour-time.Minute || r.spec.Timeout > 4*time.Hour {
-				t.Errorf("the time limit left is %v, want 4h less the time before the join", r.spec.Timeout)
+			if r.spec.Timeout != 45*time.Minute {
+				t.Errorf("the time limit is %v, want the whole 45m", r.spec.Timeout)
+			}
+			data, err := os.ReadFile(filepath.Join(r.runDir, "harness.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var doc struct {
+				Harness struct {
+					Workflows map[string]contracts.HarnessWorkflow `json:"workflows"`
+				} `json:"harness"`
+			}
+			if json.Unmarshal(data, &doc) != nil || doc.Harness.Workflows["hello"] != (contracts.HarnessWorkflow{Access: "write", Plan: "build-plan", Tier: "thinking"}) {
+				t.Errorf("harness.yaml has:\n%s", data)
 			}
 			r.noAddress(t)
 		})
 	}
+}
+
+// helloWithPlan is the workflow hello of a harness document that defines a stack, with
+// access write, plan build-plan and tier thinking.
+var helloWithPlan = map[string]any{"access": "write", "plan": "build-plan", "tier": "thinking"}
+
+// helloScopeCheck is the qory-module.yaml of the module hello with a scope check for
+// build-plan.
+const helloScopeCheck = "apiVersion: qory.dev/v1alpha1\nname: hello\nscope_checks:\n  build-plan: [checks/check.js, scope]\n"
+
+// TestARunCodesHarnessDocumentWithAPlanNoModuleChecksStops is a run from a run code whose
+// harness document defines a stack whose workflow hello has plan build-plan, and whose
+// module hello declares no scope check: qory passes the plan to the compose, which fails,
+// exit 2, before the join.
+func TestARunCodesHarnessDocumentWithAPlanNoModuleChecksStops(t *testing.T) {
+	r := codeHarness{defines: map[string]any{"hello": helloWithPlan}}.run(t)
+	if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
+		t.Fatalf("%v (exit %d), want exit 2 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out+r.err.Error(), "No module of the stack declares a scope check for build-plan.")
 }
 
 // TestARunCodesHarnessDocumentWithAWorkflowItsModulesLackStops is a run from a run code
@@ -564,7 +609,7 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 		{"a module's source does not parse", codeHarness{stack: thenMore("https://" + proxygittest.Host + "%40evil.example/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
 			[]string{"correct " + workspaceHarness + ", then take the work item in again in Qory Apiary: Correct the URL in the source of the module more.\n  qory could not read it as a URL.\n  The source of the module more is in " + workspaceBase + "; the code is used\n"}},
 		{"a module's source is not https", codeHarness{stack: thenMore("http://" + proxygittest.Host + "/example-org/more.git"), tools: toolsModule()}, cmd.ExitInput,
-			[]string{"qory run: use an https URL for the module more, then take the work item in again in Qory Apiary: a run from a control plane fetches git sources only over https; the code is used\n"}},
+			[]string{"qory run: use an https URL for the module more, then take the work item in again.\n  A run from a control plane fetches git sources only over https; the code is used\n"}},
 		{"two modules ship one skill", codeHarness{stack: withTools(tools, toolsRef), tools: map[string]string{
 			"modules/tools/qory-module.yaml":      "apiVersion: qory.dev/v1alpha1\nname: tools\n",
 			"modules/tools/skills/greet/SKILL.md": "---\nname: greet\ndescription: Greets.\n---\nHello.\n",
@@ -594,15 +639,16 @@ func TestARunCodeOfAHiddenHarnessThatFailsShowsNoAddress(t *testing.T) {
 
 // TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile is a run from a run code
 // whose documents contain no harness document, in a checkout whose qory.yaml extends a
-// stack of another repository, which sets the workflow's time limit: qory composes the
-// checkout's file, fetches the base through the run's stack proxy, which it closes
-// before the join, opens no host proxy and writes no harness.yaml. With the harness
-// hidden, every line, event and spec shows the base by its name; with it shown, the
-// fetch line shows the URL and the ref.
+// stack of another repository: qory composes the checkout's file, fetches the base
+// through the run's stack proxy, which it closes before the join, opens no host proxy
+// and writes no harness.yaml. The documents' time_limit_minutes, 300, is the session's
+// time limit. With the harness hidden, every line, event and spec shows the base by its
+// name; with it shown, the fetch line shows the URL and the ref.
 func TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile(t *testing.T) {
 	for _, shown := range []bool{false, true} {
 		t.Run(fmt.Sprintf("shown %v", shown), func(t *testing.T) {
-			r := codeHarness{checkout: true, shown: shown, stack: func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 5h\n    access: write\n" }}.run(t)
+			r := codeHarness{checkout: true, shown: shown, stack: func(s string) string { return s + "workflows:\n  hello:\n    access: write\n" },
+				change: func(d map[string]any) { d["time_limit_minutes"] = 300 }}.run(t)
 			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 			}
@@ -616,8 +662,8 @@ func TestARunCodeWithoutAHarnessDocumentComposesTheCheckoutsFile(t *testing.T) {
 				t.Errorf("the calls %q, %d tunnels, want the stack proxy opened and closed before the join, and no host proxy", r.calls, r.server.Tunnels())
 			}
 			r.noHarnessFile(t)
-			if r.spec.Timeout <= 5*time.Hour-time.Minute || r.spec.Timeout > 5*time.Hour {
-				t.Errorf("the time limit left is %v, want 5h less the time before the join", r.spec.Timeout)
+			if r.spec.Timeout != 5*time.Hour {
+				t.Errorf("the time limit is %v, want the whole 5h", r.spec.Timeout)
 			}
 			if shown {
 				return
@@ -654,7 +700,7 @@ func TestARunCodeOfAHiddenCheckoutHarnessThatFailsShowsNoAddress(t *testing.T) {
 		{"a module's ref is gone", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": toolsURL, "ref": "tools-gone", "path": "modules/tools"}}}, tools: toolsModule()}, cmd.ExitInput,
 			"qory run: set the ref of the module tools to a branch, tag or commit its repository has, then take the work item in again in Qory Apiary: the repository of the module tools has no branch or tag by the ref it is set to; the code is used\n"},
 		{"a module's source is not https", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": "git@" + proxygittest.Host + ":example-org/tools.git", "ref": toolsRef}}}}, cmd.ExitInput,
-			"qory run: use an https URL for the module tools, then take the work item in again in Qory Apiary: a run from a control plane fetches git sources only over https; the code is used\n"},
+			"qory run: use an https URL for the module tools, then take the work item in again.\n  A run from a control plane fetches git sources only over https; the code is used\n"},
 		{"the stack proxy returns 403 for a module's host", codeHarness{modules: []map[string]any{{"name": "tools", "source": map[string]any{"git": "https://other.test/example-org/tools.git", "ref": toolsRef, "path": "modules/tools"}}}}, 1,
 			"qory run: add the host of the module tools to gateway.stack_hosts in the gateway's forager.yaml or to the stack_hosts of the run configuration that Qory Apiary sends, and, for a private repository, a harness credential for the module tools to that run configuration, then take the work item in again: the fetch of the module tools through the run's stack proxy failed: the stack proxy returned 403, as it does for a host that neither list of stack hosts contains, and for a host of the run configuration's stack_hosts that the gateway's policy denies or has path rules for; the code is used\n"},
 		{"the base's URL has a user part", codeHarness{document: func(s string) string { return strings.Replace(s, "https://", "https://reader:s3cret@", 1) }}, cmd.ExitInput,
@@ -1083,15 +1129,31 @@ func TestARunCodeWhoseHarnessBindsByKindComposes(t *testing.T) {
 	wants(t, r.out, "qory run: composed ")
 }
 
-// TestARunCodeWhoseHarnessBindsFlatStops is a run from a run code whose harness
-// document writes a bind key as <kind>/<role>: the documents fail qory's checks, and the
-// run stops before the session joins, exit 1.
-func TestARunCodeWhoseHarnessBindsFlatStops(t *testing.T) {
-	r := runFromCode(t, nil, harnessBind(map[string]any{"commands/greeting": "hello"}))
-	if r.joined || cmd.ExitCode(r.err) != 1 {
-		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
-	}
-	wants(t, r.err.Error(), "the response to the run code does not pass qory's checks")
+// TestARunCodeWhoseHarnessBindsFlat is a run from a run code whose harness document
+// writes a bind key as <kind>/<role>, which is no kind of bind: qory does not read the
+// key, the harness composes without it, and the session joins. The same documents whose
+// must_understand lists the key fail qory's checks, and the run stops before the session
+// joins, exit 1.
+func TestARunCodeWhoseHarnessBindsFlat(t *testing.T) {
+	writes := func(s string) string { return s + "workflows:\n  hello:\n    access: write\n" }
+	flat := harnessBind(map[string]any{"commands/greeting": "hello"})
+	t.Run("composes", func(t *testing.T) {
+		r := runFromCodeWith(t, behindAWall(t), nil, writes, flat)
+		if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
+			t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+		}
+		wants(t, r.out, "qory run: composed ")
+	})
+	t.Run("must understand the key", func(t *testing.T) {
+		r := runFromCode(t, nil, func(d map[string]any) {
+			flat(d)
+			d["must_understand"] = []any{"/harness/harness/bind/commands~1greeting"}
+		})
+		if r.joined || cmd.ExitCode(r.err) != 1 {
+			t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+		}
+		wants(t, r.err.Error(), "the response to the run code does not pass qory's checks")
+	})
 }
 
 // TestARunCodeWhoseHarnessBindsAGroupRoleToAListComposes is a run from a run code whose

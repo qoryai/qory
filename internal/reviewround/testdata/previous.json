@@ -1,0 +1,17 @@
+{
+  "round": 1,
+  "reviewers": [
+    {
+      "reviewer": "code-reviewer",
+      "findings": [
+        {"id": "f1", "severity": "blocking", "point": "A batch of exactly the limit loses its last item."}
+      ]
+    },
+    {
+      "reviewer": "security-reviewer",
+      "findings": [
+        {"id": "f2", "severity": "non-blocking", "point": "The token is read on each call."}
+      ]
+    }
+  ]
+}

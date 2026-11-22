@@ -1,0 +1,2 @@
+Keep the program of the scope check in its module, or move it out of the left-out entry.
+  The program skills/tools/check.js of the scope check for build-plan is in skills/tools, and an exclude or only of module core leaves skills/tools out.

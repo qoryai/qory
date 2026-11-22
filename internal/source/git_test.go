@@ -1,6 +1,7 @@
 package source_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -580,6 +581,20 @@ func TestResolveGitRefusesAnExportListLinkedOutOfTheClone(t *testing.T) {
 	}
 }
 
+// TestResolveStopsAGitCommandWhenItsContextEnds is a fetch whose Context ended already,
+// with no timeout: git is stopped, and the error is a FetchError that wraps the
+// context's cause.
+func TestResolveStopsAGitCommandWhenItsContextEnds(t *testing.T) {
+	url, _, _ := remote(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: "v1"}, source.Options{Context: ctx})
+	var fetch *source.FetchError
+	if !errors.As(err, &fetch) || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "was stopped: context canceled") {
+		t.Fatalf("err = %v, want a FetchError that wraps the context's end", err)
+	}
+}
+
 // TestResolveStopsAGitCommandAtTheTimeout is a fetch with a timeout already over: git is
 // stopped, and the error is a FetchError that names the time given.
 func TestResolveStopsAGitCommandAtTheTimeout(t *testing.T) {
@@ -588,5 +603,36 @@ func TestResolveStopsAGitCommandAtTheTimeout(t *testing.T) {
 	var fetch *source.FetchError
 	if !errors.As(err, &fetch) || !strings.Contains(err.Error(), "ran past 1ns and was stopped") {
 		t.Fatalf("err = %v, want a FetchError naming the timeout", err)
+	}
+}
+
+// TestASealedMemoResolvesWithNoLookup is a memo that resolved main and was sealed: after a
+// new commit on main, main resolves to the first commit with no git command at all and no
+// warning, and a ref the memo does not hold fails with a SealedError, with no git command.
+func TestASealedMemoResolvesWithNoLookup(t *testing.T) {
+	url, _, second := remote(t)
+	dir := strings.TrimPrefix(url, "file://")
+	opts := source.Options{Cache: t.TempDir(), Memo: source.NewMemo()}
+	if _, err := source.Resolve("/nowhere", stack.Source{Git: url, Ref: "main", Path: "modules/core"}, opts); err != nil {
+		t.Fatal(err)
+	}
+	opts.Memo.Seal()
+	write(t, filepath.Join(dir, "modules", "core", "AGENTS.md"), "# Core v3\n")
+	run(t, dir, "commit", "-q", "-am", "third")
+	var r source.Resolved
+	var err, tagErr error
+	commands := traced(t, func() {
+		r, err = source.Resolve("/nowhere", stack.Source{Git: url, Ref: "main", Path: "modules/core"}, opts)
+		_, tagErr = source.Resolve("/nowhere", stack.Source{Git: url, Ref: "v1", Path: "modules/core"}, opts)
+	})
+	if err != nil || r.Commit != second || r.Warning != "" {
+		t.Errorf("main resolved to %s with warning %q, %v; want %s", r.Commit, r.Warning, err, second)
+	}
+	var sealed *source.SealedError
+	if !errors.As(tagErr, &sealed) || !strings.HasPrefix(tagErr.Error(), "set the stage's workflows in Qory Apiary to runtimes whose modules session 1 fetched.\n  ") || !strings.Contains(tagErr.Error(), "is not in the run's cache") {
+		t.Errorf("v1: %v, want a SealedError", tagErr)
+	}
+	if len(commands) != 0 {
+		t.Errorf("git ran: %v", commands)
 	}
 }

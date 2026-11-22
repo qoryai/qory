@@ -34,7 +34,7 @@ func (f *fromRegistry) install(t *testing.T, arch string) (runtimeinstall.Instal
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	return runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch: runtimeinstall.RegistryFetch(client, f.reg.Host(), arch, f.reg.Instance()), Runtime: "claude", Folder: f.folder,
 	})
 }
@@ -89,16 +89,16 @@ func TestTheRegistryFetchRefuses(t *testing.T) {
 			bad := bytes.Clone(good)
 			bad[len(bad)/2] ^= 0xff
 			r.Publish("2.1.320", true, map[string]rt.Layer{"amd64": {Tarball: good, Served: bad}})
-		}, "Ask Qory Apiary's instance admin to check the registry's runtime cache\nThe layer of claude 2.1.320 does not match its digest sha256:"},
+		}, "Ask Qory Apiary's instance admin to check the registry's runtime cache\nThe layer of claude 2.1.320 does not match its digest\n  sha256:"},
 		{"sha512 checksum", func(t *testing.T, r *rt.Registry) {
 			r.Publish("2.1.320", true, map[string]rt.Layer{"amd64": {Tarball: rt.PlainTarball(t, "2.1.320"), Integrity: rt.Integrity([]byte("another tarball"))}})
-		}, "The tarball of claude 2.1.320 does not match the checksum sha512-"},
+		}, "The tarball of claude 2.1.320 does not match the checksum\n  sha512-"},
 		{"version tag differs from newest", func(t *testing.T, r *rt.Registry) {
 			r.PublishPlain("2.1.320")
 			newest := r.Tag("newest")
 			r.Publish("2.1.320", false, map[string]rt.Layer{"amd64": {Tarball: rt.PlainTarball(t, "other")}})
 			r.SetTag("newest", newest)
-		}, "Ask Qory Apiary's instance admin to check the registry's runtime cache\nshared/runtimes/claude:2.1.320 has the digest sha256:"},
+		}, "Ask Qory Apiary's instance admin to check the registry's runtime cache\nshared/runtimes/claude:2.1.320 has the digest\n  sha256:"},
 		{"version that climbs", func(t *testing.T, r *rt.Registry) {
 			r.Publish("..", true, map[string]rt.Layer{"amd64": {Tarball: rt.PlainTarball(t, "x")}})
 		}, `shared/runtimes/claude:newest has the version "..", and a version is 1 to 64 letters`},
@@ -107,7 +107,7 @@ func TestTheRegistryFetchRefuses(t *testing.T) {
 		}, "shared/runtimes/claude:2.1.320 has 0 image manifests for linux/amd64, not one"},
 		{"malicious tarball", func(t *testing.T, r *rt.Registry) {
 			r.Publish("2.1.320", true, map[string]rt.Layer{"amd64": {Tarball: rt.Tarball(t, rt.Entry{Name: "package/claude", Kind: '2', Link: "/bin/sh"})}})
-		}, "has package/claude as another kind of entry than a regular file"},
+		}, "has package/claude\n  as another kind of entry than a regular file"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -142,7 +142,7 @@ func TestANewestTheRegistryNeverHeldStartsWithTheFix(t *testing.T) {
 	if want := "Check that the instance's registry reaches the publisher of claude, then run again"; first != want || len(first) > 100 {
 		t.Fatalf("first line = %q, want %q", first, want)
 	}
-	if want := "The registry has never held claude and could not fetch it: shared/runtimes/claude:newest returned 404."; rest != want {
+	if want := "The registry has never held claude and could not fetch it:\n  shared/runtimes/claude:newest returned 404."; rest != want {
 		t.Fatalf("second line = %q, want %q", rest, want)
 	}
 }
@@ -219,7 +219,7 @@ func TestACacheThatStaysUnavailableIsRetriedUntilTheContextEnds(t *testing.T) {
 			f := newFromRegistry(t)
 			f.reg.PublishPlain("2.1.320")
 			f.reg.Unavailable(-1, retryAfter)
-			_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{
+			_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Keys: rt.Keys(),
 				Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, f.reg.Host(), "amd64", f.reg.Instance()),
 				Runtime: "claude", Folder: f.folder,
 			})
@@ -247,7 +247,7 @@ func TestAnotherStatusIsNotRetried(t *testing.T) {
 	waits := fakeClock(t)
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) }))
 	t.Cleanup(reg.Close)
-	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, strings.TrimPrefix(reg.URL, "http://"), "amd64", ""),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
@@ -269,7 +269,7 @@ func TestATokenRealmElsewhereIsRefused(t *testing.T) {
 		f.reg.RealmHost("localhost:" + port)
 		f.reg.PublishPlain("2.1.320")
 		// The stand-in proxy forwards only to loopback addresses, so the install is direct.
-		got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+		got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 			Fetch: runtimeinstall.RegistryFetch(http.DefaultClient, f.reg.Host(), "amd64", f.reg.Instance()), Runtime: "claude", Folder: f.folder,
 		})
 		if err != nil {
@@ -287,21 +287,21 @@ func TestATokenRealmElsewhereIsRefused(t *testing.T) {
 		want     string
 	}{
 		{"the registry's host", "http://localhost:%PORT%", func(registry, _ string) string { return "http://" + registry + "/registry/token" },
-			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://%REGISTRY%/registry/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nThe registry's token realm is\n  http://%REGISTRY%/registry/token,\n  and the instance's token route is http://localhost:%PORT%/registry/token."},
 		{"another host", "http://localhost:%PORT%", func(_, port string) string { return "http://127.0.0.1:" + port + "/registry/token" },
-			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://127.0.0.1:%PORT%/registry/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nThe registry's token realm is\n  http://127.0.0.1:%PORT%/registry/token,\n  and the instance's token route is http://localhost:%PORT%/registry/token."},
 		{"another port", "http://localhost:%PORT%", func(_, _ string) string { return "http://localhost:1/registry/token" },
-			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:1/registry/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nThe registry's token realm is\n  http://localhost:1/registry/token,\n  and the instance's token route is http://localhost:%PORT%/registry/token."},
 		{"http when the instance is https", "https://localhost:%PORT%", func(_, port string) string { return "http://localhost:" + port + "/registry/token" },
-			"Ask Qory Apiary's instance admin to put the registry's token realm at https://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/registry/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at https://localhost:%PORT%/registry/token\nThe registry's token realm is\n  http://localhost:%PORT%/registry/token,\n  and the instance's token route is https://localhost:%PORT%/registry/token."},
 		{"another path", "http://localhost:%PORT%", func(_, port string) string { return "http://localhost:" + port + "/api/token" },
-			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/api/token"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nThe registry's token realm is\n  http://localhost:%PORT%/api/token,\n  and the instance's token route is http://localhost:%PORT%/registry/token."},
 		{"a longer path", "http://localhost:%PORT%", func(_, port string) string { return "http://localhost:" + port + "/registry/token/x" },
-			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nIt is http://localhost:%PORT%/registry/token/x"},
+			"Ask Qory Apiary's instance admin to put the registry's token realm at http://localhost:%PORT%/registry/token\nThe registry's token realm is\n  http://localhost:%PORT%/registry/token/x,\n  and the instance's token route is http://localhost:%PORT%/registry/token."},
 		{"an instance under a path", "http://localhost:%PORT%/base", func(_, port string) string { return "http://localhost:" + port + "/base/registry/token" },
-			"Set gateway.server.url in forager.yaml to an address with no path\nThe address is \"http://localhost:%PORT%/base\"."},
+			"Set gateway.server.url in forager.yaml to an address with no path\nThe address of Qory Apiary has a path:\n  \"http://localhost:%PORT%/base\""},
 		{"no address of the instance", "", func(_, port string) string { return "http://localhost:" + port + "/registry/token" },
-			"Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe realm is http://localhost:%PORT%/registry/token, and the run has no address of Qory Apiary to check it against."},
+			"Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe pool's forager.yaml sets no gateway.server.url, so qory cannot check the registry's token realm http://localhost:%PORT%/registry/token."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			asked := false
@@ -317,7 +317,7 @@ func TestATokenRealmElsewhereIsRefused(t *testing.T) {
 			host := strings.TrimPrefix(reg.URL, "http://")
 			realm = c.realm(host, port)
 			fill := strings.NewReplacer("%PORT%", port, "%REGISTRY%", host)
-			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+			_, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 				Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", fill.Replace(c.instance)),
 				Runtime: "claude", Folder: t.TempDir(),
 			})
@@ -338,7 +338,7 @@ func TestAProxyThatRefusesIsNotRetried(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch: runtimeinstall.RegistryFetch(client, f.reg.Host(), "amd64", f.reg.Instance()), Runtime: "claude", Folder: f.folder,
 	})
 	if err == nil || !strings.HasPrefix(err.Error(), "Check that the run's proxy reaches the registry at "+f.reg.Host()) || f.proxy.Refusals() == 0 || len(*waits) != 0 {
@@ -394,7 +394,7 @@ func TestARegistryThatNeverRespondsIsRetriedUntilTheContextEnds(t *testing.T) {
 	gone := httptest.NewServer(http.NotFoundHandler())
 	host := strings.TrimPrefix(gone.URL, "http://")
 	gone.Close()
-	_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{
+	_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", ""),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
@@ -421,7 +421,7 @@ func TestAConnectTheProxyRefusesIsNotRetried(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+	_, err = runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 		Fetch:   runtimeinstall.RegistryFetch(client, "registry.example", "amd64", ""),
 		Runtime: "claude", Folder: t.TempDir(),
 	})
@@ -442,7 +442,7 @@ func TestAWaitingFetchTellsItsProgress(t *testing.T) {
 		f.reg.PublishPlain("2.1.320")
 		f.reg.Unavailable(-1, "")
 		var lines []string
-		_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{
+		_, err := runtimeinstall.Install(ctx, runtimeinstall.Options{Keys: rt.Keys(),
 			Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, f.reg.Host(), "amd64", f.reg.Instance()),
 			Runtime: "claude", Folder: f.folder,
 			Progress: func(line string) { lines = append(lines, line) },
@@ -461,7 +461,7 @@ func TestAWaitingFetchTellsItsProgress(t *testing.T) {
 		host := strings.TrimPrefix(gone.URL, "http://")
 		gone.Close()
 		var lines []string
-		_, _ = runtimeinstall.Install(ctx, runtimeinstall.Options{
+		_, _ = runtimeinstall.Install(ctx, runtimeinstall.Options{Keys: rt.Keys(),
 			Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, host, "amd64", ""),
 			Runtime: "claude", Folder: t.TempDir(),
 			Progress: func(line string) { lines = append(lines, line) },
@@ -476,7 +476,7 @@ func TestAWaitingFetchTellsItsProgress(t *testing.T) {
 		f := newFromRegistry(t)
 		f.reg.PublishPlain("2.1.320")
 		var lines []string
-		got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{
+		got, err := runtimeinstall.Install(context.Background(), runtimeinstall.Options{Keys: rt.Keys(),
 			Fetch:   runtimeinstall.RegistryFetch(http.DefaultClient, f.reg.Host(), "amd64", f.reg.Instance()),
 			Runtime: "claude", Folder: f.folder,
 			Progress: func(line string) { lines = append(lines, line) },

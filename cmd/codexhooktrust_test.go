@@ -1,0 +1,70 @@
+package cmd_test
+
+import (
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/BurntSushi/toml"
+
+	"github.com/qoryai/qory/cmd"
+)
+
+// webSearch is the value of the top-level key web_search in config, a Codex config.toml.
+func webSearch(t *testing.T, config string) string {
+	t.Helper()
+	var m struct {
+		WebSearch string `toml:"web_search"`
+	}
+	if _, err := toml.Decode(config, &m); err != nil {
+		t.Fatalf("config.toml: %v\n%s", err, config)
+	}
+	return m.WebSearch
+}
+
+// TestComposeTrustsTheCodexCommandHooks composes for codex a module with a PreToolUse
+// command hook in config.toml, and an mcp_tool hook and a Stop command hook with U+2028
+// in hooks.json. The home's config.toml has web_search = "disabled" at the top level,
+// features.unified_exec_tty = false and a trusted_hash for the PreToolUse hook, keyed by
+// the config.toml of the home's codex folder. The other two hooks get no hash and a
+// skipped row each. --check then finds the home current.
+func TestComposeTrustsTheCodexCommandHooks(t *testing.T) {
+	root := tierCheckout(t)
+	tierModule(t, root, "codex", nil)
+	core := filepath.Join(root, "harness", "core", "settings", "codex")
+	writeFile(t, filepath.Join(core, "config.toml"), "[[hooks.PreToolUse]]\nmatcher = \"*\"\n[[hooks.PreToolUse.hooks]]\ntype = \"command\"\ncommand = \"echo guard\"\ntimeout = 120\n")
+	writeFile(t, filepath.Join(core, "hooks.json"), `{"hooks": {"Stop": [{"hooks": [{"type": "mcp_tool", "server": "files", "tool": "check"}, {"type": "command", "command": "echo \u2028"}]}]}}`)
+	out, err := run(t, "harness", "compose")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got, want := fieldRows(out)["skipped"], []string{
+		"hooks.Stop[0].hooks[0] in hooks.json for codex  (qory writes no trusted hash for an mcp_tool hook; Codex skips it in a run without a wall)",
+		"hooks.Stop[0].hooks[1] in hooks.json for codex  (qory writes no trusted hash for a hook with U+2028 or U+2029; Codex skips it in a run without a wall)",
+	}; !reflect.DeepEqual(got, want) {
+		t.Errorf("skipped rows %q\nwant %q\n%s", got, want, out)
+	}
+	codexDir, err := filepath.EvalSymlinks(filepath.Join(root, ".qory", "harness", "codex"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := readText(t, filepath.Join(codexDir, "config.toml"))
+	for _, want := range []string{
+		"[features]\n  unified_exec_tty = false\n",
+		"[hooks.state.\"" + filepath.Join(codexDir, "config.toml") + ":pre_tool_use:0:0\"]\n      trusted_hash = \"sha256:",
+	} {
+		if !strings.Contains(config, want) {
+			t.Errorf("config.toml lacks %q:\n%s", want, config)
+		}
+	}
+	if got := webSearch(t, config); got != "disabled" {
+		t.Errorf("config.toml has web_search %q, want \"disabled\":\n%s", got, config)
+	}
+	if strings.Count(config, "trusted_hash") != 1 {
+		t.Errorf("config.toml has %d trusted hashes, want 1:\n%s", strings.Count(config, "trusted_hash"), config)
+	}
+	if out, err := run(t, "harness", "compose", "--check"); err != nil {
+		t.Errorf("--check: %v, exit %d\n%s", err, cmd.ExitCode(err), out)
+	}
+}

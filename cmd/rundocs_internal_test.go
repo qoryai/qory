@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,30 +19,45 @@ import (
 	"github.com/qoryai/qory/internal/report"
 )
 
-// TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet is the line of a run from a run code
-// whose time limit came before the runtime started: its fix is a longer limit in Qory
-// Apiary or in the workflows of the harness, never --timeout, which such a run does not
-// take. The workflows are in the base of a harness document with extends, in a harness
-// document that defines a stack, and in the checkout's harness or its base for a run
-// without a harness document.
-func TestARunCodesTimeLimitLineNamesWhereTheLimitIsSet(t *testing.T) {
-	const line = "set a longer Time limit for the workflow example on the Workflows page in Qory Apiary, or a longer workflows.example.time_limit in %s: the run was cancelled at its time limit of 45m0s, before claude started"
-	for _, c := range []struct {
-		harness string
-		defines bool
-		where   string
-	}{
-		{"{}\n", false, "the base of the workspace's harness"},
-		{"{}\n", true, "the workspace's harness"},
-		{"", false, "the checkout's harness or the base it extends"},
-	} {
-		r := &codeRun{workflow: "example", defines: c.defines}
-		if c.harness != "" {
-			r.harness = []byte(c.harness)
+// TestASetupPastItsLimitNamesItsStep is the line of a run whose setup passed its limit
+// of 30 minutes: for each step, line 1 is the fix, with at most 100 characters with
+// "qory run: ", which is longer than "✗ ", and the cause names the step, then the runtime
+// and the limit. A dispatched run shows the cause alone, whose line 1 has at most 100
+// characters too, also for a runtime not known yet or with a long name, and no line names
+// Qory Apiary.
+func TestASetupPastItsLimitNamesItsStep(t *testing.T) {
+	if setupLimit != 30*time.Minute {
+		t.Errorf("the setup's limit is %s, want 30m0s", setupLimit)
+	}
+	runtimes := map[string]string{"claude": "claude", "": "the agent", "a-runtime-with-a-name-of-forty-characters": "a-runtime-with-a-name-of-forty-characters"}
+	for step := stepNone; step <= stepSetupRecord; step++ {
+		s, ok := setupSteps[step]
+		if !ok {
+			t.Fatalf("step %d has no name", step)
 		}
-		if got, want := r.timedOutLine(45*time.Minute, "claude"), fmt.Sprintf(line, c.where); got != want {
-			t.Errorf("got  %q\nwant %q", got, want)
+		for runtime, shown := range runtimes {
+			cause := "the run was cancelled during " + s.name + ":\nthe steps before " + shown + " starts may take at most 30 minutes"
+			for _, dispatched := range []bool{false, true} {
+				got := setupPassed(step, runtime, 30*time.Minute, dispatched).Error()
+				want := s.fix + "\n" + cause
+				if dispatched {
+					want = cause
+				}
+				if got != want {
+					t.Errorf("step %d, %q, dispatched %v:\ngot  %q\nwant %q", step, runtime, dispatched, got, want)
+				}
+				first, _, _ := strings.Cut(got, "\n")
+				if n := len("qory run: " + first); n > 100 {
+					t.Errorf("step %d, %q, dispatched %v: line 1 has %d characters with qory run: %q", step, runtime, dispatched, n, first)
+				}
+				if strings.Contains(got, "Qory Apiary") || strings.HasSuffix(got, ".") {
+					t.Errorf("step %d, %q, dispatched %v: %q", step, runtime, dispatched, got)
+				}
+			}
 		}
+	}
+	if got, want := setupPassed(stepFetch, "", time.Second, true).Error(), "the run was cancelled during the fetch of the run's repositories:\nthe steps before the agent starts may take at most 1s"; got != want {
+		t.Errorf("a setup past a limit of 1s before the runtime is known:\ngot  %q\nwant %q", got, want)
 	}
 }
 
@@ -454,7 +470,7 @@ func TestAMissingWorkflowEndsTheRunWithItsReason(t *testing.T) {
 	const fix = "add a skill workflow-example to "
 	const cause = ", or set another workflow in Qory Apiary: the composed harness has no skill or command workflow-example or example (workflow_not_in_harness); the code is used"
 	doc := &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}
-	target := &contracts.Target{System: "code.example.com", Path: "acme/site"}
+	target := &contracts.Target{Collection: "R_1001", Address: &contracts.TargetAddress{System: "code.example.com", Path: "acme/site"}}
 	for _, c := range []struct {
 		harness *contracts.HarnessDocument
 		target  *contracts.Target
@@ -464,7 +480,8 @@ func TestAMissingWorkflowEndsTheRunWithItsReason(t *testing.T) {
 		{nil, target, "code.example.com", "the checkout's harness in the repository acme/site"},
 		{nil, target, "forge.example.org", "the checkout's harness for the target acme/site"},
 		{nil, target, "", "the checkout's harness for the target acme/site"},
-		{nil, &contracts.Target{System: "tickets.example.com", Path: "queue-7"}, "code.example.com", "the checkout's harness for the target queue-7"},
+		{nil, &contracts.Target{Collection: "queue-7", Address: &contracts.TargetAddress{System: "tickets.example.com", Path: "queue-7"}}, "code.example.com", "the checkout's harness for the target queue-7"},
+		{nil, &contracts.Target{Collection: "queue-7"}, "", "the checkout's harness"},
 		{nil, nil, "code.example.com", "the checkout's harness"},
 		{doc, target, "code.example.com", "the workspace's harness"},
 	} {
@@ -545,13 +562,13 @@ func TestAHarnessDocumentWithASourceQoryDoesNotFetchStops(t *testing.T) {
 // TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime is a harness document
 // with no extends, whose section defines a stack with workflows: harnessChecked checks
 // its modules and no base, and qory writes it with target.runtime set to the run's
-// runtime, run_settings.runtime or the default runtime when the documents have no run
-// settings, the workflows as the documents have them.
+// runtime, run_settings.runtime, and the workflows as the documents have them, plan and
+// tier included.
 func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing.T) {
 	defined := func(git string) *contracts.HarnessDocument {
 		return &contracts.HarnessDocument{Harness: contracts.HarnessSection{
 			Modules:   []contracts.HarnessModule{{Name: "tools", Source: contracts.HarnessSource{Git: git, Ref: "main"}}},
-			Workflows: map[string]contracts.HarnessWorkflow{"example": {Access: "write", TimeLimit: "45m"}},
+			Workflows: map[string]contracts.HarnessWorkflow{"example": {Access: "write", Plan: "build-plan", Tier: "thinking"}},
 		}}
 	}
 	if err := harnessChecked(defined("https://code.example.com/team/tools.git"), true); err != nil {
@@ -560,7 +577,7 @@ func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing
 	if err := harnessChecked(defined(""), true); err == nil || !strings.HasPrefix(err.Error(), "set the module tools of the harness in the workspace's settings in Qory Apiary to an https source") {
 		t.Errorf("a module in a folder: %v", err)
 	}
-	for _, settings := range []*contracts.RunSettings{{Runtime: "claude"}, nil} {
+	for _, settings := range []*contracts.RunSettings{{Runtime: "claude"}, {Runtime: "codex"}} {
 		r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: defined("https://code.example.com/team/tools.git"), Workflow: "example", RunSettings: settings})
 		if err != nil {
 			t.Fatal(err)
@@ -577,13 +594,16 @@ func TestAHarnessDocumentThatDefinesAStackIsWrittenWithTheRunsRuntime(t *testing
 			t.Fatal(err)
 		}
 		h := doc.Harness
-		if !r.defines || h.Extends != nil || h.Target.Runtime != "claude" || len(h.Modules) != 1 || h.Workflows["example"] != (contracts.HarnessWorkflow{Access: "write", TimeLimit: "45m"}) {
-			t.Errorf("run settings %+v: defines %v, harness.yaml has:\n%s", settings, r.defines, r.harness)
+		if h.Extends != nil || h.Target.Runtime != settings.Runtime || len(h.Modules) != 1 || h.Workflows["example"] != (contracts.HarnessWorkflow{Access: "write", Plan: "build-plan", Tier: "thinking"}) {
+			t.Errorf("run settings %+v: harness.yaml has:\n%s", settings, r.harness)
 		}
 	}
-	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}, Workflow: "example"})
-	if err != nil || r.defines || strings.Contains(string(r.harness), "target") {
-		t.Errorf("a document with extends: %v, defines %v, harness.yaml has:\n%s", err, r != nil && r.defines, r.harness)
+	r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: &contracts.HarnessDocument{Harness: contracts.HarnessSection{Extends: &contracts.HarnessBase{Git: "https://code.example.com/team/stacks", Ref: "release-7"}}}, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
+	if err != nil {
+		t.Fatalf("a document with extends: %v", err)
+	}
+	if strings.Contains(string(r.harness), "target") {
+		t.Errorf("a document with extends: harness.yaml has:\n%s", r.harness)
 	}
 }
 
@@ -606,7 +626,7 @@ func TestAHarnessDocumentsBindIsWrittenInItsForm(t *testing.T) {
 		if err := json.Unmarshal(fmt.Appendf(nil, documents, source), &h); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: &h, Workflow: "example"})
+		r, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Harness: &h, Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}})
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -664,18 +684,85 @@ func TestARunCodesWorkflowStartsOnEachRuntimesHeadlessStart(t *testing.T) {
 		{"opencode", skill, "add a command workflow-example to the checkout's harness, or set another runtime in Qory Apiary: opencode runs no skill by its name from a headless start, and the composed harness has no command workflow-example or example; the code is used"},
 		{"codex", command, "add a skill workflow-example to the checkout's harness, or set another runtime in Qory Apiary: codex runs no command by its name from a headless start, and the composed harness has no skill workflow-example or example; the code is used"},
 		{"cursor", command, "add a skill workflow-example to the checkout's harness, or set another runtime in Qory Apiary: cursor runs no command by its name from a headless start, and the composed harness has no skill workflow-example or example; the code is used"},
-		{"amp", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for amp; the code is used"},
-		{"copilot", skill, "set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for copilot; the code is used"},
+		{"amp", skill, "qory runs a run code's workflow on one of claude and codex,\n  and not on amp; the code is used"},
+		{"copilot", skill, "qory runs a run code's workflow on one of claude and codex,\n  and not on copilot; the code is used"},
 	} {
 		if _, err := r.workflowArgs(c.runtime, c.rep, in, ""); err == nil || err.Error() != c.want {
 			t.Errorf("%s: got %v\nwant %s", c.runtime, err, c.want)
 		}
 	}
-	for _, runtime := range []string{"goose", "amp", "copilot", "any", "example"} {
+	for _, runtime := range []string{"gemini", "cursor", "opencode", "goose", "amp", "copilot", "any", "example"} {
 		_, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: runtime}})
-		if want := noHeadless(runtime); err == nil || err.Error() != want.Error() {
+		if want := notRunRuntime(runtime); err == nil || err.Error() != want.Error() {
 			t.Errorf("%s: codeRunOf got %v, want %v", runtime, err, want)
 		}
+	}
+}
+
+// TestDocumentsWithNoRuntimeAreRefused is codeRunOf for documents with no run settings
+// and with run settings that set no runtime: each is refused with the runtimes that a
+// run from a run code runs on, claude and codex, exit 1. codeDocumentsOf refuses explore documents with no run
+// settings, null ones, or run settings whose runtime is missing, empty or null, before
+// the schema check, since explore starts an agent session, and leaves a prebuild's
+// documents to that check. A step or run_settings member in another case is not read.
+func TestDocumentsWithNoRuntimeAreRefused(t *testing.T) {
+	want := "The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of claude and codex."
+	for name, settings := range map[string]*contracts.RunSettings{"no run settings": nil, "no runtime": {Model: "opus"}} {
+		_, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: settings})
+		if err == nil || err.Error() != want || ExitCode(err) != 1 {
+			t.Errorf("%s: %v (exit %d), want %q", name, err, ExitCode(err), want)
+		}
+	}
+	for _, c := range []struct {
+		documents string
+		lacks     bool
+	}{
+		{`{"step":"workflow","run_settings":{}}`, true},
+		{`{"step":"workflow","run_settings":{"runtime":""}}`, true},
+		{`{"step":"workflow","run_settings":{"runtime":null}}`, true},
+		{`{"step":"workflow","run_settings":{"runtime":"codex"}}`, false},
+		{`{"step":"workflow"}`, true},
+		{`{"step":"workflow","run_settings":null}`, true},
+		{`{"step":"workflow","run_settings":"claude"}`, false},
+		{`{"step":"explore"}`, false},
+		{`{"step":"prebuild","run_settings":{}}`, false},
+		{`{"step":"prebuild"}`, false},
+		{`{"STEP":"workflow","step":"prebuild","run_settings":{}}`, false},
+		{`{"step":"workflow","RUN_SETTINGS":{"runtime":"codex"}}`, true},
+		{`{"step":"workflow","run_settings":{"runtime":"codex"},"RUN_SETTINGS":{}}`, false},
+	} {
+		if got := lacksRuntime(json.RawMessage(c.documents)); got != c.lacks {
+			t.Errorf("%s: lacksRuntime is %v", c.documents, got)
+		}
+	}
+	if _, err := codeDocumentsOf(json.RawMessage(`{"step":"prebuild","run_settings":{}}`)); err == nil || !strings.Contains(err.Error(), "documents.schema.json") {
+		t.Errorf("a prebuild with run settings and no runtime: %v", err)
+	}
+}
+
+// TestARunCodesWorkItemIsASubjectOfThatKind is documents of the step workflow whose
+// subject is a work item, a ticket, or absent: the run's work item is the subject's id for
+// the kind work_item alone, so a run for another kind reads no work item and its branch.
+// Documents with no workflow, which the schema refuses, stop the run.
+func TestARunCodesWorkItemIsASubjectOfThatKind(t *testing.T) {
+	settings := &contracts.RunSettings{Runtime: "claude"}
+	for _, c := range []struct {
+		subject *contracts.Subject
+		want    string
+	}{
+		{&contracts.Subject{Kind: "work_item", ID: "wi_8Kx2mQ4vT9"}, "wi_8Kx2mQ4vT9"},
+		{&contracts.Subject{Kind: "ticket", ID: "TRK-1"}, ""},
+		{nil, ""},
+	} {
+		r, err := codeRunOf(contracts.Documents{Step: "workflow", Inputs: json.RawMessage(`{}`), Workflow: "example", Subject: c.subject, Trigger: "take_in", RunSettings: settings})
+		if err != nil {
+			t.Errorf("the subject %+v: %v", c.subject, err)
+		} else if r.workItem != c.want {
+			t.Errorf("the subject %+v: the work item %q, want %q", c.subject, r.workItem, c.want)
+		}
+	}
+	if _, err := codeRunOf(contracts.Documents{Step: "workflow", Inputs: json.RawMessage(`{}`), RunSettings: settings}); err == nil || !strings.HasSuffix(err.Error(), "has no workflow"+codeUsed) {
+		t.Errorf("no workflow: %v", err)
 	}
 }
 
@@ -699,15 +786,20 @@ func TestARunWritesOnlyWithAccessWriteInItsDocuments(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			var fields map[string]any
+			if err := json.Unmarshal(raw, &fields); err != nil {
+				t.Fatal(err)
+			}
 			if c.set != "" {
-				var doc map[string]any
-				if err := json.Unmarshal(raw, &doc); err != nil {
-					t.Fatal(err)
-				}
-				doc["access"] = c.set
-				if raw, err = json.Marshal(doc); err != nil {
-					t.Fatal(err)
-				}
+				fields["access"] = c.set
+			}
+			// Explore documents require run settings with a runtime, which the pinned
+			// contract's fixtures do not contain yet.
+			if _, ok := fields["run_settings"]; !ok {
+				fields["run_settings"] = map[string]any{"runtime": "claude"}
+			}
+			if raw, err = json.Marshal(fields); err != nil {
+				t.Fatal(err)
 			}
 			doc, err := codeDocumentsOf(raw)
 			if err != nil {
@@ -728,18 +820,25 @@ func TestARunWritesOnlyWithAccessWriteInItsDocuments(t *testing.T) {
 	}
 }
 
-// TestFullSuiteOfTheDocumentsIsTheRunsFullSuite: codeRunOf takes full_suite of the documents; a
-// document with false or none gives false.
+// TestFullSuiteOfTheDocumentsIsTheRunsFullSuite: codeRunOf takes full_suite of the documents'
+// type_settings. fullSuite is false for a document with false, with none, with one that is not
+// a boolean, with a member name in another case, or with no type_settings.
 func TestFullSuiteOfTheDocumentsIsTheRunsFullSuite(t *testing.T) {
-	yes, no := true, false
 	for _, c := range []struct {
-		name string
-		full *bool
-		want bool
-	}{{"true", &yes, true}, {"false", &no, false}, {"absent", nil, false}} {
+		name     string
+		settings string
+		want     bool
+	}{
+		{"true", `{"full_suite":true}`, true},
+		{"false", `{"full_suite":false}`, false},
+		{"absent", `{}`, false},
+		{"not a boolean", `{"full_suite":"true"}`, false},
+		{"another case", `{"Full_Suite":true}`, false},
+		{"no type_settings", "", false},
+	} {
 		doc := contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: "claude"}}
-		if c.full != nil {
-			doc.FullSuite = *c.full
+		if c.settings != "" {
+			doc.TypeSettings = json.RawMessage(c.settings)
 		}
 		r, err := codeRunOf(doc)
 		if err != nil {
@@ -747,6 +846,144 @@ func TestFullSuiteOfTheDocumentsIsTheRunsFullSuite(t *testing.T) {
 		}
 		if r.fullSuite != c.want || fullSuiteOf(r) != c.want {
 			t.Errorf("%s: fullSuite %v, want %v", c.name, r.fullSuite, c.want)
+		}
+	}
+}
+
+// TestALaterSessionStartGivesALaterDeadline is [sessionDeadline] for session 1, whose clock
+// starts at its join, and for a later session, whose clock starts when it starts: each
+// deadline is its start plus its limit, so a later start gives a later deadline. A limit
+// of 0 or below gives no deadline.
+func TestALaterSessionStartGivesALaterDeadline(t *testing.T) {
+	joined := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
+	first := sessionDeadline(joined, 30*time.Minute)
+	if want := joined.Add(30 * time.Minute); !first.Equal(want) {
+		t.Errorf("session 1 ends at %v, want %v", first, want)
+	}
+	second := sessionDeadline(first.Add(5*time.Minute), 60*time.Minute)
+	if want := joined.Add(95 * time.Minute); !second.Equal(want) {
+		t.Errorf("session 2 ends at %v, want %v", second, want)
+	}
+	if !second.After(first) {
+		t.Errorf("session 2 ends at %v, not after session 1 at %v", second, first)
+	}
+	if got := sessionDeadline(joined, 0); !got.IsZero() {
+		t.Errorf("a session with no limit ends at %v, want no deadline", got)
+	}
+	if got := sessionDeadline(joined, -time.Minute); !got.IsZero() {
+		t.Errorf("a session with a negative limit ends at %v, want no deadline", got)
+	}
+}
+
+// TestARunCodeRunsOnlyOnRuntimesWithADescriptorAndAnInstall is runRuntimes: the
+// runtimes that qory installs, have a descriptor in Forager's runtimes.json and have a
+// headless start. gemini, cursor and opencode have a headless start and neither a
+// descriptor nor an install, so they are not in it. listOf writes the list.
+func TestARunCodeRunsOnlyOnRuntimesWithADescriptorAndAnInstall(t *testing.T) {
+	if got := runRuntimes(); !slices.Equal(got, []string{"claude", "codex"}) {
+		t.Errorf("runRuntimes() = %q, want claude and codex", got)
+	}
+	for names, want := range map[string]string{"": "", "claude": "claude", "claude codex": "claude and codex", "claude codex gemini": "claude, codex, and gemini"} {
+		if got := listOf(strings.Fields(names)); got != want {
+			t.Errorf("listOf(%s) = %q, want %q", names, got, want)
+		}
+	}
+}
+
+// TestTheRuntimeRefusalsListTheSetTheCheckUses is the refusal of no runtime and of a
+// runtime a run code does not run on: each lists exactly [runRuntimes], the set that
+// codeRunOf accepts, joined by [listOf], so both change with the set.
+func TestTheRuntimeRefusalsListTheSetTheCheckUses(t *testing.T) {
+	set := runRuntimes()
+	list := listOf(set)
+	if !strings.HasSuffix(noRuntime().Error(), "\n  qory runs one of "+list+".") {
+		t.Errorf("the refusal of no runtime is %q, want it to list %q", noRuntime(), list)
+	}
+	if got := notRunRuntime("gemini").Error(); !strings.Contains(got, "on one of "+list+",\n  and not on gemini;") {
+		t.Errorf("the refusal of gemini is %q, want it to list %q", got, list)
+	}
+	for _, name := range append([]string{"gemini", "cursor", "opencode"}, set...) {
+		_, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: name}})
+		if accepted := slices.Contains(set, name); accepted != (err == nil) || !accepted && strings.Count(err.Error(), list) != 1 {
+			t.Errorf("%s: %v, want it accepted: %v", name, err, accepted)
+		}
+	}
+}
+
+// TestTheRuntimeRefusalsFollowAChangedSet changes the set of [runRuntimes] to one
+// runtime and to three: the refusal of no runtime and of a runtime outside the set list
+// the changed set, and codeRunOf accepts exactly its runtimes.
+func TestTheRuntimeRefusalsFollowAChangedSet(t *testing.T) {
+	for _, c := range []struct {
+		set     []string
+		list    string
+		outside string
+	}{
+		{[]string{"codex"}, "codex", "claude"},
+		{[]string{"claude", "codex", "gemini"}, "claude, codex, and gemini", "cursor"},
+	} {
+		t.Run(c.list, func(t *testing.T) {
+			defer SetRunRuntimes(c.set...)()
+			if want := "\n  qory runs one of " + c.list + "."; !strings.HasSuffix(noRuntime().Error(), want) {
+				t.Errorf("the refusal of no runtime is %q, want it to end with %q", noRuntime(), want)
+			}
+			if want := "on one of " + c.list + ",\n  and not on " + c.outside + ";"; !strings.Contains(notRunRuntime(c.outside).Error(), want) {
+				t.Errorf("the refusal of %s is %q, want %q", c.outside, notRunRuntime(c.outside), want)
+			}
+			for _, name := range append([]string{c.outside}, c.set...) {
+				_, err := codeRunOf(contracts.Documents{Inputs: json.RawMessage(`{}`), Workflow: "example", RunSettings: &contracts.RunSettings{Runtime: name}})
+				if accepted := slices.Contains(c.set, name); accepted != (err == nil) {
+					t.Errorf("%s: %v, want it accepted: %v", name, err, accepted)
+				}
+			}
+		})
+	}
+}
+
+// TestTheUnknownRuntimeTextFitsItsLines is the refusal of a runtime that a run code does
+// not run on, for a name of 64 characters, the longest a runtime's name has: with
+// "qory run: " before it, each line has at most 100 characters.
+func TestTheUnknownRuntimeTextFitsItsLines(t *testing.T) {
+	for _, line := range strings.Split("qory run: "+notRunRuntime(strings.Repeat("a", 64)).Error(), "\n") {
+		if len(line) > 100 {
+			t.Errorf("the line has %d characters: %s", len(line), line)
+		}
+	}
+}
+
+// TestCauseOnlyDropsTheFixLine is causeOnly on an install's error of a fix line and an
+// indented cause on two lines: the cause, its first line with no indent and its first
+// letter in lower case, and no full stop at its end.
+func TestCauseOnlyDropsTheFixLine(t *testing.T) {
+	got := causeOnly(errors.New("Update qory.\n  The tarball of codex 0.170.0 has no\n  package/vendor/x/bin/a.")).Error()
+	if want := "the tarball of codex 0.170.0 has no\n  package/vendor/x/bin/a"; got != want {
+		t.Errorf("causeOnly = %q, want %q", got, want)
+	}
+	if got := causeOnly(errors.New("one line")).Error(); got != "one line" {
+		t.Errorf("causeOnly of one line = %q", got)
+	}
+}
+
+// TestCauseOnlySplitsALongRealmLine is causeOnly on the two refusals of a registry's
+// token realm, with an address of 200 characters: a dispatched run shows the cause, whose
+// first line, with "qory run: ", has at most 100 characters. The first refusal goes on
+// after its first comma, on an indented line; the second has the realm on a separate
+// indented line. A short cause stays on one line.
+func TestCauseOnlySplitsALongRealmLine(t *testing.T) {
+	long := "https://apiary-" + strings.Repeat("a", 158) + ".example.com/registry/token"
+	for _, c := range []struct{ err, want string }{
+		{"Set gateway.server.url in forager.yaml to the address of Qory Apiary\nThe pool's forager.yaml sets no gateway.server.url, so qory cannot check the registry's token realm " + long + ".",
+			"the pool's forager.yaml sets no gateway.server.url,\n  so qory cannot check the registry's token realm " + long},
+		{"Ask Qory Apiary's instance admin to put the registry's token realm at " + long + "\nThe registry's token realm is\n  " + long + "x,\n  and the instance's token route is " + long + ".",
+			"the registry's token realm is\n  " + long + "x,\n  and the instance's token route is " + long},
+		{"Run again\nA short cause, on one line.", "a short cause, on one line"},
+	} {
+		got := causeOnly(errors.New(c.err)).Error()
+		if got != c.want {
+			t.Errorf("causeOnly = %q, want %q", got, c.want)
+		}
+		if first, _, _ := strings.Cut("qory run: "+got+codeUsed, "\n"); len(first) > 100 {
+			t.Errorf("the first line has %d characters: %s", len(first), first)
 		}
 	}
 }

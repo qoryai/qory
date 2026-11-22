@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/session"
@@ -25,6 +24,8 @@ import (
 	"github.com/qoryai/qory/internal/provisioner"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/report"
+	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/runtimeinstall"
 	"github.com/qoryai/qory/internal/source"
 	"github.com/qoryai/qory/internal/stack"
 )
@@ -84,49 +85,68 @@ func fromAnswerOnly(cmd *cobra.Command, runtime string, extra []string) error {
 	case len(extra) > 0:
 		return input(errors.New("leave out the arguments after --: a run from a run code starts its workflow with the arguments qory sets"))
 	case changed("timeout"):
-		return input(errors.New("leave out --timeout: a run from a run code takes its time limit from Qory Apiary's response to the code, else from its workflow"))
+		return input(errors.New("leave out --timeout: a run from a run code takes its time limit from Qory Apiary"))
 	}
 	return nil
 }
 
 // codeRun is what a run from a run code takes from the documents of the answer to the
 // code, checked: the runtime and the compose flags its run settings map to, the
-// harness document, the workflow, the inputs as the documents have them, the run
-// time_limit_minutes, 0 for none, and harness_hidden. named is set when
-// harness_hidden is true: no text of the run shows the address of a harness source.
-// target is the documents' target and target_version, which the fetch uses for the
-// target's repository. workItem is the id of the documents' work item, "" for none.
+// harness document, the workflow, the inputs as the documents have them, the
+// documents' time_limit_minutes, the limit of session 1, 0 for none, and
+// harness_hidden. named is set when harness_hidden is true: no text of the run shows
+// the address of a harness source.
+// target is the address of the documents' target and target_version, which the fetch
+// uses for the target's repository, and empty for a target with no address. workItem is
+// the id of the documents' subject when the subject is a work item, and "" for a subject
+// of another kind or none.
 type codeRun struct {
 	runtime  string
 	settings []provisioner.Setting
 	// harness is the documents' harness document as JSON, which qory composes in place of
 	// the checkout's file; nil when the documents contain none, and the run composes the
-	// checkout's qory.yaml or harness.yaml. defines is set when the harness section has
-	// no extends and defines a stack.
+	// checkout's qory.yaml or harness.yaml.
 	harness  []byte
-	defines  bool
 	named    *source.Named
 	workflow string
 	inputs   []byte
-	// fullSuite is the documents' full_suite: whether session 1 runs the full suite.
+	// fullSuite is full_suite of the documents' type_settings, see [fullSuiteIn]: whether
+	// session 1 runs the full suite, and for a later session, full_suite of the
+	// type_settings of its next-session answer.
 	fullSuite bool
-	minutes   int
-	hidden    bool
-	target    preparation.Target
+	// harnessDoc is the documents' harness document, which [codeRun.next] writes again
+	// for the runtime of a later session; nil for none.
+	harnessDoc *contracts.HarnessDocument
+	// runSettings is the documents' run_settings, whose runtime a later session runs on
+	// when its model choice has no runtime.
+	runSettings *contracts.RunSettings
+	// shared is the documents' shared_run: qory sends the next-session request after each
+	// session and runs the session that the answer sets.
+	shared bool
+	// modelCredential is the model key the session joins with, the
+	// model_provider_credential_name of a later session's next-session answer; "" for the
+	// run's default model provider credential, as session 1 has.
+	modelCredential string
+	minutes         int
+	hidden          bool
+	target          preparation.Target
 	// access is what the run may do on its target, from the documents' access: read,
 	// write, or write-no-push (a writable checkout with no push step). It is empty when
 	// the documents have no target.
 	access   string
 	workItem string
-	// submit is the documents' submit, the run's submit settings, type and send: the one
-	// place qory takes them from, never the composed harness's process.yaml, see
-	// [codeRun.submitLine]. nil when the documents have no submit. submitModule is the
-	// documents' submit_module, nil for none.
-	submit       *contracts.Submit
-	submitModule *contracts.SubmitModule
+	// deliver is the documents' deliver, the type and the send of each artifact the run
+	// delivers: the one place qory takes them from, never the composed harness's
+	// process.yaml, see [codeRun.deliveredTypes] and [codeRun.deliverLines]. nil when the
+	// documents have none.
+	deliver []contracts.Deliver
 
-	// runNumber is the run's number on the server, set by [codeRun.readBranch].
+	// runNumber is the run's number on the server, and snapshot the work item snapshot
+	// that the run read at its start, nil for none: [codeRun.readWorkItem] sets both.
 	runNumber int
+	snapshot  *runapi.Snapshot
+	// targetRef is the documents' target, nil for none: the target of a delivered output.
+	targetRef *contracts.Target
 }
 
 // The harness of a run from a run code as a text shows it: the documents' harness
@@ -144,23 +164,39 @@ const inSettings = "of the harness in the workspace's settings in Qory Apiary"
 // document to, mode 0600, and composes as -f does.
 const harnessFile = "harness.yaml"
 
+// textDocumentsBroken is the line of documents that do not pass qory's checks, with the
+// cause and [codeUsed]; a [*provisioner.BrokenRule] adds its detail on line 2.
+const textDocumentsBroken = "update qory, or ask Qory Apiary's instance admin: the response to the run code does not pass qory's checks: %v%s"
+
 // codeDocumentsOf reads documents, the documents of the answer to a run code, for a
-// step qory runs: explore, which [codeRunOf] reads further, or prebuild, which
-// [runCodePrebuild] runs. Each error is exit 1 and ends with [codeUsed].
+// step qory runs: workflow, which [codeRunOf] reads further, or prebuild, which
+// [runCodePrebuild] runs. The schema allows these two steps alone, so the check of the
+// step is a guard. Each error is exit 1. Each ends with [codeUsed], except
+// [textNoRuntime] and the error of another step, whose first lines end with it. Workflow
+// documents start an agent session, so they require run settings with a runtime.
+// Documents with no run settings, or with run settings whose runtime is missing, empty or
+// null, get that refusal before the schema check, see [lacksRuntime].
 func codeDocumentsOf(documents json.RawMessage) (contracts.Documents, error) {
+	if lacksRuntime(documents) {
+		return contracts.Documents{}, noRuntime()
+	}
 	doc, err := provisioner.ReadDocuments(documents)
+	var broken *provisioner.BrokenRule
 	switch {
+	case errors.As(err, &broken):
+		return doc, fmt.Errorf(textDocumentsBroken+"\n  %s", err, codeUsed, broken.Detail)
 	case err != nil:
-		return doc, fmt.Errorf("update qory, or ask Qory Apiary's instance admin: the response to the run code does not pass qory's checks: %v%s", err, codeUsed)
-	case doc.Step != provisioner.StepExplore && doc.Step != provisioner.StepPrebuild:
-		return doc, fmt.Errorf("update qory: the response to the run code is for the step %s, and qory runs a run code's run for the steps explore and prebuild only%s", doc.Step, codeUsed)
+		return doc, fmt.Errorf(textDocumentsBroken, err, codeUsed)
+	case doc.Step != provisioner.StepWorkflow && doc.Step != provisioner.StepPrebuild:
+		return doc, fmt.Errorf("update qory: the run code's response has a step qory does not run%s.\n  qory runs a run code's run for the steps workflow and prebuild only, and the step is %s.", codeUsed, integration.Printable(exports.Value(doc.Step, false)))
 	}
 	return doc, nil
 }
 
-// codeRunOf reads doc, the documents of the answer to a run code for the step explore.
-// Each error ends with [codeUsed]: a source of the harness document that qory does not
-// fetch is an input error, see [harnessChecked], and every other error is exit 1.
+// codeRunOf reads doc, the documents of the answer to a run code for the step workflow.
+// Each error ends with [codeUsed], [textNoRuntime] on its first line: a source of the
+// harness document that qory does not fetch is an input error, see [harnessChecked], and
+// every other error is exit 1.
 func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Workflow == "" {
 		return nil, errors.New("set a workflow for the workspace in Qory Apiary, then take the work item in again: the response to the run code has no workflow" + codeUsed)
@@ -170,41 +206,95 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	}
 	hidden := doc.HarnessHidden != nil && *doc.HarnessHidden
 	runtime, settings := provisioner.Settings(doc.RunSettings)
-	// A runtime this qory does not render has no headless start either.
-	if rt, err := render.Lookup(runtime); err != nil {
-		return nil, noHeadless(runtime)
-	} else if _, ok := rt.(render.Headless); !ok {
-		return nil, noHeadless(runtime)
+	// A workflow runs on the runtime of the workspace or of its workflow settings, which
+	// Qory Apiary sends in run_settings, required in workflow documents; qory sets no
+	// default runtime. codeDocumentsOf refuses such documents first; this check covers
+	// documents that reach codeRunOf another way.
+	if runtime == "" {
+		return nil, noRuntime()
 	}
-	var harness []byte
-	defines := doc.Harness != nil && doc.Harness.Harness.Extends == nil
+	if !slices.Contains(runRuntimes(), runtime) {
+		return nil, notRunRuntime(runtime)
+	}
 	if doc.Harness != nil {
 		if err := harnessChecked(doc.Harness, hidden); err != nil {
 			return nil, err
 		}
-		var written any = doc.Harness
-		if defines {
-			written = definedHarness{Harness: definedSection{HarnessSection: doc.Harness.Harness, Target: definedTarget{Runtime: runtime}}}
-		}
-		var err error
-		if harness, err = json.MarshalIndent(written, "", "  "); err != nil {
-			return nil, fmt.Errorf("update qory: qory could not write the harness of the response to the run code: %v%s", err, codeUsed)
-		}
-		harness = append(harness, '\n')
 	}
+	harness, err := harnessFor(doc.Harness, runtime)
+	if err != nil {
+		return nil, err
+	}
+	// The fetch reads the target's address alone: a target with no address, such as a
+	// place that is not on a host, is not fetched, and its target_version is not used.
 	target := preparation.Target{FromCode: true}
-	if doc.Target != nil {
-		target.System, target.Path, target.Version = doc.Target.System, doc.Target.Path, doc.TargetVersion
+	if doc.Target != nil && doc.Target.Address != nil {
+		target.System, target.Path, target.Version = doc.Target.Address.System, doc.Target.Address.Path, doc.TargetVersion
 	}
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, defines: defines, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: doc.FullSuite, hidden: hidden, target: target, access: doc.Access}
-	if doc.WorkItem != nil {
-		r.workItem = doc.WorkItem.ID
+	r := &codeRun{targetRef: doc.Target, runtime: runtime, settings: settings, harness: harness, harnessDoc: doc.Harness, runSettings: doc.RunSettings, shared: doc.SharedRun, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: fullSuiteIn(doc.TypeSettings), hidden: hidden, target: target, access: doc.Access}
+	if doc.Subject != nil && doc.Subject.Kind == provisioner.SubjectWorkItem {
+		r.workItem = doc.Subject.ID
 	}
 	if hidden {
 		r.named = source.NewNamed(r.phrase())
 	}
-	r.submit, r.submitModule = doc.Submit, doc.SubmitModule
+	r.deliver = doc.Deliver
 	return r, nil
+}
+
+// fullSuiteIn is full_suite of settings, the type_settings of the documents or of a
+// next-session answer: false when settings is empty, has no full_suite, or has one that
+// is not a boolean. qory checks type_settings against no schema: Qory Apiary checks it
+// against the schema of the workspace type's process when it writes it, and qory checks
+// that the schema compiles when a command reads the configuration.
+func fullSuiteIn(settings json.RawMessage) bool {
+	var members map[string]any
+	if json.Unmarshal(settings, &members) != nil {
+		return false
+	}
+	full, _ := members["full_suite"].(bool)
+	return full
+}
+
+// harnessFor is h, the documents' harness document, as qory writes it for a session of
+// runtime, nil for no document: each workflow with its access, plan and tier, and, for a
+// section that defines a stack, target.runtime set to runtime.
+func harnessFor(h *contracts.HarnessDocument, runtime string) ([]byte, error) {
+	if h == nil {
+		return nil, nil
+	}
+	var written any = h
+	if h.Harness.Extends == nil {
+		written = definedHarness{Harness: definedSection{HarnessSection: h.Harness, Target: definedTarget{Runtime: runtime}}}
+	}
+	harness, err := json.MarshalIndent(written, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("update qory: qory could not write the harness of the response to the run code: %v%s", err, codeUsed)
+	}
+	return append(harness, '\n'), nil
+}
+
+// next makes r the run of the session that a, a next-session answer of Qory Apiary's,
+// starts: its runtime and compose flags, from a's model choice, else the runtime of the
+// documents' run settings, see [provisioner.SettingsOf]; its model key, workflow,
+// inputs, time limit and the full_suite of its type_settings; and the harness document
+// written for its runtime. A runtime that a run code does not run on, and inputs that
+// [checkInputs] stops, stop the session before anything of it starts.
+func (r *codeRun) next(a contracts.NextSessionAnswer) error {
+	runtime, settings := provisioner.SettingsOf(a.ModelChoice, r.runSettings)
+	if !slices.Contains(runRuntimes(), runtime) {
+		return notRunRuntime(runtime)
+	}
+	if err := checkInputs(a.Inputs); err != nil {
+		return err
+	}
+	harness, err := harnessFor(r.harnessDoc, runtime)
+	if err != nil {
+		return err
+	}
+	r.runtime, r.settings, r.harness, r.modelCredential = runtime, settings, harness, a.ModelProviderCredentialName
+	r.workflow, r.inputs, r.minutes, r.fullSuite = a.Workflow, a.Inputs, a.TimeLimitMinutes, fullSuiteIn(a.TypeSettings)
+	return nil
 }
 
 // writes reports whether the documents of the run r give it the access to write and push
@@ -351,6 +441,25 @@ func (r *codeRun) apply(cmd *cobra.Command) error {
 	return nil
 }
 
+// applyTo sets the compose flags of r on o for a later session of the run, as [codeRun.apply]
+// sets them on the command for session 1: each flag that r's settings do not set is
+// cleared, so no model, effort or tier of an earlier session carries over.
+func (r *codeRun) applyTo(o *composeOptions) {
+	o.model, o.effort, o.tiers, o.tierEfforts = "", "", nil, nil
+	for _, s := range r.settings {
+		switch s.Flag {
+		case "model":
+			o.model = s.Value
+		case "effort":
+			o.effort = s.Value
+		case "tier":
+			o.tiers = append(o.tiers, s.Value)
+		case "tier-effort":
+			o.tierEfforts = append(o.tierEfforts, s.Value)
+		}
+	}
+}
+
 // givenMount is a mount of a walled run that wall.mounts in forager.yaml or --mount
 // adds; from is which of the two adds it, as an error prints it.
 type givenMount struct {
@@ -443,6 +552,37 @@ func (r *codeRun) readExposed(root, cwd, report string) error {
 	return nil
 }
 
+// clonesDestinations reports whether the run from the run code r skips the fetch before
+// its session, and its agent clones what it needs with qory destination clone: the
+// documents' access is read, the documents contain a harness document, and the inputs list
+// destinations. A run whose documents contain no harness document fetches its target, whose
+// harness it composes; a run that may write fetches its target, works on its branch and
+// pushes. False for a run with no run code. It reads the documents' access, not the level
+// that the composed harness's workflow lowers it to, since the fetch comes before the
+// compose.
+func (r *codeRun) clonesDestinations() bool {
+	return r != nil && r.access == stack.AccessRead && r.harness != nil && hasDestinations(r.inputs)
+}
+
+// fetchesTargetAlone reports whether the run from the run code r fetches its target and no
+// further repository of the run configuration: a read run whose inputs list destinations
+// and whose documents contain no harness document, which fetches its target only for the
+// harness of the target's repository, see [codeRun.clonesDestinations]. The agent clones
+// any other destination with qory destination clone.
+func (r *codeRun) fetchesTargetAlone() bool {
+	return r != nil && r.access == stack.AccessRead && r.harness == nil && hasDestinations(r.inputs)
+}
+
+// fetchValues is [runValues] for the fetch of the run from the run code r: with
+// [codeRun.fetchesTargetAlone], [preparation.EnvRepositories] is cut to the target, as
+// [preparation.TargetAlone] cuts it.
+func (r *codeRun) fetchValues(run openedRun) func(string) string {
+	if !r.fetchesTargetAlone() {
+		return runValues(run)
+	}
+	return preparation.TargetAlone(runValues(run), r.fetchTarget())
+}
+
 // fetchTarget is the target the fetch of the run's repositories takes, as
 // [preparation.RunAt] uses it: r's target and target_version, and none for a nil r, a
 // run not from a run code.
@@ -453,20 +593,28 @@ func (r *codeRun) fetchTarget() preparation.Target {
 	return r.target
 }
 
-// timedOutLine is the line of a run from a run code whose time limit, limit, came before
-// the runtime started: [timedOutBeforeJoin] for a run that cannot take --timeout. The
-// workflows are in the stack the harness defines, or in the base it extends: a harness
-// document does one of the two, and defines is set when it defines a stack. The
-// checkout's file may do either, so its line lists both.
-func (r *codeRun) timedOutLine(limit time.Duration, runtime string) string {
-	where := "the base of " + r.phrase()
-	switch {
-	case r.harness == nil:
-		where = r.phrase() + " or the base it extends"
-	case r.defines:
-		where = r.phrase()
+// sessionDeadline is the time at which a session whose clock starts at start reaches its
+// time limit, limit, and the zero time for a limit of 0 or below, no limit. Each session's
+// clock starts when its agent starts: qory run passes the time of session 1's join, so
+// the steps before it, which [setupLimit] bounds, do not count. A caller for a later
+// session passes that session's start.
+func sessionDeadline(start time.Time, limit time.Duration) time.Time {
+	if limit <= 0 {
+		return time.Time{}
 	}
-	return fmt.Sprintf("set a longer Time limit for the workflow %s on the Workflows page in Qory Apiary, or a longer workflows.%s.time_limit in %s: the run was cancelled at its time limit of %s, before %s started", r.workflow, r.workflow, where, limit, agentName(runtime))
+	return start.Add(limit)
+}
+
+// sessionMinute is a minute of the documents' time_limit_minutes; a test sets a shorter one.
+var sessionMinute = time.Minute
+
+// sessionLimit is the time limit of the current session of the run r: time_limit_minutes
+// of the documents for session 1, or of the next-session answer for a later session, see
+// [codeRun.next], and 0, no limit, when they set none. qory sets no
+// default: Qory Apiary writes a limit for each workflow, 180 minutes when the workspace
+// stores none. The limit counts from the agent's start, see [sessionDeadline].
+func (r *codeRun) sessionLimit() time.Duration {
+	return time.Duration(r.minutes) * sessionMinute
 }
 
 // startLine is the line qory run prints once the answer to the run code is read.
@@ -508,6 +656,102 @@ const inputsMember = "qory"
 type qoryInputs struct {
 	// HarnessExtensions is the harness report's extensions, {} for none.
 	HarnessExtensions map[string]any `json:"harness_extensions"`
+	// Outputs is the outputs of the run's stage, in the stage's order, [] for none, as
+	// [codeRun.outputs] has them.
+	Outputs []inputOutput `json:"outputs"`
+}
+
+// inputOutput is one output of the run's stage in [qoryInputs]: its type, whether the
+// stage requires it, and the type's JSON Schema from the composed harness's process.yaml
+// with the primitives written out, null for a type with none there.
+type inputOutput struct {
+	Type     string          `json:"type"`
+	Required bool            `json:"required"`
+	Schema   json.RawMessage `json:"schema"`
+}
+
+// outputs is the outputs of the stage of r's work item, from the work item snapshot of
+// [codeRun.readWorkItem], each with the schema of its type in types, the artifact types of
+// the composed harness: nil for a run with no snapshot.
+// shortcut: a type that the composed process.yaml does not define, such as a standard
+// type, has the schema null, as qory has no copy of a standard type's schema; replace it
+// when the run API gives each output's schema.
+func (r *codeRun) outputs(types []exports.ProcessType) []inputOutput {
+	if r == nil || r.snapshot == nil {
+		return nil
+	}
+	var out []inputOutput
+	for _, o := range r.snapshot.Outputs {
+		entry := inputOutput{Type: o.Type, Required: o.Required, Schema: json.RawMessage("null")}
+		for _, t := range types {
+			if t.Name == o.Type && t.Schema != nil {
+				entry.Schema = t.Schema
+			}
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// checkOutputTypes stops the run of r on a type of types, the artifact types of the
+// composed harness, whose json_schema does not convert, when the stage's outputs or the
+// documents' deliver list the type: the outputs of such a type would go unchecked. nil for r
+// nil, a run with a run key and no run code.
+func (r *codeRun) checkOutputTypes(types []exports.ProcessType) error {
+	if r == nil {
+		return nil
+	}
+	listed := map[string]bool{}
+	if r.snapshot != nil {
+		for _, o := range r.snapshot.Outputs {
+			listed[o.Type] = true
+		}
+	}
+	for _, d := range r.deliver {
+		listed[d.Type] = true
+	}
+	for _, t := range types {
+		if t.Unread != "" && listed[t.Name] {
+			return fmt.Errorf(textSchemaUnread, shownText(provisioner.ShownType(t.Name)), shownText(t.Unread))
+		}
+	}
+	return nil
+}
+
+// deliveredTypes is types, the artifact types of the composed harness, with the send of each
+// from r's deliver, the documents' deliver: a type that deliver does not list has no send. A
+// type that deliver lists and types do not define is [textDeliverNoType]: qory has no schema
+// to check its output against and no marks to fill. The harness's process.yaml sends nothing
+// on a run from a run code.
+func (r *codeRun) deliveredTypes(types []exports.ProcessType) ([]exports.ProcessType, error) {
+	out := make([]exports.ProcessType, 0, len(types))
+	for _, t := range types {
+		t.Send = ""
+		out = append(out, t)
+	}
+	if r == nil {
+		return out, nil
+	}
+	for _, d := range r.deliver {
+		i := slices.IndexFunc(out, func(t exports.ProcessType) bool { return t.Name == d.Type })
+		if i < 0 {
+			shown := shownText(provisioner.ShownType(d.Type))
+			return nil, fmt.Errorf(textDeliverNoType, shown, shown)
+		}
+		out[i].Send = d.Send
+	}
+	return out, nil
+}
+
+// harnessTypes is the artifact types of the composed harness rep: those of the process.yaml
+// of the first module in stack order that has one, and found false when no module has one.
+func harnessTypes(rep report.Report) (types []exports.ProcessType, found bool) {
+	for _, m := range rep.Modules {
+		if types, found = exports.ProcessTypes(filepath.Join(rep.Home, "modules", m.Name)); found {
+			return types, true
+		}
+	}
+	return nil, false
 }
 
 // writeInputs writes inputs.json, mode 0600, into in, the folder of [codeRun.inputsDir]:
@@ -576,10 +820,13 @@ func fillCopy(f *os.File, data []byte) error {
 
 // withQoryMember is inputs, a JSON object, with the member [inputsMember] set to q added
 // after its last member. The bytes of inputs from its opening brace to its last member
-// stay as they came, and a nil map of q is written as {}.
+// stay as they came, a nil map of q is written as {}, and nil outputs as [].
 func withQoryMember(inputs []byte, q qoryInputs) ([]byte, error) {
 	if q.HarnessExtensions == nil {
 		q.HarnessExtensions = map[string]any{}
+	}
+	if q.Outputs == nil {
+		q.Outputs = []inputOutput{}
 	}
 	value, err := json.Marshal(q)
 	if err != nil {
@@ -636,7 +883,7 @@ func (r *codeRun) workflowArgs(name string, rep report.Report, in, system string
 	}
 	h, ok := rt.(render.Headless)
 	if !ok {
-		return nil, noHeadless(name)
+		return nil, notRunRuntime(name)
 	}
 	// Every kind, the skipped ones too, so a workflow of a kind the runtime does not
 	// render gets the line with the kind it does invoke.
@@ -688,10 +935,84 @@ func (r *codeRun) harnessAt(system string) string {
 	return checkoutHarness + " for the target " + path
 }
 
-// noHeadless is the error of a run from a run code on the runtime name, which has no
-// headless start, see [render.Headless]. It is exit 1 and ends with [codeUsed].
-func noHeadless(name string) error {
-	return fmt.Errorf("set another runtime for the workspace in Qory Apiary, then take the work item in again: qory starts a run code's workflow with a runtime's headless start, and has none for %s%s", accesskey.ShownName(name, false), codeUsed)
+// textNoRuntime is the refusal of documents whose run settings name no runtime, with the
+// runtimes that a run from a run code runs on, see [runRuntimes]. Its first line ends
+// with [codeUsed] and a full stop.
+const textNoRuntime = "The run settings set no runtime, so the run did not start" + codeUsed + ".\n  qory runs one of %s."
+
+// noRuntime is the error of workflow documents with no run settings, or with run
+// settings that set no runtime. It is exit 1.
+func noRuntime() error {
+	return fmt.Errorf(textNoRuntime, listOf(runRuntimes()))
+}
+
+// lacksRuntime reports whether documents are for the step workflow, which starts an agent
+// session and so requires run settings with a runtime, and have no run_settings, a null
+// one, or run settings with no runtime, an empty one or a null one. Any other form, such as run
+// settings that are no object, is left to the schema check. A prebuild starts no agent
+// session, and the schema refuses run settings in its documents.
+func lacksRuntime(documents json.RawMessage) bool {
+	var d struct {
+		Step        string          `json:"step,case:strict"`
+		RunSettings json.RawMessage `json:"run_settings,case:strict"`
+	}
+	if json.Unmarshal(documents, &d) != nil || d.Step != provisioner.StepWorkflow {
+		return false
+	}
+	if len(d.RunSettings) == 0 || string(d.RunSettings) == "null" {
+		return true
+	}
+	var settings map[string]json.RawMessage
+	if json.Unmarshal(d.RunSettings, &settings) != nil {
+		return false
+	}
+	runtime, ok := settings["runtime"]
+	return !ok || string(runtime) == `""` || string(runtime) == "null"
+}
+
+// runRuntimes are the runtimes that a run from a run code runs on, in alphabetical
+// order: those that qory installs, see [runtimeinstall.Runtimes], that have a
+// descriptor in Forager's runtimes.json, see [foragerList], and that qory renders with
+// a headless start. The runtimes.json is embedded in the Forager module, and
+// TestForagerAndQoryListTheSameRuntimes reads it, so an error reading it gives none. A
+// test replaces the set with SetRunRuntimes.
+var runRuntimes = installedHeadlessRuntimes
+
+// installedHeadlessRuntimes is the set of [runRuntimes].
+func installedHeadlessRuntimes() []string {
+	described, _ := foragerList()
+	var names []string
+	for _, n := range runtimeinstall.Runtimes() {
+		if !slices.ContainsFunc(described, func(rt foragerRuntime) bool { return rt.Name == n }) {
+			continue
+		}
+		if rt, err := render.Lookup(n); err == nil {
+			if _, ok := rt.(render.Headless); ok {
+				names = append(names, n)
+			}
+		}
+	}
+	return names
+}
+
+// listOf is names as a list for a message: "claude and codex", or "claude, codex, and
+// gemini".
+func listOf(names []string) string {
+	switch len(names) {
+	case 0, 1:
+		return strings.Join(names, "")
+	case 2:
+		return names[0] + " and " + names[1]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + ", and " + names[len(names)-1]
+}
+
+// notRunRuntime is the error of a run from a run code on the runtime name, which is not
+// one of [runRuntimes]. Only a dispatched run gets it, so it is the cause alone, with no
+// fix line, under the user's ruling 771 (a), on two lines that each stay within 100
+// characters with "qory run: ". It is exit 1 and ends with [codeUsed].
+func notRunRuntime(name string) error {
+	return fmt.Errorf("qory runs a run code's workflow on one of %s,\n  and not on %s%s", listOf(runRuntimes()), accesskey.ShownName(name, false), codeUsed)
 }
 
 // entryKeys are rep's entries as <kind>/<name>, the form [render.Addresses] takes.
@@ -703,80 +1024,51 @@ func entryKeys(rep report.Report) []string {
 	return keys
 }
 
-// limitSubmit keeps r's submit and submit_module only for a run whose level is
-// [stack.AccessWrite], the run's [accessOf] level: a run that the stack's workflow or the
-// documents lower to write-no-push or read has no submit settings.
-func (r *codeRun) limitSubmit(level string) {
-	if r != nil && level != stack.AccessWrite {
-		r.submit, r.submitModule = nil, nil
-	}
-}
+// The lines of [codeRun.deliverLines], one for each type whose send differs between the
+// documents' deliver and the harness's process.yaml. The run uses the documents' send.
+const (
+	textDeliverDiffers   = "deliver: %s at %s from the documents; harness has %s"
+	textDeliverNoHarness = "deliver: %s at %s from the documents; harness has none"
+	textDeliverNoDocs    = "deliver: no %s from the documents; harness has %s"
+)
 
-// submitLine is the line that shows the harness's submit, the first module's in stack
-// order, beside r's when they differ, or alone when r has none. It is "" for a run whose
-// level, its [accessOf] level, is not [stack.AccessWrite], and for r nil. Line 1 has at
-// most [submitLineMax] characters with the "qory run: " that the caller adds, so a type
-// name that does not fit is shortened there, and a second line has the full name.
-func (r *codeRun) submitLine(rep report.Report, level string) string {
-	if r == nil {
-		return ""
+// deliverLines are the lines that show where the harness's deliver, of the first module in
+// stack order that has a process.yaml, differs from r's deliver, which the run uses: one for
+// each type, in the documents' order and then the harness's, with the type cut as
+// [provisioner.ShownType] cuts it. They are nil for a run whose level, its [accessOf] level,
+// is not [stack.AccessWrite], for a harness with no process.yaml, and for r nil.
+func (r *codeRun) deliverLines(rep report.Report, level string) []string {
+	if r == nil || level != stack.AccessWrite {
+		return nil
 	}
-	var typ, send string
-	found := false
-	for _, m := range rep.Modules {
-		if typ, send, found = exports.ProcessSubmit(filepath.Join(rep.Home, "modules", m.Name)); found {
-			break
+	types, found := harnessTypes(rep)
+	if !found {
+		return nil
+	}
+	harness := map[string]string{}
+	var order []string
+	for _, t := range types {
+		if t.Send != "" {
+			harness[t.Name] = t.Send
+			order = append(order, t.Name)
 		}
 	}
-	switch {
-	case !found, level != stack.AccessWrite:
-		return ""
-	case r.submit == nil:
-		line := func(typ, _ string) string {
-			return fmt.Sprintf("submit: documents have no submit, so harness's %s at %s is unused", typ, send)
+	var lines []string
+	listed := map[string]bool{}
+	for _, d := range r.deliver {
+		listed[d.Type] = true
+		send, has := harness[d.Type]
+		switch {
+		case !has:
+			lines = append(lines, fmt.Sprintf(textDeliverNoHarness, provisioner.ShownType(d.Type), d.Send))
+		case send != d.Send:
+			lines = append(lines, fmt.Sprintf(textDeliverDiffers, provisioner.ShownType(d.Type), d.Send, send))
 		}
-		return fitSubmit(line, typ, "", "The full type is "+typ+".")
-	case r.submit.Type == typ && r.submit.Send == send:
-		return ""
 	}
-	line := func(docs, harness string) string {
-		return fmt.Sprintf("submit: documents' %s at %s replaces harness's %s at %s", docs, r.submit.Send, harness, send)
+	for _, name := range order {
+		if !listed[name] {
+			lines = append(lines, fmt.Sprintf(textDeliverNoDocs, provisioner.ShownType(name), harness[name]))
+		}
 	}
-	return fitSubmit(line, r.submit.Type, typ, "The full types are "+r.submit.Type+" in the documents and "+typ+" in the harness.")
-}
-
-// submitLineMax is the most characters of line 1 of the text of [codeRun.submitLine],
-// with the "qory run: " in front of it, as for a refusal.
-const submitLineMax = 100
-
-// fitSubmit is line of a and b, whole when line 1 has at most [submitLineMax] characters
-// after "qory run: ". Otherwise it is line of a and b shortened to share what the rest
-// of line 1 leaves, each as [shortSubmitName] has it, then full on a second line. b is ""
-// for a line of one name. [exports.Fit] cannot do this: it keeps 20 characters of a
-// name, and the rest of this line has 77 or more.
-func fitSubmit(line func(a, b string) string, a, b, full string) string {
-	const prefix = "qory run: "
-	if text := line(a, b); utf8.RuneCountInString(prefix+text) <= submitLineMax {
-		return text
-	}
-	left := submitLineMax - utf8.RuneCountInString(prefix+line("", ""))
-	na, nb := utf8.RuneCountInString(a), utf8.RuneCountInString(b)
-	first := left / 2
-	if na <= first {
-		first = na
-	} else if nb <= left/2 {
-		first = left - nb
-	}
-	return line(shortSubmitName(a, first), shortSubmitName(b, left-first)) + "\n  " + full
-}
-
-// shortSubmitName is name with its middle replaced by "…" so that it has n characters,
-// and name as it is when it has at most n.
-func shortSubmitName(name string, n int) string {
-	r := []rune(name)
-	if len(r) <= n || n < 3 {
-		return name
-	}
-	head := n / 2
-	return string(r[:head]) + "…" + string(r[len(r)-(n-1-head):])
+	return lines
 }

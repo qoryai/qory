@@ -81,6 +81,14 @@ type Manifest struct {
 	// PushChecks are the checks the module declares for the files of an artifact type,
 	// one per type, in the order of the file; nil when the manifest has none.
 	PushChecks []PushCheck
+	// SubmitProgram is the program of the submit step the module ships, nil when the
+	// manifest has no submit_program key. See [SubmitProgram].
+	SubmitProgram *SubmitProgram
+	// ScopeChecks are the scope checks the module declares, by the artifact type of a
+	// plan: for each type, one command, the program, a path inside the module, cleaned,
+	// and its arguments. Nil when the manifest has none.
+	// Only a module of a run's base stack counts, see ScopeChecks of the compose result.
+	ScopeChecks map[string][]string
 	// Contracts are the role contracts the module declares, each the path of the
 	// contract file inside the module, cleaned, keyed <kind>/<role>: the path in the
 	// role's map form, roles: {agents: {developer: {fill: one, contract: <path>}}}. Nil
@@ -91,7 +99,7 @@ type Manifest struct {
 // PushCheck is one check a module declares for the files of one artifact type.
 type PushCheck struct {
 	// Type is the artifact type: lowercase letters and digits in groups joined by single
-	// hyphens, at most 64 bytes.
+	// hyphens, starting with a letter, at most 64 bytes.
 	Type string
 	// Command is the program and its arguments. The program is a path inside the module,
 	// relative to its root, cleaned.
@@ -99,6 +107,15 @@ type PushCheck struct {
 	// Reads are the other artifact types the check reads, each once, in the order of the
 	// file; nil for none.
 	Reads []string
+}
+
+// SubmitProgram is the program a module ships for the submit step of a local run: it reads
+// the draft document and writes the forge's links and draft into it. A composed harness has at
+// most one.
+type SubmitProgram struct {
+	// Command is the program and its arguments. The program is a path inside the module,
+	// relative to its root, cleaned, with no .. part.
+	Command []string
 }
 
 // InsideModule reports whether path is a relative path that stays inside the module:
@@ -129,6 +146,15 @@ type rawManifest struct {
 	Roles       yaml.Node              `yaml:"roles,omitempty"`
 	Provides    yaml.Node              `yaml:"provides,omitempty"`
 	PushChecks  []rawPushCheck         `yaml:"push_checks,omitempty"`
+	// SubmitProgram is the submit_program item as it is written; nil when absent.
+	SubmitProgram *rawSubmitProgram `yaml:"submit_program,omitempty"`
+	ScopeChecks   yaml.Node         `yaml:"scope_checks,omitempty"`
+}
+
+// rawSubmitProgram is the submit_program item as it is written. The command's items stay
+// nodes for the reason [rawPushCheck] gives.
+type rawSubmitProgram struct {
+	Command []yaml.Node `yaml:"command"`
 }
 
 // rawPushCheck is one push_checks item as it is written. The command's items stay nodes,
@@ -190,6 +216,26 @@ type Entry struct {
 	// every change, and for every other kind. A renderer leaves the key out of the
 	// agent's file.
 	Paths []string
+	// Note is the note a skill is, read from its SKILL.md frontmatter keys notes_for and
+	// paths; nil for a skill without notes_for and for every other kind.
+	Note *Note
+}
+
+// Note is a skill that carries knowledge for the agents that fill some roles, a note that a
+// script attaches to the start of such an agent when a change touches one of its paths.
+type Note struct {
+	// Roles are the roles the frontmatter key notes_for lists, as written: developer, not
+	// agents/developer. A single value reads as a list of one. None is empty.
+	Roles []string
+	// Paths are the globs of the frontmatter key paths, from the checkout root, as
+	// written, at least one, none empty, in the grammar of an agent's paths.
+	Paths []string
+	// Err is the refusal of a note whose keys are wrong, with [exports.ModulePlace] for
+	// the module and the file filled in; nil for a note that reads. Reading a module
+	// refuses nothing: the compose returns Err only for a skill it includes, so a skill
+	// that an exclude or an only leaves out is never checked. Roles and Paths are empty
+	// with Err.
+	Err error
 }
 
 // Module is a module read from disk.
@@ -468,6 +514,12 @@ func parseManifest(dir string, data []byte, err error) (*Manifest, error) {
 	if m.PushChecks, err = readPushChecks(path, raw.PushChecks); err != nil {
 		return nil, err
 	}
+	if m.SubmitProgram, err = readSubmitProgram(path, raw.SubmitProgram); err != nil {
+		return nil, err
+	}
+	if m.ScopeChecks, err = readScopeChecks(path, &raw.ScopeChecks); err != nil {
+		return nil, err
+	}
 	if m.Contracts, err = readContracts(path, &raw.Roles); err != nil {
 		return nil, err
 	}
@@ -530,7 +582,7 @@ func readPushChecks(path string, items []rawPushCheck) ([]PushCheck, error) {
 	refuse := func(fix string, lines ...string) error {
 		return exports.Refuse(fix, append(lines, "The manifest is "+path+".")...)
 	}
-	const typeRule = "An artifact type is lowercase letters and digits in groups joined by single hyphens, at most 64 bytes."
+	const typeRule = "An artifact type is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes."
 	for i, item := range items {
 		if !runapi.ArtifactName(item.Type) {
 			return nil, refuse(fmt.Sprintf("Set push_checks[%d].type to an artifact type.", i), typeRule, "The value is "+exports.Value(item.Type, true)+".")
@@ -566,6 +618,83 @@ func readPushChecks(path string, items []rawPushCheck) ([]PushCheck, error) {
 			reads = append(reads, node.Value)
 		}
 		out = append(out, PushCheck{Type: item.Type, Command: command, Reads: reads})
+	}
+	return out, nil
+}
+
+// readSubmitProgram checks the submit_program item of the manifest at path: a command
+// whose first item is a path inside the module with no .. part, and whose other items are
+// strings. It returns the item with the program's path cleaned, nil for none.
+func readSubmitProgram(path string, item *rawSubmitProgram) (*SubmitProgram, error) {
+	if item == nil {
+		return nil, nil
+	}
+	refuse := func(fix string, lines ...string) error {
+		return exports.Refuse(fix, append(lines, "The manifest is "+path+".")...)
+	}
+	if len(item.Command) == 0 {
+		return nil, refuse("Set submit_program.command to the program's path inside the module, then its arguments.", "The list is empty.")
+	}
+	words := make([]string, len(item.Command))
+	for i, node := range item.Command {
+		if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
+			return nil, refuse(fmt.Sprintf("Set submit_program.command[%d] to a string, quoted when it reads as a number or a boolean.", i), "The item is not a string.")
+		}
+		words[i] = node.Value
+	}
+	program, ok := InsideModule(words[0])
+	if !ok || slices.Contains(strings.Split(filepath.ToSlash(words[0]), "/"), "..") {
+		return nil, refuse("Set the first item of submit_program.command to a path inside the module.", exports.Value(words[0], true)+" is not one.")
+	}
+	return &SubmitProgram{Command: append([]string{program}, words[1:]...)}, nil
+}
+
+// readScopeChecks checks the scope_checks key of the manifest at path, a map from an
+// artifact type, in the form [runapi.ArtifactName] checks, each type once, to one command.
+// A command is a list of strings that is not empty, with a first item that is a path
+// inside the module with no .. part. It returns the map with each program's path cleaned,
+// nil for a manifest with no key.
+func readScopeChecks(path string, node *yaml.Node) (map[string][]string, error) {
+	if node.Kind == 0 {
+		return nil, nil
+	}
+	refuse := func(fix string, lines ...string) error {
+		return exports.Refuse(fix, append(lines, "The manifest is "+path+".")...)
+	}
+	const typeRule = "An artifact type is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes."
+	if node.Kind != yaml.MappingNode {
+		return nil, refuse("Set scope_checks to a map from an artifact type to a command.", "The value is not a map.")
+	}
+	out := map[string][]string{}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, command := node.Content[i], node.Content[i+1]
+		if key.Kind != yaml.ScalarNode || !runapi.ArtifactName(key.Value) {
+			return nil, refuse("Set each key of scope_checks to an artifact type.", typeRule, "The key is "+exports.Value(key.Value, true)+".")
+		}
+		typ := key.Value
+		if _, dup := out[typ]; dup {
+			return nil, refuse(fmt.Sprintf("Remove one of the two scope_checks keys for %s.", typ), "A manifest has one command per type.")
+		}
+		at := "scope_checks." + typ
+		if command.Kind != yaml.SequenceNode || len(command.Content) == 0 {
+			return nil, refuse(fmt.Sprintf("Set %s to the program's path inside the module, then its arguments.", at), "The value is not a list, or the list is empty.")
+		}
+		words := make([]string, len(command.Content))
+		for k, word := range command.Content {
+			if word.Kind == yaml.SequenceNode {
+				return nil, refuse("Give each plan type of scope_checks one command, a list of strings, not a list of lists.", fmt.Sprintf("%s[%d] is a list.", at, k))
+			}
+			if word.Kind != yaml.ScalarNode || word.Tag != "!!str" {
+				return nil, refuse(fmt.Sprintf("Set %s[%d] to a string, quoted when it reads as a number or a boolean.", at, k), "The item is not a string.")
+			}
+			words[k] = word.Value
+		}
+		// No .. part at all, as the schema has it, though a/../b would stay inside.
+		program, ok := InsideModule(words[0])
+		if !ok || slices.Contains(strings.Split(filepath.ToSlash(words[0]), "/"), "..") {
+			return nil, refuse(fmt.Sprintf("Set the first item of %s to a path inside the module.", at), exports.Value(words[0], true)+" is not one.")
+		}
+		out[typ] = append([]string{program}, words[1:]...)
 	}
 	return out, nil
 }
@@ -759,6 +888,7 @@ func ReadWith(name, dir string, m *Manifest, variant string, readFile func(path 
 		l.Entries[i].Front = refs.front
 		l.Entries[i].In = refs.in
 		l.Entries[i].Paths = refs.paths
+		l.Entries[i].Note = refs.note
 	}
 	sort.Slice(l.Entries, func(i, j int) bool {
 		if l.Entries[i].Kind != l.Entries[j].Kind {
@@ -1149,17 +1279,18 @@ func (r *skillReader) add(at, name, path string) error {
 	return nil
 }
 
-// fits reports whether line, the first line of a refusal, has at most 100 characters, with
+// fits reports whether line, the first line of a refusal, has at most [exports.LineMax]
+// characters, so it has at most 100 under the "✗ " that qory prints before it, with
 // [exports.ModulePlace] in it a module as long as a refusal prints one: "module " and a
 // name of [exports.NameMax] characters.
 func fits(line string) bool {
 	line = strings.ReplaceAll(line, exports.ModulePlace, strings.Repeat("m", len("module ")+exports.NameMax))
-	return utf8.RuneCountInString(line) <= 100
+	return utf8.RuneCountInString(line) <= exports.LineMax
 }
 
 // jsonObjectRefusal is the refusal of the MCP server file, a path in the module as a
 // message prints it, whose content is no JSON object. The path moves to the second line
-// when it would push the first past 100 characters.
+// when it would push the first past 98 characters.
 func jsonObjectRefusal(file, cause string) error {
 	fix := fmt.Sprintf("Write %s in %s as one JSON object.", file, exports.ModulePlace)
 	if !fits(fix) {

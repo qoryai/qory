@@ -1,0 +1,4 @@
+apiVersion: qory.dev/v1alpha1
+name: forge
+submit_program:
+  command: [bin/open-draft]

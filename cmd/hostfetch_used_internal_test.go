@@ -35,7 +35,7 @@ func TestAComposeLineOfAHiddenHarnessEndsWithTheUsedCode(t *testing.T) {
 		exit int
 	}{
 		{"https", input(&source.SchemeError{URL: "http://git.example/x", Name: "the module tools"}),
-			"use an https URL for the module tools" + takeIn + "a run from a control plane fetches git sources only over https" + used, ExitInput},
+			"use an https URL for the module tools, then take the work item in again.\n  A run from a control plane fetches git sources only over https" + used, ExitInput},
 		{"a gone ref", input(&source.GoneError{URL: "https://git.example/x", Ref: "r", Name: "the module tools"}),
 			"set the ref of the module tools to a branch, tag or commit its repository has" + takeIn + "the repository of the module tools has no branch or tag by the ref it is set to" + used, ExitInput},
 		{"an export, under a module", input(fmt.Errorf("module tools: %w", &source.ExportGoneError{Where: "the module tools", Export: "module tools"})),

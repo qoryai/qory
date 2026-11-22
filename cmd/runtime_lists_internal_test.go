@@ -6,6 +6,7 @@ import (
 
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/render"
+	"github.com/qoryai/qory/internal/runtimeinstall"
 )
 
 // foragerRuntimes is the names in Forager's runtime list, in its order.
@@ -23,7 +24,7 @@ func foragerRuntimes() ([]string, error) {
 
 // runsBare are the runtimes qory starts that are not in Forager's runtimes.json: Forager
 // runs each as a bare runtime until its descriptor is added there.
-var runsBare = []string{"codex", "gemini", "opencode", "amp", "cursor", "copilot"}
+var runsBare = []string{"gemini", "opencode", "amp", "cursor", "copilot"}
 
 // listsDiffer are the lines on which listed, the runtimes of Forager's runtimes.json,
 // starts, the runtimes qory renders with a launch template, and bare, [runsBare],
@@ -66,8 +67,9 @@ func launchers() []string {
 
 // TestForagerAndQoryListTheSameRuntimes compares Forager's runtimes.json, at the pinned
 // Forager module, with the runtimes qory starts: each runtime in the list has a render
-// package with a launch template, and each runtime qory starts is in the list or in
-// [runsBare]. any and goose have no launch template and are left out.
+// package with a launch template, each runtime qory starts is in the list or in
+// [runsBare], and each runtime qory installs is in the list. any and goose have no
+// launch template and are left out.
 func TestForagerAndQoryListTheSameRuntimes(t *testing.T) {
 	listed, err := foragerRuntimes()
 	if err != nil {
@@ -78,6 +80,11 @@ func TestForagerAndQoryListTheSameRuntimes(t *testing.T) {
 	}
 	for _, line := range listsDiffer(listed, launchers(), runsBare) {
 		t.Error(line)
+	}
+	for _, name := range runtimeinstall.Runtimes() {
+		if !slices.Contains(listed, name) {
+			t.Errorf("add a descriptor for %s to Forager, or delete its npm package from internal/runtimeinstall: qory installs it, and it is not in Forager's runtimes.json", name)
+		}
 	}
 }
 

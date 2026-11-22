@@ -2,16 +2,18 @@
 // run's first session, from the publisher's npm tarball: from the runtime cache of the
 // instance's registry, [RegistryFetch], or from npm, [NpmFetch].
 //
-// [Install] asks its [Fetch] for the runtime's newest release: the version, npm's
-// sha512 checksum of the tarball, and a way to open the tarball. It takes the run's hold
-// of the version, which keeps the version's folder until the run ends, and removes the
-// older versions' folders that an install made, and the temporary entries, that no run
-// holds. It uses the folder <Folder>/<runtime>/<version> when an earlier install of a
-// tarball with the same checksum made it, and opens no tarball then. Otherwise it takes
-// the version's install lock, so that a second run that needs the same version waits and
-// then uses the folder, reads the tarball into a temporary file, checks its checksum, and
-// extracts only package/<runtime> to bin/<runtime> in a temporary folder, which it then
-// renames to the version's folder: a folder at that path is always a complete install.
+// [Install] calls [Fetch] for a release of the runtime, the version that
+// [Options.Version] pins, or else the newest: the version, npm's sha512 checksum of the
+// tarball, and a way to open the tarball. It takes the run's hold of the version, which
+// keeps the version's folder until the run ends, and removes the older versions' folders
+// that an install made, and the temporary entries, that no run holds. It uses the folder
+// <Folder>/<runtime>/<version> when an earlier install of a tarball with the same
+// checksum made it, and opens no tarball then. Otherwise it takes the version's install
+// lock, so that a second run that needs the same version waits and then uses the folder,
+// reads the tarball into a temporary file, checks its checksum, and extracts into a
+// temporary folder either the program's entry, [Release.Program], to bin/<runtime>, or
+// the release's folder, [Release.Folder], whole. It then renames that folder to the
+// version's folder: a folder at that path is always a complete install.
 package runtimeinstall
 
 import (
@@ -23,7 +25,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -47,11 +51,32 @@ var (
 	// first a letter or a digit, so the version is one folder name and never . or ..;
 	// Forager takes 1 to 64 of the same characters.
 	versionShape = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$`)
+	// pinShape is a version a stack may pin: a digit, then up to 31 letters, digits, . or
+	// -, 32 characters at most, so that the line of a run from a run code for a pin the
+	// registry does not have, "; the code is used" included, fits in 100 characters. It
+	// has no +, which an OCI tag, the registry's tag <version>, does not allow.
+	pinShape = regexp.MustCompile(`^[0-9][0-9A-Za-z.-]{0,31}$`)
 	// runtimeShape is a runtime's name, as Forager's descriptor schema has it.
 	runtimeShape = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 	// digestShape is a sha256 digest.
 	digestShape = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
+
+// ValidVersion reports whether v is a version a stack may pin, [pinShape]: a digit
+// first, so that a dist-tag such as latest is not one, and no +.
+func ValidVersion(v string) bool {
+	return pinShape.MatchString(v)
+}
+
+// NotPublishedError is the error of a [Fetch] whose source has no release of Runtime at
+// the pinned Version: npm returned 404 for the version's document, or the registry's
+// runtime cache returned 404 for the version's tag. Its text is the cause alone: the
+// caller adds the fix, with the file that pins the version.
+type NotPublishedError struct{ Runtime, Version string }
+
+func (e *NotPublishedError) Error() string {
+	return fmt.Sprintf("the registry has no %s %s", e.Runtime, e.Version)
+}
 
 // checkError is an error of a release's tarball reader whose text starts with its fix,
 // such as bytes that do not match the layer's digest: Install returns it as it is.
@@ -61,7 +86,7 @@ func (e *checkError) Error() string { return e.err.Error() }
 
 func (e *checkError) Unwrap() error { return e.err }
 
-// Release is a runtime's newest release, as a [Fetch] returns it.
+// Release is a runtime's release, as a [Fetch] returns it.
 type Release struct {
 	// Version is the publisher's version, such as 2.1.320.
 	Version string
@@ -69,21 +94,58 @@ type Release struct {
 	// digest in base64.
 	Integrity string
 	// Open opens the tarball, npm's gzip tar archive of the package for the machine's
-	// platform, whose program is package/<runtime>. Install calls it at most once, and
+	// platform, whose program is the entry Program. Install calls it at most once, and
 	// only when the version's folder is not complete.
 	Open func(ctx context.Context) (io.ReadCloser, error)
+	// Program is the entry of the program in the tarball, see [layout]; "" stands for
+	// package/<runtime>. Install extracts only this entry, to bin/<runtime>.
+	Program string
+	// Signed is the package and version that npm signs, <package>@<version>, such as
+	// @openai/codex@0.170.0-linux-x64, and Signatures are npm's signatures of
+	// <Signed>:<Integrity>. Install checks them before it uses the release.
+	Signed     string
+	Signatures []Signature
+	// Folder, when it is set, is a folder of the tarball, ending in /, see [layout].
+	// Install extracts it whole, in its layout, as the version's folder, in place of
+	// Program: the folder's bin/<runtime> is the program.
+	Folder string
 }
 
-// Fetch returns the newest release of the runtime. Every error's text starts with what
-// to fix: Install returns it as it is.
-type Fetch func(ctx context.Context, runtime string) (Release, error)
+// folderFiles are the files beside bin/<runtime> that a runtime's folder, see [layout],
+// must contain, by their paths in the folder: the program runs them, so an install
+// without one would fail later, in the session.
+var folderFiles = map[string][]string{
+	"codex": {"codex-resources/bwrap", "codex-path/rg", "bin/codex-code-mode-host"},
+}
+
+// layout is where runtime's program is in the npm tarball of its build for linux/arch,
+// as a [Release] has it. Codex's build is the folder package/vendor/<x86_64 or
+// aarch64>-unknown-linux-musl/: its codex-package.json sets bin/codex as the entry point
+// and codex-resources and codex-path as the folders of its helpers, such as
+// codex-resources/bwrap and codex-path/rg, and bin/codex-code-mode-host is beside
+// bin/codex. Install extracts that folder whole. Any other runtime's program is the one
+// entry package/<runtime>, such as package/claude for Claude Code.
+func layout(runtime, arch string) (program, folder string) {
+	if runtime == "codex" {
+		triple := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[arch]
+		return "", "package/vendor/" + triple + "-unknown-linux-musl/"
+	}
+	return "package/" + runtime, ""
+}
+
+// Fetch returns the release of the runtime at version, or the newest release when
+// version is "". A version the source does not have is a [*NotPublishedError]. Every
+// other error's text starts with what to fix: Install returns it as it is.
+type Fetch func(ctx context.Context, runtime, version string) (Release, error)
 
 // Options are what [Install] installs, and where from.
 type Options struct {
-	// Fetch returns the runtime's newest release.
+	// Fetch returns the runtime's release.
 	Fetch Fetch
 	// Runtime is the runtime's name, Forager's descriptor name, such as claude.
 	Runtime string
+	// Version is the version a stack pins, see [ValidVersion]; "" installs the newest.
+	Version string
 	// Folder is where the versions are kept: <Folder>/<Runtime>/<version>.
 	Folder string
 	// Mounted, when set, returns the host folders that running containers mount. The
@@ -94,6 +156,9 @@ type Options struct {
 	// Progress, when set, gets a line, with no prefix, when a registry fetch waits for
 	// the registry: at the first retry, and every five minutes after that.
 	Progress func(line string)
+	// Keys are the keys that npm signs with; nil stands for [NpmKeys], the keys built
+	// into qory.
+	Keys []SigningKey
 }
 
 // Installed is a runtime that [Install] installed, or found installed.
@@ -123,9 +188,11 @@ func (i *Installed) Release() {
 // Program is the path of the runtime's program: <Dir>/bin/<Runtime>.
 func (i Installed) Program() string { return filepath.Join(i.Dir, "bin", i.Runtime) }
 
-// textRelease is the first line of each refusal of what the fetch returned: the fix. The
-// cause follows on the second line.
-const textRelease = "Check the source of the runtime's releases\n"
+// textRelease is the first line of each refusal of what the fetch of runtime returned:
+// the fix. The cause follows on lines indented two spaces, each sentence with a full stop.
+func textRelease(runtime string) string {
+	return "Check the source of " + runtime + "'s releases."
+}
 
 // Install installs the runtime o names, as the package's documentation says, and
 // returns it. It takes as long as ctx allows. Every error's text starts with what to
@@ -136,21 +203,43 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 			"%q is not a runtime's name, which has 1 to 64 characters.", o.Runtime)
 	}
 	if !filepath.IsAbs(o.Folder) {
-		return Installed{}, fmt.Errorf("Keep runtimes in an absolute folder\n%q is not one.", o.Folder)
+		return Installed{}, fmt.Errorf("Keep runtimes in an absolute folder\nThe folder for runtimes is not an absolute path:\n  %q", o.Folder)
+	}
+	if o.Version != "" && !ValidVersion(o.Version) {
+		return Installed{}, fmt.Errorf("Pin an exact version of %s, such as 2.1.320\n"+
+			"The pinned version is %q, and an exact version starts with a digit, followed by up to 31 letters, digits, . or -.", o.Runtime, o.Version)
 	}
 	if o.Progress != nil {
 		ctx = context.WithValue(ctx, progressKey{}, o.Progress)
 	}
-	rel, err := o.Fetch(ctx, o.Runtime)
+	rel, err := o.Fetch(ctx, o.Runtime, o.Version)
 	if err != nil {
 		return Installed{}, err
 	}
+	// A pinned install checks the pin first: a release of the pin has the pin's shape, so
+	// only an install of the newest gets the text of the newest's version.
+	if o.Version != "" && rel.Version != o.Version {
+		got := rel.Version
+		if !versionShape.MatchString(got) {
+			got = strconv.Quote(got)
+		}
+		return Installed{}, fmt.Errorf(textRelease(o.Runtime)+"\n  The source returned %s %s, and the pinned version is %s.", o.Runtime, got, o.Version)
+	}
 	if !versionShape.MatchString(rel.Version) {
-		return Installed{}, fmt.Errorf(textRelease+"The newest %s has the version %q, and a version is 1 to 64 letters, digits, ., + or -, the first a letter or a digit", o.Runtime, rel.Version)
+		return Installed{}, fmt.Errorf(textRelease(o.Runtime)+"\n  The newest %s has the version %q, and a version is 1 to 64 letters, digits, ., + or -, the first a letter or a digit.", o.Runtime, rel.Version)
 	}
 	sum, err := sha512Of(rel.Integrity)
 	if err != nil {
-		return Installed{}, fmt.Errorf(textRelease+"The checksum of %s %s is not sha512- and 64 bytes in base64", o.Runtime, rel.Version)
+		return Installed{}, fmt.Errorf(textRelease(o.Runtime)+"\n  The checksum of %s %s is not sha512- and 64 bytes in base64.", o.Runtime, rel.Version)
+	}
+	keys := o.Keys
+	if keys == nil {
+		if keys, err = NpmKeys(); err != nil {
+			return Installed{}, fmt.Errorf("Update qory.\n%w", err)
+		}
+	}
+	if err := verify(rel, keys, time.Now(), o.Runtime, o.Version != ""); err != nil {
+		return Installed{}, err
 	}
 	f := folder{base: filepath.Join(o.Folder, o.Runtime), runtime: o.Runtime}
 	if o.Mounted != nil {
@@ -170,7 +259,7 @@ func Install(ctx context.Context, o Options) (Installed, error) {
 		return in, nil
 	case rel.Open == nil:
 		in.Release()
-		return Installed{}, errors.New(textRelease + "It returned no tarball")
+		return Installed{}, fmt.Errorf(textRelease(o.Runtime)+"\n  The source of the runtime's releases returned no tarball\n  of %s %s.", o.Runtime, rel.Version)
 	}
 	// A second run that needs the version waits here for the run that reads its tarball,
 	// and then finds the folder.

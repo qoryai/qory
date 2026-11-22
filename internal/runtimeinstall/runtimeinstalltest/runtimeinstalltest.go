@@ -21,10 +21,11 @@ import (
 )
 
 // Entry is one entry of a test tarball: a regular file with Body when Kind is 0, else
-// an entry of Kind, such as a link to Link.
+// an entry of Kind, such as a link to Link. Mode is the entry's mode, 0644 when it is 0.
 type Entry struct {
 	Name, Body, Link string
 	Kind             byte
+	Mode             int64
 }
 
 // Tarball is a gzip tar archive of the entries, as npm packs a package.
@@ -38,7 +39,11 @@ func Tarball(t *testing.T, entries ...Entry) []byte {
 		if kind == 0 {
 			kind = tar.TypeReg
 		}
-		h := &tar.Header{Name: e.Name, Typeflag: kind, Mode: 0o644, Linkname: e.Link}
+		mode := e.Mode
+		if mode == 0 {
+			mode = 0o644
+		}
+		h := &tar.Header{Name: e.Name, Typeflag: kind, Mode: mode, Linkname: e.Link}
 		if kind == tar.TypeReg {
 			h.Size = int64(len(e.Body))
 		}
@@ -63,6 +68,40 @@ func Tarball(t *testing.T, entries ...Entry) []byte {
 // Program is the program of version in [PlainTarball].
 func Program(version string) string {
 	return "#!/bin/sh\necho claude " + version + "\n"
+}
+
+// CodexProgram is the program of version in [CodexTarball].
+func CodexProgram(version string) string {
+	return "#!/bin/sh\necho codex " + version + "\n"
+}
+
+// CodexTarball is a tarball of Codex's build of version for linux/arch, amd64 or arm64,
+// in the layout of npm's @openai/codex@0.170.0-linux-x64 and -linux-arm64: the folder
+// package/vendor/<x86_64 or aarch64>-unknown-linux-musl/ with the program bin/codex and
+// the files beside it, see [CodexFolder], and package/package.json and package/codex
+// outside it. As in npm's tarball, the archive has no entries for folders.
+func CodexTarball(t *testing.T, version, arch string) []byte {
+	triple := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[arch] + "-unknown-linux-musl"
+	entries := []Entry{{Name: "package/package.json", Body: `{"name":"@openai/codex"}`}}
+	for _, f := range CodexFolder(version + " " + arch) {
+		entries = append(entries, Entry{Name: "package/vendor/" + triple + "/" + f.Name, Body: f.Body, Mode: f.Mode})
+	}
+	return Tarball(t, append(entries, Entry{Name: "package/codex", Body: "not the program\n"})...)
+}
+
+// CodexFolder is the folder of Codex's build of version in [CodexTarball], by each
+// file's path in the folder: the program bin/codex, bin/codex-code-mode-host,
+// codex-resources/bwrap and codex-path/rg, each mode 0755, and codex-package.json and
+// codex-resources/voice/manifest.json, mode 0644.
+func CodexFolder(version string) []Entry {
+	return []Entry{
+		{Name: "bin/codex", Body: CodexProgram(version), Mode: 0o755},
+		{Name: "bin/codex-code-mode-host", Body: "#!/bin/sh\necho code mode host\n", Mode: 0o755},
+		{Name: "codex-resources/bwrap", Body: "#!/bin/sh\necho bwrap\n", Mode: 0o755},
+		{Name: "codex-path/rg", Body: "#!/bin/sh\necho rg\n", Mode: 0o755},
+		{Name: "codex-package.json", Body: `{"layoutVersion":1,"entrypoint":"bin/codex","resourcesDir":"codex-resources","pathDir":"codex-path"}` + "\n", Mode: 0o644},
+		{Name: "codex-resources/voice/manifest.json", Body: "{}\n", Mode: 0o644},
+	}
 }
 
 // PlainTarball is a tarball of the claude package of version.
@@ -119,8 +158,8 @@ func (s *Source) Fail(err error) {
 	s.err = err
 }
 
-// Fetch is the source's [runtimeinstall.Fetch].
-func (s *Source) Fetch(_ context.Context, runtime string) (runtimeinstall.Release, error) {
+// Fetch is the source's [runtimeinstall.Fetch]: it returns the newest release whatever the version.
+func (s *Source) Fetch(_ context.Context, runtime, _ string) (runtimeinstall.Release, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.fetches++
@@ -129,8 +168,10 @@ func (s *Source) Fetch(_ context.Context, runtime string) (runtimeinstall.Releas
 		return runtimeinstall.Release{}, s.err
 	}
 	tarball := s.tarball
+	signed := "@anthropic-ai/claude-code-linux-x64@" + s.version
 	return runtimeinstall.Release{
 		Version: s.version, Integrity: s.integrity,
+		Signed: signed, Signatures: Signatures(signed, s.integrity),
 		Open: func(context.Context) (io.ReadCloser, error) {
 			s.mu.Lock()
 			s.opens++

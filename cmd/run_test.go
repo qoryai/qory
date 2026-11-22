@@ -902,7 +902,10 @@ var containerRun = regexp.MustCompile(`(?m)^run `)
 // exec: this test binary through its QORY_TEST_EXEC hook, with Forager's arguments, in
 // place of qory's Linux build inside, which this machine does not have at its path; the
 // program after its -- starts through the script again, without the hook's variable.
-// The run's preparation script runs as it is, with a program that exits 0 in place of
+// The agent-env step of a walled run of Claude Code is skipped, and the launch after its
+// -- starts through the script again: the verb makes the agent's home at a fixed path
+// of the container, which this machine shares between tests or, on a Mac, has below a
+// link. The run's preparation script runs as it is, with a program that exits 0 in place of
 // each setup command, which runs through qory's Linux build inside. A run on a machine that holds an access key needs a wall;
 // this one lets such a run reach its runtime as an unwalled run would. It runs the arms
 // of [agentImageAnswers] for the agent image and an agent's container with a transcript
@@ -945,6 +948,11 @@ if [ "$1" = `+wall.HelperPath+` ] && [ "$2" = run ] && [ "$3" = exec ]; then
 		set -- "$@" "$a"
 	done
 	QORY_TEST_EXEC=1 exec '`+bin+`' -test.run='^$' -- "$@"
+fi
+if [ "$1" = `+wall.HelperPath+` ] && [ "$2" = run ] && [ "$3" = agent-env ]; then
+	while [ $# -gt 0 ] && [ "$1" != -- ]; do shift; done
+	shift
+	exec /bin/sh `+enter+` - "$@"
 fi
 if [ "$1" = /bin/sh ] && [ "${2##*/}" = `+session.PreparationScript+` ]; then
 	sed "s|^setup .*|true|" "$2" > `+prepared+`
@@ -2137,7 +2145,7 @@ func TestResendSaysTheServerWantsNoMoreEvents(t *testing.T) {
 func TestRunRunsARuntimeTheForagerShipsNothingFor(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	script := filepath.Join(t.TempDir(), "fake-codex")
+	script := filepath.Join(t.TempDir(), "fake-gemini")
 	writeFile(t, script, `#!/bin/sh
 echo '{"kind":"done","text":"all good","session":"s-1","ok":true}'
 test -n "$QORY_TEST_WAIT" || exit 0
@@ -2151,20 +2159,20 @@ sleep 30 & wait
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "qory.yaml"), `apiVersion: qory.dev/v1alpha1
 harness:
   launch:
-    codex:
+    gemini:
       command: `+script+`
       args: []
 `)
-	if out, err := run(t, "harness", "compose", "--runtime", "codex", "--no-links"); err != nil {
+	if out, err := run(t, "harness", "compose", "--runtime", "gemini", "--no-links"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	out, err := run(t, "run", "codex", "--headless")
+	out, err := run(t, "run", "gemini", "--headless")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	wants(t, out, "codex exited 0")
+	wants(t, out, "gemini exited 0")
 	dir, evs := events(t, root)
-	if started := sessionStarted(t, evs); started["runtime"] != "codex" || started["runtime_version"] != nil {
+	if started := sessionStarted(t, evs); started["runtime"] != "gemini" || started["runtime_version"] != nil {
 		t.Errorf("session.started %v", started)
 	}
 	if len(evs["dev.qory.runtime.result"]) != 0 || len(evs["dev.qory.run.exited"]) != 1 {
@@ -2177,8 +2185,8 @@ harness:
 		t.Fatal(err)
 	}
 
-	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", cmd.DescriptorsDir, "codex.yaml"), `version: 1
-runtime: codex
+	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", cmd.DescriptorsDir, "gemini.yaml"), `version: 1
+runtime: gemini
 sources:
   output: {format: jsonl}
 stop: {signal: SIGHUP}
@@ -2190,7 +2198,7 @@ rules:
 `)
 	t.Setenv("QORY_TEST_WAIT", "1")
 	// A short grace: the runtime's sleep holds its output open until the grace ends, 10s by default.
-	out, err = run(t, "run", "codex", "--headless", "--timeout", "500ms", "--stop-grace", "1s")
+	out, err = run(t, "run", "gemini", "--headless", "--timeout", "500ms", "--stop-grace", "1s")
 	if cmd.ExitCode(err) != 124 {
 		t.Fatalf("%v\n%s", err, out)
 	}

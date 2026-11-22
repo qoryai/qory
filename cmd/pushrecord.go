@@ -103,7 +103,7 @@ func sendPushed(ctx context.Context, send pushedSender, body []byte) error {
 	var last error
 	for attempt := range recordAttempts {
 		if attempt > 0 {
-			if err := branchWait(ctx, recordWaits[attempt-1]); err != nil {
+			if err := submissionWait(ctx, recordWaits[attempt-1]); err != nil {
 				return err
 			}
 		}

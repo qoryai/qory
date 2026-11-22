@@ -9,20 +9,29 @@ import (
 )
 
 // TestAPersonsRunLoadsAsBefore is a run without a run key, behind a wall and without
-// one: the launch has no --strict-mcp-config and no MCP list qory adds, the agent's
-// environment no CLAUDE_CONFIG_DIR, and the container starts the launch itself, not
-// through the agent-env verb; those are a dispatched walled run's.
+// one: the launch has no --strict-mcp-config and no MCP list qory adds; those are a
+// dispatched run's. Without a wall, the agent's environment has no CLAUDE_CONFIG_DIR
+// and the launch starts without the agent-env verb. Behind a wall, as on a dispatched
+// walled run, CLAUDE_CONFIG_DIR is the agent's home, and the launch starts through the
+// agent-env verb, which links the agent's transcripts to .claude/projects.
 func TestAPersonsRunLoadsAsBefore(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)
-	composedForFake(t, root, fakeRuntime(t))
+	script := filepath.Join(t.TempDir(), "fake-runtime")
+	writeFile(t, script, "#!/bin/sh\necho \"hello from $QORY_RUN_ID with $*\"\necho \"config [$CLAUDE_CONFIG_DIR]\"\nexit 3\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	composedForFake(t, root, script)
 	t.Setenv("QORY_RUN_KEY", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	os.Unsetenv("CLAUDE_CONFIG_DIR")
 	out, err := run(t, "run", "claude", "--", "-p", "hi")
 	if err == nil || cmd.ExitCode(err) != 3 {
 		t.Fatalf("run returned %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
-	wants(t, out, "hello from ", " with --settings ", " -p hi")
-	lacks(t, out, "--strict-mcp-config", "--mcp-config", "mcpServers", "--setting-sources")
+	wants(t, out, "hello from ", " with --settings ", " -p hi", "config []")
+	lacks(t, out, "--strict-mcp-config", "--mcp-config", "mcpServers", "--setting-sources", "qory-agent-home", "agent-env")
 
 	docker, log := fakeDocker(t)
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"), "wall:\n  adapter: docker\n  image: example.com/agent:1\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n")
@@ -34,8 +43,9 @@ func TestAPersonsRunLoadsAsBefore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wants(t, string(data), "/qory/runtime/claude/bin/claude --settings ", " -p hi")
-	lacks(t, string(data), "--strict-mcp-config", "--mcp-config", "mcpServers", "--setting-sources", "CLAUDE_CONFIG_DIR=", "qory-agent-home", "agent-env")
+	wants(t, string(data), "/qory/runtime/claude/bin/claude --settings ", " -p hi", "env: CLAUDE_CONFIG_DIR=/tmp/qory-agent-home\n",
+		" run agent-env ", " projects .claude/projects -- ")
+	lacks(t, string(data), "--strict-mcp-config", "--mcp-config", "mcpServers", "--setting-sources")
 }
 
 // TestAWalledRunTakesAHomeWhereARunWithARunKeyComposes is a person's walled run on a
@@ -62,8 +72,8 @@ func TestAWalledRunTakesAHomeWhereARunWithARunKeyComposes(t *testing.T) {
 
 // TestACheckoutsLaunchArgumentsApplyToAPersonsRun is the checkout's qory.yaml setting
 // harness.launch.claude.args: a person's run starts with them. A run given a run key
-// reads no machine key of the checkout's file, see
-// TestARunKeyReadsNoMachineKeyOfTheCheckout.
+// reads no machine harness setting of the checkout's file, see
+// TestARunKeyReadsNoMachineHarnessSettingOfTheCheckout.
 func TestACheckoutsLaunchArgumentsApplyToAPersonsRun(t *testing.T) {
 	root := newCheckout(t)
 	copyFixture(t, "two-modules", root)

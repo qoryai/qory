@@ -98,6 +98,9 @@ type Reserved struct {
 	// one entry at a time, such as claude's "rules", where a module ships files below the
 	// path and not a file at it.
 	Exact bool
+	// Refusal, when set, is the whole refusal in place of the one Why ends, with the
+	// module's name for its %s.
+	Refusal string
 }
 
 // FilesKind is the entry kind of a file a module ships as it is, at
@@ -176,6 +179,29 @@ type AgentModel interface {
 	// AgentEfforts are the effort values the runtime's agent file takes, nil for a
 	// runtime that writes no effort into an agent.
 	AgentEfforts() []string
+}
+
+// AloneModel is an [AgentModel] that writes the agents' tiers only into a home composed
+// for it alone. One tier map serves every runtime of a home, so in a home composed for
+// several runtimes its agents would get model ids meant for another runtime's provider.
+type AloneModel interface {
+	AgentModel
+	// TiersAlone marks the runtime; it does nothing.
+	TiersAlone()
+}
+
+// TierWriter is rt as an [AgentModel] and true when rt writes the agents' tiers in a home
+// composed for runtimes: false for a runtime that writes none, and for an [AloneModel] in
+// a home with more than one runtime.
+func TierWriter(rt Runtime, runtimes []Runtime) (AgentModel, bool) {
+	am, ok := rt.(AgentModel)
+	if !ok {
+		return nil, false
+	}
+	if _, alone := rt.(AloneModel); alone && len(runtimes) > 1 {
+		return nil, false
+	}
+	return am, true
 }
 
 // TierFront returns an agent file with its tier written into the frontmatter keys model
@@ -262,6 +288,24 @@ type Dispatcher interface {
 	DispatchedArgs(args []string) []string
 }
 
+// Walled is a [Launcher] whose launch arguments differ behind a wall, where the wall is
+// the limit of what the program may change. A runtime that does not implement it starts
+// a walled run with the launch's arguments.
+type Walled interface {
+	// WalledArgs are args, the launch's arguments, as a walled run passes them, or an
+	// error when args set what a walled run takes from qory and Forager alone; the run
+	// then stops before the launch. home is the composed harness home.
+	WalledArgs(args []string, home string) ([]string, error)
+}
+
+// ArgsChecker is a [Launcher] whose launch arguments a run without a wall checks too. A
+// walled run checks them in [Walled].
+type ArgsChecker interface {
+	// CheckArgs is an error when args, the launch's arguments, set what every run takes
+	// from qory alone; the run then stops before the launch.
+	CheckArgs(args []string) error
+}
+
 // SettingsInliner is a [Launcher] whose settings file a run passes to Forager as its
 // JSON, read from the home by qory, after the home's check: Forager reads no file of
 // the home. The flag takes a file or the JSON itself.
@@ -271,19 +315,19 @@ type SettingsInliner interface {
 }
 
 // AgentHomer is a [Launcher] whose program reads its configuration directory from a
-// variable. A dispatched walled run sets the variable to a new, empty folder inside the
-// container, so nothing the image has there reaches the agent.
+// variable. A walled run sets the variable to a new, empty folder inside the container,
+// so nothing the image has there reaches the agent.
 type AgentHomer interface {
 	// AgentHomeVariable is the variable, such as CLAUDE_CONFIG_DIR.
 	AgentHomeVariable() string
 }
 
 // TranscriptLinker is an [AgentHomer] whose program writes the transcripts of its
-// sessions in a folder of its configuration directory. On a dispatched walled run, qory
-// links that folder to the place where Forager binds the run's transcript folder, the
-// runtime descriptor's resume.prefix below the agent's HOME, so the transcripts reach
-// the machine and a continuation of a paused run resumes from them. A runtime that does
-// not implement it gets no link.
+// sessions in a folder of its configuration directory. On a walled run, qory links that
+// folder to the place where Forager binds the run's transcript folder, the runtime
+// descriptor's resume.prefix below the agent's HOME, so the transcripts reach the
+// machine and a continuation of a paused run resumes from them. A runtime that does not
+// implement it gets no link.
 type TranscriptLinker interface {
 	AgentHomer
 	// TranscriptFolder is the folder, relative to the configuration directory and with
@@ -635,9 +679,9 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 // writes AGENTS.md at the staging root with its references resolved the same way, since
 // every checkout link reads them, push-checks.json beside it when a module declares a
 // push check, [PushChecksFile], hooks.json when the checkout lists a workflow hook,
-// [HooksFile], and roles.json when the harness has a role, [RolesFile], then calls each
-// runtime's Render for the subdirectory
-// named after it and links the runtime's files entries into that subdirectory. The links
+// [HooksFile], roles.json when the harness has a role, [RolesFile], and role-notes.json,
+// [RoleNotesFile], then calls each runtime's Render for the subdirectory named after it and
+// links the runtime's files entries into that subdirectory. The links
 // point at the modules by absolute path, so a tree staged anywhere contains the same
 // links. A module the home holds a copy of, see [compose.Module.Copy], is copied in place
 // of each link, and its modules/<name> comes first: a copy of one of its entries leaves
@@ -674,12 +718,23 @@ func BuildAt(res *compose.Result, stage, home string, runtimes ...Runtime) error
 	if err := writeRoles(res, stage); err != nil {
 		return err
 	}
+	if err := writeRoleNotes(res, stage); err != nil {
+		return err
+	}
 	for _, p := range runtimes {
 		dir := filepath.Join(stage, p.Name())
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
-		if err := p.Render(res, dir, home); err != nil {
+		// An AloneModel in a home of several runtimes renders with no tier map, so its
+		// agents get no model, see [TierWriter].
+		r := res
+		if _, alone := p.(AloneModel); alone && len(runtimes) > 1 && res.Tiers != nil {
+			noTiers := *res
+			noTiers.Tiers = nil
+			r = &noTiers
+		}
+		if err := p.Render(r, dir, home); err != nil {
 			return err
 		}
 		if err := linkFiles(res, p, dir); err != nil {
@@ -788,6 +843,47 @@ func writeRoles(res *compose.Result, stage string) error {
 		return err
 	}
 	return WriteFile(stage, RolesFile, append(data, '\n'))
+}
+
+// RoleNotesFile is the file at the root of a home with the notes of the composed harness,
+// for a script that attaches them to the start of an agent. It is always written, with an
+// empty list when the harness has no note. It is not the notes.json of a push check.
+const RoleNotesFile = "role-notes.json"
+
+// RoleNotes is the content of [RoleNotesFile].
+type RoleNotes struct {
+	Notes []RoleNoteRow `json:"notes"`
+}
+
+// RoleNoteRow is one row of [RoleNotes]: a skill that is a note.
+type RoleNoteRow struct {
+	// Name is the skill's name; the body is skills/<name>/SKILL.md in the home.
+	Name string `json:"name"`
+	// Roles are the roles the note is for, each <kind>/<role> as roles.json writes a role,
+	// a group role such as agents/reviewers as written.
+	Roles []string `json:"roles"`
+	// Paths are the globs of the skill's frontmatter paths, from the checkout root, as
+	// written.
+	Paths []string `json:"paths"`
+	// Module is the module the skill comes from.
+	Module string `json:"module"`
+	// Layer is 0 for a module of the checkout's qory.yaml, or of the stack composed when
+	// it extends none, and 1 for a module of the base stack it extends.
+	Layer int `json:"layer"`
+}
+
+// writeRoleNotes writes [RoleNotesFile] into stage: one row per note, in the order of the
+// composed entries, and {"notes": []} when there is none.
+func writeRoleNotes(res *compose.Result, stage string) error {
+	rows := []RoleNoteRow{}
+	for _, n := range res.RoleNotes() {
+		rows = append(rows, RoleNoteRow{Name: n.Name, Roles: n.Roles, Paths: n.Paths, Module: n.Module, Layer: n.Layer})
+	}
+	data, err := json.MarshalIndent(RoleNotes{Notes: rows}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return WriteFile(stage, RoleNotesFile, append(data, '\n'))
 }
 
 // Difference is one path at which two trees differ, as [Diff] reports it.
@@ -1086,7 +1182,8 @@ func FileFor(e compose.Entry, runtime string) (string, bool) {
 //
 // The refusal states the module and the entry as it sits in the module,
 // files/<runtime>/<path>, and ends with the runtime's [Reserved] clause, or with the
-// runtimes qory renders when the first segment is none of them.
+// runtimes qory renders when the first segment is none of them. A [Reserved] with a
+// Refusal is refused with that text.
 func CheckFiles(res *compose.Result) error {
 	for _, e := range res.Entries {
 		if e.Kind != FilesKind {
@@ -1099,6 +1196,9 @@ func CheckFiles(res *compose.Result) error {
 		}
 		for _, r := range p.Reserved() {
 			if path == r.Path || !r.Exact && strings.HasPrefix(path, r.Path+"/") {
+				if r.Refusal != "" {
+					return fmt.Errorf(r.Refusal, accesskey.ShownName(e.Module, false))
+				}
 				return fmt.Errorf("module %s ships files/%s, and %s", accesskey.ShownName(e.Module, false), accesskey.ShownName(e.Name, false), r.Why)
 			}
 		}

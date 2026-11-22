@@ -665,7 +665,7 @@ func TestEnrolRetriesOnlyWithTheKeyMadeForTheCode(t *testing.T) {
 		t.Errorf("%d enrolments sent", n)
 	}
 	if heldKey(t).PublicKey() != mine.PublicKey() || movedAside(t) != 0 {
-		t.Error("the machine's key was moved or replaced")
+		t.Error("the machine's access key was moved or replaced")
 	}
 }
 

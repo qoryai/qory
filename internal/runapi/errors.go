@@ -25,6 +25,9 @@ const (
 	CodeTooLarge        = "too_large"
 	CodeInvalidArtifact = "invalid_artifact"
 	CodeUnavailable     = "unavailable"
+	// CodeUnknownDecision is a push whose decision is not the id of a person's note on
+	// the run's work item.
+	CodeUnknownDecision = "unknown_decision"
 	// The refusals of a withdrawal.
 	CodeTypeNotWithdrawable = "type_not_withdrawable"
 	CodeWithdrawalWithFiles = "withdrawal_with_files"
@@ -146,19 +149,22 @@ func HasCode(err error, code string) bool {
 	return errors.As(err, &apiError) && apiError.Code == code
 }
 
+// errorBody is the body of a response with a status that the request does not expect.
+type errorBody struct {
+	Error    string   `json:"error,case:strict"`
+	Type     string   `json:"type,case:strict"`
+	Limit    int64    `json:"limit,case:strict"`
+	Names    []string `json:"names,case:strict"`
+	Message  string   `json:"message,case:strict"`
+	Findings []string `json:"findings,case:strict"`
+}
+
 // readError returns the [Error] of a response with a status the request does not expect.
 // A body that is not the run API's JSON leaves the code and the other members empty.
 func readError(response *http.Response, request string) *Error {
 	apiError := &Error{Status: response.StatusCode, Request: request}
 
-	var body struct {
-		Error    string   `json:"error"`
-		Type     string   `json:"type"`
-		Limit    int64    `json:"limit"`
-		Names    []string `json:"names"`
-		Message  string   `json:"message"`
-		Findings []string `json:"findings"`
-	}
+	var body errorBody
 
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxErrorResponse))
 	if err == nil && json.Unmarshal(raw, &body) == nil {

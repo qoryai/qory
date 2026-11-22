@@ -95,7 +95,7 @@ func TestFreshHomeRefusesWhatIsThere(t *testing.T) {
 				t.Fatal(err)
 			}
 			err = freshHome(path)
-			if want := "remove " + path + " from the image and from the setup commands: qory makes the agent's home only where nothing is, so a run given a run key does not start"; err == nil || err.Error() != want {
+			if want := "remove " + path + " from the image and from the setup commands\n  qory makes the agent's home only where nothing is, so the run does not start"; err == nil || err.Error() != want {
 				t.Errorf("%v, want %q", err, want)
 			}
 			after, err := os.Lstat(path)
@@ -180,6 +180,67 @@ func TestFreshFolderOfTheStore(t *testing.T) {
 	}
 }
 
+// TestReadFoldersMakesTheStoreAndTheClones is the folders a read run gets before its agent
+// starts: the folder of its artifact files and the folder of its clones, each new, empty
+// and of mode 0700. Something at the folder of the clones stops with its line, not the
+// store's.
+func TestReadFoldersMakesTheStoreAndTheClones(t *testing.T) {
+	dir := realTemp(t)
+	store, clones := filepath.Join(dir, "qory-artifacts"), filepath.Join(dir, "qory-destinations")
+	if err := readFolders(store, clones); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{store, clones} {
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.IsDir() || info.Mode().Perm() != 0o700 {
+			t.Errorf("%s has mode %v, want a folder of mode 0700", path, info.Mode())
+		}
+		if entries, _ := os.ReadDir(path); len(entries) != 0 {
+			t.Errorf("%s has %d entries", path, len(entries))
+		}
+	}
+
+	other := realTemp(t)
+	taken := filepath.Join(other, "qory-destinations")
+	if err := os.Mkdir(taken, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := "remove " + taken + " from the image\n  qory makes the folder of a run's clones only where nothing is, so a read run does not start"
+	if err := readFolders(filepath.Join(other, "qory-artifacts"), taken); err == nil || err.Error() != want {
+		t.Errorf("a folder at the clones' path: %v, want %q", err, want)
+	}
+}
+
+// TestFreshHomeMakesTheReadFoldersWithStore is the preparation of an agent's home with
+// store set, for a read run, and without: with it, the home, the folder of the artifact
+// files and the folder of the clones are each new, empty and of mode 0700; without it,
+// only the home is made.
+func TestFreshHomeMakesTheReadFoldersWithStore(t *testing.T) {
+	before := managedSettings
+	managedSettings = filepath.Join(realTemp(t), "claude-code")
+	t.Cleanup(func() { managedSettings = before })
+	for _, store := range []bool{true, false} {
+		t.Run(fmt.Sprint("store ", store), func(t *testing.T) {
+			dir := realTemp(t)
+			home, artifacts, clones := filepath.Join(dir, "home"), filepath.Join(dir, "qory-artifacts"), filepath.Join(dir, "qory-destinations")
+			if err := freshHomeAt(home, store, artifacts, clones); err != nil {
+				t.Fatal(err)
+			}
+			wantFreshHome(t, home)
+			for _, path := range []string{artifacts, clones} {
+				if store {
+					wantFreshHome(t, path)
+				} else if _, err := os.Lstat(path); !os.IsNotExist(err) {
+					t.Errorf("%s was made without store: %v", path, err)
+				}
+			}
+		})
+	}
+}
+
 // TestAgentHomeRefusesManagedSettings is Claude Code's managed settings in the image, as
 // a folder, a file or a link: refused in one line naming the path, and no home is made.
 // With nothing there, the home is made.
@@ -213,7 +274,7 @@ func TestAgentHomeRefusesManagedSettings(t *testing.T) {
 			t.Cleanup(func() { managedSettings = before })
 			home := filepath.Join(dir, "qory-agent-home")
 			err := agentHome(home)
-			if want := "use an image without " + managed + ": Claude Code reads managed settings there above every other source, so a run given a run key does not start"; err == nil || err.Error() != want {
+			if want := "use an image without " + managed + "\n  Claude Code reads managed settings there above every other source, so the run does not start"; err == nil || err.Error() != want {
 				t.Errorf("%v, want %q", err, want)
 			}
 			if _, err := os.Lstat(home); !os.IsNotExist(err) {
@@ -257,7 +318,7 @@ func TestFreshHomeRefusesAFolderPutThereAfterMkdir(t *testing.T) {
 		}
 	}
 	err := freshHome(path)
-	if want := "leave no program of the image or the setup commands running that writes into " + path + ": the agent's home held something once qory made it, so a run given a run key does not start"; err == nil || err.Error() != want {
+	if want := "leave no program running that writes into " + path + "\n  The agent's home held something once qory made it, so the run does not start; a program that the image or the setup commands started can write there"; err == nil || err.Error() != want {
 		t.Errorf("%v, want %q", err, want)
 	}
 	fi, err := os.Stat(path)
@@ -406,7 +467,7 @@ func TestTheTranscriptsLinkStopsAtAPathOutside(t *testing.T) {
 }
 
 // TestLinkTranscriptsNeedsTheAgentHome is a launch whose CLAUDE_CONFIG_DIR is not the
-// agent's home, as on a run that is not dispatched or not walled: no link is made.
+// agent's home, as on a run that is not walled: no link is made.
 func TestLinkTranscriptsNeedsTheAgentHome(t *testing.T) {
 	getenv := func(name string) string {
 		if name == "HOME" {

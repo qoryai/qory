@@ -1,3 +1,0 @@
-Set workflows.fix.time_limit to a duration above zero, such as 7h or 45m.
-  The value is "7 hours".
-  workflows.fix is in qory.yaml.

@@ -10,9 +10,9 @@ import (
 )
 
 // TestDocumentIsTheRootsOwnComposeFile is what compose -f names a base for: nothing when
-// the root holds no file or one of machine keys alone, the file when its harness section
-// composes, and the error of a file that does not read, so a mistake in it is reported
-// where it is.
+// the root holds no file or one of machine harness settings alone, the file when its
+// harness section composes, and the error of a file that does not read, so a mistake
+// in it is reported where it is.
 func TestDocumentIsTheRootsOwnComposeFile(t *testing.T) {
 	root := t.TempDir()
 	got, err := config.Document(root)
@@ -23,7 +23,7 @@ func TestDocumentIsTheRootsOwnComposeFile(t *testing.T) {
 	writeRaw(t, path, "harness: {runtime: codex}\n")
 	got, err = config.Document(root)
 	if err != nil || got != "" {
-		t.Fatalf("machine keys alone: got %q, %v", got, err)
+		t.Fatalf("machine harness settings alone: got %q, %v", got, err)
 	}
 	writeRaw(t, path, "harness:\n  modules:\n    - name: app\n")
 	got, err = config.Document(root)
@@ -85,9 +85,9 @@ func TestOnBaseTakesTheBaseFromTheFlag(t *testing.T) {
 	}
 }
 
-// TestOnBaseRefusesWhatIsNoDocument is a section of machine keys alone, which is no
-// document, and a harness.yaml with a key it does not read, whose message names the
-// file by that name.
+// TestOnBaseRefusesWhatIsNoDocument is a section of machine harness settings alone,
+// which is no document, and a harness.yaml with a key it does not read, whose message
+// names the file by that name.
 func TestOnBaseRefusesWhatIsNoDocument(t *testing.T) {
 	tmp := t.TempDir()
 	base := filepath.Join(tmp, "tree", stack.FileName)
@@ -115,7 +115,7 @@ func TestOnBaseRefusesWorkflows(t *testing.T) {
 		path := filepath.Join(tmp, "app-"+name, name)
 		for _, body := range []string{
 			"harness:\n  target: {runtime: claude}\n  modules:\n    - name: app\n  workflows:\n    fix: {access: write}\n",
-			"harness:\n  extends: {path: ../tree}\n  workflows:\n    fix: {time_limit: 45m}\n",
+			"harness:\n  extends: {path: ../tree}\n  workflows:\n    fix: {access: read}\n",
 		} {
 			writeRaw(t, path, body)
 			want := "Remove workflows from " + name + ", or leave out -f.\n  -f selects the base, and its workflows apply.\n  harness.workflows is in " + path + "."

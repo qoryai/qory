@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"regexp/syntax"
 	"slices"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 	"gopkg.in/yaml.v3"
 
+	"github.com/qoryai/qory/internal/primitives"
 	"github.com/qoryai/qory/internal/runapi"
 )
 
@@ -53,7 +56,8 @@ const (
 	maxSchemaDepth   = 64
 )
 
-// The limit of the patterns of all custom types in one process.yaml, in bytes of
+// The limit of the patterns of all JSON Schemas in one process.yaml, those of the custom
+// types and of type_settings, in bytes of
 // [patternBudget]'s estimate. A pattern counts a fixed part and one [syntax.Inst] of 40
 // bytes for each instruction of a program, a repeat counting its group once for each
 // count. qory compiles no pattern, so the estimate is not memory that qory uses.
@@ -64,7 +68,7 @@ const (
 )
 
 // typeSchemaURL is what a custom type's JSON Schema is compiled under: a name no loader
-// resolves, since the schema refers to nothing outside itself.
+// resolves, since the schema refers to nothing outside itself but the primitives.
 const typeSchemaURL = "https://qory.dev/contracts/harness/v1/artifact-type"
 
 // maxSchemaError is the most characters of the JSON Schema library's text that a message
@@ -72,7 +76,7 @@ const typeSchemaURL = "https://qory.dev/contracts/harness/v1/artifact-type"
 const maxSchemaError = 300
 
 // typeKeys is every key an entry of artifact_types may have.
-var typeKeys = []string{"name", "base_view", "size_limit", "max_files", "json_schema", "withdrawable"}
+var typeKeys = []string{"name", "base_view", "size_limit", "max_files", "json_schema", "withdrawable", "deliver"}
 
 // typeSchemaDrafts is what $schema may be set to in a custom type's JSON Schema, each
 // with and without a # at its end.
@@ -85,10 +89,11 @@ var typeSchemaDrafts = []string{
 
 // checkArtifactTypes checks artifact_types in the process.yaml shown, which may be left
 // out, as [checkArtifactType] checks each entry, and that no two entries have one name.
-// The entries share one [patternBudget]. A list with no entries passes. The error has
-// one refusal for each entry it stops on, each written fix first with shown on its
-// last line.
-func checkArtifactTypes(shown string, list *yaml.Node) error {
+// The entries share patterns, the budget of the file's patterns. A list with no entries
+// passes. The error has one refusal for each entry it stops on, each written fix first
+// with shown on its last line, as [Fit] fits it, so a long name or key in a fix line is
+// shortened.
+func checkArtifactTypes(shown string, list *yaml.Node, patterns *patternBudget) error {
 	if list.Kind == 0 {
 		return nil
 	}
@@ -97,7 +102,6 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 	}
 	var lines []string
 	first := map[string]int{}
-	patterns := &patternBudget{counted: map[string]bool{}}
 	for i, entry := range list.Content {
 		name, why := checkArtifactType(entry, i, patterns)
 		at, twice := first[name]
@@ -112,19 +116,19 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 		}
 	}
 	if len(lines) > 0 {
-		return errors.New(strings.Join(lines, "\n"))
+		return errors.New(Fit(strings.Join(lines, "\n")))
 	}
 	return nil
 }
 
-// checkArtifactType checks entry i of artifact_types, counted from 0. An entry is a name
-// alone, or a name with base_view, size_limit and max_files, and with json_schema
+// checkArtifactType checks entry i of artifact_types, counted from 0. An entry is a
+// name alone, or a name with base_view, size_limit and max_files, and with json_schema
 // exactly when base_view is structured. Either also may have withdrawable, true or
-// false. It returns the entry's name, "" for none of the right form, and the first thing
-// to fix in the entry, for a message, with [FilePlace] for the file in one written fix
-// first; "" for an entry
-// that passes. qory has no list of standard types, so a name alone passes in any name
-// of the right form. patterns is the budget of the file's patterns.
+// false, and a structured type may have deliver ([checkDeliver]). It returns the
+// entry's name, "" for none of the right form, and the first thing to fix in the entry,
+// for a message, with [FilePlace] for the file, fix first; "" for an entry that passes.
+// qory has no list of standard types, so a name alone passes in any name of the right
+// form. patterns is the budget of the file's patterns.
 func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, why string) {
 	label := fmt.Sprintf("entry %d of artifact_types", i+1)
 	if entry.Kind != yaml.MappingNode {
@@ -134,7 +138,7 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 	for j := 0; j+1 < len(entry.Content); j += 2 {
 		key := entry.Content[j]
 		if key.Kind != yaml.ScalarNode || !slices.Contains(typeKeys, key.Value) {
-			return "", fmt.Sprintf("Remove the key %s from %s.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, and withdrawable.\n  The entry is in %s.", scalarText(key), label, FilePlace)
+			return "", fmt.Sprintf("Remove the key %s from %s.\n  An artifact type has only name, base_view, size_limit, max_files, json_schema, withdrawable, and deliver.\n  The entry is in %s.", scalarText(key), label, FilePlace)
 		}
 		if seen[key.Value] {
 			return "", fmt.Sprintf("Remove the second %s from %s.\n  The entry has the key twice.\n  The entry is in %s.", key.Value, label, FilePlace)
@@ -150,10 +154,10 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 		return "", fmt.Sprintf("Set the name of %s to a quoted string.\n  YAML reads %s as a value that is not a string.\n  The entry is in %s.", label, scalarText(n), FilePlace)
 	}
 	if n.Kind != yaml.ScalarNode || n.Tag != "!!str" {
-		return "", fmt.Sprintf("Set the name of %s to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, and the name is %s.\n  The entry is in %s.", label, nodeKind(n), FilePlace)
+		return "", fmt.Sprintf("Set the name of %s to a string.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, and the name is %s.\n  The entry is in %s.", label, nodeKind(n), FilePlace)
 	}
 	if !runapi.ArtifactName(n.Value) {
-		return "", fmt.Sprintf("Rename %s.\n  A name is lowercase letters and digits in groups joined by single hyphens, at most %d bytes.\n  The name is %s.\n  The entry is in %s.", label, runapi.MaxArtifactName, scalarText(n), FilePlace)
+		return "", fmt.Sprintf("Rename %s.\n  A name is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most %d bytes.\n  The name is %s.\n  The entry is in %s.", label, runapi.MaxArtifactName, scalarText(n), FilePlace)
 	}
 	name = n.Value
 	label = "artifact type " + name
@@ -164,7 +168,16 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 		}
 		return name, fmt.Sprintf("Set withdrawable of %s to true or false.\n  withdrawable is %s.\n  The type is in %s.", label, shown, FilePlace)
 	}
+	deliver := value(entry, "deliver")
+	if deliver != nil {
+		if why := checkDeliver(label, deliver); why != "" {
+			return name, why
+		}
+	}
 	if !seen["base_view"] && !seen["size_limit"] && !seen["max_files"] && !seen["json_schema"] {
+		if deliver != nil {
+			return name, notDelivered(label, "is a standard type")
+		}
 		return name, ""
 	}
 	var missing []string
@@ -193,15 +206,270 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 		return name, fmt.Sprintf("Set max_files of %s to a whole number from 1 to %d.\n  max_files is %s.\n  The type is in %s.", label, maxTypeFiles, numberText(files), FilePlace)
 	}
 	schema := value(entry, "json_schema")
+	if deliver != nil && !structured {
+		return name, notDelivered(label, "has base_view "+view.Value)
+	}
 	switch {
 	case !structured && schema != nil:
 		return name, fmt.Sprintf("Remove json_schema from %s, or set its base_view to structured.\n  Only a structured type has a JSON Schema, and base_view is %s.\n  The type is in %s.", label, view.Value, FilePlace)
 	case structured && schema == nil:
 		return name, fmt.Sprintf("Add json_schema to %s.\n  A structured type has a JSON Schema.\n  The type is in %s.", label, FilePlace)
 	case structured:
-		return name, checkTypeSchema(label, schema, patterns)
+		if why := checkTypeSchema(label, schema, patterns); why != "" {
+			return name, inTypeFile(why)
+		}
+		if deliver == nil {
+			return name, inTypeFile(checkNoFillMarks(label, schema))
+		}
+		var limit int64
+		if size.Decode(&limit) == nil && limit > maxDeliveredBytes {
+			return name, fmt.Sprintf("Set size_limit to at most %d.\n  Apiary delivers one version of a type with deliver, of at most %d bytes, and size_limit of %s is %d.\n  The type is in %s.", maxDeliveredBytes, maxDeliveredBytes, label, limit, FilePlace)
+		}
+		return name, inTypeFile(checkDeliverTarget(label, schema))
 	}
 	return name, ""
+}
+
+// maxDeliveredBytes is the most bytes of the size_limit of a type with deliver: the size
+// of the one version that Apiary delivers.
+const maxDeliveredBytes = 786432
+
+// deliverSends is each value deliver.send may have, the values of submit.send: when
+// Apiary delivers the type's versions.
+var deliverSends = []string{"end_of_run", "after_gate"}
+
+// checkDeliver checks n, the deliver of the artifact type label: an object with send, one
+// of [deliverSends], and no other key. It returns the fix for a message with [FilePlace]
+// for the file, "" for a deliver that passes. Whether the type may have a deliver is
+// [notDelivered] and [checkDeliverTarget].
+func checkDeliver(label string, n *yaml.Node) string {
+	sends := strings.Join(deliverSends, " or ")
+	if n.Kind != yaml.MappingNode {
+		return fmt.Sprintf("Set deliver to an object with send, or remove it.\n  deliver of %s is %s.\n  The type is in %s.", label, nodeKind(n), FilePlace)
+	}
+	seen := map[string]bool{}
+	for j := 0; j+1 < len(n.Content); j += 2 {
+		key := n.Content[j]
+		if key.Kind != yaml.ScalarNode || key.Value != "send" {
+			return fmt.Sprintf("Remove the extra key from deliver.\n  deliver of %s has the key %s, and has only send.\n  The type is in %s.", label, scalarText(key), FilePlace)
+		}
+		if seen[key.Value] {
+			return fmt.Sprintf("Remove the second send from deliver.\n  deliver of %s has the key twice.\n  The type is in %s.", label, FilePlace)
+		}
+		seen[key.Value] = true
+	}
+	send := value(n, "send")
+	switch {
+	case send == nil:
+		return fmt.Sprintf("Add send to deliver, %s.\n  deliver of %s has no send.\n  The type is in %s.", sends, label, FilePlace)
+	case send.Kind == yaml.ScalarNode && send.Tag != "!!str" && nodeKind(send) == "a string":
+		// A value with an explicit tag: YAML reads it as no string.
+		return fmt.Sprintf("Set send in deliver to a quoted string.\n  YAML reads send of %s, %s, as a value that is not a string.\n  The type is in %s.", label, scalarText(send), FilePlace)
+	case send.Kind != yaml.ScalarNode || send.Tag != "!!str":
+		return fmt.Sprintf("Set send in deliver to %s.\n  send of %s is %s.\n  The type is in %s.", sends, label, nodeKind(send), FilePlace)
+	case !slices.Contains(deliverSends, send.Value):
+		return fmt.Sprintf("Set send in deliver to %s.\n  send of %s is %s.\n  The type is in %s.", sends, label, scalarText(send), FilePlace)
+	}
+	return ""
+}
+
+// notDelivered is the message for a deliver on the artifact type label that is not a
+// structured type with a json_schema; what says what the type is or has.
+func notDelivered(label, what string) string {
+	return fmt.Sprintf("Remove deliver, or make the type structured with a json_schema.\n  Only a structured type is delivered, and %s %s.\n  The type is in %s.", label, what, FilePlace)
+}
+
+// primitiveReference is the $ref that a schema writes for the definition reference of the
+// primitives schema.
+const primitiveReference = primitives.URL + "#/$defs/reference"
+
+// checkDeliverTarget checks that schema, the json_schema of the artifact type label, a
+// compiled JSON Schema, has a top-level property target that is the primitive reference:
+// the property is a $ref to [primitiveReference], or to a definition of the schema's
+// $defs that is, a written-out copy of the definition whose local definitions are those
+// of the primitives, or an allOf that has one. The check reads a $ref as a path into
+// $defs of the root and as the address of the primitives, so it fails a schema that
+// changes where a $ref resolves, or how a draft reads it: a $schema other than draft
+// 2020-12, and an $id, $anchor or $dynamicAnchor anywhere in the schema. A $ref into
+// $defs counts only with a plain name ([localName]). It returns the fix for a message,
+// with no line for the file, "" for a type that passes.
+func checkDeliverTarget(label string, schema *yaml.Node) string {
+	doc, why := jsonValue(schema, "json_schema of "+label)
+	if why != "" {
+		return why
+	}
+	root, _ := doc.(map[string]any)
+	if draft, has := root["$schema"]; has && !slices.Contains(typeSchemaDrafts[:2], fmt.Sprint(draft)) {
+		return typeRefusal("Set the root $schema of the json_schema to the 2020-12 draft, or remove it.", "json_schema of "+label+" has another draft, and draft-07 ignores the keys next to a $ref.")
+	}
+	// With the root type object, a keyword such as anyOf or not can only narrow the
+	// schema, so no value but an object validates.
+	if kind, _ := root["type"].(string); kind != "object" {
+		return typeRefusal("Set type of the json_schema to object, or remove `deliver`.", "json_schema of "+label+" has no root type object, and a target is a member of an object.")
+	}
+	if hasResolutionKey(root) {
+		return typeRefusal("Remove $id, $anchor and $dynamicAnchor from the json_schema, or remove `deliver`.", "json_schema of "+label+" has one. A $ref under such a key can resolve to a different schema.")
+	}
+	props, _ := root["properties"].(map[string]any)
+	target, has := props["target"]
+	cause := label + " has no top-level target in json_schema."
+	if has {
+		cause = "The top-level target in json_schema of " + label + " is not the primitive reference."
+	}
+	if has && isReferenceMember(root, target) {
+		// shortcut: only the root required list counts, so a type that states it through
+		// an allOf fails; only "type" is read on the target, so "enum", "const", "not",
+		// "anyOf", "oneOf", bounds, and a "type" in a local definition that the $ref goes
+		// through are not, and a target that nothing can satisfy passes; replace it when
+		// a type needs either.
+		if required, _ := root["required"].([]any); !slices.Contains(required, any("target")) {
+			return typeRefusal("Add target to required. Qory Apiary cannot deliver a document without its destination.", "json_schema of "+label+" has no required with target.")
+		}
+		return checkFillMarks(label, root)
+	}
+	return typeRefusal("Add a top-level `target` of the primitive `reference` to the schema, or remove `deliver`.", cause)
+}
+
+// hasResolutionKey reports whether node, a decoded JSON Schema, has the key $id, $anchor
+// or $dynamicAnchor in any object.
+// shortcut: a property or a definition with one of these names fails too, and a value
+// of enum or const is read as a schema; replace it when a type needs such a name.
+func hasResolutionKey(node any) bool {
+	return hasKey(node, false, "$id", "$anchor", "$dynamicAnchor")
+}
+
+// hasKey reports whether node, a decoded JSON Schema, has one of keys in any object. With
+// skipOwn, the keys of node itself do not count, and those of the objects in it do.
+// shortcut: a nested property or a definition named x-qory-fill counts as a mark and
+// fails the type, as does a property of that name in a type with no deliver; replace it
+// when a type needs such a name.
+func hasKey(node any, skipOwn bool, keys ...string) bool {
+	switch v := node.(type) {
+	case map[string]any:
+		for key, member := range v {
+			if !skipOwn && slices.Contains(keys, key) || hasKey(member, false, keys...) {
+				return true
+			}
+		}
+	case []any:
+		return slices.ContainsFunc(v, func(member any) bool { return hasKey(member, false, keys...) })
+	}
+	return false
+}
+
+// primitiveDefinitions is $defs of the primitives schema, as JSON decoded into Go values.
+var primitiveDefinitions = sync.OnceValue(func() map[string]any {
+	var doc struct {
+		Defs map[string]any `json:"$defs,case:strict"`
+	}
+	if err := json.Unmarshal(primitives.Schema, &doc); err != nil {
+		panic("exports: the embedded primitives schema is no JSON: " + err.Error())
+	}
+	return doc.Defs
+})
+
+// defsPrefix starts a $ref to a definition of the root schema.
+const defsPrefix = "#/$defs/"
+
+// localName is the name of the definition that ref, a $ref, refers to under [defsPrefix],
+// and whether ref has one. A name has letters, digits, "_" and "-" only: the compiler
+// decodes "%", "~" and "/" in a JSON Pointer, so a name with one could reach another
+// definition than the name spells.
+// shortcut: a definition name outside letters, digits, "_" and "-" on the $ref chain of
+// the target, or of a marked pushed-head, pushed-base or pushed-commits member, fails;
+// replace it when a type needs such a name.
+func localName(ref string) (string, bool) {
+	name, local := strings.CutPrefix(ref, defsPrefix)
+	if !local || name == "" {
+		return "", false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+			return "", false
+		}
+	}
+	return name, true
+}
+
+// localDefinitionsAreThePrimitives reports whether each definition of root under
+// [defsPrefix] that node refers to, directly or through another such definition, is the
+// definition of the same name in the primitives schema. A $ref whose name is not plain
+// ([localName]) fails.
+func localDefinitionsAreThePrimitives(root map[string]any, node any, checked map[string]bool) bool {
+	switch v := node.(type) {
+	case map[string]any:
+		if ref, _ := v["$ref"].(string); strings.HasPrefix(ref, defsPrefix) {
+			name, plain := localName(ref)
+			if !plain {
+				return false
+			}
+			if !checked[name] {
+				checked[name] = true
+				defs, _ := root["$defs"].(map[string]any)
+				if !reflect.DeepEqual(roundTrip(defs[name]), primitiveDefinitions()[name]) {
+					return false
+				}
+				if !localDefinitionsAreThePrimitives(root, primitiveDefinitions()[name], checked) {
+					return false
+				}
+			}
+		}
+		for _, member := range v {
+			if !localDefinitionsAreThePrimitives(root, member, checked) {
+				return false
+			}
+		}
+	case []any:
+		for _, member := range v {
+			if !localDefinitionsAreThePrimitives(root, member, checked) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// roundTrip is node as JSON decodes it, so that numbers and lists compare with the
+// primitives'; nil when node has no JSON form.
+func roundTrip(node any) any {
+	data, err := json.Marshal(node)
+	if err != nil {
+		return nil
+	}
+	var same any
+	if json.Unmarshal(data, &same) != nil {
+		return nil
+	}
+	return same
+}
+
+// isPrimitiveReference reports whether node, a member of root, a JSON Schema, is the
+// primitive reference: a $ref to [primitiveReference]; a copy of its definition, written
+// out as a member does under $defs reference of the schemas of the harness, with the
+// definitions that it refers to in $defs of root as the primitives have them; a $ref to a
+// definition under "#/$defs/" of root that is one of these; or an allOf with an entry
+// that is. visited has the definitions already tried, so a loop of definitions ends and
+// each definition is read once.
+func isPrimitiveReference(root map[string]any, node any, visited map[string]bool) bool {
+	m, _ := node.(map[string]any)
+	if m == nil {
+		return false
+	}
+	if ref, _ := m["$ref"].(string); ref == primitiveReference {
+		return true
+	} else if name, plain := localName(ref); plain && !visited[name] {
+		visited[name] = true
+		defs, _ := root["$defs"].(map[string]any)
+		if isPrimitiveReference(root, defs[name], visited) {
+			return true
+		}
+	}
+	if reflect.DeepEqual(roundTrip(m), primitiveDefinitions()["reference"]) &&
+		localDefinitionsAreThePrimitives(root, m, map[string]bool{}) {
+		return true
+	}
+	all, _ := m["allOf"].([]any)
+	return slices.ContainsFunc(all, func(entry any) bool { return isPrimitiveReference(root, entry, visited) })
 }
 
 // wholeNumber reports whether n is a whole number from 1 to most, written as one: 1.0
@@ -237,10 +505,11 @@ func joinWords(words []string) string {
 	}
 }
 
-// checkTypeSchema checks n, the json_schema of the artifact type label, for a message:
-// it is an object, each value has a JSON form, $schema is a draft of [typeSchemaDrafts]
-// or left out, it is within the limits, its patterns are within patterns, and it
-// compiles with no file or network read. It returns the fix, "" for a schema that passes.
+// checkTypeSchema checks n, the json_schema of label, an artifact type or type_settings,
+// for a message: it is an object, each value has a JSON form, $schema is a draft of
+// [typeSchemaDrafts] or left out, it is within the limits, its patterns are within
+// patterns, and it compiles with no file or network read. It returns the fix and the
+// cause, to which the caller adds the line with the file; "" for a schema that passes.
 func checkTypeSchema(label string, n *yaml.Node, patterns *patternBudget) string {
 	if n.Kind != yaml.MappingNode {
 		return typeRefusal(fmt.Sprintf("Set json_schema of %s to an object, a JSON Schema.", label), "json_schema is "+nodeKind(n)+".")
@@ -268,17 +537,26 @@ func checkTypeSchema(label string, n *yaml.Node, patterns *patternBudget) string
 	}
 	if err := compileTypeSchema(compact.Bytes(), patterns); err != nil {
 		if patterns.over > 0 {
-			return typeRefusal("Shorten the patterns in "+where+".", fmt.Sprintf("The estimate for the patterns of all artifact types in the file is at most %d bytes, and this one brings it to %d.", maxPatternBytes, patterns.over))
+			return typeRefusal("Shorten the patterns in "+where+".", fmt.Sprintf("The estimate for the patterns of all JSON Schemas in the file is at most %d bytes, and this one brings it to %d.", maxPatternBytes, patterns.over))
 		}
-		return fmt.Sprintf("Fix %s so that it compiles as a JSON Schema.\n  The schema does not compile: %s\n  The type is in %s.", where, compileReason(err), FilePlace)
+		return typeRefusal("Fix "+where+" so that it compiles as a JSON Schema.", "The schema does not compile: "+compileReason(err))
 	}
 	return ""
 }
 
-// typeRefusal is the refusal of a custom type's schema, fix first, with [FilePlace] on the
-// last line.
+// typeRefusal is the refusal of a JSON Schema in a process.yaml, fix first, then the
+// cause; the caller adds the line with the file.
 func typeRefusal(fix, cause string) string {
-	return fix + "\n  " + cause + "\n  The type is in " + FilePlace + "."
+	return fix + "\n  " + cause
+}
+
+// inTypeFile is why, the refusal of a custom type, with the line of [FilePlace] added;
+// "" for "".
+func inTypeFile(why string) string {
+	if why == "" {
+		return ""
+	}
+	return why + "\n  The type is in " + FilePlace + "."
 }
 
 // capital is s with its first letter in upper case.
@@ -385,8 +663,10 @@ func overSchemaLimit(v any, depth int, values *int) string {
 // compileTypeSchema compiles a JSON Schema, draft 2020-12 unless $schema sets another,
 // with its patterns parsed through patterns, and drops the result: nothing is validated
 // against it. The compiler has no loader, so a reference to a file or a URL outside the
-// schema fails when the schema reaches it, and no file or URL is read. The JSON Schema
-// metaschemas are built into the compiler, so a reference to one passes.
+// schema fails when the schema reaches it, and no file or URL is read. Two kinds of
+// reference pass: one to a JSON Schema metaschema, which the compiler has built in, and
+// one into the primitives schema, which this function adds as a resource under
+// [primitives.URL], such as primitives.URL + "#/$defs/title".
 func compileTypeSchema(schema []byte, patterns *patternBudget) error {
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(schema))
 	if err != nil {
@@ -397,6 +677,13 @@ func compileTypeSchema(schema []byte, patterns *patternBudget) error {
 	c.UseLoader(jsonschema.SchemeURLLoader{})
 	c.UseRegexpEngine(patterns.parse)
 	patterns.over = 0
+	known, err := jsonschema.UnmarshalJSON(bytes.NewReader(primitives.Schema))
+	if err != nil {
+		return err
+	}
+	if err := c.AddResource(primitives.URL, known); err != nil {
+		return err
+	}
 	if err := c.AddResource(typeSchemaURL, doc); err != nil {
 		return err
 	}

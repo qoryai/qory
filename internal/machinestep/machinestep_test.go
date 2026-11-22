@@ -78,16 +78,17 @@ func TestLinesRoundHalfUp(t *testing.T) {
 
 // TestLinesCleanTheName is a name with a terminal escape sequence, which is removed
 // whole; with characters of category Cc, C0, DEL and C1; with characters of category
-// Cf, a right-to-left override, a zero-width space and a byte order mark; and with
-// U+2028 and U+2029: each is removed. A name of 150 characters, two bytes each, is cut
-// to 100 characters.
+// Cf, a right-to-left override, a zero-width space, a byte order mark and a tag character
+// (U+E0041); and with U+2028 and U+2029: each is removed. U+200C and U+200D stay, as in an
+// emoji sequence. A name of 150 characters, two bytes each, is cut to 100 characters.
 func TestLinesCleanTheName(t *testing.T) {
 	long := strings.Repeat("é", 150)
 	content := entry("start Docker\x1b[2K", "2026-11-06T00:31:58.904Z", "2026-11-06T00:32:02.104Z") +
-		entry("\x1b[1;31mfire\x1b[0mwall\r\n\t\x7f\u0085\u202e\u200b\ufeff\u2028\u2029", "2026-11-06T00:31:58.904Z", "2026-11-06T00:32:02.104Z") +
+		entry("\x1b[1;31mfire\x1b[0mwall\r\n\t\x7f\u0085\u202e\u200b\ufeff\u2028\u2029\U000E0041", "2026-11-06T00:31:58.904Z", "2026-11-06T00:32:02.104Z") +
+		entry("family \U0001F468\u200d\U0001F469\u200d\U0001F467 a\u200cb", "2026-11-06T00:31:58.904Z", "2026-11-06T00:32:02.104Z") +
 		entry(long, "2026-11-06T00:31:58.904Z", "2026-11-06T00:32:02.104Z")
 	got, err := Lines(file(t, content))
-	want := []string{"start Docker  3.2 s\n", "firewall  3.2 s\n", strings.Repeat("é", 100) + "  3.2 s\n"}
+	want := []string{"start Docker  3.2 s\n", "firewall  3.2 s\n", "family \U0001F468\u200d\U0001F469\u200d\U0001F467 a\u200cb  3.2 s\n", strings.Repeat("é", 100) + "  3.2 s\n"}
 	if err != nil || !slices.Equal(got, want) {
 		t.Errorf("%q, %v, want %q", got, err, want)
 	}

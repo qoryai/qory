@@ -20,6 +20,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/qoryai/qory/internal/exports"
+	"github.com/qoryai/qory/internal/primitives"
 	"github.com/qoryai/qory/internal/runapi"
 )
 
@@ -33,6 +34,8 @@ const (
 	MaxTrackID = 40
 	// MaxReason is the most characters of a track's reason.
 	MaxReason = 300
+	// MaxKind is the most characters of a verdict's kind.
+	MaxKind = 64
 )
 
 // schemaURL is the schema's $id, which it is compiled under.
@@ -80,6 +83,29 @@ var (
 // questionID is the id form of a question in contracts/harness/v1/questions.schema.json.
 var questionID = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
+// kindForm is the form of a verdict's kind: a lower-case letter, then lower-case letters,
+// digits and hyphens.
+var kindForm = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// ValidKind reports whether kind has the form of a verdict's kind, at most [MaxKind]
+// characters: one of the three kinds of this version, or one that a later version adds.
+func ValidKind(kind string) bool {
+	return len(kind) <= MaxKind && kindForm.MatchString(kind)
+}
+
+// Known reports whether kind is one of the kinds this version of the format defines:
+// passed, changes-requested or escalate.
+func Known(kind string) bool {
+	return kind == runapi.VerdictPassed || kind == runapi.VerdictChangesRequested || kind == runapi.VerdictEscalate
+}
+
+// commandAction reports whether action is one that a point of qory run verdict takes:
+// answer or run_again. The format takes any action of its form.
+// shortcut: Apiary refuses an unknown kind or action until A-65; open the command when A-65 lands.
+func commandAction(action string) bool {
+	return action == runapi.ActionAnswer || action == runapi.ActionRunAgain
+}
+
 // trackID is the form of a track's id: lower-case words joined by hyphens.
 var trackID = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
 
@@ -121,10 +147,11 @@ func Check(document []byte) error {
 	return nil
 }
 
-// Points reads data, a JSON array of the points of an escalation, and checks it against
-// the schema. The error starts with the fix. An error about one point contains the
-// point's number, from 1, such as "Write each point as {text, action}: point 2 has no
-// action." Points does not check that a question is open.
+// Points reads data, a JSON array of the points of an escalation for qory run verdict,
+// and checks it against the schema and [commandAction]. The error starts with the fix.
+// An error about one point contains the point's number, from 1, such as "Write each
+// point as {text, action}: point 2 has no action." Points does not check that a
+// question is open.
 func Points(data []byte) ([]runapi.Point, error) {
 	items, err := pointsArray(data)
 	if err != nil {
@@ -260,7 +287,7 @@ func readPoint(n int, item any) (runapi.Point, error) {
 	}
 
 	action, ok := members["action"].(string)
-	if !ok || (action != runapi.ActionAnswer && action != runapi.ActionRunAgain) {
+	if !ok || !commandAction(action) {
 		return runapi.Point{}, fmt.Errorf("Set the action of point %d to answer or run_again. The action is %s.", n, shown(members["action"]))
 	}
 
@@ -322,30 +349,11 @@ func checkLine(n int, name, line string) error {
 		case '\n', '\r':
 			return fmt.Errorf("Write the %s of point %d on one line. It has a line break (%U).", name, n, r)
 		}
-		if Excluded(r) {
+		if primitives.StopsLine(r) {
 			return fmt.Errorf("Remove the character %U from the %s of point %d: the contract's $defs line excludes it.", r, name, n)
 		}
 	}
 	return nil
-}
-
-// Excluded reports whether the schema's $defs line excludes r: any control character,
-// tab, line feed and carriage return included, a bidirectional control, a separator
-// U+2028 or U+2029, or one of the format characters it lists.
-func Excluded(r rune) bool {
-	switch {
-	case r <= 0x1f, r >= 0x7f && r <= 0x9f:
-		return true
-	case r == 0xad, r == 0x61c, r == 0x180e, r == 0x200b, r == 0x200e, r == 0x200f:
-		return true
-	case r == 0x2028, r == 0x2029, r >= 0x202a && r <= 0x202e:
-		return true
-	case r >= 0x2060 && r <= 0x2064, r >= 0x2066 && r <= 0x2069:
-		return true
-	case r == 0xfeff, r >= 0xfff9 && r <= 0xfffb:
-		return true
-	}
-	return false
 }
 
 // kind is the JSON kind of value, a value of a decoder with UseNumber.

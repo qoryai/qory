@@ -117,7 +117,7 @@ compose. The URL is https only, and the ref and the folder are required. A folde
 absolute, has a `..` segment or is not in the repository stops the compose with exit 2.
 
 Under `extends`, the compose reads the repository's file for its document and its
-`worktree` keys. Its `git` and `env` keys and its machine keys under `harness`, such as
+`worktree` keys. Its `git` and `env` keys and its machine harness settings, such as
 `model` or `force`, are left out: your `qory.yaml` and the files above the checkout
 set those. The compose prints a `read` row with what it took from the file, and an
 `ignored` row with the keys it left out, when the file sets any:
@@ -143,7 +143,8 @@ exports:
 A listed module with a `process.yaml` at its folder root is a factory. The file is a
 process template: a name, a summary, a description, a workspace type, a stack that
 `exports.stacks` lists, a `qory.process/v1` process, and optionally `artifact_types`, the
-artifact types the workspaces use, and `submit`, the submit step of a run. Every command
+artifact types the workspaces use, and `type_settings`, the JSON Schema of a run's type
+settings. Every command
 that reads the configuration, `qory config` among them, checks the file, and checks that
 the stack declares under `workflows` each workflow that the process runs. The fields
 and their limits are in [the contract's section on a factory's
@@ -297,6 +298,56 @@ test-reviewer, python-reviewer.` The members come in module order, each once. A 
 reviewer that reads only some files lists them in its frontmatter, `paths: ["**/*.py"]`.
 The home's `roles.json` contains each member with its `paths`, and the agent files that
 qory writes for a runtime leave the key out.
+
+### Notes
+
+A note is a skill that holds knowledge for the agents of some roles. Give the skill the
+frontmatter keys `notes_for`, a role or a list of roles, and `paths`, one glob or a list
+of globs from the checkout root:
+
+```yaml
+---
+name: python-naming
+description: Naming rules for Python code.
+notes_for: developer
+paths: ["**/*.py", pyproject.toml]
+---
+```
+
+Technology modules and the modules of a repository write notes. A skill with `paths`
+and no `notes_for` is no note. `paths` has the grammar of an agent's `paths`, which [the
+contract](../contracts/harness/v1/README.md#the-module-manifest) states: `**` matches any
+number of directories, `*` and `?` match within one directory, and every other character,
+`[`, `{` and `\` included, is literal. The compose checks both keys of each note it
+composes, and not a skill that an `exclude` or an `only` leaves out. It stops with exit 2
+when:
+
+- a role in `notes_for` is one that no agent fills: `Set notes_for in python-naming of
+  module python to a role the stack fills.`, then `The stack fills no tester
+  role.` and `The stack fills developer and reviewers.`;
+- the stack fills no role: `Remove notes_for from python-naming of module python.`, then
+  `The stack fills no role.`;
+- a note has no `paths`, or an empty one: `Add paths to python-naming of module python.`,
+  then `A note needs one path or more.`
+
+The home has `role-notes.json`, written for every harness, with `{"notes": []}` when there is
+no note. It is not the `notes.json` of a push check. A home that an earlier qory composed has
+no `role-notes.json`, and `qory harness compose --check` reports it as differing until you
+compose again. Each row is:
+
+```json
+{"name": "python-naming", "roles": ["agents/developer"], "paths": ["**/*.py", "pyproject.toml"], "module": "python", "layer": 1}
+```
+
+- `name` is the skill's name; its body is `skills/<name>/SKILL.md` in the home,
+- `roles` is `notes_for` as a list, each role written `agents/<role>`, as `roles.json`
+  writes a role,
+- `paths` is the globs as written,
+- `module` is the module that ships the skill,
+- `layer` is 0 for a module of your `qory.yaml`, or of the stack you compose when it extends
+  none, and 1 for a module of the base stack it extends.
+
+Rows come in the order of the compose report's entries.
 
 These stop the compose with exit 2:
 
@@ -472,6 +523,8 @@ The composed tree lives in the **home**, `.qory/harness`. The home has one direc
 runtime.
 
 Most of the home is symlinks to files in modules: every skill, agent, command and hook.
+The Codex directory, `codex`, contains copies of the skills instead, as folders and
+regular files, because Codex 0.167.2 skips a `SKILL.md` that is a link.
 A home outside the checkout contains copies instead for a module that lies in the checkout.
 The home of a walled run contains copies for every module, of the files the stack selects.
 The home of a run whose documents set `harness_hidden: true` contains copies for every
@@ -482,6 +535,8 @@ Beside the links are generated copies. Each is joined from the modules' fragment
 - `AGENTS.md`, at the root of the home,
 - `roles.json`, at the root of the home, when the harness has a role: each role and each
   member of a group role, with the agent that fills it,
+- `role-notes.json`, at the root of the home, always: each note with its roles, paths,
+  module and layer, as [Notes](#notes) describes it,
 - the instruction file each runtime wants,
 - its settings,
 - its MCP file.
@@ -490,14 +545,14 @@ Beside the links are generated copies. Each is joined from the modules' fragment
 
 An edit to a module's file is live, through the link. In a home outside the checkout, a
 module that lies in the checkout is copied, so an edit there reaches the home on the next
-compose.
+compose. An edit to a skill reaches the copy in `codex/skills` on the next compose too.
 
 An edit to a module's instruction section or a settings fragment is not. The merged copy
 is generated. It stays as it was until the next compose.
 
 `qory harness compose --check` compares the home with what the stack and modules define.
-It exits 6 when a merged copy, or a copied module, is behind. That is the check a CI job
-runs.
+It exits 6 when a merged copy, a copied module or a copied Codex skill is behind. That is
+the check a CI job runs.
 
 ### Links in the checkout
 
@@ -679,11 +734,20 @@ qory writes a tier into these keys of each runtime's agent file:
 | ----------------------- | -------------------------------------- | ------------------------------------------------------------------------ |
 | claude                  | `model`                                | `effort`: `low`, `medium`, `high`, `xhigh` or `max`                      |
 | copilot                 | `model`                                | `reasoning-effort`: `minimal`, `low`, `medium`, `high`, `xhigh` or `max` |
+| codex, composed alone   | `model`                                | `model_reasoning_effort`: `none`, `low`, `medium`, `high`, `xhigh`, `max` or `ultra` |
 | cursor, opencode, goose | `model`                                | none: the agent runs at the session's effort                             |
-| codex, gemini           | none: the agent runs on the main model | none                                                                     |
+| codex beside another runtime, gemini | none: the agent runs on the main model | none                                                        |
 | amp, `any`              | no agent files                         | no agent files                                                           |
 
-For claude and copilot, an effort outside the runtime's values stops the compose with exit 2. For cursor, opencode and goose, the compose prints a `skipped` row for a tier's effort, with the agents it concerns, and for codex and gemini a `skipped` row for a tier's model.
+For claude, copilot and codex composed alone, an effort outside the runtime's values stops the compose with exit 2. For cursor, opencode and goose, the compose prints a `skipped` row for a tier's effort, with the agents it concerns, and for gemini a `skipped` row for a tier's model.
+
+Codex gets the tiers only in a home composed for codex alone. One tier map serves every runtime of a home, so in a home composed for claude too, a Codex agent would get a Claude model id. A home composed for codex and another runtime, at once or by an earlier compose that the home keeps, writes no tier into the Codex agents and prints the `skipped` row for codex:
+
+```text
+skipped  tier thinking for codex  (qory writes tiers into codex agents only in a home composed for codex alone; agent planner runs on the main model)
+```
+
+A Codex agent with no tier gets no model and no effort from its file.
 
 ## Agent tools on Codex
 
@@ -692,6 +756,31 @@ An agent's `tools` key limits what the agent can use on Claude Code. An agent wi
 On Codex, qory writes `[features]` with `shell_tool = false` into the agent's file `agents/<name>.toml` when the agent has a `tools` key that lists no shell tool. A shell tool is `Bash` or `PowerShell`, also with a rule such as `Bash(git:*)`. That agent has no shell. An agent with no `tools` key keeps the shell. Codex 0.149.0 or later reads this setting.
 
 Codex has no setting for any other tool of an agent. An agent without `Write` or `Edit` in its `tools` key can still write files with Codex's `apply_patch` tool, because Codex cannot turn that tool off for one agent. An agent's file [cannot set the agent's sandbox](https://learn.chatgpt.com/docs/agent-configuration/subagents) either.
+
+## Hooks on Codex
+
+Codex reads hooks from `hooks.json` and from the `hooks` table of `config.toml`. A module ships them in `settings/codex/hooks.json` or `settings/codex/config.toml`.
+
+- **A run without a wall.** Codex runs a hook of `$CODEX_HOME` only when `hooks.state` in `$CODEX_HOME/config.toml` has the hook's hash, and skips it with no error otherwise. qory writes a `trusted_hash` for each `command` hook into the `config.toml` of the home's `codex` folder, keyed by `<home>/codex/<file>:<event>:<group>:<hook>` with every link in the path resolved and each name in the case on disk, as Codex resolves `CODEX_HOME`. qory starts Codex without `--dangerously-bypass-hook-trust`, which would also run hooks that the agent writes.
+- **A walled run.** qory binds every hook of both files in `/etc/codex/hooks.json`, read-only, where Codex runs it with no hash.
+
+qory stops every Codex run, walled or not, before the agent starts, when its Codex arguments before `--` contain `--dangerously-bypass-hook-trust` or `--trust`, set the `hooks` table, the `projects` table or the feature `hooks`, `codex_hooks` or `unified_exec_tty` with `-c` or `--config`, or turn one of those features on or off with `--enable` or `--disable`. See [Codex arguments that stop a run](run.md#codex-arguments-that-stop-a-run).
+
+Three limits apply to a run without a wall:
+
+- An `mcp_tool` hook gets no hash, so Codex skips it. The compose prints a row for each:
+
+  ```text
+  skipped  hooks.PreToolUse[0].hooks[0] in config.toml for codex  (qory writes no trusted hash for an mcp_tool hook; Codex skips it in a run without a wall)
+  ```
+
+- A `command` hook with U+2028 or U+2029 in its command, its `statusMessage` or its group's `matcher` gets no hash either, and the compose prints a row for it with the reason `qory writes no trusted hash for a hook with U+2028 or U+2029`.
+
+- If `harness.launch.codex.env` sets `CODEX_HOME`, Codex reads a home other than the one in the keys of the hashes, and skips every hook with no error. Leave `CODEX_HOME` to qory.
+
+qory's `config.toml` also sets `features.unified_exec_tty = false`, in a walled run too. A shell that the agent starts with a terminal takes later commands through `write_stdin`, for which Codex runs no `PreToolUse` hook; with this setting, Codex starts no shell with a terminal. A Codex agent cannot start an interactive shell.
+
+qory's `config.toml` also sets `web_search = "disabled"`, in a walled run too. Without the key, Codex 0.169.0 turns web search on: cached, or live in a run with `--sandbox danger-full-access`, such as a walled run. A fragment that sets `web_search` fails the compose.
 
 ## Removing the harness
 

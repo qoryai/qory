@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/process.schema.json",
   "title": "process.yaml",
-  "description": "process.yaml at the folder root of an exported module, a factory: a process template, with the texts a list of templates shows, the workspace type, the stack its workflows run on, the process document, the artifact types its workspaces use and the submit step of a run.",
+  "description": "process.yaml at the folder root of an exported module, a factory: a process template, with the texts a list of templates shows, the workspace type, the stack its workflows run on, the process document, the artifact types its workspaces use, and the schema of the type settings of a run.",
   "type": "object",
   "required": ["apiVersion", "name", "summary", "description", "type", "stack", "process"],
   "additionalProperties": false,
@@ -12,9 +12,9 @@
     "summary": {"description": "One or two sentences on what a workspace made from the template does, at most 200 characters.", "type": "string", "maxLength": 200, "pattern": "\\S"},
     "description": {"description": "How a workspace made from the template works, at most 1200 characters and 80 words.", "type": "string", "maxLength": 1200, "pattern": "^\\s*\\S+(\\s+\\S+){0,79}\\s*$"},
     "type": {"description": "The workspace type a workspace made from the template has: a workspace type key, such as qory.software.", "type": "string", "pattern": "\\S"},
-    "stack": {"description": "The stack the template's workflows run on: a name that exports.stacks of the same repository lists. Each workflow of a stage is declared under workflows in that stack's qory-stack.yaml.", "type": "string", "pattern": "^[^./\\\\@\\p{Cc}][^/\\\\@\\p{Cc}]*$"},
+    "stack": {"description": "The stack the template's workflows run on: a name that exports.stacks of the same repository lists. Each workflow of a stage is declared under workflows in that stack's qory-stack.yaml.", "type": "string", "pattern": "^[^./\\\\@\\p{Cc}][^/\\\\@\\p{Cc}]*$", "allOf": [{"$ref": "#/$defs/line"}]},
     "process": {
-      "description": "The process document of a workspace made from the template, a qory.process/v1 document. qory checks its schema, that its stages are a list, that each workflow of a stage is a non-empty string of one line that the stack declares, and that each stage name has no line break or other control character, and checks nothing else in it. This schema checks the same, except whether the stack declares a workflow.",
+      "description": "The process document of a workspace made from the template, a qory.process/v1 document. qory checks its schema, that its stages are a list, that each workflow of a stage is a non-empty string of one line of text that the stack declares, and that each stage name is one line of text (no control character, no U+2028 or U+2029, and no format character but U+200C and U+200D), and checks nothing else in it. This schema checks the same, except whether the stack declares a workflow.",
       "type": "object",
       "required": ["schema", "stages"],
       "properties": {
@@ -23,7 +23,45 @@
           "type": "array",
           "items": {
             "properties": {
-              "name": {"description": "A stage name has no line break or other control character.", "pattern": "^\\P{Cc}*$"},
+              "name": {"description": "A stage name is one line of text, as $defs line defines it.", "$ref": "#/$defs/line"},
+              "outputs": {
+                "description": "The artifact types the stage produces. Optional. Each type is listed in artifact_types of the same file and once in the stage, which qory checks and this schema cannot state. when, unless and check are optional, as Qory Apiary's process schema defines them; qory checks no value of them.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["type"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "type": {"description": "The name of an entry of artifact_types.", "$ref": "#/$defs/artifact_type_name"},
+                    "required": {"description": "Whether the stage must produce the type. Optional, and false when the output has none.", "type": "boolean", "default": false},
+                    "when": {
+                      "description": "The output is required only when its condition is met; otherwise the stage does not check it.",
+                      "$ref": "#/$defs/condition"
+                    },
+                    "unless": {
+                      "description": "The output is not required when its condition is met.",
+                      "$ref": "#/$defs/condition"
+                    },
+                    "check": {
+                      "description": "How the output is checked: it exists, the default, or an adapter reported an outcome for it. A reported check is stored and not checked in this version.",
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": ["exists"],
+                          "not": {"required": ["reported"]},
+                          "properties": {"exists": {"const": true}}
+                        },
+                        {
+                          "type": "object",
+                          "required": ["reported"],
+                          "not": {"required": ["exists"]},
+                          "properties": {"reported": {"$ref": "#/$defs/outcome"}}
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
               "sequence": {
                 "items": {
                   "properties": {
@@ -46,35 +84,95 @@
       "type": "array",
       "items": {"$ref": "#/$defs/artifact_type"}
     },
-    "submit": {
-      "description": "The submit step of a run of a workspace made from the template. Optional: without it, the step stores no submission. At most one per file.",
+    "type_settings": {
+      "description": "The type settings of a run of a workspace made from the template: the settings that belong to the workspace type, which Qory Apiary sends in type_settings of the run documents. Optional: without it, the template registers no schema for them. qory checks that json_schema compiles as a JSON Schema within the limits of the contract's README, as it checks the json_schema of an artifact type, and checks no run's type settings against it.",
       "type": "object",
-      "required": ["type", "send"],
+      "required": ["json_schema"],
       "additionalProperties": false,
       "properties": {
-        "type": {"description": "The artifact type of the submission: the name of a custom entry of artifact_types in the same file with base_view structured. qory checks that the entry is there, which this schema cannot state.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
-        "send": {"description": "When the step sends the submission: end_of_run at the end of the run; after_gate after the gate of the run's stage passes, and until then the step stores the submission and sends nothing.", "enum": ["end_of_run", "after_gate"]}
+        "json_schema": {"description": "The JSON Schema of type_settings, such as one that requires full_suite in a software factory.", "type": "object"}
       }
     }
   },
   "$defs": {
+    "artifact_type_name": {
+      "description": "The name of an artifact type: lowercase letters and digits in groups joined by single hyphens, starting with a letter, 1 to 64 bytes.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "condition": {
+      "description": "One test. `{input: T}` is met when the version of the type T that the stage reads has a file of more than 0 bytes; T is an output of an earlier stage. `{input: T, changed: true}`, only on a workflow entry, is met when T has a version and the entry has no run on the work item that ended `passed`, or that version was stored after the newest such run was queued; saving a process with it on a stage, a loop, an input or an output fails. `{track: ID}` is met when the track ID is the one chosen at an earlier gate; an earlier gate offers it. `{feedback: new}`, only on a workflow entry, is met while a member's feedback on the work item is open, or a run returned the work item to the stage, and no run of an entry with this condition that ended `passed` or `changes-requested` started after it (for an answer given while no escalation is open, no run of the stage that ended so): the note of Request changes or of a move, an answer, a review comment or a reply, the comment of Run another round, the note of an escalation resolved by any choice but Accept as it is or Start and the name of the entry the accept starts, or the return of a run of a later stage. In a stage with such an entry, Run another round while feedback other than such an answer is unhandled, a comment with Run another round, answers to an open escalation, Request changes with a note, and a move into the stage with a note start the stage again at its first entry. Saving a process with it on a stage, a loop, an input or an output fails.",
+      "oneOf": [
+        {"$ref": "#/$defs/input_condition"},
+        {"$ref": "#/$defs/track_condition"},
+        {"$ref": "#/$defs/feedback_condition"}
+      ]
+    },
+    "input_condition": {
+      "description": "Met when the version of the type `input` that the stage reads has a file of more than 0 bytes. `input` is an output of an earlier stage.",
+      "type": "object",
+      "required": ["input"],
+      "additionalProperties": false,
+      "properties": {
+        "input": {"$ref": "#/$defs/artifact_type_name"},
+        "changed": {
+          "description": "Only `true`, and only on a workflow entry: the condition is met when the version of `input` is new since the entry last ran and passed, whatever the size of its files. The schema allows the key wherever an input condition is; a save refuses it on a stage, a loop, an input and an output (`condition_changed_entry_only`).",
+          "const": true
+        }
+      }
+    },
+    "track_condition": {
+      "description": "Met when the track `track` is the one chosen at an earlier gate.",
+      "type": "object",
+      "required": ["track"],
+      "additionalProperties": false,
+      "properties": {"track": {"$ref": "#/$defs/track_id"}}
+    },
+    "feedback_condition": {
+      "description": "Met while a member's feedback on the work item is open, or a run returned the work item to the stage, and no run of the stage handled it: a run of an entry with this condition, or of any entry of the stage for an answer given while no escalation is open, that started after it and ended `passed` or `changes-requested`. Only the value `new`, and only on a workflow entry: the schema allows it wherever a condition is; saving a process with it on a stage, a loop, an input or an output fails (`condition_feedback_entry_only`).",
+      "type": "object",
+      "required": ["feedback"],
+      "additionalProperties": false,
+      "properties": {"feedback": {"const": "new"}}
+    },
+    "track_id": {
+      "description": "One lower-case word, or lower-case words joined by hyphens: fast-track.",
+      "type": "string",
+      "maxLength": 40,
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "outcome": {
+      "description": "An outcome that an adapter reports for an output: a lower-case letter, then lower-case letters, digits and hyphens, at most 64 characters.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
     "artifact_type": {
       "description": "An artifact type: a standard type by its name alone, or a custom type with its full definition. Either may set withdrawable.",
       "type": "object",
       "required": ["name"],
       "additionalProperties": false,
       "properties": {
-        "name": {"description": "Lowercase letters and digits in groups joined by single hyphens, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
+        "name": {"description": "Lowercase letters and digits in groups joined by single hyphens, starting with a letter, 1 to 64 bytes.", "type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"},
         "base_view": {"description": "How a version's files are shown, and what they must be.", "enum": ["document", "image", "video", "file", "structured"]},
         "size_limit": {"description": "The most bytes of all files of one version.", "type": "integer", "minimum": 1},
         "max_files": {"description": "The most files of one version.", "type": "integer", "minimum": 1, "maximum": 20},
         "json_schema": {"description": "The JSON Schema of a structured type's file.", "type": "object"},
-        "withdrawable": {"description": "Whether a run may withdraw a name of the type. Optional, and true when the entry has none. A standard type and a custom type may both set it.", "type": "boolean"}
+        "withdrawable": {"description": "Whether a run may withdraw a name of the type. Optional, and true when the entry has none. A standard type and a custom type may both set it.", "type": "boolean"},
+        "deliver": {
+          "description": "Marks a type that Apiary delivers to the target in the run documents. Optional: a type without it is stored and never delivered. Only a custom structured type has it, and its json_schema is an object schema with a top-level property target that is the primitive reference and is in the root required list, $ref https://qory.dev/contracts/harness/v1/primitives.schema.json#/$defs/reference, written directly, in an allOf, or through a definition under $defs, or a written-out copy of that definition in any of these places. A top-level property may have x-qory-fill with one of pushed-commits, pushed-head, pushed-base, pushed-branch, pushed-base-branch or pushed-commits-left-out, which qory fills from its push. qory checks the property and the marks, which this schema cannot state.",
+          "type": "object",
+          "required": ["send"],
+          "additionalProperties": false,
+          "properties": {
+            "send": {"description": "When Apiary delivers a version: end_of_run at the end of the run; after_gate after the gate of the run's stage passes, and until then qory stores the version.", "enum": ["end_of_run", "after_gate"]}
+          }
+        }
       },
       "oneOf": [
         {
           "description": "A standard type: the name alone, or the name and withdrawable.",
-          "not": {"anyOf": [{"required": ["base_view"]}, {"required": ["size_limit"]}, {"required": ["max_files"]}, {"required": ["json_schema"]}]}
+          "not": {"anyOf": [{"required": ["base_view"]}, {"required": ["size_limit"]}, {"required": ["max_files"]}, {"required": ["json_schema"]}, {"required": ["deliver"]}]}
         },
         {"$ref": "#/$defs/custom_document"},
         {"$ref": "#/$defs/custom_image"},
@@ -85,29 +183,36 @@
     },
     "custom_document": {
       "required": ["base_view", "size_limit", "max_files"],
-      "properties": {"base_view": {"const": "document"}, "size_limit": {"maximum": 10485760}, "json_schema": false}
+      "properties": {"base_view": {"const": "document"}, "size_limit": {"maximum": 10485760}, "json_schema": false, "deliver": false}
     },
     "custom_image": {
       "required": ["base_view", "size_limit", "max_files"],
-      "properties": {"base_view": {"const": "image"}, "size_limit": {"maximum": 52428800}, "json_schema": false}
+      "properties": {"base_view": {"const": "image"}, "size_limit": {"maximum": 52428800}, "json_schema": false, "deliver": false}
     },
     "custom_video": {
       "required": ["base_view", "size_limit", "max_files"],
-      "properties": {"base_view": {"const": "video"}, "size_limit": {"maximum": 2147483648}, "json_schema": false}
+      "properties": {"base_view": {"const": "video"}, "size_limit": {"maximum": 2147483648}, "json_schema": false, "deliver": false}
     },
     "custom_file": {
       "required": ["base_view", "size_limit", "max_files"],
-      "properties": {"base_view": {"const": "file"}, "size_limit": {"maximum": 1073741824}, "json_schema": false}
+      "properties": {"base_view": {"const": "file"}, "size_limit": {"maximum": 1073741824}, "json_schema": false, "deliver": false}
     },
     "custom_structured": {
-      "description": "A structured type has one file, and the one base view with a json_schema.",
+      "description": "A structured type has one file, and the one base view with a json_schema. A type with deliver has a size_limit of at most 786432 bytes.",
       "required": ["base_view", "size_limit", "max_files", "json_schema"],
-      "properties": {"base_view": {"const": "structured"}, "size_limit": {"maximum": 1048576}, "max_files": {"maximum": 1}}
+      "properties": {"base_view": {"const": "structured"}, "size_limit": {"maximum": 1048576}, "max_files": {"maximum": 1}},
+      "if": {"required": ["deliver"]},
+      "then": {"properties": {"size_limit": {"maximum": 786432}}}
     },
     "workflow": {
       "description": "A workflow of a stage: a string of one line, not empty or white space alone, that the stack declares under workflows.",
       "type": "string",
-      "pattern": "^\\P{Cc}*[^\\p{Cc}\\p{Z}]\\P{Cc}*$"
+      "pattern": "^\\P{Cc}*[^\\p{Cc}\\p{Z}]\\P{Cc}*$",
+      "allOf": [{"$ref": "#/$defs/line"}]
+    },
+    "line": {
+      "description": "One line of text: no control character (so no tab, line feed or carriage return), no U+2028 or U+2029, and no format character (Unicode category Cf) but U+200C and U+200D, the joiners of emoji. The pattern is the one of $defs line in primitives.schema.json. It does not apply to a value that is no string.",
+      "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u180e\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb\ud804\udcbd\ud804\udccd\ud80d\udc30-\ud80d\udc3f\ud82f\udca0-\ud82f\udca3\ud834\udd73-\ud834\udd7a\udb40\udc01\udb40\udc20-\udb40\udc7f]*$"
     }
   }
 }

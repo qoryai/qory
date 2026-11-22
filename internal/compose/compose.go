@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -133,6 +134,9 @@ type Entry struct {
 	// Paths are the globs an agent's frontmatter paths sets, the files of a change the
 	// agent reads; nil for an agent without the key, which reads every change.
 	Paths []string
+	// Note is the note a skill is, see [module.Note]; nil for a skill without the
+	// frontmatter key notes_for and for every other kind.
+	Note *module.Note
 }
 
 // Exclude is one entry a module left out.
@@ -152,6 +156,15 @@ type Exclude struct {
 	Listed string
 }
 
+// HooksFragment is the hooks of one module's Codex settings fragment.
+type HooksFragment struct {
+	// Module is the module's name, and File the fragment's file, config.toml or
+	// hooks.json.
+	Module, File string
+	// Hooks is the value of the fragment's hooks key, as decoded.
+	Hooks any
+}
+
 // Result is a composed stack: what a renderer writes and what the report records.
 type Result struct {
 	// Stack is the stack that was composed.
@@ -163,7 +176,24 @@ type Result struct {
 	// Excludes are the entries the modules left out, in module order, by kind.
 	Excludes []Exclude
 	// Settings are the merged fragments: per runtime, per target file, in module order.
+	// [CodexReadRules] is not among them.
 	Settings map[string]map[string]map[string]any
+	// CodexReadRules is every module's settings/codex/read-access.rules, Codex
+	// execpolicy rules for a run whose access is read, joined in module order, each
+	// ending in a newline; nil when no module ships one. Compose merges the file into
+	// no target file, and no render places it in a home: the Codex renderer's
+	// WriteWalledHome writes it to the rules folder of a walled read run's home.
+	CodexReadRules []byte
+	// CodexHooksJSON are the bytes of every module's settings/codex/hooks.json fragment,
+	// as written, in module order; nil when no module ships one. The fragments are also
+	// merged into Settings like any other; the Codex renderer reads these to tell a
+	// number such as 2.0, which Codex refuses, from 2, which the merge cannot.
+	CodexHooksJSON [][]byte
+	// CodexHooks are the hooks of every module's settings/codex/config.toml and
+	// settings/codex/hooks.json fragment that has a hooks key, as decoded, before the
+	// merge, in module order. The Codex renderer checks each one, so a hook that Codex
+	// cannot read is found by its module and its place in that module's file.
+	CodexHooks []HooksFragment
 	// MCP contains the composed MCP servers by name, each the object its module's
 	// mcp/<name>.json contains, with every $QORY_HARNESS_HOME as written, before
 	// substitution. [Result.MCPFor] renders it for a home.
@@ -202,10 +232,21 @@ type Result struct {
 	// sorted by type, one per type; nil when no module declares one. [Result.PushChecksFor]
 	// renders them for a home.
 	PushChecks []PushCheck
+	// SubmitProgram is the program of the submit step that a module declares; nil when no
+	// module declares one. [Result.SubmitProgramFor] renders it for a home.
+	SubmitProgram *SubmitProgram
+	// ScopeChecks are the scope checks the modules of the base stack declare, by the
+	// artifact type of a plan; nil when no module declares one. A module that a checkout
+	// adds to the base declares none that counts, since the repository under work must
+	// not supply the check of the plan that the base's workflow names.
+	ScopeChecks map[string]ScopeCheck
 	// Hooks are the workflow hooks of the checkout's qory.yaml, in its order, each
 	// checked against the base stack; nil when it lists none. A build writes them into
 	// hooks.json.
 	Hooks []Hook
+	// Cache is the folder git sources are fetched to, [Options.Cache] or
+	// [source.CacheDir]; "" when neither is known.
+	Cache string
 	// roots are the module roots the compose opened, which [Result.Close] closes.
 	roots []*os.Root
 	// setBy is the module that set each settings leaf, keyed
@@ -233,6 +274,9 @@ type Options struct {
 	// Git, when set, fetches every git source through a run's stack proxy, see
 	// [source.Git]; nil fetches with the person's git.
 	Git *source.Git
+	// Context, when set, stops every git command of the compose once it ends, see
+	// [source.Options.Context]; nil stops none.
+	Context context.Context
 	// Env are the configuration's variables, written over what the modules export.
 	Env map[string]string
 	// Base is the base stack [LoadBase] resolved, recorded in the result and enforced on
@@ -280,7 +324,11 @@ func Compose(p *stack.Stack) (*Result, error) { return ComposeWith(p, Options{})
 // be fetched a [*source.FetchError]. The package comment has the order of the rules and
 // the merge semantics.
 func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
-	res := &Result{Stack: p, Base: opts.Base, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, Exported: map[string]string{}, setBy: map[string]string{}}
+	cache := opts.Cache
+	if cache == "" {
+		cache, _ = source.CacheDir()
+	}
+	res := &Result{Stack: p, Base: opts.Base, Cache: cache, Settings: map[string]map[string]map[string]any{}, MCP: map[string]map[string]any{}, Env: map[string]string{}, Exported: map[string]string{}, setBy: map[string]string{}}
 	defer func() {
 		if err != nil {
 			res.Close()
@@ -296,13 +344,14 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	// declared is every entry, as <kind>/<name>, that the modules of the stack whose
 	// workflows the compose checks compose, see [workflowsShipped].
 	declared := map[string]bool{}
-	for _, pl := range p.Modules {
-		ps := p.SourceOf(pl)
+	// open resolves the module pl at ps and reads its manifest. who names the module in
+	// a message.
+	open := func(pl stack.Module, ps stack.Source) (openedModule, error) {
 		who := "module " + accesskey.ShownName(pl.Name, false)
 		if pl.Name == "" {
 			who = "module at " + ps.Shown()
 		}
-		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Memo: opts.Memo, Git: opts.Git}
+		so := source.Options{Pin: opts.Pins[ps.String()], Update: opts.Update, Cache: opts.Cache, Timeout: opts.Timeout, Context: opts.Context, Memo: opts.Memo, Git: opts.Git}
 		if opts.Git != nil && opts.Git.Named != nil {
 			so.Name = opts.Git.Named.Module(pl.Name)
 		}
@@ -319,7 +368,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			if pl.Name == "" {
 				fix = "Check the source of a module in the stack.\n  The module is at " + ps.Shown() + "."
 			}
-			return nil, fmt.Errorf("%s\n  %w", fix, exports.HideError(err))
+			return openedModule{}, fmt.Errorf("%s\n  %w", fix, exports.HideError(err))
 		}
 		o := openedModule{pl: pl, ps: ps, src: src}
 		if opts.Copies != nil {
@@ -337,26 +386,40 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 			o.m, err = module.ReadManifest(src.Dir)
 		}
 		if err != nil {
-			return nil, module.Prefixed(who, err)
+			return openedModule{}, module.Prefixed(who, err)
 		}
 		if afterManifest != nil {
 			afterManifest(src.Dir)
 		}
 		if pl.Name != "" && o.m.Name != pl.Name {
-			return nil, exports.Refuse(fmt.Sprintf("Use one name for the module in %s and in its %s.", listedIn(p, pl), module.ManifestName),
+			return openedModule{}, exports.Refuse(fmt.Sprintf("Use one name for the module in %s and in its %s.", listedIn(p, pl), module.ManifestName),
 				fmt.Sprintf("The module %s at %s has the name %s in its %s.", accesskey.ShownName(pl.Name, false), ps.Shown(), accesskey.ShownName(o.m.Name, false), module.ManifestName))
 		}
+		return o, nil
+	}
+	// add checks the module o against the modules before it, and appends it.
+	add := func(o openedModule) error {
 		if other, ok := dirs[o.m.Name]; ok {
-			return nil, exports.Refuse(fmt.Sprintf("Remove one of the two sources of module %s.", accesskey.ShownName(o.m.Name, false)),
-				fmt.Sprintf("Module %s is composed from %s and from %s.", accesskey.ShownName(o.m.Name, false), other, ps.Shown()))
+			return exports.Refuse(fmt.Sprintf("Remove one of the two sources of module %s.", accesskey.ShownName(o.m.Name, false)),
+				fmt.Sprintf("Module %s is composed from %s and from %s.", accesskey.ShownName(o.m.Name, false), other, o.ps.Shown()))
 		}
-		dirs[o.m.Name] = ps.Shown()
-		if !pl.Base && opts.Base != nil {
+		dirs[o.m.Name] = o.ps.Shown()
+		if !o.pl.Base && opts.Base != nil {
 			if err := checkProvides(o.m, opts.Base); err != nil {
-				return nil, err
+				return err
 			}
 		}
 		opened = append(opened, o)
+		return nil
+	}
+	for _, pl := range p.Modules {
+		o, err := open(pl, p.SourceOf(pl))
+		if err != nil {
+			return nil, err
+		}
+		if err := add(o); err != nil {
+			return nil, err
+		}
 	}
 	// The roles before the selection: a provided entry that the providing module's exclude
 	// lists provides nothing, and a role that two modules provide keeps the name of the
@@ -430,6 +493,15 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 		if err := addPushChecks(res, checkers, l.Dir, root, name, m.PushChecks); err != nil {
 			return nil, err
 		}
+		if err := addSubmitProgram(res, l.Dir, root, name, m.SubmitProgram); err != nil {
+			return nil, err
+		}
+		// A module that a checkout adds declares no scope check that counts.
+		if pl.Base || opts.Base == nil {
+			if err := addScopeChecks(res, l.Dir, root, name, m.ScopeChecks); err != nil {
+				return nil, err
+			}
+		}
 		res.Modules = append(res.Modules, rl)
 		for _, e := range l.Entries {
 			key := e.Kind + "/" + e.Name
@@ -450,6 +522,24 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 				res.Settings[runtime] = map[string]map[string]any{}
 			}
 			for file, path := range files {
+				if runtime == "codex" && file == CodexReadRulesName {
+					data, err := readFile(path)
+					if err != nil {
+						return nil, exports.HideError(err)
+					}
+					if len(data) > 0 && data[len(data)-1] != '\n' {
+						data = append(data, '\n')
+					}
+					res.CodexReadRules = append(res.CodexReadRules, data...)
+					continue
+				}
+				if runtime == "codex" && file == "hooks.json" {
+					data, err := readFile(path)
+					if err != nil {
+						return nil, exports.HideError(err)
+					}
+					res.CodexHooksJSON = append(res.CodexHooksJSON, data)
+				}
 				if res.Settings[runtime][file] == nil {
 					res.Settings[runtime][file] = map[string]any{}
 				}
@@ -477,7 +567,7 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	}
 	for key, ls := range owners {
 		kind, name, _ := strings.Cut(key, "/")
-		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]], For: fors[key+"@"+ls[0]], References: refs[key+"@"+ls[0]], Tier: tiers[key+"@"+ls[0]], Front: sites[key+"@"+ls[0]].Front, In: sites[key+"@"+ls[0]].In, Paths: sites[key+"@"+ls[0]].Paths})
+		res.Entries = append(res.Entries, Entry{Kind: kind, Name: name, Module: ls[0], Path: paths[key+"@"+ls[0]], For: fors[key+"@"+ls[0]], References: refs[key+"@"+ls[0]], Tier: tiers[key+"@"+ls[0]], Front: sites[key+"@"+ls[0]].Front, In: sites[key+"@"+ls[0]].In, Paths: sites[key+"@"+ls[0]].Paths, Note: sites[key+"@"+ls[0]].Note})
 		if tier := tiers[key+"@"+ls[0]]; tier != "" {
 			if t, ok := opts.Tiers[tier]; ok {
 				if res.Tiers == nil {
@@ -521,10 +611,16 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	if err := workflowsShipped(p, declared, opts.Base, opts.StackAs); err != nil {
 		return nil, err
 	}
+	if err := checkPlans(res, p, opts.Base, opts.StackAs); err != nil {
+		return nil, err
+	}
 	if err := checkHooks(res, p, opts); err != nil {
 		return nil, err
 	}
 	if err := checkContracts(res, opened); err != nil {
+		return nil, err
+	}
+	if err := checkNotes(res); err != nil {
 		return nil, err
 	}
 	if len(instructions) > 0 {
@@ -577,33 +673,212 @@ func addPushChecks(res *Result, checkers map[string]string, dir string, root *os
 			return exports.Errorf("Remove the push check for %s from module %s.\n  qory run verdict sends a verdict, and push checks do not cover it.", verdictType, shown(name))
 		}
 		if other, ok := checkers[c.Type]; ok {
-			return exports.Errorf("Remove the push check for %s from module %s or module %s.\n  A type has one push check, and both modules declare one.", c.Type, shown(other), shown(name))
+			return duplicatePushCheck(c.Type, other, name)
 		}
 		checkers[c.Type] = name
 		program := c.Command[0]
 		shownProgram := exports.Value(filepath.ToSlash(program), false)
 		info, err := root.Stat(program)
 		if err != nil {
-			return exports.Errorf("Add %s to module %s, or change its push check for %s.\n  Module %s has no file at %s.", shownProgram, shown(name), c.Type, shown(name), shownProgram)
+			return exports.Errorf("Add the program of the push check to its module, or change its path.\n  Module %s has no file at %s, the program of the push check for %s.", shown(name), shownProgram, c.Type)
 		}
 		if !info.Mode().IsRegular() {
-			return exports.Errorf("Set the push check for %s of module %s to a program file.\n  %s is not a file.", c.Type, shown(name), shownProgram)
+			return exports.Errorf("Set the program of the push check to a file in its module.\n  %s of module %s is not a file, and it is the program of the push check for %s.", shownProgram, shown(name), c.Type)
 		}
-		for _, e := range res.Excludes {
-			if e.Module != name || e.Path == "" {
-				continue
-			}
-			entry, err := filepath.Rel(dir, e.Path)
-			if err != nil || entry != program && !strings.HasPrefix(program, entry+string(filepath.Separator)) {
-				continue
-			}
-			return exports.Errorf("%s\n  The program of the push check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
-				altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), c.Type, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
+		if e, ok := excludedProgram(res, dir, name, program); ok {
+			return exports.Errorf("Keep the program of the push check in its module, or move it out of the left-out entry.\n  The program %s of the push check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
+				shownProgram, c.Type, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
 		}
 		command := append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(program)}, c.Command[1:]...)
 		res.PushChecks = append(res.PushChecks, PushCheck{Type: c.Type, Module: name, Command: command, Reads: c.Reads})
 	}
 	return nil
+}
+
+// SubmitProgram is the program of the submit step that the composed harness declares.
+type SubmitProgram struct {
+	// Module is the module that declares the program.
+	Module string `json:"module"`
+	// Command is the program and its arguments. The program is
+	// $QORY_HARNESS_HOME/modules/<module>/<path>, before substitution.
+	Command []string `json:"command"`
+}
+
+// addSubmitProgram sets the submit program of the module name at dir in the result. A
+// second module that declares one fails the compose, and so does a program that is not a
+// file in the module, read through root when it is not nil, and one in an entry the
+// module's exclude or only leaves out.
+func addSubmitProgram(res *Result, dir string, root *os.Root, name string, program *module.SubmitProgram) error {
+	if program == nil {
+		return nil
+	}
+	if res.SubmitProgram != nil {
+		return exports.Errorf("Remove submit_program from module %s or module %s.\n  A composed harness has one submit program, and both modules declare one.", shown(res.SubmitProgram.Module), shown(name))
+	}
+	if root == nil {
+		opened, err := os.OpenRoot(dir)
+		if err != nil {
+			return exports.HideError(err)
+		}
+		defer opened.Close()
+		root = opened
+	}
+	path := program.Command[0]
+	shownProgram := exports.Value(filepath.ToSlash(path), false)
+	info, err := root.Stat(path)
+	if err != nil {
+		return exports.Errorf("Add %s to module %s, or change its submit_program.\n  Module %s has no file at %s.", shownProgram, shown(name), shown(name), shownProgram)
+	}
+	if !info.Mode().IsRegular() {
+		return exports.Errorf("Set the submit_program of module %s to a program file.\n  %s is not a file.", shown(name), shownProgram)
+	}
+	if e, ok := excludedProgram(res, dir, name, path); ok {
+		return exports.Errorf("%s\n  The submit_program of module %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
+			altFix(fmt.Sprintf("Keep %s/%s in module %s", e.Kind, shown(e.Name), shown(name)), "move "+shownProgram+" out of it"), shown(name), e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
+	}
+	command := append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(path)}, program.Command[1:]...)
+	res.SubmitProgram = &SubmitProgram{Module: name, Command: command}
+	return nil
+}
+
+// SubmitProgramFor is a copy of the submit program rendered for a home, with every
+// $QORY_HARNESS_HOME in the command replaced the way [Result.PushChecksFor] replaces it;
+// nil when no module declares one.
+func (r *Result) SubmitProgramFor(home string) *SubmitProgram {
+	if r.SubmitProgram == nil {
+		return nil
+	}
+	command := make([]string, len(r.SubmitProgram.Command))
+	for i, word := range r.SubmitProgram.Command {
+		command[i] = ForHome(word, home).(string)
+	}
+	return &SubmitProgram{Module: r.SubmitProgram.Module, Command: command}
+}
+
+// duplicatePushCheck is the refusal for a type that the modules first and second both
+// declare a push check for, shaped as [duplicateScopeCheck] is: the fix has the type and
+// the modules when it has at most [exports.LineMax] characters, and otherwise has none of
+// them, and the second line has them.
+func duplicatePushCheck(typ, first, second string) error {
+	if fix := fmt.Sprintf("Remove the push check for %s from module %s or module %s.", typ, shown(first), shown(second)); fits(fix) {
+		return exports.Errorf("%s\n  A type has one push check, and both modules declare one.", fix)
+	}
+	return exports.Errorf("Remove the push check for the type from one of the two modules.\n  Modules %s and %s both declare one for %s, and a type has one push check.", shown(first), shown(second), typ)
+}
+
+// excludedProgram is the entry that the exclude or only of module name at dir leaves out
+// and that holds the program, a path inside the module, so the home can leave the program
+// out.
+func excludedProgram(res *Result, dir, name, program string) (Exclude, bool) {
+	for _, e := range res.Excludes {
+		if e.Module != name || e.Path == "" {
+			continue
+		}
+		entry, err := filepath.Rel(dir, e.Path)
+		if err != nil || entry != program && !strings.HasPrefix(program, entry+string(filepath.Separator)) {
+			continue
+		}
+		return e, true
+	}
+	return Exclude{}, false
+}
+
+// ScopeCheck is the scope check the composed harness declares for the plan of one
+// artifact type: one command, written to take --base <start commit> and --artifacts
+// <folder> as its last arguments and to exit 0 when the plan holds.
+type ScopeCheck struct {
+	// Module is the module of the base stack that declares the check.
+	Module string `json:"module"`
+	// Command is the program and its arguments, as the manifest has them. The program is
+	// $QORY_HARNESS_HOME/modules/<module>/<path>, before substitution.
+	Command []string `json:"command"`
+}
+
+// addScopeChecks adds the scope checks of the module name at dir to the result. A type
+// that another module already declares a scope check for fails the compose, and so does
+// a program that is not a file in the module, read through root when it is not nil, and
+// one in an entry the module's exclude or only leaves out, since the home can leave out
+// such an entry.
+func addScopeChecks(res *Result, dir string, root *os.Root, name string, checks map[string][]string) error {
+	if len(checks) == 0 {
+		return nil
+	}
+	if root == nil {
+		opened, err := os.OpenRoot(dir)
+		if err != nil {
+			return exports.HideError(err)
+		}
+		defer opened.Close()
+		root = opened
+	}
+	for _, typ := range slices.Sorted(maps.Keys(checks)) {
+		if other, ok := res.ScopeChecks[typ]; ok {
+			return duplicateScopeCheck(typ, other.Module, name)
+		}
+		c := checks[typ]
+		program := c[0]
+		shownProgram := exports.Value(filepath.ToSlash(program), false)
+		info, err := root.Stat(program)
+		if err != nil {
+			return exports.Errorf("Add the program of the scope check to its module, or change its path.\n  Module %s has no file at %s, the program of the scope check for %s.", shown(name), shownProgram, typ)
+		}
+		if !info.Mode().IsRegular() {
+			return exports.Errorf("Set the program of the scope check to a file in its module.\n  %s of module %s is not a file, and it is the program of the scope check for %s.", shownProgram, shown(name), typ)
+		}
+		if e, ok := excludedProgram(res, dir, name, program); ok {
+			return exports.Errorf("Keep the program of the scope check in its module, or move it out of the left-out entry.\n  The program %s of the scope check for %s is in %s/%s, and an exclude or only of module %s leaves %s/%s out.",
+				shownProgram, typ, e.Kind, shown(e.Name), shown(name), e.Kind, shown(e.Name))
+		}
+		if res.ScopeChecks == nil {
+			res.ScopeChecks = map[string]ScopeCheck{}
+		}
+		res.ScopeChecks[typ] = ScopeCheck{Module: name, Command: append([]string{"$QORY_HARNESS_HOME/modules/" + name + "/" + filepath.ToSlash(program)}, c[1:]...)}
+	}
+	return nil
+}
+
+// duplicateScopeCheck is the refusal for a type that the modules first and second both
+// declare a scope check for. The fix line names the type and the modules when it fits in
+// 98 characters. Otherwise the fix line is the same without the values, and the second
+// line has them, so no length of a name or a type moves the fix past 98 characters.
+func duplicateScopeCheck(typ, first, second string) error {
+	if fix := fmt.Sprintf("Remove the scope check for %s from module %s or %s.", typ, shown(first), shown(second)); fits(fix) {
+		return exports.Errorf("%s\n  A type has one scope check, and both modules declare one.", fix)
+	}
+	return exports.Errorf("Remove the scope check for the type from one of the two modules.\n  Modules %s and %s both declare one for %s, and a type has one scope check.", shown(first), shown(second), typ)
+}
+
+// checkPlans refuses a workflow of the stack whose plan type no module of the base stack
+// declares a scope check for, for the first such workflow in sorted order, so no plan
+// goes unchecked. The refusal is one line when it fits in 98 characters, and the
+// alternative moves to a second line otherwise, as [altFix] does. The check is the compose's, since the stack alone does not
+// know its modules.
+func checkPlans(res *Result, p *stack.Stack, base *Base, as string) error {
+	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
+		plan := p.Workflows[name].Plan
+		if plan == "" {
+			continue
+		}
+		if _, ok := res.ScopeChecks[plan]; !ok {
+			return exports.Errorf("%s\n  No module of the stack declares a scope check for %s.\n  workflows.%s is in %s.", altFix(fmt.Sprintf("Add a scope check for %s to a module's scope_checks", plan), fmt.Sprintf("remove `plan: %s` from %s in the stack", plan, name)), plan, name, stackFile(p, base, as))
+		}
+	}
+	return nil
+}
+
+// stackFile is the file that defines the stack as a refusal prints it: the qory-stack.yaml
+// of the base stack a checkout extends, with the base's name and pin, the name the caller
+// gives a stack it did not read from a file, or the file of the stack.
+func stackFile(p *stack.Stack, base *Base, as string) string {
+	switch {
+	case base != nil:
+		return "the " + stack.FileName + " of the base stack " + base.String()
+	case as != "":
+		return as
+	case p.File != "":
+		return filepath.Base(p.File)
+	}
+	return "the stack"
 }
 
 // PushChecksFor is a copy of the push checks rendered for a home, with every
@@ -1549,6 +1824,10 @@ func collisions(owners map[string][]string, modules []Module, base *Base, checko
 	return e
 }
 
+// CodexReadRulesName is the one file under settings/codex/ that is no fragment: Codex
+// execpolicy rules for a read run, kept as [Result.CodexReadRules].
+const CodexReadRulesName = "read-access.rules"
+
 // mergeFile decodes one settings fragment of the named module, read with readFile, and
 // folds it into the result's target file for the runtime. The extension decides the format, and a TOML
 // document is normalized to the types the JSON decoder produces. The top-level key
@@ -1579,6 +1858,9 @@ func mergeFile(res *Result, runtime, file, path, modName string, decided map[str
 	default:
 		return exports.Refuse(fmt.Sprintf("Rename the settings fragment of module %s to end in .json or .toml.", shown(modName)),
 			"The file is "+exports.HidePath(path)+".")
+	}
+	if hooks, ok := src["hooks"]; ok && runtime == "codex" && (file == "config.toml" || file == "hooks.json") {
+		res.CodexHooks = append(res.CodexHooks, HooksFragment{Module: modName, File: file, Hooks: hooks})
 	}
 	m := &merger{file: "settings/" + runtime + "/" + file, module: modName, setBy: res.setBy}
 	dst := res.Settings[runtime][file]
@@ -1751,6 +2033,25 @@ func (r *Result) SettingsFor(runtime, file, home string) map[string]any {
 		src = map[string]any{}
 	}
 	return ForHome(src, home).(map[string]any)
+}
+
+// SourceDirs are the folders the compose read its modules from: each module's Dir and,
+// when it differs, its RealDir, in module order without repeats, then [Result.Cache]
+// when it is known. qory copies a file that a link in a Codex home leads to only when it
+// lies in the composed home or in one of them.
+func (r *Result) SourceDirs() []string {
+	var dirs []string
+	for _, m := range r.Modules {
+		for _, d := range []string{m.Dir, m.RealDir} {
+			if d != "" && !slices.Contains(dirs, d) {
+				dirs = append(dirs, d)
+			}
+		}
+	}
+	if r.Cache != "" && !slices.Contains(dirs, r.Cache) {
+		dirs = append(dirs, r.Cache)
+	}
+	return dirs
 }
 
 // MCPFor is a copy of the composed MCP servers rendered for a home, name to object, with

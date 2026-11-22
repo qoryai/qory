@@ -4,10 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/qoryai/qory/internal/branchformat"
 )
 
 const testRef = "qory/wi_1"
@@ -28,17 +27,17 @@ func branchCommit(t *testing.T, base, path, first string, change func(work strin
 
 // versionOf is a version with the commit of each path, given as path, commit, path,
 // commit, on git.example.com.
-func versionOf(pairs ...string) []branchformat.Repository {
-	var entries []branchformat.Repository
+func versionOf(pairs ...string) []Repository {
+	var entries []Repository
 	for i := 0; i < len(pairs); i += 2 {
-		entries = append(entries, branchformat.Repository{System: "git.example.com", Path: pairs[i], Commit: pairs[i+1]})
+		entries = append(entries, Repository{System: "git.example.com", Path: pairs[i], Commit: pairs[i+1]})
 	}
 	return entries
 }
 
 // fetchBranchAt fetches list with the target acme/shop at version and the branch with
 // entries, and returns the branch.
-func fetchBranchAt(t *testing.T, dir, list, version string, entries []branchformat.Repository) *WorkBranch {
+func fetchBranchAt(t *testing.T, dir, list, version string, entries []Repository) *WorkBranch {
 	t.Helper()
 	b := &WorkBranch{Ref: testRef, Version: entries}
 	if _, err := fetchListAt(dir, list, Target{System: "git.example.com", Path: "acme/shop", Version: version, Branch: b}); err != nil {
@@ -64,7 +63,7 @@ func switchTo(dir string, b *WorkBranch) (string, error) {
 	return strings.TrimSuffix(report.String(), "\n"), err
 }
 
-// TestTheTargetStaysAtItsVersionUntilTheSwitch is a run with a branch version: the fetch
+// TestTheTargetStaysAtItsVersionUntilTheSwitch is a run with a version to start from: the fetch
 // leaves the working folder at the target version, for the compose, and the switch puts
 // it on the branch at the version's commit.
 func TestTheTargetStaysAtItsVersionUntilTheSwitch(t *testing.T) {
@@ -99,12 +98,12 @@ func TestTheTargetStaysAtItsVersionUntilTheSwitch(t *testing.T) {
 	if got := contentOf(t, filepath.Join(dir, "qory.yaml")); got != "branch\n" {
 		t.Errorf("qory.yaml = %q", got)
 	}
-	if want := (WorkRepository{Path: "acme/shop", Dir: ".", Commit: commit}); len(b.Repositories) != 1 || b.Repositories[0] != want {
+	if want := (WorkRepository{Path: "acme/shop", Dir: ".", Commit: commit, Start: commit, DefaultBranch: "main"}); len(b.Repositories) != 1 || b.Repositories[0] != want {
 		t.Errorf("repositories = %+v", b.Repositories)
 	}
 }
 
-// TestABranchWithNoVersionStartsAtTheTargetVersion is a work item with no branch version:
+// TestABranchWithNoVersionStartsAtTheTargetVersion is a work item with no version to start from:
 // the branch is new, at the target version.
 func TestABranchWithNoVersionStartsAtTheTargetVersion(t *testing.T) {
 	needGit(t)
@@ -162,9 +161,9 @@ func TestFurtherRepositoriesGetTheBranch(t *testing.T) {
 		}
 	}
 	want := []WorkRepository{
-		{Path: "acme/shop", Dir: ".", Commit: first},
-		{Path: "acme/api", Dir: ".qory/repositories/acme/api", Commit: apiCommit},
-		{Path: "acme/docs", Dir: ".qory/repositories/acme/docs", Commit: docsHead},
+		{Path: "acme/shop", Dir: ".", Commit: first, Start: first, DefaultBranch: "main"},
+		{Path: "acme/api", Dir: ".qory/repositories/acme/api", Commit: apiCommit, Start: apiCommit, DefaultBranch: "main"},
+		{Path: "acme/docs", Dir: ".qory/repositories/acme/docs", Commit: docsHead, Start: docsHead, DefaultBranch: "main"},
 	}
 	if len(b.Repositories) != len(want) {
 		t.Fatalf("repositories = %+v", b.Repositories)
@@ -192,8 +191,10 @@ func TestABranchCannotChangeTheComposedHarness(t *testing.T) {
 	b := fetchBranchAt(t, dir, "acme/shop", first, versionOf("acme/shop", commit))
 
 	_, err := switchTo(dir, b)
-	if err == nil || !strings.Contains(err.Error(), "commit "+commit[:12]+" of "+testRef+" has another .qory") {
-		t.Fatalf("err = %v", err)
+	want := "qory run: Commit " + commit[:12] + " of " + testRef + " has a .qory folder that differs from the one at target version " + first[:12] +
+		", so the run did not start; the code is used\n  qory keeps the files of the run in .qory."
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %s", err, want)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".qory", "harness")); !os.IsNotExist(err) {
 		t.Errorf(".qory/harness: %v", err)
@@ -222,9 +223,10 @@ func TestAFileInTheWayStopsTheCheckout(t *testing.T) {
 			}
 
 			_, err := switchTo(dir, b)
-			want := "qory run: add a new version of the artifact branch in Qory Apiary with a commit that git can check out"
-			if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), "; the code is used") {
-				t.Fatalf("err = %v", err)
+			want := "qory run: git cannot check out commit " + commit[:12] + " of " + testRef +
+				", where the run starts, so the run did not start; the code is used\n  The checkout in acme/shop failed: "
+			if err == nil || !strings.HasPrefix(err.Error(), want) {
+				t.Fatalf("err = %v, want it to start with %s", err, want)
 			}
 			if got := contentOf(t, filepath.Join(dir, "notes.md")); got != "in the way\n" {
 				t.Errorf("notes.md = %q", got)
@@ -242,9 +244,9 @@ func TestStopsOnABranchCommitTheRemoteLacks(t *testing.T) {
 
 	b := &WorkBranch{Ref: testRef, Version: versionOf("acme/shop", strings.Repeat("a", 40))}
 	_, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: first, Branch: b})
-	want := "qory run: add a new version of the artifact branch in Qory Apiary with a commit of acme/shop, then take the work item in again: the version has aaaaaaaaaaaa"
+	want := "qory run: The version that the run starts from has commit aaaaaaaaaaaa, which is not a commit on acme/shop on git.example.com, so the run did not start; the code is used\n  The fetch through the run's gateway failed: "
 	if err == nil || !strings.HasPrefix(err.Error(), want) {
-		t.Fatalf("err = %v", err)
+		t.Fatalf("err = %v, want it to start with %s", err, want)
 	}
 }
 
@@ -257,7 +259,7 @@ func TestStopsOnABranchIDThatIsNoCommit(t *testing.T) {
 
 	b := &WorkBranch{Ref: testRef, Version: versionOf("acme/shop", tree)}
 	_, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: first, Branch: b})
-	want := "qory run: add a new version of the artifact branch in Qory Apiary with a commit of acme/shop, then take the work item in again: the version has " + tree[:12] + ", which is not a commit; the code is used"
+	want := "qory run: The version that the run starts from has " + tree[:12] + " for acme/shop, which is not a commit, so the run did not start; the code is used"
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %s", err, want)
 	}
@@ -319,5 +321,36 @@ func TestABranchNeedsATargetVersion(t *testing.T) {
 	}
 	if b.Repositories != nil {
 		t.Errorf("repositories = %+v", b.Repositories)
+	}
+}
+
+// TestEachRepositoryKeepsTheNameOfItsDefaultBranch is a run of two repositories whose default
+// branches are trunk and stable: the fetch reads each name, before the switch moves HEAD to the
+// work branch, and [Push] has it as the base's branch of that repository alone.
+func TestEachRepositoryKeepsItsOwnDefaultBranchName(t *testing.T) {
+	needGit(t)
+	base, dir := t.TempDir(), emptyFolder(t)
+	remote(t, base, "acme/shop", "trunk", nil)
+	remote(t, base, "acme/lib", "stable", nil)
+	first := run(t, filepath.Join(base, "acme", "shop.git"), "rev-parse", "HEAD")
+	b := fetchBranchAt(t, dir, "acme/shop,acme/lib", first, nil)
+	if _, err := switchTo(dir, b); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, r := range b.Repositories {
+		got[r.Path] = r.DefaultBranch
+	}
+	if want := map[string]string{"acme/shop": "trunk", "acme/lib": "stable"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("the default branches are %v, want %v", got, want)
+	}
+	var version []Repository
+	for _, r := range b.Repositories {
+		version = withCommit(version, "git.example.com", r.Path, r.Commit, r.Start, r.DefaultBranch, nil)
+	}
+	for _, r := range version {
+		if want := got[r.Path]; r.Base == nil || r.Base.Branch != want {
+			t.Errorf("%s has the base %+v, want the branch %s", r.Path, r.Base, want)
+		}
 	}
 }

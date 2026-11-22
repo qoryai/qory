@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -16,7 +17,6 @@ import (
 
 	"github.com/qoryai/integrations/contracts"
 
-	"github.com/qoryai/qory/internal/branchformat"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/proxygit"
 )
@@ -24,6 +24,13 @@ import (
 // onBranch fetches acme/shop, and acme/lib when list has it, and checks out the branch,
 // from a first commit of each repository; it returns the working folder and the branch.
 func onBranch(t *testing.T, list string) (string, *WorkBranch) {
+	dir, b, _ := onBranchIn(t, list)
+	return dir, b
+}
+
+// onBranchIn is [onBranch] that also returns the folder of the remotes, whose repository
+// acme/shop is shop.git in the folder acme.
+func onBranchIn(t *testing.T, list string) (string, *WorkBranch, string) {
 	t.Helper()
 	needGit(t)
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
@@ -34,6 +41,7 @@ func onBranch(t *testing.T, list string) (string, *WorkBranch) {
 	dir := emptyFolder(t)
 	version := run(t, filepath.Join(base, "acme", "shop.git"), "rev-parse", "main")
 	b := fetchBranchAt(t, dir, list, version, nil)
+	// A first run: no submission and no pushed commit, so the branch is not at the forge yet.
 	if _, err := switchTo(dir, b); err != nil {
 		t.Fatal(err)
 	}
@@ -41,20 +49,31 @@ func onBranch(t *testing.T, list string) (string, *WorkBranch) {
 		bare := filepath.Join(base, filepath.FromSlash(r.Path)+".git")
 		run(t, bare, "config", "http.receivepack", "true")
 	}
-	return dir, b
+	return dir, b, base
 }
+
+// pushed is what [Push] returned: the repositories it moved.
+type pushed struct{ Repositories []Repository }
 
 // pushOf is [Push] of b in dir, with the message "Changes left", which returns the lines
 // it printed too.
-func pushOf(dir string, b *WorkBranch) (*branchformat.Branch, string, error) {
+func pushOf(dir string, b *WorkBranch) (*pushed, string, error) {
 	return pushWith(dir, b, true)
 }
 
 // pushWith is [pushOf] with agentStopped set.
-func pushWith(dir string, b *WorkBranch, agentStopped bool) (*branchformat.Branch, string, error) {
+func pushWith(dir string, b *WorkBranch, agentStopped bool) (*pushed, string, error) {
+	return pushChecked(dir, b, agentStopped, nil)
+}
+
+// pushChecked is [pushWith] with the check of [Push].
+func pushChecked(dir string, b *WorkBranch, agentStopped bool, check func([]Repository) error) (*pushed, string, error) {
 	var report strings.Builder
-	doc, err := Push(context.Background(), dir, os.Environ(), b, "Changes left", testProxy, agentStopped, &report)
-	return doc, report.String(), err
+	repositories, err := Push(context.Background(), dir, os.Environ(), b, "Changes left", testProxy, testProxy, agentStopped, check, &report)
+	if repositories == nil {
+		return nil, report.String(), err
+	}
+	return &pushed{Repositories: repositories}, report.String(), err
 }
 
 // TestAfterTheRunTheCheckTakesWhatTheFetchWrote is a repository qory fetched: the check
@@ -162,18 +181,22 @@ func TestNoChangeAfterGitAddsCommitsNothing(t *testing.T) {
 }
 
 // TestWithCommit replaces the entry of a repository, in any letter case on github.com,
-// and adds one for a repository that has none.
+// with the run's base and commits, and adds one for a repository that has none.
 func TestWithCommit(t *testing.T) {
-	entry := func(system, path, commit string) branchformat.Repository {
-		return branchformat.Repository{System: system, Path: path, Commit: commit}
+	entry := func(system, path, commit string) Repository {
+		return Repository{System: system, Path: path, Commit: commit}
 	}
-	version := []branchformat.Repository{entry("github.com", "Acme/Shop", "a"), entry("github.com", "acme/lib", "b")}
-	got := withCommit(slices.Clone(version), "github.com", "acme/shop", "c")
-	if want := []branchformat.Repository{entry("github.com", "Acme/Shop", "c"), entry("github.com", "acme/lib", "b")}; !slices.Equal(got, want) {
+	commits := []Commit{{Commit: "b1"}, {Commit: "c"}}
+	pushed := func(system, path string) Repository {
+		return Repository{System: system, Path: path, Commit: "c", Base: &Base{Commit: "a", Branch: "main"}, Commits: commits}
+	}
+	version := []Repository{entry("github.com", "Acme/Shop", "a"), entry("github.com", "acme/lib", "b")}
+	got := withCommit(slices.Clone(version), "github.com", "acme/shop", "c", "a", "main", commits)
+	if want := []Repository{pushed("github.com", "Acme/Shop"), entry("github.com", "acme/lib", "b")}; !reflect.DeepEqual(got, want) {
 		t.Errorf("replaced: %+v, want %+v", got, want)
 	}
-	got = withCommit(slices.Clone(version), "git.example.com", "Acme/Shop", "c")
-	if len(got) != 3 || got[2] != entry("git.example.com", "Acme/Shop", "c") {
+	got = withCommit(slices.Clone(version), "git.example.com", "Acme/Shop", "c", "a", "main", commits)
+	if len(got) != 3 || !reflect.DeepEqual(got[2], pushed("git.example.com", "Acme/Shop")) {
 		t.Errorf("added: %+v", got)
 	}
 }
@@ -197,7 +220,6 @@ func TestPushCause(t *testing.T) {
 func TestPushFailed(t *testing.T) {
 	b := &WorkBranch{Ref: testRef, system: "git.example.com"}
 	for output, want := range map[string]string{
-		" ! [rejected] a -> b (non-fast-forward)":           "qory run: add a new version of the artifact branch",
 		" ! [remote rejected] a -> b (protected)":           "qory run: change the rule on git.example.com",
 		"error: RPC failed; HTTP 403 curl 22":               "qory run: The push was refused (403).",
 		"fatal: unable to access 'x': returned error: 403":  "qory run: The push was refused (403).",
@@ -208,6 +230,9 @@ func TestPushFailed(t *testing.T) {
 		got := pushFailed(b, "acme/shop", &gitError{line: output, exit: 1, output: output}).Error()
 		if !strings.HasPrefix(got, want) || !strings.HasSuffix(got, "; the code is used") {
 			t.Errorf("pushFailed(%q) = %q, want it to start with %q", output, got, want)
+		}
+		if strings.Contains(got, "add a new version") {
+			t.Errorf("pushFailed(%q) offers a version: %q", output, got)
 		}
 		if strings.Contains(got, "token-123") {
 			t.Errorf("pushFailed(%q) shows the password: %q", output, got)
@@ -1147,5 +1172,143 @@ func TestACommitThatFailsInAFurtherRepositoryPushesNothing(t *testing.T) {
 	}
 	if got := b.PushedPaths(); got != "" {
 		t.Errorf("qory pushed %s", got)
+	}
+}
+
+// TestABaseBranchOverTheFormatsLimitIsLeftOut is a default branch name of 256 characters: the
+// base has no branch, so the version passes the format's check after the push landed.
+func TestABaseBranchOverTheFormatsLimitIsLeftOut(t *testing.T) {
+	if got := baseBranch(strings.Repeat("a", 255)); got != strings.Repeat("a", 255) {
+		t.Errorf("a name of 255 characters is %q", got)
+	}
+	if got := baseBranch(strings.Repeat("é", 256)); got != "" {
+		t.Errorf("a name of 256 characters is %q, want none", got)
+	}
+}
+
+// TestDeleteBranchIsTheOnlyWayOut is the fix of a branch that was pushed with no version
+// stored: delete the branch, because only a run stores a version.
+func TestDeleteBranchIsTheOnlyWayOut(t *testing.T) {
+	b := &WorkBranch{Ref: testRef, system: "git.example.com", pushed: []string{"acme/shop", "acme/lib"}}
+	want := "delete branch qory/wi_1 of acme/shop and acme/lib on git.example.com"
+	if got := b.DeleteBranch(); got != want {
+		t.Errorf("DeleteBranch() = %q, want %q", got, want)
+	}
+}
+
+// TestACheckThatFailsPushesNothing is a check of [Push] that fails: Push returns its error,
+// the branch is not at the forge, and the commit of what the agent left stays local, at the
+// head that the check got.
+func TestACheckThatFailsPushesNothing(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop")
+	write(t, filepath.Join(dir, "left.txt"), "left\n")
+	stop := errors.New("qory run: the check failed")
+	var got []Repository
+	doc, _, err := pushChecked(dir, b, true, func(version []Repository) error {
+		got = version
+		return stop
+	})
+	if !errors.Is(err, stop) || doc != nil {
+		t.Fatalf("Push returned %+v, %v", doc, err)
+	}
+	head := run(t, dir, "rev-parse", "HEAD")
+	if len(got) != 1 || got[0].Commit != head || len(got[0].Commits) != 1 || got[0].Commits[0].Commit != head {
+		t.Errorf("the check got %+v, want the commit %s", got, head)
+	}
+	if out := run(t, filepath.Join(base, "acme", "shop.git"), "branch", "--list", b.Ref); out != "" {
+		t.Errorf("the forge has the branch: %q", out)
+	}
+	if b.PushedPaths() != "" || b.Repositories[0].Commit == head {
+		t.Errorf("the branch records a push: %q, %s", b.PushedPaths(), b.Repositories[0].Commit)
+	}
+}
+
+// TestACheckThatFailsPushesNoRepository is a run with a target and a further repository, and
+// a change left in each: the check gets the version with the local head of both, after both
+// are committed and listed, and when it fails the forge has the branch in neither.
+func TestACheckThatFailsPushesNoRepository(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop,acme/lib")
+	lib := filepath.Join(dir, filepath.FromSlash(b.Repositories[1].Dir))
+	write(t, filepath.Join(dir, "left.txt"), "left\n")
+	write(t, filepath.Join(lib, "left.txt"), "left\n")
+	stop := errors.New("qory run: the check failed")
+	var got []Repository
+	_, _, err := pushChecked(dir, b, true, func(version []Repository) error {
+		got = version
+		return stop
+	})
+	if !errors.Is(err, stop) {
+		t.Fatalf("Push: %v", err)
+	}
+	heads := map[string]string{"acme/shop": run(t, dir, "rev-parse", "HEAD"), "acme/lib": run(t, lib, "rev-parse", "HEAD")}
+	if len(got) != 2 {
+		t.Fatalf("the check got %+v, want both repositories", got)
+	}
+	for _, r := range got {
+		if r.Commit != heads[r.Path] || len(r.Commits) != 1 || r.Commits[0].Commit != heads[r.Path] {
+			t.Errorf("the check got %s at %s with %+v, want the local head %s", r.Path, r.Commit, r.Commits, heads[r.Path])
+		}
+	}
+	for path := range heads {
+		if out := run(t, filepath.Join(base, filepath.FromSlash(path)+".git"), "branch", "--list", b.Ref); out != "" {
+			t.Errorf("the forge has the branch in %s: %q", path, out)
+		}
+	}
+}
+
+// TestAPushThatStopsBeforeItsFirstPushListsNoEarlierPush is a branch that an earlier Push
+// pushed, and a Push whose check fails: the branch lists no repository as pushed, so no line
+// says to delete it.
+func TestAPushThatStopsBeforeItsFirstPushListsNoEarlierPush(t *testing.T) {
+	dir, b, _ := onBranchIn(t, "acme/shop")
+	write(t, filepath.Join(dir, "one.txt"), "one\n")
+	if _, lines, err := pushOf(dir, b); err != nil || b.PushedPaths() != "acme/shop" {
+		t.Fatalf("the first Push: %v, pushed %q\n%s", err, b.PushedPaths(), lines)
+	}
+	write(t, filepath.Join(dir, "two.txt"), "two\n")
+	stop := errors.New("qory run: the check failed")
+	if _, _, err := pushChecked(dir, b, true, func([]Repository) error { return stop }); !errors.Is(err, stop) {
+		t.Fatalf("the second Push: %v", err)
+	}
+	if got := b.PushedPaths(); got != "" {
+		t.Errorf("the branch lists %q as pushed, want none", got)
+	}
+}
+
+// TestAListThatFailsInAPushHasTheRunCodeLine is a Push whose start commit the repository
+// lacks, so the list of the run's commits fails: the error is the line of a run from a run
+// code, and the forge has no branch.
+func TestAListThatFailsInAPushHasTheRunCodeLine(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop")
+	write(t, filepath.Join(dir, "left.txt"), "left\n")
+	b.Repositories[0].Start = strings.Repeat("1", 40)
+	_, _, err := pushOf(dir, b)
+	want := "qory run: Start the run again: the list of the run's commits failed.\n  Listing the commits of acme/shop from commit 111111111111 to "
+	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), ". qory pushed nothing. The run code is used up.") {
+		t.Fatalf("the error is %v, want the start %q and the end of a run from a run code", err, want)
+	}
+	if out := run(t, filepath.Join(base, "acme", "shop.git"), "branch", "--list", b.Ref); out != "" {
+		t.Errorf("the forge has the branch: %q", out)
+	}
+}
+
+// TestTheCheckGetsTheVersionThePushLeaves is a check of [Push] that passes: the version it
+// got is the one that Push returns after the push.
+func TestTheCheckGetsTheVersionThePushLeaves(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop")
+	write(t, filepath.Join(dir, "left.txt"), "left\n")
+	var got []Repository
+	doc, _, err := pushChecked(dir, b, true, func(version []Repository) error {
+		got = version
+		return nil
+	})
+	if err != nil || doc == nil {
+		t.Fatalf("Push returned %+v, %v", doc, err)
+	}
+	if !reflect.DeepEqual(got, doc.Repositories) {
+		t.Errorf("the check got %+v, and Push returned %+v", got, doc.Repositories)
+	}
+	if head := run(t, filepath.Join(base, "acme", "shop.git"), "rev-parse", b.Ref); head != got[0].Commit {
+		t.Errorf("the forge's branch is at %s, and the check got %s", head, got[0].Commit)
 	}
 }

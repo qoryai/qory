@@ -1,0 +1,11 @@
+apiVersion: qory.dev/v1alpha1
+name: core
+modules:
+  - name: core
+    source: {path: modules/core}
+extending: {}
+runtimes:
+  claude:
+    version: 2.1.300
+  codex:
+    version: 0.167.2

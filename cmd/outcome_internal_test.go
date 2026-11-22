@@ -11,6 +11,7 @@ import (
 
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/ui"
@@ -121,6 +122,23 @@ func TestRunEndedSaysTheOutcome(t *testing.T) {
 			"claude ended on the signal SIGTERM\nthe run was paused: every model key reached its limit\n", 1},
 		{"exit 0 at the model key limit", &session.Result{State: "paused", Reason: event.ReasonModelKeyLimit}, "",
 			"claude exited 0\nthe run was paused: every model key reached its limit\n", 1},
+		// A model key the model provider rejected: the run pauses while another key is
+		// usable, and fails when none is. Forager stopped the runtime, so the outcome
+		// follows the runtime's line whatever its exit.
+		{"a kill at a rejected key", &session.Result{State: "paused", Reason: reasonModelKeySwitch, ExitCode: -1, Signal: "SIGTERM"}, "",
+			"claude ended on the signal SIGTERM\nthe run was paused: the model provider rejected a model key, and the run can continue on another key\n", 1},
+		{"exit 0 at a rejected key", &session.Result{State: "paused", Reason: reasonModelKeySwitch}, "",
+			"claude exited 0\nthe run was paused: the model provider rejected a model key, and the run can continue on another key\n", 1},
+		{"a kill at every key rejected", &session.Result{State: "failed", Reason: reasonModelKeyUnauthorized, ExitCode: -1, Signal: "SIGTERM"}, "",
+			"claude ended on the signal SIGTERM\nthe run failed: the model provider rejected every model key\n", 1},
+		{"exit 3 at every key rejected", &session.Result{State: "failed", Reason: reasonModelKeyUnauthorized, ExitCode: 3}, "",
+			"claude exited 3\nthe run failed: the model provider rejected every model key\n", 1},
+		{"exit 0 at every key rejected", &session.Result{State: "failed", Reason: reasonModelKeyUnauthorized}, "",
+			"claude exited 0\nthe run failed: the model provider rejected every model key\n", 1},
+		{"a key rejected, closed paused", closed("paused", reasonModelKeySwitch), "",
+			"the run was paused: the model provider rejected a model key, claude was stopped, and the run can continue on another key\n", 1},
+		{"every key rejected, closed failed", closed("failed", reasonModelKeyUnauthorized), "",
+			"the run failed: the model provider rejected every model key, and claude was stopped\n", 1},
 	} {
 		said, code := endOf(c.res, runEnd{runtime: "claude", timeout: 5 * time.Minute, got: c.got})
 		if said != c.want || code != c.code {
@@ -146,6 +164,14 @@ func TestRunEndedMarksTheOutcome(t *testing.T) {
 		{&session.Result{State: "failed", Reason: "checks_failed"}, "✓ claude exited 0\n✗ the run failed: checks failed\n"},
 		{&session.Result{State: "succeeded", ExitCode: 2}, "✗ claude exited 2\n✓ the run completed\n"},
 		{&session.Result{State: "paused", Reason: event.ReasonModelKeyLimit}, "✓ claude exited 0\n✗ the run was paused: every model key reached its limit\n"},
+		{&session.Result{State: "paused", Reason: reasonModelKeySwitch, ExitCode: 143},
+			"✗ claude exited 143\n✗ the run was paused: the model provider rejected a model key, and the run can continue on another key\n"},
+		{&session.Result{State: "failed", Reason: reasonModelKeyUnauthorized, ExitCode: 143},
+			"✗ claude exited 143\n✗ the run failed: the model provider rejected every model key\n"},
+		{&session.Result{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "paused", Reason: reasonModelKeySwitch},
+			"✗ the run was paused: the model provider rejected a model key, claude was stopped, and the run can continue on another key\n"},
+		{&session.Result{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "paused", Reason: event.ReasonModelKeyLimit},
+			"✗ the run was paused: every model key reached its limit, and claude was stopped\n"},
 	} {
 		var out strings.Builder
 		runEnded(ui.New(&out), c.res, runEnd{runtime: "claude"})
@@ -185,6 +211,7 @@ func TestGatewayEndedResendSaysTheOutcome(t *testing.T) {
 		{session.ResendResult{RunClosed: true, ClosedReason: oldReasonCredentialExpired}, "the run has ended (cancelled: the run credential expired)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonSessionLost}, "the run has ended (lost: it lost contact with the gateway for 1m30s)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "paused", Reason: event.ReasonModelKeyLimit}, "the run has ended (paused: every model key reached its limit)" + tail},
+		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonRunClosed, State: "paused", Reason: reasonModelKeySwitch}, "the run has ended (paused: the model provider rejected a model key, and the run can continue on another key)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: event.ReasonBatchRefused}, "the run has ended (failed: its events could not be recorded)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: oldReasonCredentialInvalid}, "the run has ended (failed: its run credential could not be checked)" + tail},
 		{session.ResendResult{RunClosed: true, ClosedReason: "another_code"}, "the run has ended (failed: the gateway stopped during the run)" + tail},
@@ -326,6 +353,8 @@ func TestEndsAsSaysTheResendsEnd(t *testing.T) {
 		{"cancelled", event.ReasonInterrupted, "cancelled"},
 		{"paused", event.ReasonModelKeyLimit, "paused: every model key reached its limit"},
 		{"paused", "", "paused: every model key reached its limit"},
+		{"paused", reasonModelKeySwitch, "paused: the model provider rejected a model key, and the run can continue on another key"},
+		{"failed", reasonModelKeyUnauthorized, "failed: the model provider rejected every model key"},
 	} {
 		if got := endsAs(c.state, c.reason); got != c.want {
 			t.Errorf("%q, %q: %q, want %q", c.state, c.reason, got, c.want)
@@ -470,6 +499,45 @@ func TestPushEndingOutcome(t *testing.T) {
 	}
 }
 
+// TestPushEndingOutcomeOfAMovedBranch is the close of a run whose push step was refused because the
+// branch moved: failed with push_head_changed after a session that succeeded, failed or timed out,
+// with the session's exit code for the last two, also when the run's time limit cut the step after
+// the refusal. A session that was interrupted, cancelled or paused keeps its end, and a stop that
+// landed after the refusal wins. A time limit that cuts a step with no refusal still closes a
+// passed session cancelled with the reason timeout.
+func TestPushEndingOutcomeOfAMovedBranch(t *testing.T) {
+	succeeded := session.Outcome{State: event.StateSucceeded}
+	timedOut := session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
+	failed := session.Outcome{State: event.StateFailed, ExitCode: 3}
+	interrupted := session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: 130}
+	closed := session.Outcome{State: event.StateCancelled, Reason: "stopped", ExitCode: 1}
+	paused := session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: 143}
+	moved := &preparation.HeadChanged{Branch: "qory/w1", Head: strings.Repeat("a", 40), Expected: strings.Repeat("b", 40)}
+	code := string(contracts.EndCodePushHeadChanged)
+	for _, c := range []struct {
+		name   string
+		ending pushEnding
+		want   session.Outcome
+	}{
+		{"succeeded session", pushEnding{session: succeeded}, session.Outcome{State: event.StateFailed, ExitCode: 1, Reason: code}},
+		{"failed session", pushEnding{session: failed}, session.Outcome{State: event.StateFailed, ExitCode: 3, Reason: code}},
+		{"timed out session", pushEnding{session: timedOut}, session.Outcome{State: event.StateFailed, ExitCode: exitTimeout, Reason: code}},
+		{"interrupted session", pushEnding{session: interrupted}, interrupted},
+		{"session that a stop closed", pushEnding{session: closed}, closed},
+		{"paused session", pushEnding{session: paused}, paused},
+		{"time limit after the refusal, succeeded session", pushEnding{session: succeeded, cut: true}, session.Outcome{State: event.StateFailed, ExitCode: 1, Reason: code}},
+		{"time limit after the refusal, failed session", pushEnding{session: failed, cut: true}, session.Outcome{State: event.StateFailed, ExitCode: 3, Reason: code}},
+		{"time limit after the refusal, timed out session", pushEnding{session: timedOut, cut: true}, session.Outcome{State: event.StateFailed, ExitCode: exitTimeout, Reason: code}},
+		{"stop after the refusal, succeeded session", pushEnding{session: succeeded, cut: true, stopped: true}, session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}},
+		{"stop after the refusal, failed session", pushEnding{session: failed, cut: true, stopped: true}, failed},
+		{"stop after the refusal, timed out session", pushEnding{session: timedOut, cut: true, stopped: true}, timedOut},
+	} {
+		if got := c.ending.outcome(moved); got != c.want {
+			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
+		}
+	}
+}
+
 // TestCopyEndingOutcome is the close of a run for each end of its session and its copy step. A
 // run in a copy has no time limit past its session, and it exits 1 when its work does not come
 // back. A run the gateway closed takes no such close: see TestARunsEndWithAFailedCopyStep.
@@ -551,6 +619,49 @@ func TestPushEndingLines(t *testing.T) {
 	}
 }
 
+// TestPushEndingPrintsTheRefusalOfAMovedBranchAfterACut is a run whose push step the head check
+// refused because the branch moved, and whose time limit then cut the step: the run closes failed
+// with push_head_changed and prints the refusal, as a step with no cut does, not the line of a cut
+// step. A stop after the refusal keeps the cut line, and a cut with no refusal prints it too.
+func TestPushEndingPrintsTheRefusalOfAMovedBranchAfterACut(t *testing.T) {
+	succeeded := session.Outcome{State: event.StateSucceeded}
+	failed := session.Outcome{State: event.StateFailed, ExitCode: 3}
+	timedOut := session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}
+	moved := &preparation.HeadChanged{Branch: "qory/w1", System: "git.example.com", Path: "acme/shop", Head: strings.Repeat("a", 40), Expected: strings.Repeat("b", 40)}
+	refusal := "Set the branch to the expected commit or delete it; its head is not that commit.\n" +
+		"  Branch qory/w1. Repository git.example.com/acme/shop. Head: " + strings.Repeat("a", 40) + ". Expected: " + strings.Repeat("b", 40) + ", the start commit. qory did not push.\n" +
+		"  Setting the branch to that commit or deleting it loses the commits on it that no version has."
+	cutLine := "✗ take the work item in again in Qory Apiary: the run reached its time limit of 1h0m0s during the push step, and the run's commits may not have reached the branch; the code is used\n"
+	for _, c := range []struct {
+		name    string
+		ending  pushEnding
+		err     error
+		said    string // what the refusal line printed, "" for none
+		printed string // what the terminal got from the cut line
+		code    int
+	}{
+		{"cut after the refusal, succeeded session", pushEnding{session: succeeded, cut: true, limit: time.Hour}, moved, refusal, "", 1},
+		{"cut after the refusal, failed session", pushEnding{session: failed, cut: true, limit: time.Hour}, moved, refusal, "", 3},
+		{"cut after the refusal, timed out session", pushEnding{session: timedOut, cut: true, limit: time.Hour}, moved, refusal, "", 3},
+		{"stop after the refusal, succeeded session", pushEnding{session: succeeded, cut: true, stopped: true, got: "SIGTERM", limit: time.Hour}, moved, "", "✗ take the work item in again in Qory Apiary: qory run got SIGTERM, and the step reached its limit of 15s during the push step, and the run's commits may not have reached the branch; the code is used\n", 1},
+		{"cut with no refusal, succeeded session", pushEnding{session: succeeded, cut: true, limit: time.Hour}, errors.New("cut"), "", cutLine, exitTimeout},
+		{"no cut, succeeded session", pushEnding{session: succeeded}, moved, refusal, "", 1},
+	} {
+		var out strings.Builder
+		var said string
+		err := c.ending.ended(ui.New(&out), func(line string) { said += line }, c.err, &preparation.WorkBranch{}, reported(&exitError{code: 3}))
+		if said != c.said {
+			t.Errorf("%s: said %q, want %q", c.name, said, c.said)
+		}
+		if got := out.String(); got != c.printed {
+			t.Errorf("%s: printed %q, want %q", c.name, got, c.printed)
+		}
+		if got := ExitCode(err); got != c.code {
+			t.Errorf("%s: exit %d, want %d", c.name, got, c.code)
+		}
+	}
+}
+
 // TestFailedEnd is the one text of a run that did not succeed.
 func TestFailedEnd(t *testing.T) {
 	for out, want := range map[session.Outcome]string{
@@ -591,7 +702,9 @@ func TestThePushHasTwoMinutesPastTheLimit(t *testing.T) {
 
 // TestSessionOutcome is the outcome qory closes a run with for each end of its one
 // session: a session paused at the model key limit closes the run paused with
-// model_key_limit and the runtime's exit code.
+// model_key_limit, one paused at a rejected model key paused with model_key_switch, and
+// one failed at every model key rejected failed with model_key_unauthorized, each with the
+// runtime's exit code.
 func TestSessionOutcome(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -610,8 +723,20 @@ func TestSessionOutcome(t *testing.T) {
 			session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: 143}},
 		{"paused, exit 0", &session.Result{State: event.StatePaused, Reason: event.ReasonModelKeyLimit}, nil,
 			session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit}},
+		{"paused with no reason", &session.Result{State: event.StatePaused, ExitCode: 143}, nil,
+			session.Outcome{State: event.StatePaused, Reason: event.ReasonModelKeyLimit, ExitCode: 143}},
+		{"paused at a rejected model key", &session.Result{State: event.StatePaused, Reason: reasonModelKeySwitch, ExitCode: 143}, nil,
+			session.Outcome{State: event.StatePaused, Reason: reasonModelKeySwitch, ExitCode: 143}},
+		{"failed at every model key rejected", &session.Result{State: event.StateFailed, Reason: reasonModelKeyUnauthorized, ExitCode: 143}, nil,
+			session.Outcome{State: event.StateFailed, Reason: reasonModelKeyUnauthorized, ExitCode: 143}},
+		{"failed at every model key rejected, exit 0", &session.Result{State: event.StateFailed, Reason: reasonModelKeyUnauthorized}, nil,
+			session.Outcome{State: event.StateFailed, Reason: reasonModelKeyUnauthorized}},
+		{"closed by the gateway at every model key rejected", &session.Result{RunClosed: true, State: event.StateFailed, Reason: reasonModelKeyUnauthorized}, nil,
+			session.Outcome{State: event.StateFailed, ExitCode: -1}},
 		{"succeeded", &session.Result{State: event.StateSucceeded}, nil, session.Outcome{State: event.StateSucceeded}},
 		{"failed", &session.Result{State: event.StateFailed, ExitCode: 3}, nil, session.Outcome{State: event.StateFailed, ExitCode: 3}},
+		{"failed with another reason", &session.Result{State: event.StateFailed, Reason: "checks_failed", ExitCode: 3}, nil,
+			session.Outcome{State: event.StateFailed, ExitCode: 3}},
 	} {
 		if got := sessionOutcome(c.res, c.err); got != c.want {
 			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)

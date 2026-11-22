@@ -1,0 +1,4 @@
+Set workflows.fix.plan to an artifact type.
+  An artifact type is lowercase letters and digits in groups joined by single hyphens, starting with a letter, at most 64 bytes.
+  The value is "Change_Plan".
+  workflows.fix is in stack/qory-stack.yaml.

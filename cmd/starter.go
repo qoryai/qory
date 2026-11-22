@@ -450,11 +450,15 @@ func recordedAs(o server.Outcome) string {
 	if o.State == "" {
 		return "cancelled, with no outcome given"
 	}
-	out := outcomeOf(o.State, o.Reason)
+	// A reason that contains a key or a code, such as qrk_, prints as a phrase: outcomeOf
+	// prints a reason of the starter's with each _ as a space.
+	// shortcut: endOutcome sends such a reason to the server as it is; replace this when
+	// endOutcome ends with an input error for a reason that contains a key or a code.
+	out := outcomeOf(o.State, exports.Value(o.Reason, false))
 	if out.reason == "" {
 		return out.word()
 	}
-	return out.word() + ": " + out.reason
+	return out.word() + ": " + out.because()
 }
 
 // explainDiscoveryForEnd words a refusal of the discovery qory run end reads before it

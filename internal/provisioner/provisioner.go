@@ -37,11 +37,17 @@ import (
 	"github.com/qoryai/integrations/contracts"
 )
 
-// The steps a run's documents set, run/v1 documents.schema.json, that qory knows.
+// The steps a run's documents set, run/v1 documents.schema.json: a run of the step
+// workflow runs the workflow that the documents set, for their subject.
 const (
-	StepExplore  = "explore"
+	StepWorkflow = "workflow"
 	StepPrebuild = "prebuild"
 )
+
+// SubjectWorkItem is the kind of a run's subject that is a work item of the control
+// plane, run/v1 documents.schema.json. The inputs of a run whose subject has this kind
+// contain the work item.
+const SubjectWorkItem = "work_item"
 
 // WaitSeconds is how long Qory Apiary may hold a claim while no dispatch can be made,
 // the most the contract allows. ClaimTimeout, a claim's timeout, is longer, so a held

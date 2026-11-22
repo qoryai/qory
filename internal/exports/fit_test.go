@@ -65,7 +65,7 @@ func TestFitShortensTheNamesOfAFirstLineOverTheLimit(t *testing.T) {
 		t.Errorf("two refusals: %d full-name lines, want 3:\n%s", n, got)
 	}
 	for _, line := range firstLines(got) {
-		if utf8.RuneCountInString(line) > 100 {
+		if utf8.RuneCountInString(line) > exports.LineMax {
 			t.Errorf("a first line of %d characters: %s", utf8.RuneCountInString(line), line)
 		}
 	}
@@ -85,7 +85,7 @@ func TestFitShortensADottedRoleAndAQuotedKind(t *testing.T) {
 	} {
 		got := exports.Fit(text)
 		first := firstLines(got)[0]
-		if n := utf8.RuneCountInString(first); n > 100 {
+		if n := utf8.RuneCountInString(first); n > exports.LineMax {
 			t.Errorf("%s: the first line has %d characters: %s", name, n, first)
 		}
 		if !strings.HasSuffix(first, ".") && !strings.HasSuffix(first, "\".") {
@@ -105,7 +105,7 @@ func TestFitKeepsMoreCharactersForTwoNamesWithOneForm(t *testing.T) {
 	text := "Rename " + a + " or " + b + " in the stack, and the names stay unique.\n  The cause."
 	got := exports.Fit(text)
 	first := firstLines(got)[0]
-	if n := utf8.RuneCountInString(first); n > 100 {
+	if n := utf8.RuneCountInString(first); n > exports.LineMax {
 		t.Errorf("the first line has %d characters: %s", n, first)
 	}
 	forms := strings.Fields(strings.TrimPrefix(strings.SplitN(first, " in the stack", 2)[0], "Rename "))
@@ -138,7 +138,7 @@ func TestARefusalFitsItsModuleName(t *testing.T) {
 	r := exports.Refuse("Write the MCP server file of "+exports.ModulePlace+" as one JSON object, and keep it small.", "The file is x.json.")
 	err := exports.Prefixed(module, r).Error()
 	lines := strings.Split(err, "\n")
-	if utf8.RuneCountInString(lines[0]) > 100 || strings.Contains(lines[0], module) || !strings.Contains(strings.Join(lines[1:], "\n"), name) {
+	if utf8.RuneCountInString(lines[0]) > exports.LineMax || strings.Contains(lines[0], module) || !strings.Contains(strings.Join(lines[1:], "\n"), name) {
 		t.Errorf("%s", err)
 	}
 }
@@ -241,7 +241,7 @@ func TestFitMovesAHiddenPhraseOutOfALongFirstLine(t *testing.T) {
 	long := "Remove gateway.integrations." + phrase + ", or give it a program that defines a credential."
 	got := exports.Fit(long + "\n  A cause.")
 	lines := strings.Split(got, "\n")
-	if n := utf8.RuneCountInString(lines[0]); n > 100 || strings.Contains(lines[0], phrase) {
+	if n := utf8.RuneCountInString(lines[0]); n > exports.LineMax || strings.Contains(lines[0], phrase) {
 		t.Errorf("line 1 has %d characters and the phrase: %s", n, lines[0])
 	}
 	if !strings.Contains(got, "The hidden name is "+phrase+".") || !strings.Contains(got, "A cause.") {
@@ -250,5 +250,25 @@ func TestFitMovesAHiddenPhraseOutOfALongFirstLine(t *testing.T) {
 	short := "Remove " + phrase + " from the module."
 	if got := exports.Fit(short); got != short {
 		t.Errorf("a short line changed: %q", got)
+	}
+}
+
+// TestFitTreatsAFirstLineOf98CharactersAsFitting is a first line of 98 characters, which
+// has 100 under the "✗ " that qory prints, and one of 99 with a name of 30 characters: Fit
+// leaves the first and shortens the name of the second.
+func TestFitTreatsAFirstLineOf98CharactersAsFitting(t *testing.T) {
+	name := strings.Repeat("n", 30)
+	stay := "Keep skills/" + name + " in module " + strings.Repeat("m", 98-len("Keep skills/ in module .")-30) + ".\n  The cause."
+	if n := utf8.RuneCountInString(strings.SplitN(stay, "\n", 2)[0]); n != 98 {
+		t.Fatalf("the first line has %d characters, want 98", n)
+	}
+	if got := exports.Fit(stay); got != stay {
+		t.Errorf("98 characters: %q", got)
+	}
+	over := strings.Replace(stay, ".\n", "m.\n", 1)
+	got := exports.Fit(over)
+	first := strings.SplitN(got, "\n", 2)[0]
+	if strings.Contains(first, name) || utf8.RuneCountInString(first) > exports.LineMax || !strings.Contains(got, "The full name of") {
+		t.Errorf("99 characters: %q", got)
 	}
 }

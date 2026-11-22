@@ -61,3 +61,9 @@ func NoteForTest(host, runtime, version, answer string, report func(string)) {
 	r := &registry{host: host, runtime: runtime}
 	r.note(context.WithValue(context.Background(), progressKey{}, report), version, answer)
 }
+
+// Verify is verify, the signature check of Install.
+var Verify = verify
+
+// SignedName is signedName.
+var SignedName = signedName

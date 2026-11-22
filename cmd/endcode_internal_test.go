@@ -53,7 +53,7 @@ func TestForagersCloseTakesTheEndCodes(t *testing.T) {
 	} {
 		t.Run(string(code), func(t *testing.T) {
 			ctx := context.Background()
-			at, err := openAtGateway(ctx, session.OpenSpec{RunID: event.NewRunID(), RunsDir: t.TempDir(), Report: func(string) {}}, "")
+			at, err := openAtGateway(ctx, session.OpenSpec{RunID: event.NewRunID(), RunsDir: t.TempDir(), Report: func(string) {}}, "", nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -80,7 +80,7 @@ func TestForagersCloseTakesTheEndCodesAfterAJoin(t *testing.T) {
 	} {
 		t.Run(string(code), func(t *testing.T) {
 			ctx := context.Background()
-			at, err := openAtGateway(ctx, session.OpenSpec{RunID: event.NewRunID(), RunsDir: t.TempDir(), Report: func(string) {}}, "")
+			at, err := openAtGateway(ctx, session.OpenSpec{RunID: event.NewRunID(), RunsDir: t.TempDir(), Report: func(string) {}}, "", nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

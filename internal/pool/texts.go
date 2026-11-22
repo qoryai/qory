@@ -64,8 +64,8 @@ const (
 	lineGone403 = "check this pool's key in Qory Apiary: Qory Apiary returned 403 for the gone report, so the pool does not send it again"
 	lineGone404 = "check the server address and update Qory Apiary: Qory Apiary returned 404 for the gone report, so the pool does not send it again"
 	// lineRelease400, lineRelease403 and lineRelease404 are a release that got a signed
-	// 400, 403 or 404, after which the pool does not send it again. The status's code is
-	// in the attribute error.
+	// 400 or 404, or a 403 that reads as forbidden, after which the pool does not send
+	// it again. The status's code is in the attribute error.
 	lineRelease400 = "update qory to the version of this Qory Apiary: Qory Apiary returned 400 for the release, so the pool does not send it again"
 	lineRelease403 = "check this pool's key in Qory Apiary: Qory Apiary returned 403 for the release, so the pool does not send it again"
 	lineRelease404 = "check the server address and update Qory Apiary: Qory Apiary returned 404 for the release, so the pool does not send it again"

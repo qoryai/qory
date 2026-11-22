@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
@@ -24,7 +25,7 @@ func declares(access string) func(string) string {
 	return func(s string) string {
 		s += "workflows:\n  hello:\n"
 		if access == "" {
-			return s + "    time_limit: 1h\n"
+			return s + "    tier: light\n"
 		}
 		return s + "    access: " + access + "\n"
 	}
@@ -93,8 +94,8 @@ func checkoutMounts(spec session.SessionSpec) []wall.Mount {
 // write-no-push and the stack declares its workflow read or not at all. The session
 // binds the workspace read-only, the checkout's mount is read-only, the checkout stays
 // among the places the run may write, and Claude Code's settings deny the edit tools,
-// allow the commands of a work item on /qory/qory in Bash and set defaultMode to
-// dontAsk.
+// allow the commands of a work item and qory destination clone on /qory/qory in Bash,
+// allow reads of the folder of the clones, and set defaultMode to dontAsk.
 func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 	for _, c := range []struct {
 		name      string
@@ -126,16 +127,17 @@ func TestAReadRunSeesTheCheckoutReadOnly(t *testing.T) {
 			settings := settingsOf(t, r.spec.Args)
 			wants(t, settings, `"Edit(/`+r.spec.Dir+`/**)"`, `"Edit(//workspace/**)"`, `"NotebookEdit"`,
 				`"Bash(/qory/qory artifact *)"`, `"Bash(/qory/qory run verdict *)"`, `"Bash(/qory/qory work-item *)"`,
-				`"Read(//tmp/qory-artifacts/**)"`, `"Edit(//tmp/qory-artifacts/**)"`, `"defaultMode": "dontAsk"`)
-			lacks(t, settings, `"Edit"`, `"Write"`, `"Bash(/qory/qory *)"`)
+				`"Read(//tmp/qory-artifacts/**)"`, `"Edit(//tmp/qory-artifacts/**)"`, `"defaultMode": "dontAsk"`,
+				`"Bash(/qory/qory destination *)"`, `"Read(//tmp/qory-destinations/**)"`)
+			lacks(t, settings, `"Edit"`, `"Write"`, `"Bash(/qory/qory *)"`, `"Edit(//tmp/qory-destinations/**)"`)
 		})
 	}
 }
 
 // TestAReadRunOpensTheStoreToAComposedBlock is a read run whose module sets
 // blockReadsOutsideWorkingDirectories in its settings, as the software factory's does: the
-// compose keeps the setting, and the settings of the launch list the store in
-// additionalDirectories, without which Read in the store fails on Claude Code.
+// compose keeps the setting, and the settings of the launch list the store and the folder
+// of the clones in additionalDirectories, without which Read there fails on Claude Code.
 func TestAReadRunOpensTheStoreToAComposedBlock(t *testing.T) {
 	r := runFromCodeLinks(t, func(string) []string {
 		docker, _ := fakeDocker(t)
@@ -148,7 +150,7 @@ func TestAReadRunOpensTheStoreToAComposedBlock(t *testing.T) {
 	if !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
 	}
-	wants(t, settingsOf(t, r.spec.Args), `"blockReadsOutsideWorkingDirectories": true`, `"additionalDirectories": [`, `"/tmp/qory-artifacts"`)
+	wants(t, settingsOf(t, r.spec.Args), `"blockReadsOutsideWorkingDirectories": true`, `"additionalDirectories": [`, `"/tmp/qory-artifacts"`, `"/tmp/qory-destinations"`)
 }
 
 // TestAWriteWorkflowSeesTheCheckoutWritable is a walled run from a run code whose
@@ -171,7 +173,7 @@ func TestAWriteWorkflowSeesTheCheckoutWritable(t *testing.T) {
 	if got := checkoutMounts(r.spec); len(got) != 1 || got[0] != (wall.Mount{Path: r.spec.Dir}) {
 		t.Errorf("the mounts of the checkout are %+v, want %s writable alone", got, r.spec.Dir)
 	}
-	lacks(t, settingsOf(t, r.spec.Args), "/qory/qory", "dontAsk", "NotebookEdit", "additionalDirectories")
+	lacks(t, settingsOf(t, r.spec.Args), "/qory/qory", "dontAsk", "NotebookEdit", "additionalDirectories", "qory-destinations")
 }
 
 // noTarget leaves out the target of a run's documents, and with it access and
@@ -830,19 +832,21 @@ func checkRemovalStopped(t *testing.T, r codeRun, out session.Outcome, code int)
 	}
 }
 
-// TestATimeLimitDuringTheSetupContainersRemovalEndsAsInASetup is a read run whose time
-// limit ends while RemoveSetup runs: RemoveSetup's context ends at the limit, and the run
-// takes the path of a setup that the limit cut short: cancelled with timeout, exit 124,
-// and the line of the time limit, with no read_needs_setup_removed.
-func TestATimeLimitDuringTheSetupContainersRemovalEndsAsInASetup(t *testing.T) {
+// TestASetupLimitDuringTheSetupContainersRemovalEndsAsInASetup is a read run whose setup's
+// limit, made 15s here, ends while RemoveSetup runs: RemoveSetup's context ends at the
+// limit, and the run takes the path of a setup that the limit cut short: cancelled with
+// timeout, exit 124, and the line of the setup's limit, which names the removal, with no
+// read_needs_setup_removed. The session's time limit of 1h does not change it.
+func TestASetupLimitDuringTheSetupContainersRemovalEndsAsInASetup(t *testing.T) {
 	listsRepositories(t)
 	removesSetupWith(t, func(ctx context.Context) error {
 		<-ctx.Done()
 		return fmt.Errorf("the removal stopped: %w", ctx.Err())
 	})
-	r, _ := readRun(t, func(s string) string { return s + "workflows:\n  hello:\n    time_limit: 15s\n" }, readImage, "")
+	defer cmd.SetSetupLimit(15 * time.Second)()
+	r, _ := readRunDocuments(t, nil, func(s string) string { return s + "workflows:\n  hello: {}\n" }, func(d map[string]any) { d["time_limit_minutes"] = 60 }, readImage, "")
 	checkRemovalStopped(t, r, session.Outcome{State: "cancelled", Reason: "timeout", ExitCode: 124}, 124)
-	wants(t, r.out+r.err.Error(), "the run was cancelled at its time limit of 15s, before ")
+	wants(t, r.out+r.err.Error(), "✗ the run was cancelled during the removal of the setup container:\n  the steps before ")
 	lacks(t, r.out+r.err.Error(), "read_needs_setup_removed")
 }
 
@@ -863,4 +867,27 @@ func TestASignalDuringTheSetupContainersRemovalEndsAsInASetup(t *testing.T) {
 	checkRemovalStopped(t, r, session.Outcome{State: "cancelled", Reason: "interrupted", ExitCode: -1}, 1)
 	wants(t, r.out+r.err.Error(), "the run was cancelled: qory run got SIGINT before ")
 	lacks(t, r.out+r.err.Error(), "read_needs_setup_removed")
+}
+
+// TestAWalledCodexReadRunWithNoRepositoriesHasNoSetup is a walled Codex run from a run code
+// that only reads and lists no repositories: its workspace is bound read-only, and Forager
+// runs no setup step beside it, so its session joins with no setup.
+func TestAWalledCodexReadRunWithNoRepositoriesHasNoSetup(t *testing.T) {
+	r := runFromCodeLinks(t, func(string) []string {
+		docker, _ := fakeDocker(t)
+		writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
+			"wall:\n  adapter: docker\n  command: "+docker+"\n  helper: "+staticELF(t)+"\n  user: \"1000:1000\"\n  image: "+readImage+"\n")
+		return nil
+	}, []string{"--home", filepath.Join(tempDir(t), "home")}, declares("read"), func(d map[string]any) {
+		d["run_settings"] = map[string]any{"runtime": "codex"}
+	}, map[string]string{
+		"examples/hello/modules/hello/skills/workflow-hello/SKILL.md": "---\nname: workflow-hello\ndescription: Say hello.\n---\n\nSay hello.\n",
+	}, nil)
+	if !r.joined {
+		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+	}
+	wants(t, r.out, " on codex\n")
+	if !r.spec.WorkspaceReadOnly || len(r.spec.Setup) != 0 || len(r.spec.SetupRunner) != 0 {
+		t.Errorf("read-only %v, setup %q through %q", r.spec.WorkspaceReadOnly, r.spec.Setup, r.spec.SetupRunner)
+	}
 }

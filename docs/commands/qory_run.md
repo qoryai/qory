@@ -94,7 +94,7 @@ qory run [runtime] [-- argument...] [flags]
       --subject stringArray        what the run works on, type=<type>,ref=<ref>[,url=<url>][,title=<title>], such as type=ticket,ref=7; title takes the rest of the value, commas too; repeatable
       --tier stringArray           map a tier to a model id for each agent whose model is ${qory:<tier>}, as <tier>=<model id>; repeat it for each tier (tiers: light, balanced, thinking; qory.yaml: harness.tiers)
       --tier-effort stringArray    set the effort value for each agent whose model is ${qory:<tier>}, as <tier>=<effort>, beside --tier <tier>=<model id>; repeat it for each tier
-      --timeout duration           stop the run after this long, counted from its open, compose included, such as 5h30m, and exit 124 (default no limit; forager.yaml: session.run.timeout)
+      --timeout duration           stop the run after this long, counted from the agent's start, such as 5h30m, and exit 124 (default no limit; forager.yaml: session.run.timeout)
       --title string               the run's title, for a person to read, reported when the run starts
       --wall string                run the agent in a container whose one way out is the proxy: docker, or none (forager.yaml: wall.adapter)
 ```

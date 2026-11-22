@@ -1,0 +1,14 @@
+apiVersion: qory.dev/v1alpha1
+name: core
+modules:
+  - name: core
+    source: {path: modules/core}
+extending: {}
+workflows:
+  fix:
+    access: write
+    plan: change-plan
+  review:
+    access: read
+  stage:
+    access: write-no-push
