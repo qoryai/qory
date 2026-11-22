@@ -2,6 +2,7 @@ package cmd_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -177,6 +178,45 @@ func TestALocalWriteRunWithAHandoffPushesThroughTheChecksThenRunsTheProgram(t *t
 	}
 	if got := strings.TrimSpace(readText(t, started)); got != "acme/app "+branch+" open 1" {
 		t.Errorf("the program got %q, want the path, %s, the draft open and 1 pushed repository", got, branch)
+	}
+}
+
+// TestALocalRunWithASubmitProgramHasItsOutboxInItsInputs is a local walled run whose harness
+// has a submit program: the home has inputs.json with the member qory alone, as a run with a
+// run key has it, whose outbox is the copy's .qory/outbox, and the session gets no variable
+// QORY_OUTBOX. TestAPersonsUnwalledRunGetsNoInputs and
+// TestAPersonsWalledRunsPushChecksGetNoInputs are local runs with no submit program, whose
+// home has no inputs.json.
+func TestALocalRunWithASubmitProgramHasItsOutboxInItsInputs(t *testing.T) {
+	localProgramCheckout(t)
+	bothChecks(t, func(context.Context, string, string) error { return nil })
+	var data []byte
+	var readErr error
+	var dir string
+	var variables []string
+	hands := handsOffText(t)
+	agentInCopy(t, func(spec session.SessionSpec) {
+		data, readErr = os.ReadFile(filepath.Join(spec.HarnessHome, "inputs.json"))
+		dir, variables = spec.Dir, outboxVariables(spec)
+		hands(spec)
+	})
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if readErr != nil {
+		t.Fatalf("the home has no inputs.json while the agent runs: %v", readErr)
+	}
+	outbox, err := json.Marshal(filepath.Join(dir, ".qory", "outbox"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"qory":{"harness_extensions":{},"outputs":[],"outbox":` + string(outbox) + `,"start_commits":[],"start_artifacts":""}}` + "\n"
+	if string(data) != want {
+		t.Errorf("inputs.json is\n%s\nwant\n%s", data, want)
+	}
+	if len(variables) != 0 {
+		t.Errorf("the session has the variables %q", variables)
 	}
 }
 

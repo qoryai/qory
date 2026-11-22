@@ -438,14 +438,47 @@ type pushRepo struct {
 	noOutput bool
 }
 
-// outboxOf is the value of QORY_OUTBOX in the session's variables, "" with none.
+// outboxOf is qory.outbox of the session's $QORY_HARNESS_HOME/inputs.json, "" with no file
+// or no member.
 func outboxOf(spec session.SessionSpec) string {
-	for _, v := range spec.Variables.Run {
-		if value, ok := strings.CutPrefix(v, "QORY_OUTBOX="); ok {
-			return value
+	outbox, _ := outboxMember(spec)
+	return outbox
+}
+
+// outboxMember is qory.outbox of the session's $QORY_HARNESS_HOME/inputs.json, and whether
+// the file has the member.
+func outboxMember(spec session.SessionSpec) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(spec.HarnessHome, "inputs.json"))
+	if err != nil {
+		return "", false
+	}
+	var in struct {
+		Qory map[string]json.RawMessage `json:"qory"`
+	}
+	if json.Unmarshal(data, &in) != nil {
+		return "", false
+	}
+	raw, ok := in.Qory["outbox"]
+	if !ok {
+		return "", false
+	}
+	var outbox string
+	if json.Unmarshal(raw, &outbox) != nil {
+		return "", true
+	}
+	return outbox, true
+}
+
+// outboxVariables is each variable of the session whose name is QORY_OUTBOX: qory passes the
+// outbox in inputs.json, and Forager reserves the name.
+func outboxVariables(spec session.SessionSpec) []string {
+	var found []string
+	for _, v := range slices.Concat(spec.Variables.Run, spec.Variables.Machine) {
+		if strings.HasPrefix(v, "QORY_OUTBOX=") {
+			found = append(found, v)
 		}
 	}
-	return ""
+	return found
 }
 
 // viaLink is each report of the run over the link of its gateway: [pushRepo.gateway] first,
@@ -1738,19 +1771,29 @@ func TestADeliveredTypeThatTheHarnessDoesNotDefineStopsTheRun(t *testing.T) {
 	}
 }
 
-// TestOnlyAWriteRunHasTheOutboxVariable is the variable QORY_OUTBOX in the session of a run
-// at write, with the path of the checkout's .qory/outbox, and its absence in a run the
-// workflow lowers to write-no-push: that run stores no outputs.
-func TestOnlyAWriteRunHasTheOutboxVariable(t *testing.T) {
+// TestOnlyAWriteRunHasAnOutbox is qory.outbox in the inputs.json of a run at write, the
+// absolute path of the checkout's .qory/outbox, and no such member in a run the workflow
+// lowers to write-no-push: that run stores no outputs. Neither session gets a variable
+// QORY_OUTBOX.
+func TestOnlyAWriteRunHasAnOutbox(t *testing.T) {
 	for access, want := range map[string]bool{"write": true, "write-no-push": false} {
 		t.Run(access, func(t *testing.T) {
 			p := newPushRepo(t, access)
 			var found string
-			p.mountsOf = func(spec session.SessionSpec) { found = outboxOf(spec) }
+			var has bool
+			var dir string
+			var variables []string
+			p.mountsOf = func(spec session.SessionSpec) {
+				found, has = outboxMember(spec)
+				dir, variables = spec.Dir, outboxVariables(spec)
+			}
 			r := p.run(t, writesAndCommits(t), nil)
 			r.wantsClose(t, event.StateSucceeded, 0)
-			if (found != "") != want || want && !strings.HasSuffix(found, filepath.Join(".qory", "outbox")) {
-				t.Errorf("the variable is %q, want present: %v", found, want)
+			if has != want || want && found != filepath.Join(dir, ".qory", "outbox") {
+				t.Errorf("qory.outbox is %q (present: %v), want %s present: %v", found, has, filepath.Join(dir, ".qory", "outbox"), want)
+			}
+			if len(variables) != 0 {
+				t.Errorf("the session has the variables %q", variables)
 			}
 		})
 	}
@@ -3257,7 +3300,7 @@ func TestARunWithNoRepositoryStoresItsReply(t *testing.T) {
 	r := p.run(t, nil, nil)
 	r.wantsClose(t, event.StateSucceeded, 0)
 	if *outbox == "" {
-		t.Fatalf("the session has no %s\n%s", "QORY_OUTBOX", r.out)
+		t.Fatalf("the session's inputs.json has no qory.outbox\n%s", r.out)
 	}
 	if posts, _, _ := p.api.counts(); posts != 1 {
 		t.Fatalf("%d POST, want 1\n%s", posts, r.out)

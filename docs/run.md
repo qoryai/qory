@@ -2119,11 +2119,12 @@ the run stops as it does for documents that break the schema. Only a run whose s
   temporary folder, which qory removes when the run ends. Behind a wall, `in/` is mounted
   read-only at the same path. The file has the inputs' members as they came, then one
   member that qory adds once the harness is composed, `qory`:
-  `{"harness_extensions": {…}, "outputs": […], "start_commits": […], "start_artifacts": "…"}`.
+  `{"harness_extensions": {…}, "outputs": […], "outbox": "…", "start_commits": […], "start_artifacts": "…"}`.
   `harness_extensions` is the harness
   report's `extensions`, or `{}` when the harness has none. `outputs` is the outputs of the
-  work item's stage, or `[]` for none and for a run with no run API (see [The outputs of a
-  session](#the-outputs-of-a-session)). `start_commits` has, for each repository of the
+  work item's stage, or `[]` for none and for a run with no run API, and `outbox` the
+  absolute path of the session's outbox, left out for a run with no outbox (see [The outputs
+  of a session](#the-outputs-of-a-session)). `start_commits` has, for each repository of the
   run's branch, `{"path": <the repository's folder, absolute>, "commit": <the commit the
   session starts at>}`, `[]` for a run with no branch; and `start_artifacts` is the folder
   of the session's launch snapshot, `<in>/start-artifacts` (see [The scope check before the
@@ -2150,7 +2151,11 @@ the run stops as it does for documents that break the schema. Only a run whose s
   as a whole. A run with a run key and no run code gets the same files, with the member `qory`
   alone, since it has no inputs: `{"qory": {"harness_extensions": {…}, "outputs": [], "start_commits": […], "start_artifacts": "…"}}` in
   `in/` (read-only
-  behind a wall), in the composed home, and after `--inputs` of its push checks.
+  behind a wall), in the composed home, and after `--inputs` of its push checks. A run with
+  neither a run code nor a run key, whose composed harness has a submit program (see [The
+  submit program](#the-submit-program)), gets the file with the member `qory` alone in the
+  composed home only, `[]` as its `start_commits`, `""` as its `start_artifacts`, and
+  `qory.outbox` when it has an outbox; its push checks get no `--inputs`.
   A home that already has `inputs.json` stops the run with exit 1: `Remove inputs.json from
   the home, or omit --home and harness.home, then take the work item in again.` Inputs that
   have a member `qory` stop the run before
@@ -3280,12 +3285,13 @@ artifact type and whether the stage requires it (see
 `null` for a type that the composed `process.yaml` does not define. A stage with no output
 has `[]`.
 
-A session writes each output to the outbox, the folder whose absolute path is in the
-variable `QORY_OUTBOX`. A run from a run code at the access `write` has the variable when it
-read its work item at the start, as every run of a work item does on an instance with the
-feature `workflow_model`: `.qory/outbox` at the top of the checkout, or of the working
-folder of a run with no repository. A run with neither a run code nor a run key has it when
-the composed harness has a submit program, see [The submit program](#the-submit-program).
+A session writes each output to the outbox, the folder whose absolute path `inputs.json`
+has as `qory.outbox`, a string. A run from a run code at the access `write` has the member
+when it read its work item at the start, as every run of a work item does on an instance
+with the feature `workflow_model`: `.qory/outbox` at the top of the checkout, or of the
+working folder of a run with no repository. A run with neither a run code nor a run key has
+it when the composed harness has a submit program, see [The submit program](#the-submit-program).
+Any other run has no `qory.outbox`.
 For a run on the branch of its work item, qory adds the line `/.qory/outbox/` to the
 checkout's `.git/info/exclude` once before the session starts, with the line `/.qory` that
 the compose adds. That file is local to the clone and no commit has it, so `git add -A` and
@@ -3498,7 +3504,7 @@ draft `none`.
 
 The session writes the draft's text and the ledger step of each commit to the pull-request
 output, `.qory/outbox/pull-request/pull-request.json` in the copy, under the folder in
-`QORY_OUTBOX`. qory reads `title`, `text` and `steps` of this JSON, and no other member:
+`qory.outbox`. qory reads `title`, `text` and `steps` of this JSON, and no other member:
 
 ```json
 {"title": "Add an orders page", "text": "The page lists open orders.",

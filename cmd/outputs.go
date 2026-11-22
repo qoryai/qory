@@ -22,11 +22,10 @@ import (
 	"github.com/qoryai/qory/internal/runapi"
 )
 
-// outboxEnv is the variable that gives a session the path of its outbox, outboxRel the
-// outbox in the checkout, or in the working folder of a run with no repository, and
-// outboxExclude the line of the checkout's .git/info/exclude that keeps it out of a commit.
+// outboxRel is the outbox in the checkout, or in the working folder of a run with no
+// repository, whose absolute path inputs.json has as qory.outbox, and outboxExclude the line
+// of the checkout's .git/info/exclude that keeps it out of a commit.
 const (
-	outboxEnv     = "QORY_OUTBOX"
 	outboxRel     = ".qory/outbox"
 	outboxExclude = "/.qory/outbox/"
 )
