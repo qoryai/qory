@@ -1016,7 +1016,7 @@ func TestAFailedPushKeepsTheEndOfTheSession(t *testing.T) {
 	if _, state := r.step(); state != event.StateFailed {
 		t.Errorf("the step ended %q, want failed", state)
 	}
-	wants(t, r.out, "this run has no push credential, so qory pushed nothing")
+	wants(t, r.out, "This run has no push credential, so qory pushed nothing.")
 }
 
 // TestARunTheGatewayClosedPushesNothing is a session that ended because Qory Apiary closed
