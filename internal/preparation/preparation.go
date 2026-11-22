@@ -402,6 +402,25 @@ func Unlisted(getenv func(string) string, at Target) error {
 	return fmt.Errorf(textTargetMissing, integration.Printable(exports.Value(at.Path, false)))
 }
 
+// TargetAlone is getenv with [EnvRepositories] cut to its first entry when that entry is
+// at's repository on [EnvSystem] and further entries follow: the list of a run that fetches
+// its target and no further repository. Any other list stays as it is, so [RunAt] stops
+// on it with the line it has for that list.
+func TargetAlone(getenv func(string) string, at Target) func(string) string {
+	return func(name string) string {
+		value := getenv(name)
+		system := getenv(EnvSystem)
+		if name != EnvRepositories || at.System != system {
+			return value
+		}
+		paths, err := Check(system, value)
+		if err != nil || len(paths) < 2 || targetIn(system, paths, at.Path) != 0 {
+			return value
+		}
+		return paths[0]
+	}
+}
+
 // targetIn is the index in paths, the entries of [EnvRepositories] on system, of path,
 // the target's path in a run's documents, and -1 when no entry is path. The entries and
 // the path compare as [sameRepository] compares them: on github.com in any case.

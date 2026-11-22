@@ -356,28 +356,29 @@ func TestARunCodeWhoseInputsListDestinationsFetchesNothing(t *testing.T) {
 }
 
 // TestARunCodeFetchesItsTargetUnlessItClonesDestinations is a run from a run code on
-// git.test at a commit of acme/site, its target, that the run configuration lists, which
-// fetches the target at the commit before the session and joins:
+// git.test at a commit of acme/site, its target, whose run configuration lists acme/site
+// and then acme/shop. Each fetches the target at the commit before the session and joins:
 //   - a read run whose inputs list destinations and whose documents contain no harness
-//     document: qory composes the qory.yaml of the fetched commit;
+//     document composes the qory.yaml of the fetched commit, and fetches acme/site alone:
+//     the agent clones any other destination it needs;
 //   - a run that may write, whose inputs list destinations and whose documents contain a
-//     harness document;
-//   - a run whose inputs list no destinations, as a Build run's.
+//     harness document, fetches acme/shop too;
+//   - a run whose inputs list no destinations, as a Build run's, fetches acme/shop too.
 //
-// In each, git reaches no remote repository other than acme/site and the harness's.
+// In each, git reaches no remote repository other than these and the harness's.
 func TestARunCodeFetchesItsTargetUnlessItClonesDestinations(t *testing.T) {
 	for _, c := range []struct {
-		name, access          string
-		destinations, harness bool
+		name, access                 string
+		destinations, harness, alone bool
 	}{
-		{"read, no harness document", "read", true, false},
-		{"write, harness document", "write", true, true},
-		{"no destinations", "write", false, false},
+		{"read, no harness document", "read", true, false, true},
+		{"write, harness document", "write", true, true, false},
+		{"no destinations", "write", false, false, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			files := harnessFiles(t, c.access)
 			h, first, _, _ := versionRepository(t)
-			out, err, n, _ := runAtTargetWith(t, h, proxygittest.Host, "acme/site", first, siteTarget, func(d map[string]any) {
+			out, err, n, _ := runAtTargetWith(t, h, proxygittest.Host, "acme/site,acme/shop", first, siteTarget, func(d map[string]any) {
 				if c.destinations {
 					d["inputs"].(map[string]any)["destinations"] = siteDestinations
 				}
@@ -389,15 +390,30 @@ func TestARunCodeFetchesItsTargetUnlessItClonesDestinations(t *testing.T) {
 			if !n.joined {
 				t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
 			}
-			wants(t, out, "qory run: fetched acme/site at "+first[:12]+" in ", "qory run: composed ")
+			fetched := "qory run: fetched acme/site at " + first[:12] + " and 1 further repository in "
+			if c.alone {
+				fetched = "qory run: fetched acme/site at " + first[:12] + " in "
+			}
+			wants(t, out, fetched, "qory run: composed ")
 			if got := gitOut(t, h.dir, "rev-parse", "HEAD"); got != first {
 				t.Errorf("the working folder is at %s, want %s", got, first)
 			}
 			data, _ := os.ReadFile(h.argv)
+			shop := false
 			for line := range strings.Lines(string(data)) {
-				if strings.Contains(line, "://") && !strings.Contains(line, "/acme/site") && !strings.Contains(line, "/acme/stack") {
+				if !strings.Contains(line, "://") {
+					continue
+				}
+				shop = shop || strings.Contains(line, "/acme/shop")
+				if !strings.Contains(line, "/acme/site") && !strings.Contains(line, "/acme/shop") && !strings.Contains(line, "/acme/stack") {
 					t.Errorf("git reached another repository: %s", line)
 				}
+			}
+			if shop == c.alone {
+				t.Errorf("git reached acme/shop: %v, want %v\n%s", shop, !c.alone, out)
+			}
+			if c.alone && strings.Contains(out, "acme/shop") {
+				t.Errorf("the run's lines show acme/shop:\n%s", out)
 			}
 		})
 	}
