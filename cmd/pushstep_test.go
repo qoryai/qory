@@ -3316,3 +3316,34 @@ func replyRepoWith(t *testing.T, process string) (*pushRepo, *string) {
 	}
 	return p, outbox
 }
+
+// TestAWriteRunWithReadTargetsAndNoTargetPushesNothing is a write run whose documents set a
+// target with no address, the read target acme/site and a harness document, and whose agent
+// commits in acme/site's read-only checkout: the run has no work item's branch, so its step
+// stores the outputs alone, and acme/site gets no branch.
+func TestAWriteRunWithReadTargetsAndNoTargetPushesNothing(t *testing.T) {
+	files := harnessFiles(t, "write")
+	p := newPushRepo(t, "write")
+	p.repositories = "acme/site"
+	p.change = func(d map[string]any) {
+		target := map[string]any{"collection": "profile-7"}
+		d["target"], d["inputs"].(map[string]any)["target"] = target, target
+		d["read_targets"] = readTargets("acme/site")
+		d["harness"] = servedHarness(t, p.h, files)
+		delete(d, "deliver")
+	}
+	r := p.run(t, func(dir string) {
+		site := filepath.Join(dir, ".qory", "repositories", "acme", "site")
+		writeFile(t, filepath.Join(site, "left.txt"), "left\n")
+		proxygittest.Git(t, site, "add", "-A")
+		proxygittest.Git(t, site, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", "commit", "--quiet", "-m", "agent")
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	wants(t, r.out, "qory run: fetched 1 read-only repository in ", "the run has no repository to push")
+	if name, state := r.step(); name != "store the outputs" || state != event.StateSucceeded {
+		t.Errorf("the step %q ended %q, want store the outputs, succeeded\n%s", name, state, r.out)
+	}
+	if refs := proxygittest.Git(t, p.bare, "for-each-ref", "refs/heads/"); strings.Contains(refs, "qory/") {
+		t.Errorf("the read target has the branch: %s\n%s", refs, r.out)
+	}
+}

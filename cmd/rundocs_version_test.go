@@ -77,7 +77,7 @@ func runAtTarget(t *testing.T, h *hostFetch, system, reads, version string, targ
 const decoyRepositories = "acme/decoy"
 
 // readTargets is the documents' read_targets of reads, a comma-separated list of paths on
-// git.test, each with a collection of its own: none for "".
+// git.test, each with the collection R_2000, R_2001 and on: none for "".
 func readTargets(reads string) []any {
 	list := []any{}
 	if reads == "" {

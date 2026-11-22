@@ -801,10 +801,10 @@ func defaultBranch(out string) string {
 	return ""
 }
 
-// keepRepositories refuses a run repository, path, that has a .qory that is not a
-// directory, a file or a link a clone would follow, and one that has anything at
+// keepRepositories stops on a run repository, path, that has a .qory that is not a
+// directory, a file or a link a clone would follow, and on one that has anything at
 // [Repositories], tracked or not. With path "", a list with no target's repository, see
-// [Target.Repositories], it refuses the same in the working folder.
+// [Target.Repositories], it stops on the same in the working folder.
 func keepRepositories(dir, path string) error {
 	shown := integration.Printable(exports.Value(path, false))
 	if fi, err := os.Lstat(filepath.Join(dir, checkout.Dir)); err == nil && !fi.IsDir() {

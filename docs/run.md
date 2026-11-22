@@ -2237,9 +2237,9 @@ run code. The read targets follow these rules:
 - A read target on another host than `QORY_RUN_SYSTEM`, or on github.com of another owner
   than the first repository, stops the run before any fetch, and so does a read target
   inside another.
-- With read targets and no target on `QORY_RUN_SYSTEM`, the run has no repository of its
-  own: each read target goes under `.qory/repositories`, the working folder stays an empty
-  repository, and the run pushes nothing.
+- With read targets and no target on `QORY_RUN_SYSTEM`, the working folder gets no
+  repository: each read target goes under `.qory/repositories`, the working folder stays an
+  empty repository, and the run pushes nothing.
 
 The documents of a run with a target may set `target_version`: the version at which Qory
 Apiary checked the target for a harness file. When the `system` of the target's address
@@ -3007,7 +3007,8 @@ A run has no step in these cases, and what the agent left stays in the working f
   and is deleted with it, so nothing reaches the branch.
 - A run on a machine that is lost: nothing is left to run the step.
 
-The step does this, in order:
+The step does this, in order, for each repository that it pushes. The step leaves each read
+target's checkout as the agent left it: no check, commit or push.
 
 1. qory checks each repository again, because the agent could write to each `.git`. The
    check stops on a key in a configuration file in `.git` that neither `git init` nor the
