@@ -8,7 +8,7 @@
   "additionalProperties": false,
   "properties": {
     "ref": {"description": "The branch's name, the same in each repository: qory/ followed by the work item's id.", "type": "string", "pattern": "^qory/wi_[A-Za-z0-9_-]{1,64}$"},
-    "verdict": {"description": "The work item's newest verdict at the end of the run.", "type": "string", "enum": ["passed", "changes-requested", "escalate", "none"]},
+    "verdict": {"description": "The work item's newest verdict at the end of the run, when this run wrote it: its kind in the form of verdict.schema.json's verdict, such as passed, changes-requested or escalate, or none.", "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "maxLength": 64},
     "text": {
       "description": "The title and the description of the draft pull request, from the session's hand-off file. Absent when the session wrote none.",
       "type": "object",

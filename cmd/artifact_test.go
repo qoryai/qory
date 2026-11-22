@@ -1722,6 +1722,8 @@ func TestRunVerdictChecksItsArguments(t *testing.T) {
 		want string
 	}{
 		{[]string{"run", "verdict", "maybe"}, `Pass passed, changes-requested or escalate. The verdict is "maybe".`},
+		{[]string{"run", "verdict", "pased"}, `Pass passed, changes-requested or escalate. The verdict is "pased".`},
+		{[]string{"run", "verdict", "approve-spend"}, `Pass passed, changes-requested or escalate. The verdict is "approve-spend".`},
 		{[]string{"run", "verdict"}, "accepts 1 arg(s), received 0"},
 		{[]string{"run", "verdict", "escalate"}, "Pass --points <file> with escalate: a JSON array of the points a person acts on."},
 		{[]string{"run", "verdict", "passed", "--points", points(verdictPoints)}, "Leave out --points with passed: only escalate has points."},
@@ -1731,6 +1733,8 @@ func TestRunVerdictChecksItsArguments(t *testing.T) {
 		{[]string{"run", "verdict", "escalate", "--points", points(`[{"text": "The checks failed.", "action": "run_again"}, {"text": "The checks failed."}]`)},
 			"Write each point as {text, action}: point 2 has no action."},
 		{[]string{"run", "verdict", "escalate", "--points", points(`[]`)}, "Write at least one point. The array is empty."},
+		{[]string{"run", "verdict", "escalate", "--points", points(`[{"text": "Approve the spend.", "action": "approve_spend"}]`)},
+			`Set the action of point 1 to answer or run_again. The action is "approve_spend".`},
 		{[]string{"run", "verdict", "escalate", "--points", withMark}, "Save " + withMark + " without a byte order mark."},
 		{[]string{"run", "verdict", "escalate", "--points", notUTF8}, "Save " + notUTF8 + " as UTF-8."},
 		{[]string{"run", "verdict", "escalate", "--points", lone}, `Remove the escape of a lone surrogate, such as \ud800, from ` + lone + "."},

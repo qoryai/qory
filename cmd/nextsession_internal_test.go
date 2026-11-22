@@ -25,7 +25,7 @@ import (
 // a session 2 of the workflow fix on codex with a model key.
 const (
 	endAnswer     = `{"next":"end"}`
-	sessionAnswer = `{"next":"session","session":2,"workflow":"fix","model_choice":{"runtime":"codex"},"model_provider_credential_name":"example-provider-1","time_limit_minutes":30,"full_suite":true,"inputs":{"version":1}}`
+	sessionAnswer = `{"next":"session","session":2,"workflow":"fix","model_choice":{"runtime":"codex"},"model_provider_credential_name":"example-provider-1","time_limit_minutes":30,"type_settings":{"full_suite":true},"inputs":{"version":1}}`
 )
 
 // nextLink is a link that returns, for send n from 1, the answer or the error of respond(n),
@@ -87,7 +87,7 @@ func TestTheNextSessionAnswerIsRead(t *testing.T) {
 	if err != nil || ended != "" {
 		t.Fatalf("askNextSession: %q, %v", ended, err)
 	}
-	if a.Next != contracts.NextSessionKindSession || a.Workflow != "fix" || a.ModelChoice.Runtime != "codex" || a.ModelProviderCredentialName != "example-provider-1" || a.TimeLimitMinutes != 30 || !a.FullSuite {
+	if a.Next != contracts.NextSessionKindSession || a.Workflow != "fix" || a.ModelChoice.Runtime != "codex" || a.ModelProviderCredentialName != "example-provider-1" || a.TimeLimitMinutes != 30 || !fullSuiteIn(a.TypeSettings) {
 		t.Errorf("the answer is %+v", a)
 	}
 	if want := []string{`{"session":1,"state":"succeeded","reason":null}`}; !slices.Equal(link.bodies, want) {
@@ -318,10 +318,11 @@ func TestACoded503IsSentAgainUntilItPasses(t *testing.T) {
 	}
 }
 
-// TestAnAnswerOutsideItsSchemaEndsTheRun is an answer with a member the schema does not have:
-// one send, and an error whose first line is its fix and which has no value of the answer.
+// TestAnAnswerOutsideItsSchemaEndsTheRun is an answer of the end shape with a workflow, a
+// member of the session shape: one send, and an error whose first line is its fix and
+// which has no value of the answer.
 func TestAnAnswerOutsideItsSchemaEndsTheRun(t *testing.T) {
-	link := &nextLink{respond: func(int) ([]byte, error) { return []byte(`{"next":"end","branch":"secret-branch"}`), nil }}
+	link := &nextLink{respond: func(int) ([]byte, error) { return []byte(`{"next":"end","workflow":"secret-branch"}`), nil }}
 	_, ended, err := askNextSession(context.Background(), link.send, 1, succeededOut)
 	if ended != "" || err == nil {
 		t.Fatalf("askNextSession: %q, %v, want an error", ended, err)

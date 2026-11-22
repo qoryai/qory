@@ -99,8 +99,8 @@ func TestARunCodeTakesNoStackRuntimeOrArguments(t *testing.T) {
 }
 
 // TestARunCodeWhoseAnswerQoryDoesNotRunStops is a redemption whose documents qory does
-// not run: none, documents that break the schema, a stack or a stack_reference, which
-// the schema does not allow, a step other than workflow and prebuild, the step explore,
+// not run: none, documents that break the schema, documents whose must_understand lists
+// a member the schema does not define, a step other than workflow and prebuild, the step explore,
 // a work_item in place of a subject, no workflow, which the schema requires for the
 // step workflow, a prebuild on a machine whose forager.yaml has no wall, no runtime (no
 // run settings, null run settings, run settings with no runtime, an empty one, or a null
@@ -122,12 +122,11 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 		want      string
 	}{
 		{"none", nil, "use another run code: the enrolment answer has no documents"},
-		{"an unknown member", codeDocuments(t, func(d map[string]any) { d["prompt"] = "x" }), broken},
-		{"a time limit of 0 minutes", codeDocuments(t, func(d map[string]any) { d["time_limit_minutes"] = 0 }), broken},
-		{"a time limit in the run settings", codeDocuments(t, func(d map[string]any) {
-			d["run_settings"] = map[string]any{"runtime": "claude", "time_limit_minutes": 45}
+		{"an unknown member it must understand", codeDocuments(t, func(d map[string]any) {
+			d["prompt"], d["must_understand"] = "x", []any{"/prompt"}
 		}), broken},
-		{"a run id", codeDocuments(t, func(d map[string]any) { d["run_id"] = keyRunID }), broken},
+		{"a pointer to no member", codeDocuments(t, func(d map[string]any) { d["must_understand"] = []any{"/zz"} }), broken},
+		{"a time limit of 0 minutes", codeDocuments(t, func(d map[string]any) { d["time_limit_minutes"] = 0 }), broken},
 		{"another domain in inputs", codeDocuments(t, func(d map[string]any) { d["inputs"].(map[string]any)["domain"] = "marketing" }),
 			checks + "its inputs.domain is not its domain; the code is used"},
 		{"another step", json.RawMessage(`{"step":"triage","domain":"software","inputs":{"version":1}}`), broken},
@@ -135,10 +134,6 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 		{"a work item in place of a subject", codeDocuments(t, func(d map[string]any) { d["work_item"] = d["subject"]; delete(d, "subject") }), broken},
 		{"prebuild with no wall", preDocs, "set wall.image, pinned by its digest, wall.user and wall.prebuild_image in forager.yaml: a prebuild from a run code builds with them; the code is used"},
 		{"no workflow", codeDocuments(t, func(d map[string]any) { delete(d, "workflow"); delete(d, "harness_hidden") }), broken},
-		{"a stack", codeDocuments(t, func(d map[string]any) { d["stack"] = "core" }), broken},
-		{"a stack reference", codeDocuments(t, func(d map[string]any) {
-			d["stack"], d["stack_reference"] = "core", "https://code.example.com/team/stacks#release-7:core"
-		}), broken},
 		{"no run settings", codeDocuments(t, func(d map[string]any) { delete(d, "run_settings") }),
 			"The run settings set no runtime, so the run did not start; the code is used.\n  qory runs one of " + headlessRuntimes + "."},
 		{"null run settings", codeDocuments(t, func(d map[string]any) { d["run_settings"] = nil }),
@@ -177,6 +172,36 @@ func TestARunCodeWhoseAnswerQoryDoesNotRunStops(t *testing.T) {
 			}
 			key := g.runKey()
 			lacks(t, out+err.Error(), key, key[4:40], "F1XT")
+		})
+	}
+}
+
+// TestARunCodeWithMembersQoryDoesNotDefineStarts is a run from a run code whose
+// documents have members the schema does not define: a member at the top, a run id, a
+// time limit in the run settings, a stack and a stack_reference. qory does not read
+// them, and the session joins. So it does for documents whose must_understand lists only
+// members qory reads.
+func TestARunCodeWithMembersQoryDoesNotDefineStarts(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		change func(map[string]any)
+	}{
+		{"an unknown member", func(d map[string]any) { d["prompt"] = "x" }},
+		{"a run id", func(d map[string]any) { d["run_id"] = keyRunID }},
+		{"a time limit in the run settings", func(d map[string]any) { d["run_settings"].(map[string]any)["time_limit_minutes"] = 45 }},
+		{"a stack and a stack reference", func(d map[string]any) {
+			d["stack"], d["stack_reference"] = "core", "https://code.example.com/team/stacks#release-7:core"
+		}},
+		{"a must_understand of members qory reads", func(d map[string]any) {
+			d["must_understand"] = []any{"/workflow", "/run_settings/runtime", "/subject/kind"}
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := runFromCodeWith(t, behindAWall(t), nil, writesHello, c.change)
+			if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+			}
+			lacks(t, r.out, "prompt", "stack_reference")
 		})
 	}
 }
@@ -503,12 +528,12 @@ func TestARunCodesTimeLimitMinutesIsTheSessionsTimeLimit(t *testing.T) {
 }
 
 // TestARunCodeWithSharedRunAndFullSuiteStartsSession1 is a run from a run code whose
-// documents set shared_run and full_suite to true: qory takes the documents and starts
-// session 1 as it starts a run without them, with the time limit of the documents. The
-// tests of the later sessions are in sessionloop_test.go.
+// documents set shared_run and type_settings.full_suite to true: qory takes the documents
+// and starts session 1 as it starts a run without them, with the time limit of the
+// documents. The tests of the later sessions are in sessionloop_test.go.
 func TestARunCodeWithSharedRunAndFullSuiteStartsSession1(t *testing.T) {
 	r := runFromCodeWith(t, behindAWall(t), nil, writesHello, func(d map[string]any) {
-		d["time_limit_minutes"], d["shared_run"], d["full_suite"] = 60, true, true
+		d["time_limit_minutes"], d["shared_run"], d["type_settings"] = 60, true, map[string]any{"full_suite": true}
 	})
 	if !r.joined {
 		t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
@@ -518,19 +543,22 @@ func TestARunCodeWithSharedRunAndFullSuiteStartsSession1(t *testing.T) {
 	}
 }
 
-// TestARunCodeWithFullSuiteSetsTheAfterStep: a run from a run code behind a wall, whose documents
-// have full_suite true and whose work item has a build plan with a full row, gives its session
-// the after step with the suite's cap as its time limit. Documents with full_suite false, or with
-// none, give none. No test seam sets the input.
+// TestARunCodeWithFullSuiteSetsTheAfterStep: the session of a run from a run code behind a wall,
+// whose documents have full_suite true in type_settings and whose work item has a build plan
+// with a full row, has the after step with the suite's cap as its time limit. With full_suite
+// false, with type_settings and no full_suite in it, with no type_settings, or with full_suite
+// outside type_settings, the session has none. No test seam sets the input.
 func TestARunCodeWithFullSuiteSetsTheAfterStep(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		change func(map[string]any)
 		after  bool
 	}{
-		{"full_suite true", func(d map[string]any) { d["full_suite"] = true }, true},
-		{"full_suite false", func(d map[string]any) { d["full_suite"] = false }, false},
-		{"no full_suite", nil, false},
+		{"full_suite true", func(d map[string]any) { d["type_settings"] = map[string]any{"full_suite": true} }, true},
+		{"full_suite false", func(d map[string]any) { d["type_settings"] = map[string]any{"full_suite": false} }, false},
+		{"no full_suite", func(d map[string]any) { d["type_settings"] = map[string]any{} }, false},
+		{"no type_settings", nil, false},
+		{"full_suite outside type_settings", func(d map[string]any) { d["full_suite"] = true }, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			api := newSuiteAPI(t, http.StatusCreated)

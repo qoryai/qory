@@ -56,7 +56,8 @@ const (
 	maxSchemaDepth   = 64
 )
 
-// The limit of the patterns of all custom types in one process.yaml, in bytes of
+// The limit of the patterns of all JSON Schemas in one process.yaml, those of the custom
+// types and of type_settings, in bytes of
 // [patternBudget]'s estimate. A pattern counts a fixed part and one [syntax.Inst] of 40
 // bytes for each instruction of a program, a repeat counting its group once for each
 // count. qory compiles no pattern, so the estimate is not memory that qory uses.
@@ -88,10 +89,11 @@ var typeSchemaDrafts = []string{
 
 // checkArtifactTypes checks artifact_types in the process.yaml shown, which may be left
 // out, as [checkArtifactType] checks each entry, and that no two entries have one name.
-// The entries share one [patternBudget]. A list with no entries passes. The error has
-// one refusal for each entry it stops on, each written fix first with shown on its
-// last line.
-func checkArtifactTypes(shown string, list *yaml.Node) error {
+// The entries share patterns, the budget of the file's patterns. A list with no entries
+// passes. The error has one refusal for each entry it stops on, each written fix first
+// with shown on its last line, as [Fit] fits it, so a long name or key in a fix line is
+// shortened.
+func checkArtifactTypes(shown string, list *yaml.Node, patterns *patternBudget) error {
 	if list.Kind == 0 {
 		return nil
 	}
@@ -100,7 +102,6 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 	}
 	var lines []string
 	first := map[string]int{}
-	patterns := &patternBudget{counted: map[string]bool{}}
 	for i, entry := range list.Content {
 		name, why := checkArtifactType(entry, i, patterns)
 		at, twice := first[name]
@@ -115,7 +116,7 @@ func checkArtifactTypes(shown string, list *yaml.Node) error {
 		}
 	}
 	if len(lines) > 0 {
-		return errors.New(strings.Join(lines, "\n"))
+		return errors.New(Fit(strings.Join(lines, "\n")))
 	}
 	return nil
 }
@@ -215,16 +216,16 @@ func checkArtifactType(entry *yaml.Node, i int, patterns *patternBudget) (name, 
 		return name, fmt.Sprintf("Add json_schema to %s.\n  A structured type has a JSON Schema.\n  The type is in %s.", label, FilePlace)
 	case structured:
 		if why := checkTypeSchema(label, schema, patterns); why != "" {
-			return name, why
+			return name, inTypeFile(why)
 		}
 		if deliver == nil {
-			return name, checkNoFillMarks(label, schema)
+			return name, inTypeFile(checkNoFillMarks(label, schema))
 		}
 		var limit int64
 		if size.Decode(&limit) == nil && limit > maxDeliveredBytes {
 			return name, fmt.Sprintf("Set size_limit to at most %d.\n  Apiary delivers one version of a type with deliver, of at most %d bytes, and size_limit of %s is %d.\n  The type is in %s.", maxDeliveredBytes, maxDeliveredBytes, label, limit, FilePlace)
 		}
-		return name, checkDeliverTarget(label, schema)
+		return name, inTypeFile(checkDeliverTarget(label, schema))
 	}
 	return name, ""
 }
@@ -290,8 +291,8 @@ const primitiveReference = primitives.URL + "#/$defs/reference"
 // $defs of the root and as the address of the primitives, so it fails a schema that
 // changes where a $ref resolves, or how a draft reads it: a $schema other than draft
 // 2020-12, and an $id, $anchor or $dynamicAnchor anywhere in the schema. A $ref into
-// $defs counts only with a plain name ([localName]). It returns the fix for a message
-// with [FilePlace] for the file, "" for a type that passes.
+// $defs counts only with a plain name ([localName]). It returns the fix for a message,
+// with no line for the file, "" for a type that passes.
 func checkDeliverTarget(label string, schema *yaml.Node) string {
 	doc, why := jsonValue(schema, "json_schema of "+label)
 	if why != "" {
@@ -326,7 +327,7 @@ func checkDeliverTarget(label string, schema *yaml.Node) string {
 		}
 		return checkFillMarks(label, root)
 	}
-	return fmt.Sprintf("Add a top-level `target` of the primitive `reference` to the schema, or remove `deliver`.\n  %s\n  The type is in %s.", cause, FilePlace)
+	return typeRefusal("Add a top-level `target` of the primitive `reference` to the schema, or remove `deliver`.", cause)
 }
 
 // hasResolutionKey reports whether node, a decoded JSON Schema, has the key $id, $anchor
@@ -504,10 +505,11 @@ func joinWords(words []string) string {
 	}
 }
 
-// checkTypeSchema checks n, the json_schema of the artifact type label, for a message:
-// it is an object, each value has a JSON form, $schema is a draft of [typeSchemaDrafts]
-// or left out, it is within the limits, its patterns are within patterns, and it
-// compiles with no file or network read. It returns the fix, "" for a schema that passes.
+// checkTypeSchema checks n, the json_schema of label, an artifact type or type_settings,
+// for a message: it is an object, each value has a JSON form, $schema is a draft of
+// [typeSchemaDrafts] or left out, it is within the limits, its patterns are within
+// patterns, and it compiles with no file or network read. It returns the fix and the
+// cause, to which the caller adds the line with the file; "" for a schema that passes.
 func checkTypeSchema(label string, n *yaml.Node, patterns *patternBudget) string {
 	if n.Kind != yaml.MappingNode {
 		return typeRefusal(fmt.Sprintf("Set json_schema of %s to an object, a JSON Schema.", label), "json_schema is "+nodeKind(n)+".")
@@ -535,17 +537,26 @@ func checkTypeSchema(label string, n *yaml.Node, patterns *patternBudget) string
 	}
 	if err := compileTypeSchema(compact.Bytes(), patterns); err != nil {
 		if patterns.over > 0 {
-			return typeRefusal("Shorten the patterns in "+where+".", fmt.Sprintf("The estimate for the patterns of all artifact types in the file is at most %d bytes, and this one brings it to %d.", maxPatternBytes, patterns.over))
+			return typeRefusal("Shorten the patterns in "+where+".", fmt.Sprintf("The estimate for the patterns of all JSON Schemas in the file is at most %d bytes, and this one brings it to %d.", maxPatternBytes, patterns.over))
 		}
-		return fmt.Sprintf("Fix %s so that it compiles as a JSON Schema.\n  The schema does not compile: %s\n  The type is in %s.", where, compileReason(err), FilePlace)
+		return typeRefusal("Fix "+where+" so that it compiles as a JSON Schema.", "The schema does not compile: "+compileReason(err))
 	}
 	return ""
 }
 
-// typeRefusal is the refusal of a custom type's schema, fix first, with [FilePlace] on the
-// last line.
+// typeRefusal is the refusal of a JSON Schema in a process.yaml, fix first, then the
+// cause; the caller adds the line with the file.
 func typeRefusal(fix, cause string) string {
-	return fix + "\n  " + cause + "\n  The type is in " + FilePlace + "."
+	return fix + "\n  " + cause
+}
+
+// inTypeFile is why, the refusal of a custom type, with the line of [FilePlace] added;
+// "" for "".
+func inTypeFile(why string) string {
+	if why == "" {
+		return ""
+	}
+	return why + "\n  The type is in " + FilePlace + "."
 }
 
 // capital is s with its first letter in upper case.

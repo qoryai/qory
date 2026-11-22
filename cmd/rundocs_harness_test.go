@@ -1129,15 +1129,31 @@ func TestARunCodeWhoseHarnessBindsByKindComposes(t *testing.T) {
 	wants(t, r.out, "qory run: composed ")
 }
 
-// TestARunCodeWhoseHarnessBindsFlatStops is a run from a run code whose harness
-// document writes a bind key as <kind>/<role>: the documents fail qory's checks, and the
-// run stops before the session joins, exit 1.
-func TestARunCodeWhoseHarnessBindsFlatStops(t *testing.T) {
-	r := runFromCode(t, nil, harnessBind(map[string]any{"commands/greeting": "hello"}))
-	if r.joined || cmd.ExitCode(r.err) != 1 {
-		t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
-	}
-	wants(t, r.err.Error(), "the response to the run code does not pass qory's checks")
+// TestARunCodeWhoseHarnessBindsFlat is a run from a run code whose harness document
+// writes a bind key as <kind>/<role>, which is no kind of bind: qory does not read the
+// key, the harness composes without it, and the session joins. The same documents whose
+// must_understand lists the key fail qory's checks, and the run stops before the session
+// joins, exit 1.
+func TestARunCodeWhoseHarnessBindsFlat(t *testing.T) {
+	writes := func(s string) string { return s + "workflows:\n  hello:\n    access: write\n" }
+	flat := harnessBind(map[string]any{"commands/greeting": "hello"})
+	t.Run("composes", func(t *testing.T) {
+		r := runFromCodeWith(t, behindAWall(t), nil, writes, flat)
+		if !errors.Is(r.err, cmd.ErrJoinedNowhere) || !r.joined {
+			t.Fatalf("%v (exit %d), want the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+		}
+		wants(t, r.out, "qory run: composed ")
+	})
+	t.Run("must understand the key", func(t *testing.T) {
+		r := runFromCode(t, nil, func(d map[string]any) {
+			flat(d)
+			d["must_understand"] = []any{"/harness/harness/bind/commands~1greeting"}
+		})
+		if r.joined || cmd.ExitCode(r.err) != 1 {
+			t.Fatalf("%v (exit %d), want exit 1 before the join\n%s", r.err, cmd.ExitCode(r.err), r.out)
+		}
+		wants(t, r.err.Error(), "the response to the run code does not pass qory's checks")
+	})
 }
 
 // TestARunCodeWhoseHarnessBindsAGroupRoleToAListComposes is a run from a run code whose

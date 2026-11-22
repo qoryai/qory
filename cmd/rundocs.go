@@ -110,8 +110,9 @@ type codeRun struct {
 	named    *source.Named
 	workflow string
 	inputs   []byte
-	// fullSuite is the documents' full_suite: whether session 1 runs the full suite, and
-	// for a later session, the full_suite of its next-session answer.
+	// fullSuite is full_suite of the documents' type_settings, see [fullSuiteIn]: whether
+	// session 1 runs the full suite, and for a later session, full_suite of the
+	// type_settings of its next-session answer.
 	fullSuite bool
 	// harnessDoc is the documents' harness document, which [codeRun.next] writes again
 	// for the runtime of a later session; nil for none.
@@ -218,7 +219,7 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	if doc.Target != nil && doc.Target.Address != nil {
 		target.System, target.Path, target.Version = doc.Target.Address.System, doc.Target.Address.Path, doc.TargetVersion
 	}
-	r := &codeRun{runtime: runtime, settings: settings, harness: harness, harnessDoc: doc.Harness, runSettings: doc.RunSettings, shared: doc.SharedRun, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: doc.FullSuite, hidden: hidden, target: target, access: doc.Access}
+	r := &codeRun{runtime: runtime, settings: settings, harness: harness, harnessDoc: doc.Harness, runSettings: doc.RunSettings, shared: doc.SharedRun, workflow: doc.Workflow, inputs: doc.Inputs, minutes: doc.TimeLimitMinutes, fullSuite: fullSuiteIn(doc.TypeSettings), hidden: hidden, target: target, access: doc.Access}
 	if doc.Subject != nil && doc.Subject.Kind == provisioner.SubjectWorkItem {
 		r.workItem = doc.Subject.ID
 	}
@@ -227,6 +228,20 @@ func codeRunOf(doc contracts.Documents) (*codeRun, error) {
 	}
 	r.submit = doc.Submit
 	return r, nil
+}
+
+// fullSuiteIn is full_suite of settings, the type_settings of the documents or of a
+// next-session answer: false when settings is empty, has no full_suite, or has one that
+// is not a boolean. qory checks type_settings against no schema: Qory Apiary checks it
+// against the schema of the workspace type's process when it writes it, and qory checks
+// that the schema compiles when a command reads the configuration.
+func fullSuiteIn(settings json.RawMessage) bool {
+	var members map[string]any
+	if json.Unmarshal(settings, &members) != nil {
+		return false
+	}
+	full, _ := members["full_suite"].(bool)
+	return full
 }
 
 // harnessFor is h, the documents' harness document, as qory writes it for a session of
@@ -250,9 +265,9 @@ func harnessFor(h *contracts.HarnessDocument, runtime string) ([]byte, error) {
 // next makes r the run of the session that a, a next-session answer of Qory Apiary's,
 // starts: its runtime and compose flags, from a's model choice, else the runtime of the
 // documents' run settings, see [provisioner.SettingsOf]; its model key, workflow,
-// inputs, time limit and full_suite; and the harness document written for its runtime.
-// A runtime that a run code does not run on, and inputs that [checkInputs] stops, stop
-// the session before anything of it starts.
+// inputs, time limit and the full_suite of its type_settings; and the harness document
+// written for its runtime. A runtime that a run code does not run on, and inputs that
+// [checkInputs] stops, stop the session before anything of it starts.
 func (r *codeRun) next(a contracts.NextSessionAnswer) error {
 	runtime, settings := provisioner.SettingsOf(a.ModelChoice, r.runSettings)
 	if !slices.Contains(runRuntimes(), runtime) {
@@ -266,7 +281,7 @@ func (r *codeRun) next(a contracts.NextSessionAnswer) error {
 		return err
 	}
 	r.runtime, r.settings, r.harness, r.modelCredential = runtime, settings, harness, a.ModelProviderCredentialName
-	r.workflow, r.inputs, r.minutes, r.fullSuite = a.Workflow, a.Inputs, a.TimeLimitMinutes, a.FullSuite
+	r.workflow, r.inputs, r.minutes, r.fullSuite = a.Workflow, a.Inputs, a.TimeLimitMinutes, fullSuiteIn(a.TypeSettings)
 	return nil
 }
 
@@ -796,8 +811,8 @@ func noRuntime() error {
 // session, and the schema refuses run settings in its documents.
 func lacksRuntime(documents json.RawMessage) bool {
 	var d struct {
-		Step        string          `json:"step"`
-		RunSettings json.RawMessage `json:"run_settings"`
+		Step        string          `json:"step,case:strict"`
+		RunSettings json.RawMessage `json:"run_settings,case:strict"`
 	}
 	if json.Unmarshal(documents, &d) != nil || d.Step != provisioner.StepWorkflow {
 		return false

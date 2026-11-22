@@ -2091,13 +2091,19 @@ documents set, whichever workflow of the process Qory Apiary starts. The `subjec
 what the run is for: its `kind`, such as `work_item` or `ticket`, its `id`, and, when
 Qory Apiary has them, its `url` and `title`. The documents may also contain a `trigger`,
 what started the run, such as `take_in`; qory reads it and changes nothing for it.
-The documents of the step `workflow` can also contain `shared_run` and `full_suite`. With
-`full_suite` true, the session runs the full test suite when it ends, see [The full
-suite](#the-full-suite). With `shared_run` true, the run has more than one session, see
-[A run of several sessions](#a-run-of-several-sessions).
+The documents of the step `workflow` can also contain `shared_run` and `type_settings`, the
+settings of the workspace type, whose schema the workspace type's `process.yaml` registers.
+With `full_suite` true in `type_settings`, the session runs the full test suite when it
+ends, see [The full suite](#the-full-suite). With `shared_run` true, the run has more than
+one session, see [A run of several sessions](#a-run-of-several-sessions). qory checks no
+member of `type_settings`: Qory Apiary checks them against that schema when it writes the
+documents.
 qory checks the documents as the run contract's `documents.schema.json`, and, for a
 subject of the kind `work_item`, checks that `inputs.domain` and `inputs.work_item.id`
-match the domain and the subject's `id`. Only a run whose subject has the kind
+match the domain and the subject's `id`. qory does not read a member that the schema
+does not define, and matches each member's name by exact case, so `Workflow` is not
+`workflow`. When the documents' `must_understand` lists a member that qory does not read,
+the run stops as it does for documents that break the schema. Only a run whose subject has the kind
 `work_item` works on the branch `qory/<work item id>`. Then a run of the step `workflow`:
 
 - composes the harness that the documents contain, or, when they contain none, the
@@ -2459,9 +2465,8 @@ repository image of exactly the limit is kept. The last line of a successful pre
 prints the size of the final image. Without the member, the build keeps an image of any
 size. The member is set only for a prebuild started from Qory Apiary, from the
 instance's Largest prebuilt image setting. `qory prebuild` on this machine has no limit.
-qory refuses documents whose member is not an integer from 1 to 9223372036854775807, or
-that a run of another step has, as it refuses any member the run documents' schema does
-not define.
+A run stops when its documents set the member to anything but an integer from 1 to
+9223372036854775807, or set it for a run of another step.
 
 The build takes the user from `wall.user` in `forager.yaml`. The wall's helper is
 `wall.helper`, or on Linux the `qory` you run. When `forager.yaml` sets `pool.registry`,
@@ -2523,8 +2528,9 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   pass qory's checks: <reason>; the code is used`, where `<reason>` is a check that failed,
   such as `it breaks documents.schema.json`, and contains no value of the response
   but a member's name, an id, a revision or a byte count. Documents with a step other
-  than `workflow` and `prebuild`, and documents of the step `workflow` with no
-  `workflow`, stop with `it breaks documents.schema.json`
+  than `workflow` and `prebuild`, documents of the step `workflow` with no `workflow`,
+  and documents whose `must_understand` lists a member that the schema does not define,
+  stop with `it breaks documents.schema.json`
 - `set wall.image, pinned by its digest, wall.user and wall.prebuild_image in
   forager.yaml: a prebuild from a run code builds with them; the code is used`
 - `run the prebuild on a machine without an access key: this machine has an access key in
@@ -2840,9 +2846,11 @@ push step failed or found the run ended; the run closes as that session ended.
 
 The next-session answer is the end of the run or the next session: its workflow, its
 runtime and model settings, its model key (`model_provider_credential_name`), its time
-limit, `full_suite` and its inputs. For the end, qory prints `qory run: Qory Apiary
-starts no session after session <n>, so the run ends` and closes the run as the last
-session ended. For a session, qory prints
+limit, its `type_settings`, whose `full_suite` sets the full suite, and its inputs. qory
+does not read a member of the answer that `next-session-answer.schema.json` does not
+define, and matches each member's name by exact case, so `Workflow` is not `workflow`. For
+the end, qory prints `qory run: Qory Apiary starts no session after session <n>, so the
+run ends` and closes the run as the last session ended. For a session, qory prints
 `qory run: session <n> starts the workflow <workflow> on <runtime>`, and then:
 
 1. composes the workspace's harness for the session's runtime and model settings in a
@@ -2887,10 +2895,15 @@ doubles. Then:
   line of the gateway's end (see [The push step of a write
   run](#the-push-step-of-a-write-run)), and closes the run as the session ended.
 - Every other refusal of Qory Apiary's, a status below 500 other than 429 with no refusal,
-  no answer after 10 minutes, or an answer outside `next-session-answer.schema.json`: the
-  run closes `failed`, exit 1, with a line that starts with its fix, such as `qory run:
-  Contact support: the next-session request after session <n> failed.`, then `Qory Apiary
-  returned <status>: <message or code>`.
+  no answer after 10 minutes, an answer outside `next-session-answer.schema.json`, or an
+  answer whose `must_understand` lists a member that qory does not read: the run closes
+  `failed`, exit 1, with a line that starts with its fix, such as `qory run: Contact
+  support: the next-session request after session <n> failed.`, then `Qory Apiary returned
+  <status>: <message or code>`. An answer with `"branch": "main"` and `"must_understand":
+  ["/branch"]` gets `qory run: Update qory.`, then `The answer to the next-session request
+  after session <n> does not pass qory's checks.` and `The answer does not pass them: its
+  must_understand lists a member of next-session-answer.schema.json that qory does not
+  read.`
 - A stop while qory waits to send the request again, or during the steps before the next
   session: the run closes `cancelled` with the reason `interrupted`, exit 1, with `✗ the
   run was cancelled: qory run got <signal> before session <n> started`.
@@ -4254,8 +4267,9 @@ channel `qory_host`.
 
 qory runs the repository's full test suite after a session, in the session's after step, and
 posts a verdict for a suite that did not pass. A session runs the suite when the run documents
-have `full_suite` true, the run has a wall, the run may write, and the work item's build plan has
-a `full` row with a command. A session of such a run that does not move HEAD runs none.
+have `full_suite` true in `type_settings`, the run has a wall, the run may write, and the work
+item's build plan has a `full` row with a command. A session of such a run that does not move
+HEAD runs none.
 
 **Command.** The command is the `full` row of the table under `## Commands` in the build plan
 of the artifact `build-plan`: the name `main`, or the one name the work item has, at its newest
@@ -4338,7 +4352,9 @@ A red suite, whose command ran (`failed` or `timeout`):
 | none, or `passed` | `changes-requested` with one point |
 | `changes-requested` | nothing: the verdict stands |
 | `escalate` with up to 19 points | the same `escalate` and `track`, with that point added |
-| `escalate` with 20 points | nothing: the verdict stands |
+| `escalate` with 20 points | nothing: the verdict stands, and qory prints `the verdict of the agent has 20 points already, so qory adds none for the full suite` |
+| another kind, which this qory does not know, with up to 19 points | `escalate` with the agent's points and `track`, and that point added |
+| another kind with 20 points | nothing: the verdict stands, and qory prints `the verdict of the agent has 20 points already, so qory adds none for the full suite` |
 
 A suite that did not start or did not run, with a cause the agent cannot fix: the after step
 could not run or the script ended before the command (exit 70, 71, 72 or another status, or -1), or the step
@@ -4351,6 +4367,7 @@ qory cannot reach the run API, or the session succeeded and its after step did n
 | none, or `passed` | `escalate` with one point, and the agent's `track` |
 | `escalate` | the same `escalate` and `track`, with that point added |
 | `changes-requested` | `escalate` with the agent's points and `track`, and that point added |
+| another kind, which this qory does not know | `escalate` with the agent's points and `track`, and that point added |
 | 20 points already | nothing: the verdict stands, and qory prints `the verdict of the agent has 20 points already, so qory adds none for the full suite` |
 
 A suite that did not start for a cause in the build plan that the agent wrote (no usable build plan, one over 1 MiB, no
@@ -4364,6 +4381,7 @@ judges it once the session succeeded. The point has the cause in `text` and what
 | none, or `passed` | `changes-requested` with one point, and the agent's `track` |
 | `escalate` | the same `escalate` and `track`, with that point added |
 | `changes-requested` | the same verdict and `track`, with that point added: one fix round covers both |
+| another kind, which this qory does not know | `escalate` with the agent's points and `track`, and that point added |
 | 20 points already | nothing: the verdict stands, and qory prints `the verdict of the agent has 20 points already, so qory adds none for the full suite` |
 
 A session that did not succeed posts nothing for a cause found at the launch.

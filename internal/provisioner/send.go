@@ -253,9 +253,12 @@ func readAnswer(name string, body []byte, out any) error {
 }
 
 // readChecked reads body into out: one JSON document with valid UTF-8 and no member
-// twice in any object, which s, the schema name, accepts. The schema checks the bytes
-// before they are decoded, so a decoded "access":"" or "target":null is never read as
-// no target. Its error contains the schema's name, never a value of body.
+// twice in any object, which s, the schema name, accepts, and whose must_understand
+// lists only members of out. The schema checks the bytes before they are decoded, so a
+// decoded "access":"" or "target":null is never read as no target. out is a pointer to
+// a struct whose json tags have case:strict: a member that out does not define, one that
+// differs from a defined one only in letter case among them, is not read. Its error
+// contains the schema's name, never a value of body.
 func readChecked(s *jsonschema.Schema, name string, body []byte, out any) error {
 	if !jsontext.Value(body).IsValid() {
 		return errNotOneDocument
@@ -263,6 +266,9 @@ func readChecked(s *jsonschema.Schema, name string, body []byte, out any) error 
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(body))
 	if err != nil || s.Validate(doc) != nil {
 		return fmt.Errorf("it breaks %s", name)
+	}
+	if contracts.CheckMustUnderstand(body, out) != nil {
+		return fmt.Errorf("its must_understand lists a member of %s that qory does not read", name)
 	}
 	if err := json.Unmarshal(body, out); err != nil {
 		return fmt.Errorf("it breaks %s", name)

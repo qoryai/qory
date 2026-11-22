@@ -1,6 +1,7 @@
 package provisioner_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"io/fs"
 	"path"
@@ -64,16 +65,18 @@ func TestEveryNextSessionAnswerFixtureIsRead(t *testing.T) {
 	}
 }
 
-// TestANextSessionAnswerOutsideTheSchemaIsRefused is an answer with an unknown member,
-// one with no workflow, one with both shapes, one that is not JSON, and one whose model
-// choice lists an effort its model does not have: each is refused, and no error contains
-// a value of the answer.
+// TestANextSessionAnswerOutsideTheSchemaIsRefused is an answer whose must_understand lists
+// a member that qory does not read, one with no workflow, one with both shapes, one that
+// is not JSON, and one whose model choice lists an effort its model does not have: each
+// is refused, and no error contains a value of the answer.
 func TestANextSessionAnswerOutsideTheSchemaIsRefused(t *testing.T) {
 	for name, body := range map[string][]byte{
-		"unknown member": answerOf(t, "session.json", func(a map[string]any) { a["branch"] = "main" }),
-		"no workflow":    answerOf(t, "session.json", func(a map[string]any) { delete(a, "workflow") }),
-		"both shapes":    answerOf(t, "end.json", func(a map[string]any) { a["workflow"] = "hello" }),
-		"not JSON":       []byte(`{"next":`),
+		"must_understand of an unknown member": answerOf(t, "session.json", func(a map[string]any) {
+			a["branch"], a["must_understand"] = "main", []string{"/branch"}
+		}),
+		"no workflow": answerOf(t, "session.json", func(a map[string]any) { delete(a, "workflow") }),
+		"both shapes": answerOf(t, "end.json", func(a map[string]any) { a["workflow"] = "hello" }),
+		"not JSON":    []byte(`{"next":`),
 		"effort not listed": answerOf(t, "session.json", func(a map[string]any) {
 			a["model_choice"].(map[string]any)["effort"] = "max"
 		}),
@@ -87,6 +90,25 @@ func TestANextSessionAnswerOutsideTheSchemaIsRefused(t *testing.T) {
 			if strings.Contains(err.Error(), v) {
 				t.Errorf("%s: the error %q contains %q", name, err, v)
 			}
+		}
+	}
+}
+
+// TestANextSessionAnswerMemberThatIsNotDefinedIsNotRead is an answer with a member that
+// the schema does not define, and one with a second workflow written in capitals after
+// the defined one: each is read, with the defined workflow.
+func TestANextSessionAnswerMemberThatIsNotDefinedIsNotRead(t *testing.T) {
+	want, err := provisioner.ReadNextSessionAnswer(answerOf(t, "session.json", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string][]byte{
+		"unknown member": answerOf(t, "session.json", func(a map[string]any) { a["branch"] = "main" }),
+		"WORKFLOW":       append(bytes.TrimSuffix(bytes.TrimSpace(answerOf(t, "session.json", nil)), []byte("}")), []byte(`,"WORKFLOW":"other"}`)...),
+	} {
+		a, err := provisioner.ReadNextSessionAnswer(body)
+		if err != nil || a.Workflow != want.Workflow {
+			t.Errorf("%s: %q, %v, want %q", name, a.Workflow, err, want.Workflow)
 		}
 	}
 }

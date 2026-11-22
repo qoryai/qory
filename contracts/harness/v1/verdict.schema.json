@@ -7,7 +7,7 @@
   "required": ["verdict"],
   "additionalProperties": false,
   "properties": {
-    "verdict": {"description": "passed, changes-requested or escalate.", "enum": ["passed", "changes-requested", "escalate"]},
+    "verdict": {"description": "The verdict's kind: passed, changes-requested, escalate, or a kind that a later version of the format adds, in the same form: a lower-case letter, then lower-case letters, digits and hyphens, at most 64 characters. A reader passes a kind it does not know on unchanged.", "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "maxLength": 64},
     "points": {
       "description": "What is wrong or missing, 1 to 20 points: required when verdict is escalate, optional when verdict is changes-requested, where each point has action run_again, and absent when verdict is passed.",
       "type": "array",
@@ -43,19 +43,26 @@
       }
     },
     "point": {
-      "description": "One point: what is wrong or missing and its action. question is required when action is answer, and absent when action is run_again. fix is optional when action is run_again, and absent when action is answer. An answer point comes only with escalate.",
+      "description": "One point: what is wrong or missing and its action. question is required when action is answer, and absent when action is run_again. fix is optional when action is run_again, and absent when action is answer. An answer point comes only with escalate. The format sets no rule for question and fix with an action it does not define.",
       "type": "object",
       "required": ["text", "action"],
       "additionalProperties": false,
       "properties": {
         "text": {"description": "What is wrong or missing, in one plain sentence on one line, 1 to 500 characters, with no action and no question id: Qory Apiary adds the action from action.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500},
-        "action": {"description": "answer: a person answers the question in question, only with escalate. run_again: another round runs; with escalate, a person runs it.", "enum": ["answer", "run_again"]},
+        "action": {"description": "answer: a person answers the question in question, only with escalate. run_again: another round runs; with escalate, a person runs it. Or an action that a later version of the format adds, in the same form: a lower-case letter, then lower-case letters, digits and underscores, at most 64 characters. A reader passes an action it does not know on unchanged.", "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 64},
         "question": {"description": "The id of an open question in the work item's newest questions version, in the id form of questions.schema.json: 1 to 32 lower-case letters, digits and hyphens, such as q1.", "type": "string", "pattern": "^[a-z0-9-]{1,32}$"},
         "fix": {"description": "What a person does to fix it, in one plain sentence on one line, 1 to 500 characters: Qory Apiary shows it in place of the sentence of the action run_again.", "$ref": "#/$defs/line", "minLength": 1, "maxLength": 500}
       },
-      "if": {"required": ["action"], "properties": {"action": {"const": "answer"}}},
-      "then": {"required": ["question"], "properties": {"fix": false}},
-      "else": {"properties": {"question": false}}
+      "allOf": [
+        {
+          "if": {"required": ["action"], "properties": {"action": {"const": "answer"}}},
+          "then": {"required": ["question"], "properties": {"fix": false}}
+        },
+        {
+          "if": {"required": ["action"], "properties": {"action": {"const": "run_again"}}},
+          "then": {"properties": {"question": false}}
+        }
+      ]
     },
     "line": {
       "description": "Text on one line: no control character (so no tab, line feed or carriage return), no U+2028 or U+2029, and no format character (Unicode category Cf) but U+200C and U+200D, the joiners of emoji. The pattern is the one of $defs line in primitives.schema.json.",

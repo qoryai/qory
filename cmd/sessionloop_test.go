@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,7 +35,7 @@ func laterAnswer(n int, runtime, credential string, minutes int) string {
 	b, _ := json.Marshal(map[string]any{
 		"next": "session", "session": n, "workflow": "hello",
 		"model_choice": map[string]any{"runtime": runtime}, "model_provider_credential_name": credential,
-		"time_limit_minutes": minutes, "full_suite": false, "inputs": map[string]any{"version": 1},
+		"time_limit_minutes": minutes, "type_settings": map[string]any{"full_suite": false}, "inputs": map[string]any{"version": 1},
 	})
 	return string(b)
 }
@@ -308,6 +309,26 @@ func bothNpm(t *testing.T, claude, codex *rt.Npm, codexVersions ...string) strin
 		codex.SetLatest(codexVersions[len(codexVersions)-1])
 	}
 	return srv.URL
+}
+
+// TestTheNextSessionRequestHasSessionStateAndReasonAlone decodes each next-session
+// request as the fake gateway receives it, after session 1 and after session 2: its
+// members are session, state and reason, and no other. A member added to the request
+// fails here.
+func TestTheNextSessionRequestHasSessionStateAndReasonAlone(t *testing.T) {
+	r := runLoop(t, loopSetup{answers: []string{laterAnswer(2, "claude", "example-provider-2", 30)}})
+	if len(r.bodies) != 2 {
+		t.Fatalf("%d next-session requests, want 2: %v\n%s", len(r.bodies), r.err, r.out)
+	}
+	for i, body := range r.bodies {
+		var members map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(body), &members); err != nil {
+			t.Fatalf("request %d is no JSON object: %v", i+1, err)
+		}
+		if keys, want := slices.Sorted(maps.Keys(members)), []string{"reason", "session", "state"}; !slices.Equal(keys, want) {
+			t.Errorf("request %d has the members %q, want %q", i+1, keys, want)
+		}
+	}
 }
 
 // TestARunOfClaudeCodexAndClaudeInstallsEachRuntimeOnce is a walled run of three sessions

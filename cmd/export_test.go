@@ -1273,8 +1273,8 @@ func SetInstanceAddress(f func(*config.Forager) string) func() {
 // InstanceAddress is instanceAddress.
 var InstanceAddress = instanceAddress
 
-// SetFullSuite makes every run's session run the full suite as the run documents' full_suite
-// does, and returns what restores the default.
+// SetFullSuite makes every run's session run the full suite as full_suite of the run documents'
+// type_settings does, and returns what restores the default.
 func SetFullSuite(yes bool) func() {
 	before := fullSuiteOf
 	fullSuiteOf = func(*codeRun) bool { return yes }

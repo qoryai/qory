@@ -68,7 +68,7 @@ func isReferenceMember(root map[string]any, node any) bool {
 // checkFillMarks checks the [fillKey] of the json_schema root of the artifact type label,
 // a type with deliver whose target passed: the key is on a property of the top level
 // only, its value is one of [fillShapes], no value is on two properties, and the
-// property has the shape of its value. It returns the fix for a message with [FilePlace]
+// property has the shape of its value. It returns the fix for a message, with no line
 // for the file, "" for a schema that passes.
 // A nested property or a definition named x-qory-fill counts as a mark: see [hasKey].
 func checkFillMarks(label string, root map[string]any) string {

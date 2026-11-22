@@ -858,7 +858,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 				return input(err)
 			}
 
-			if !slices.Contains([]string{runapi.VerdictPassed, runapi.VerdictChangesRequested, runapi.VerdictEscalate}, args[0]) {
+			if !commandVerdict(args[0]) {
 				return input(fmt.Errorf("Pass passed, changes-requested or escalate. The verdict is %s.", exports.Value(args[0], true)))
 			}
 
@@ -1030,6 +1030,11 @@ func shownOrShort(value string) string {
 
 	return shortValue(value)
 }
+
+// commandVerdict reports whether verdict is a kind that qory run verdict takes: passed,
+// changes-requested or escalate. The verdict format takes any kind of its form.
+// shortcut: Apiary refuses an unknown kind or action until A-65; open the command when A-65 lands.
+func commandVerdict(verdict string) bool { return verdictformat.Known(verdict) }
 
 // readPoints returns the points of verdict from path, the file of --points; given is true
 // when the command line has --points. escalate needs the file, and the other verdicts

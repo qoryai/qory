@@ -18,6 +18,13 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A factory's `process.yaml` may register the JSON Schema of a run's type settings, the
+  settings of the workspace type that Qory Apiary sends as `type_settings` in the run
+  documents: `type_settings: {json_schema: {…}}`. qory checks the schema as it checks the
+  `json_schema` of an artifact type, and the patterns of both count toward one limit of
+  16 MiB for the file. A schema that does not compile stops the command with
+  `Fix json_schema of type_settings so that it compiles as a JSON Schema.` and the file
+  on the last line. See "Type settings" in `contracts/harness/v1/README.md`.
 - `qory run` from a run code whose documents set `shared_run` runs one session after
   another, until Qory Apiary ends the run. After each session, once the suite's result is
   posted and the push step passed, qory sends the next-session request, and joins the next
@@ -661,7 +668,10 @@ release may change what an existing document does, and states it under Upgrading
   setup container of `wall.setup: outside` gets neither the variable nor the route. See The
   route to qory in `docs/run.md`.
 - A session runs the repository's full test suite when the run documents have `full_suite`
-  true. Forager's after step runs it after the agent's container is removed: when HEAD moved,
+  true in `type_settings`. A session runs no suite when `full_suite` is false, when
+  `type_settings` has no `full_suite`, when the documents have no `type_settings`, and when
+  `full_suite` is outside `type_settings`.
+  Forager's after step runs it after the agent's container is removed: when HEAD moved,
   the `full` command of the build plan that the work item had at the launch runs in a fresh
   clone of HEAD, in a container of the run's image on the run's network, so the run's egress
   policy applies. A session that left HEAD where it started runs no suite. The limit is
@@ -747,6 +757,27 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- qory reads the run documents, the pool's answers from Qory Apiary, the answer to the
+  next-session request, an integration's description and Forager's `runtimes.json` without
+  a member that their contract does not define, and matches each member's name by exact
+  case. Documents with such a member, such as `run_id`, start the run. A document whose
+  `must_understand` lists a member that qory does not read stops as one that breaks its
+  schema; for the next-session answer, the run closes `failed`, exit 1. qory reads the
+  agent's `verdict.json` and the run API's answers by exact case too, and checks no
+  `must_understand` in them.
+- The verdict format takes a verdict kind and a point action that a later version adds:
+  a kind of lower-case letters, digits and hyphens, and an action of lower-case letters,
+  digits and underscores, each starting with a letter and at most 64 characters. The
+  submission's `verdict` takes such a kind too. qory passes a kind it does not know on
+  unchanged, and takes it as not passed, so no draft follows. Over a red full suite, or a
+  suite that did not start, such a kind becomes `escalate` with the agent's points and the
+  suite's point. `qory run verdict` takes only `passed`, `changes-requested` and
+  `escalate`, and only the actions `answer` and `run_again`.
+- `qory run pool` acts on a signed 403 or 409 from Qory Apiary whose body it cannot read
+  by its status alone: it keeps the dispatch and sends the release again, or `dispatched`
+  again while the lease lasts. A machine end stops on a signed 400, 403 or 404.
+- An `artifact_types` message whose first line has more than 98 characters shows each
+  long key or type name shortened on that line and in full on its last line.
 - `qory work-item show`, `qory artifact pull` (`index.json`, the files of a version and
   their names) and the message of `qory artifact push --withdraw` for a version that a
   person uploaded write each hidden character as `<U+XXXX>`. A hidden character is a
@@ -927,9 +958,9 @@ release may change what an existing document does, and states it under Upgrading
   minutes for a workflow with no Time limit. The limit counts from the agent's start, as
   `--timeout` does. At the limit the session stops, and the
   full suite's after step and the push step still run. The documents can
-  also contain `shared_run` and `full_suite`. With `full_suite` true, the session runs the full
-  test suite when it ends, as The full suite in `docs/run.md` describes; qory reads `shared_run`
-  and changes nothing for it.
+  also contain `shared_run` and `type_settings`. With `full_suite` true in `type_settings`,
+  the session runs the full test suite when it ends, as The full suite in `docs/run.md`
+  describes; qory reads `shared_run` and changes nothing for it.
 - The push step of a write run pushes through the run's push proxy, which sets the run
   configuration's push credentials alone, and the run's proxy no longer adds push
   credentials. A run with no push credential stops at the push with `Contact
@@ -1435,11 +1466,12 @@ release may change what an existing document does, and states it under Upgrading
   `claimed`, and no run starts for it.
   While the pool runs, the release is sent again after the same waits as `gone`, until
   Qory Apiary releases the dispatch or returns 410 `gone`, 409 `lease_expired`, 409
-  `machine_exists`, which `gone` follows, or a signed 400, 403 or 404. A release left
-  when the pool stops is sent at its next start. A restart of the pool stops a run left
-  from a crash of the pool, removes the containers and networks of its wall, and
-  reports its machine as gone. It sends SIGTERM to each process of the run's session,
-  then SIGKILL to each one still there 30 s later while the run still holds its lock.
+  `machine_exists`, which `gone` follows, a signed 400 or 404, or a 403 that reads as
+  `forbidden`. A release left when the pool stops is sent at its next start. A restart
+  of the pool stops a run left from a crash of the pool, removes the containers and
+  networks of its wall, and reports its machine as gone. It sends SIGTERM to each
+  process of the run's session, then SIGKILL to each one still there 30 s later while
+  the run still holds its lock.
   It signals a session only when it can prove that the session belongs to the run;
   otherwise it keeps the run and prints why. The pool section of `forager.yaml` takes
   `runs` (how many runs this host runs at once; 1 when not set), `registry` and
