@@ -1218,6 +1218,39 @@ func TestACheckThatFailsPushesNothing(t *testing.T) {
 	}
 }
 
+// TestACheckThatFailsPushesNoRepository is a run with a target and a further repository, and
+// a change left in each: the check gets the version with the local head of both, after both
+// are committed and listed, and when it fails the forge has the branch in neither.
+func TestACheckThatFailsPushesNoRepository(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop,acme/lib")
+	lib := filepath.Join(dir, filepath.FromSlash(b.Repositories[1].Dir))
+	write(t, filepath.Join(dir, "left.txt"), "left\n")
+	write(t, filepath.Join(lib, "left.txt"), "left\n")
+	stop := errors.New("qory run: the check failed")
+	var got []Repository
+	_, _, err := pushChecked(dir, b, true, func(version []Repository) error {
+		got = version
+		return stop
+	})
+	if !errors.Is(err, stop) {
+		t.Fatalf("Push: %v", err)
+	}
+	heads := map[string]string{"acme/shop": run(t, dir, "rev-parse", "HEAD"), "acme/lib": run(t, lib, "rev-parse", "HEAD")}
+	if len(got) != 2 {
+		t.Fatalf("the check got %+v, want both repositories", got)
+	}
+	for _, r := range got {
+		if r.Commit != heads[r.Path] || len(r.Commits) != 1 || r.Commits[0].Commit != heads[r.Path] {
+			t.Errorf("the check got %s at %s with %+v, want the local head %s", r.Path, r.Commit, r.Commits, heads[r.Path])
+		}
+	}
+	for path := range heads {
+		if out := run(t, filepath.Join(base, filepath.FromSlash(path)+".git"), "branch", "--list", b.Ref); out != "" {
+			t.Errorf("the forge has the branch in %s: %q", path, out)
+		}
+	}
+}
+
 // TestAPushThatStopsBeforeItsFirstPushListsNoEarlierPush is a branch that an earlier Push
 // pushed, and a Push whose check fails: the branch lists no repository as pushed, so no line
 // says to delete it.
