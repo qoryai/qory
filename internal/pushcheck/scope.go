@@ -102,13 +102,14 @@ func (c *Checker) ScopeUser() string {
 }
 
 // scopeUser is the user of a scope check for a process of uid and gid and the wall's user
-// wall: uid:gid when uid is not 0; for root, wall when it is set and its uid is not 0, else
+// wall: uid:gid when uid is not 0; for root, wall when its uid is a number above 0, else
 // 65534:65534, so the check never reads the agent's commits as root.
 func scopeUser(uid, gid int, wall string) string {
 	if uid != 0 {
 		return fmt.Sprintf("%d:%d", uid, gid)
 	}
-	if id, _, _ := strings.Cut(wall, ":"); wall != "" && id != "0" {
+	text, _, _ := strings.Cut(wall, ":")
+	if id, err := strconv.Atoi(text); err == nil && id > 0 {
 		return wall
 	}
 	return nobody

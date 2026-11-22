@@ -6322,8 +6322,8 @@ stops the push of every repository, and the commits stay local.
    `/qory-push-check/artifacts`, and the session's launch snapshot read-only at
    `/qory-push-check/files`. The clone is the one writable folder, since the check's git
    writes objects, and qory removes it after the check. The check runs as the clone's
-   owner: qory's uid:gid, or, for qory as root, the wall's `user` when its uid is not 0,
-   else `65534:65534`, after qory gives that user the clone and the snapshot's copy.
+   owner: qory's uid:gid, or, for qory as root, the wall's `user` when its uid is a number
+   above 0, else `65534:65534`, after qory gives that user the clone and the snapshot's copy.
    A session with no version of its plan type still runs the check, on a snapshot with
    no plan.
 
