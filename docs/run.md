@@ -3327,7 +3327,9 @@ Then, for each output, qory:
    32 lower-case hexadecimal digits of the SHA-256 of the target's `collection`, such as
    `t-e047707709a59e682f6b3df0e394d0bb` for `R_kgDOExample1`, so each target has one
    artifact of the type, and in the artifact `main` for any other type.
-3. Removes the output from the outbox.
+3. Removes the version's files from the outbox, and the type's folder when it is empty
+   then. A file that the version does not have, such as a second file beside
+   `<type>/<type>.json`, stays.
 
 A run with no repository pushes nothing, and prints `qory run: stored the <type> output; the
 run has no repository to push.` for each output that it stores, such as `qory run: stored the

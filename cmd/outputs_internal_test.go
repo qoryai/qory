@@ -431,3 +431,41 @@ func TestADeliveredOutputOverTheStartLimitStops(t *testing.T) {
 		})
 	}
 }
+
+// TestRemoveStoredLeavesWhatTheVersionDoesNotHave is the folder of pull-request with
+// pull-request.json, which the version has, and notes.md beside it: notes.md and the folder
+// stay. A folder whose files the version has goes.
+func TestRemoveStoredLeavesWhatTheVersionDoesNotHave(t *testing.T) {
+	root := t.TempDir()
+	folder := filepath.Join(root, ".qory", "outbox", "pull-request")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"pull-request.json", "notes.md"} {
+		if err := os.WriteFile(filepath.Join(folder, name), []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stored := readyOutput{push: runapi.Push{Type: "pull-request", Files: []runapi.PushFile{{Filename: "pull-request.json"}}}, folder: ".qory/outbox/pull-request"}
+	if err := removeStored(root, stored); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(folder, "pull-request.json")); !os.IsNotExist(err) {
+		t.Errorf("the stored file stays: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(folder, "notes.md")); err != nil {
+		t.Errorf("the file beside it is gone: %v", err)
+	}
+	if err := os.Remove(filepath.Join(folder, "notes.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "pull-request.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeStored(root, stored); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(folder); !os.IsNotExist(err) {
+		t.Errorf("the empty folder stays: %v", err)
+	}
+}

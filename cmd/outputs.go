@@ -348,10 +348,11 @@ type runOutputs struct {
 }
 
 // readyOutput is an output of the outbox that passed its checks: the version to store, and the
-// outbox entry that goes once the version is stored.
+// type's folder of the outbox, relative to the root that has the outbox, from which the
+// version's files go once the version is stored.
 type readyOutput struct {
-	push  runapi.Push
-	entry string
+	push   runapi.Push
+	folder string
 }
 
 // typeOf is the artifact type typ of types, or a type with only its name when the composed
@@ -436,7 +437,7 @@ func (o *runOutputs) ready(w io.Writer, branch *preparation.WorkBranch, note str
 			return nil, nil, fmt.Errorf(textOutputUnread, shown, shownError(err))
 		}
 		push := runapi.Push{Type: t.Name, Name: outputName(t, o.target), Note: note, Files: files}
-		out = append(out, readyOutput{push: push, entry: path.Join(outboxRel, t.Name)})
+		out = append(out, readyOutput{push: push, folder: path.Join(outboxRel, t.Name)})
 	}
 	return out, missing, nil
 }
@@ -453,12 +454,23 @@ func targetShown(target *contracts.Target) string {
 	return shownText(target.Collection)
 }
 
-// removeEntry removes the outbox entry entry, relative to root, once its version is stored.
-func removeEntry(root, entry string) error {
+// removeStored removes the files of r's version from r's folder of the outbox under root,
+// once the version is stored, and the folder when it is empty then. A file that the version
+// does not have stays, and so does its folder.
+func removeStored(root string, r readyOutput) error {
 	dir, err := os.OpenRoot(root)
 	if err != nil {
 		return err
 	}
 	defer dir.Close()
-	return dir.RemoveAll(entry)
+	for _, f := range r.push.Files {
+		if err := dir.Remove(path.Join(r.folder, f.Filename)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	left, err := fs.ReadDir(dir.FS(), r.folder)
+	if err != nil || len(left) > 0 {
+		return err
+	}
+	return dir.Remove(r.folder)
 }

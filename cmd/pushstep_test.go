@@ -1265,6 +1265,29 @@ func TestTheOutputIsStoredWithItsMarksFilled(t *testing.T) {
 	}
 }
 
+// TestAFileBesideTheOutputStaysInTheOutbox is a session that writes notes.md beside its
+// pull-request output: the version is stored with pull-request.json alone, which leaves the
+// outbox, and notes.md stays.
+func TestAFileBesideTheOutputStaysInTheOutbox(t *testing.T) {
+	p := newPushRepo(t, "write")
+	var outbox string
+	p.mountsOf = func(spec session.SessionSpec) {
+		outbox = outboxOf(spec)
+		writeFile(t, filepath.Join(outbox, "pull-request", "notes.md"), "# Notes\n")
+	}
+	r := p.run(t, writesAndCommits(t), nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if _, _, stored := p.api.counts(); stored != 1 {
+		t.Errorf("%d versions, want 1", stored)
+	}
+	if _, err := os.Stat(filepath.Join(outbox, "pull-request", "pull-request.json")); !os.IsNotExist(err) {
+		t.Errorf("the stored output stays: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outbox, "pull-request", "notes.md")); err != nil {
+		t.Errorf("notes.md is gone: %v", err)
+	}
+}
+
 // TestAnOutputWithAMemberThatQoryFillsStoresNothing is a session whose output sets branch,
 // a member that qory fills: qory stores no version, and the run fails with the line that says which
 // member to remove.
