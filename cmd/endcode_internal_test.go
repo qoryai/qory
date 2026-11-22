@@ -32,6 +32,7 @@ func TestAFailedPushStepClosesWithItsEndCode(t *testing.T) {
 		"no push credential":         {pushEnding{session: succeeded}, noCredential, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePushCredentialMissing), ExitCode: 1}},
 		"push refused":               {pushEnding{session: succeeded}, refused, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePushRefused), ExitCode: 1}},
 		"push not recorded":          {pushEnding{session: succeeded}, notRecorded, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePushNotRecorded), ExitCode: 1}},
+		"outputs invalid":            {pushEnding{session: succeeded}, &runLineError{&outputsInvalid{errors.New("the output is missing")}}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodeOutputsInvalid), ExitCode: 1}},
 		"refused, then not recorded": {pushEnding{session: succeeded}, &runLineError{errors.Join(refused, notRecorded)}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePushRefused), ExitCode: 1}},
 		"another failure":            {pushEnding{session: succeeded}, &runLineError{errors.New("the push failed")}, session.Outcome{State: event.StateFailed, ExitCode: 1}},
 		"cut at the time limit":      {pushEnding{session: succeeded, cut: true}, refused, session.Outcome{State: event.StateCancelled, Reason: event.ReasonTimeout, ExitCode: exitTimeout}},
@@ -50,6 +51,7 @@ func TestForagersCloseTakesTheEndCodes(t *testing.T) {
 	for _, code := range []contracts.EndCode{
 		contracts.EndCodePushCredentialMissing, contracts.EndCodePushRefused,
 		contracts.EndCodePrebuiltImageTooLarge, contracts.EndCodePushNotRecorded,
+		contracts.EndCodeNextSessionFailed, contracts.EndCodeOutputsInvalid,
 	} {
 		t.Run(string(code), func(t *testing.T) {
 			ctx := context.Background()
@@ -70,13 +72,15 @@ func TestForagersCloseTakesTheEndCodes(t *testing.T) {
 }
 
 // TestForagersCloseTakesTheEndCodesAfterAJoin is a run that Forager opens at a gateway in this
-// process, where a session joined and then the run closes failed with each end code of a push
-// failure as the reason, with exit code 1: the gateway takes the code after a join, as it does
-// before one, and Close returns the reason as given.
+// process, where a session joined and then the run closes failed with each end code of the list
+// as the reason, with exit code 1, or -1 for next_session_failed as qory closes it: the
+// gateway takes the code after a join, as it does before one, and Close returns the reason as
+// given.
 func TestForagersCloseTakesTheEndCodesAfterAJoin(t *testing.T) {
 	for _, code := range []contracts.EndCode{
 		contracts.EndCodePushCredentialMissing, contracts.EndCodePushRefused,
 		contracts.EndCodePrebuiltImageTooLarge, contracts.EndCodePushNotRecorded,
+		contracts.EndCodeNextSessionFailed, contracts.EndCodeOutputsInvalid,
 	} {
 		t.Run(string(code), func(t *testing.T) {
 			ctx := context.Background()
@@ -89,7 +93,13 @@ func TestForagersCloseTakesTheEndCodesAfterAJoin(t *testing.T) {
 			if _, err := at.run.Join(ctx, spec); err != nil {
 				t.Fatal(err)
 			}
-			closed, err := at.run.Close(ctx, session.Outcome{State: event.StateFailed, Reason: string(code), ExitCode: 1})
+			// A failed next-session request closes the run as a later session that does not
+			// join: with exit code -1.
+			exit := 1
+			if code == contracts.EndCodeNextSessionFailed {
+				exit = -1
+			}
+			closed, err := at.run.Close(ctx, session.Outcome{State: event.StateFailed, Reason: string(code), ExitCode: exit})
 			if err != nil {
 				t.Fatalf("Close refused the outcome after a join: %v", err)
 			}

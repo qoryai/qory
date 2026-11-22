@@ -2919,18 +2919,19 @@ doubles. Then:
   line of the gateway's end (see [The push step of a write
   run](#the-push-step-of-a-write-run)), and closes the run as the session ended.
 - Every other refusal of Qory Apiary's, a status below 500 other than 429 with no refusal,
-  no answer after 10 minutes, an answer outside `next-session-answer.schema.json`, or an
-  answer whose `must_understand` lists a member that qory does not read: the run closes
-  `failed`, exit 1, with no end code as the reason. A refusal of Qory Apiary's, and a status
-  below 500 other than 429 with no refusal, print the cause alone: `qory run: The
-  next-session request after session <n> failed.`, then `Qory Apiary returned <status>:
-  <message or code>` or `The gateway returned <status>: <message or name of the status>`.
-  No answer after 10 minutes, and an answer that qory does not read, print a line that
-  starts with its fix. An answer with `"branch": "main"` and `"must_understand":
-  ["/branch"]` gets `qory run: Update qory.`, then `The answer to the next-session request
-  after session <n> does not pass qory's checks.` and `The answer does not pass them: its
-  must_understand lists a member of next-session-answer.schema.json that qory does not
-  read.`
+  or no answer after 10 minutes: the run closes `failed`, exit 1, with the end code
+  `next_session_failed` as the reason. An answer outside `next-session-answer.schema.json`,
+  or an answer whose `must_understand` lists a member that qory does not read: the run
+  closes `failed`, exit 1, with no end code as the reason, since Qory Apiary answered. A
+  refusal of Qory Apiary's, and a status below 500 other than 429 with no refusal, print the
+  cause alone: `qory run: The next-session request after session <n> failed.`, then `Qory
+  Apiary returned <status>: <message or code>` or `The gateway returned <status>: <message
+  or name of the status>`. No answer after 10 minutes, and an answer that qory does not
+  read, print a line that starts with its fix. An answer with `"branch": "main"` and
+  `"must_understand": ["/branch"]` gets `qory run: Update qory.`, then `The answer to the
+  next-session request after session <n> does not pass qory's checks.` and `The answer does
+  not pass them: its must_understand lists a member of next-session-answer.schema.json that
+  qory does not read.`
 - A stop while qory waits to send the request again, or during the steps before the next
   session: the run closes `cancelled` with the reason `interrupted`, exit 1, with `✗ the
   run was cancelled: qory run got <signal> before session <n> started`.
@@ -3025,7 +3026,7 @@ The step does this, in order:
    indented by two spaces. After a session that succeeded, qory then reads,
    fills and checks the session's outputs with the heads that the push would leave, see [The
    outputs of a session](#the-outputs-of-a-session): an output that fails stops the step
-   before any push.
+   before any push, and the run closes `failed` with the end code `outputs_invalid`.
 5. qory checks the head of the branch on the forge, for each repository whose `HEAD` is past
    the commit the run expected: see [The head check](#the-head-check). When one
    repository fails the check, qory pushes nothing in any repository.
@@ -3310,10 +3311,17 @@ First, qory reads each output, and fills and checks each output of a type with a
 `json_schema`. For a run with a branch, qory does this, and the check of the required
 outputs, twice: after it commits what the agent left and before the push, with the local
 head, and again after the push, with the head that landed. An output that fails before the
-push stops the step before any push: the commits stay in the working folder, and the forge
-gets none of them. An output that fails after the push adds the line `Before the round,
-delete branch qory/<work item id> of <path> on <system>.`, indented by two spaces. An output
-that fails one of these stops the step before any version is stored:
+push, or a required output that no session wrote, stops the step before any push: the
+commits stay in the working folder, the forge gets none of them, and the run closes `failed`
+with the end code `outputs_invalid`. A failed read of the run's versions in that check
+closes the run `failed` with no end code. An output that fails after the push adds the line
+`Before the round, delete branch qory/<work item id> of <path> on <system>.`, indented by
+two spaces, and the run closes `failed` with no end code. A run with no repository checks
+its outputs once, before it stores any version: an output that fails, or a required output
+that no session wrote, closes the run `failed` with the end code `outputs_invalid`. A failed
+read of the run's versions, a failed store and any failure after a version was stored close
+the run `failed` with no end code. An output that fails one of these stops the step before
+any version is stored:
 
 1. qory reads the files, at most the type's `size_limit` in all, or 10 MiB for a type with
    none. A type's folder of more than 100 entries stops the read before any file is read,
@@ -3358,7 +3366,9 @@ A run with no repository pushes nothing, and prints `qory run: stored the <type>
 run has no repository to push.` for each output that it stores, such as `qory run: stored the
 reply output; the run has no repository to push.`
 
-Each of these lines fails the step, and the run closes `failed`, exit 1. `<type>` is the
+Each of these lines fails the step, and the run closes `failed`, exit 1. Before the push of
+a run with a branch, and before any version is stored in a run with no repository, the run
+closes with the end code `outputs_invalid`; after the push, with no end code. `<type>` is the
 output's type:
 
 - `Write <type> to the outbox: the stage requires it and the session wrote none.`, then

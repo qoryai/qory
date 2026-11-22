@@ -391,6 +391,14 @@ func SetRecordAttemptLimit(d time.Duration) func() {
 	return func() { recordAttemptLimit = before }
 }
 
+// SetNextSessionLimit makes the next-session request stop after d with no answer, and
+// returns what restores the default.
+func SetNextSessionLimit(d time.Duration) func() {
+	before := nextSessionLimit
+	nextSessionLimit = d
+	return func() { nextSessionLimit = before }
+}
+
 // ErrJoinedNowhere is the error of the join of a run [OpenNowhere] opened.
 var ErrJoinedNowhere = errors.New("the run was opened nowhere, so no session joins it")
 
