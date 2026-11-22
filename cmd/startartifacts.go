@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/qoryai/integrations/contracts"
+
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/runapi"
 )
@@ -20,8 +22,13 @@ import (
 // same name in the run's inputs folder, which the agent reads read-only.
 const startArtifactsDir = "start-artifacts"
 
-// textStartArtifacts is the error of a launch snapshot whose fetch failed, with the cause.
-const textStartArtifacts = "The fetch of the session's start artifacts failed, so the agent did not start.\n  Cause: %s"
+// textStartArtifacts is the error of a launch snapshot whose fetch failed, and
+// textStartArtifactsCopy of one whose folders on this machine could not be removed, made
+// or copied, each with the cause.
+const (
+	textStartArtifacts     = "The fetch of the session's start artifacts failed, so the agent did not start.\n  Cause: %s"
+	textStartArtifactsCopy = "copying the session's start artifacts on this machine failed, so the agent did not start.\n  Cause: %s"
+)
 
 // startArtifacts makes the launch snapshot of a session whose workflow's plan type is
 // plan, "" for none: the run folder's copy at runDir/start-artifacts, which it returns,
@@ -29,7 +36,8 @@ const textStartArtifacts = "The fetch of the session's start artifacts failed, s
 // snapshot is the newest version of plan that is neither cancelled nor a withdrawal, and
 // of each other artifact the version a gate approved, laid out as qory artifact pull
 // writes them, with an index.json that lists only those versions. A fetch through the run
-// API that fails is [textStartArtifacts], see [startArtifactsFailed]. A run with no run API, client
+// API that fails is [textStartArtifacts], see [startArtifactsFailed], and a folder that
+// fails [textStartArtifactsCopy], see [startArtifactsCopyFailed]. A run with no run API, client
 // nil, and a server with the feature workflow_model off get a snapshot with no artifact.
 // shortcut: a run with no run API gets an empty snapshot; replace it when a run with no
 // control plane checks its scope.
@@ -38,17 +46,17 @@ func startArtifacts(ctx context.Context, client *runapi.Client, runDir, in, plan
 	copied := filepath.Join(in, startArtifactsDir)
 	for _, dir := range []string{snapshot, copied} {
 		if err := os.RemoveAll(dir); err != nil {
-			return "", fmt.Errorf("removing the start artifacts of the session before failed: %w", exports.HideError(err))
+			return "", startArtifactsCopyFailed("removing the start artifacts of the session before", err)
 		}
 	}
 	if err := os.Mkdir(snapshot, 0o700); err != nil {
-		return "", fmt.Errorf("making the folder of the start artifacts failed: %w", exports.HideError(err))
+		return "", startArtifactsCopyFailed("making the folder of the start artifacts", err)
 	}
 	if err := fetchStartArtifacts(ctx, client, snapshot, plan); err != nil {
 		return "", startArtifactsFailed(err)
 	}
 	if err := copyTree(snapshot, copied); err != nil {
-		return "", fmt.Errorf("copying the start artifacts to the inputs folder failed: %w", exports.HideError(err))
+		return "", startArtifactsCopyFailed("copying the start artifacts to the inputs folder", err)
 	}
 	return snapshot, nil
 }
@@ -57,6 +65,13 @@ func startArtifacts(ctx context.Context, client *runapi.Client, runDir, in, plan
 // [endCodeOf]: a failed call to the run API, a [*runapi.CallError], ends run_api_failed.
 func startArtifactsFailed(err error) error {
 	return &shownCause{line: fmt.Errorf(textStartArtifacts, strings.TrimSuffix(shownError(err), ".")), cause: err}
+}
+
+// startArtifactsCopyFailed is [textStartArtifactsCopy] for step, a step on this machine
+// that failed with err; the run closes machine_setup_invalid.
+func startArtifactsCopyFailed(step string, err error) error {
+	cause := strings.TrimSuffix(step+" failed: "+shownError(exports.HideError(err)), ".")
+	return &reasonError{code: string(contracts.EndCodeMachineSetupInvalid), text: fmt.Sprintf(textStartArtifactsCopy, cause)}
 }
 
 // launchSnapshot is [startArtifacts] for a session of run, through its run API; with no
@@ -74,11 +89,10 @@ func launchSnapshot(ctx context.Context, run openedRun, in, plan string) (string
 		}
 	}
 	snapshot, err := startArtifacts(ctx, client, run.Dir(), in, plan)
-	var fetch *shownCause
-	if errors.As(err, &fetch) {
+	if err != nil {
 		return "", &runLineError{err}
 	}
-	return snapshot, err
+	return snapshot, nil
 }
 
 // fetchStartArtifacts writes the launch snapshot of [startArtifacts] into dir, an empty

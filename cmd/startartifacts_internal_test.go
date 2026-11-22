@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -173,5 +174,25 @@ func TestALaterSessionGetsANewLaunchSnapshot(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+	}
+}
+
+// TestALaunchSnapshotThatCannotBeCopiedEndsMachineSetupInvalid is an inputs folder that
+// qory cannot write: the session does not start, and the run closes machine_setup_invalid,
+// with the cause on line 2.
+func TestALaunchSnapshotThatCannotBeCopiedEndsMachineSetupInvalid(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root writes a folder of mode 0500")
+	}
+	in := t.TempDir()
+	if err := os.Chmod(in, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(in, 0o700) })
+	_, err := startArtifacts(t.Context(), nil, t.TempDir(), in, "build-plan")
+	var ended *reasonError
+	if !errors.As(err, &ended) || ended.code != string(contracts.EndCodeMachineSetupInvalid) ||
+		!strings.HasPrefix(err.Error(), "copying the session's start artifacts on this machine failed, so the agent did not start.\n  Cause: copying the start artifacts to the inputs folder failed: ") {
+		t.Errorf("got %v", err)
 	}
 }

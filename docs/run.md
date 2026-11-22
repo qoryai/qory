@@ -2137,7 +2137,10 @@ the run stops as it does for documents that break the schema. Only a run whose s
   wall.mounts or --mount.`; the mount and `in/` follow on two lines. A launch snapshot whose
   fetch fails stops the session with `run_api_failed` and `qory run: The fetch of the
   session's start artifacts failed, so the agent did not start.`, with the cause on the
-  next line. The workflow reads them from the path after its
+  next line. A launch snapshot whose folders on this machine cannot be removed, made or
+  copied stops the session with `machine_setup_invalid` and `qory run: copying the
+  session's start artifacts on this machine failed, so the agent did not start.`, with
+  the cause on the next line. The workflow reads them from the path after its
   name in the prompt,
   and a push check gets the same path after `--inputs` (see Push checks in
   `contracts/harness/v1/README.md`). qory also writes the same bytes to `inputs.json` in
