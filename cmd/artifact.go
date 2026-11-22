@@ -25,6 +25,7 @@ import (
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
+	"github.com/qoryai/qory/internal/primitives"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/sourcetext"
 	"github.com/qoryai/qory/internal/verdictformat"
@@ -1003,7 +1004,7 @@ func checkLine(flag, what, want, value string, limit int) error {
 			return fmt.Errorf("Write %s on one line. The %s has a tab (%U).", flag, what, r)
 		case r == '\n' || r == '\r':
 			return fmt.Errorf("Write %s on one line. The %s has a line break (%U).", flag, what, r)
-		case verdictformat.Excluded(r):
+		case primitives.StopsLine(r):
 			return fmt.Errorf("Remove the character %U from %s. The verdict format excludes it.", r, flag)
 		}
 	}

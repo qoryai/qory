@@ -15,11 +15,14 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"unicode"
 	"unicode/utf8"
+
+	"github.com/qoryai/qory/internal/primitives"
 )
 
-// Hidden reports whether r is a character that source text must show as `<U+XXXX>`.
+// Hidden reports whether r is a character that source text must show as `<U+XXXX>`:
+// [primitives.StopsLine] except tab (U+0009) and line feed (U+000A), so the rule of the
+// characters is written once.
 //
 // These are hidden: each control character (Unicode class Cc) except newline (U+000A)
 // and tab (U+0009), so the carriage return, NUL, DEL and U+0085 are hidden; each format
@@ -27,13 +30,7 @@ import (
 // joiner (U+200D), which spell some scripts and emoji; and the line separator U+2028
 // and the paragraph separator U+2029. Every other rune is not hidden.
 func Hidden(r rune) bool {
-	switch r {
-	case '\n', '\t', 0x200C, 0x200D:
-		return false
-	case 0x2028, 0x2029:
-		return true
-	}
-	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
+	return r != '\n' && r != '\t' && primitives.StopsLine(r)
 }
 
 // Escape returns s with each hidden rune (see [Hidden]) written as `<U+XXXX>`: the

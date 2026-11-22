@@ -55,7 +55,7 @@ func TestTheAgentEnvKeepsTheNamesForagerSets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range []string{"HTTP_PROXY", "https_proxy", "NO_PROXY", "QORY_RUN_SOCKET", "QORY_RUN_ID", "QORY_HARNESS_HOME", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR", "ca SSL_CERT_FILE", "ca NODE_EXTRA_CA_CERTS"} {
+	for _, n := range []string{"HTTP_PROXY", "https_proxy", "NO_PROXY", "QORY_RUN_SOCKET", "QORY_RUN_ID", "QORY_SESSION", "QORY_HARNESS_HOME", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR", "ca SSL_CERT_FILE", "ca NODE_EXTRA_CA_CERTS"} {
 		if !strings.Contains("\n"+string(data), "\n"+n+"\n") {
 			t.Errorf("the file lacks %s:\n%s", n, data)
 		}
