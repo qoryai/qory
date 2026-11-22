@@ -3296,7 +3296,8 @@ First, qory reads each output, and fills and checks each output of a type with a
 stored:
 
 1. qory reads the files, at most the type's `size_limit` in all, or 10 MiB for a type with
-   none. The read stays inside the checkout: a link as a file or as the type's folder, and
+   none. A type's folder of more than 100 entries stops the read before any file is read,
+   with the cause `Push at most 100 files in one version of <type>. This version has <n>.` The read stays inside the checkout: a link as a file or as the type's folder, and
    a link that leads out of the checkout, end the read.
 2. For a type with `deliver`, qory sets `target` to the run documents' target. It fills
    each member that the type's schema marks with `x-qory-fill` from what the run pushed to

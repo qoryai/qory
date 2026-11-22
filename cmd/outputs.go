@@ -110,7 +110,8 @@ func outputPath(typ string, structured bool) string {
 // any other type each regular file in the folder <type>. found is false when the entry is not
 // there. The session wrote the entry, so the read stays inside root, whatever links it made: a
 // link at any part of the path, or as a file, is an error, and so are files over the type's
-// size_limit, or [maxOutputBytes] for a type with none.
+// size_limit, or [maxOutputBytes] for a type with none, and a folder of more than
+// [runapi.MaxFiles] entries, which is an error before any file is read.
 func readOutput(root string, t exports.ProcessType) (files []runapi.PushFile, found bool, err error) {
 	limit := t.SizeLimit
 	if limit <= 0 {
@@ -149,6 +150,10 @@ func readOutput(root string, t exports.ProcessType) (files []runapi.PushFile, fo
 	case info.IsDir():
 		entries, err := fs.ReadDir(dir.FS(), entry)
 		if err != nil {
+			return nil, true, err
+		}
+		// The count comes before any file is read: a version has at most [runapi.MaxFiles].
+		if err := runapi.CheckVersion(t.Name, make([]int64, len(entries))); err != nil {
 			return nil, true, err
 		}
 		for _, e := range entries {

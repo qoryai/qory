@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -525,5 +526,32 @@ func TestATypeThatMarksNothingQoryFillsIsStoredWithNoPush(t *testing.T) {
 		if stored && strings.Contains(string(out[0].push.Files[0].Content), "earlier") {
 			t.Errorf("%s: the member is filled: %s", mark, out[0].push.Files[0].Content)
 		}
+	}
+}
+
+// TestAFolderOfTooManyFilesStopsBeforeTheRead is the folder of notes with 100 files and a
+// link: the count, 101, stops the read before any file is read, so the error is the count's
+// and not the link's.
+func TestAFolderOfTooManyFilesStopsBeforeTheRead(t *testing.T) {
+	root := t.TempDir()
+	folder := filepath.Join(root, ".qory", "outbox", "notes")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := range runapi.MaxFiles {
+		if err := os.WriteFile(filepath.Join(folder, fmt.Sprintf("n%03d.md", i)), []byte("#\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	notes := exports.ProcessType{Name: "notes"}
+	if files, _, err := readOutput(root, notes); err != nil || len(files) != runapi.MaxFiles {
+		t.Fatalf("100 files: %d, %v", len(files), err)
+	}
+	if err := os.Symlink(filepath.Join(folder, "n000.md"), filepath.Join(folder, "a-link.md")); err != nil {
+		t.Fatal(err)
+	}
+	_, found, err := readOutput(root, notes)
+	if want := "Push at most 100 files in one version of notes. This version has 101."; !found || err == nil || err.Error() != want {
+		t.Errorf("101 entries: found %v, %v, want %q", found, err, want)
 	}
 }
