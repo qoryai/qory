@@ -1009,7 +1009,8 @@ release may change what an existing document does, and states it under Upgrading
   draft pull request. A composed harness has one; a second declaration stops the compose.
 - A run with neither a run code nor a run key, whose harness has a submit program, gets
   `$QORY_HARNESS_HOME/inputs.json` with the member `qory` alone, as a run with a run key does.
-  Its `qory.outbox` is the outbox in the run's copy.
+  Such a run has `qory.outbox`, the outbox in its copy, when it may write and works in a copy
+  of a git checkout; an unwalled run and a read run have no `qory.outbox`.
 - A session of a run with neither a run code nor a run key hands the draft's title, text and
   the step of each commit to the submit program in its pull-request output,
   `.qory/outbox/pull-request/pull-request.json` under the folder in `qory.outbox`. A commit

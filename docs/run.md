@@ -2151,18 +2151,18 @@ the run stops as it does for documents that break the schema. Only a run whose s
   same path after `--inputs` (see Push checks in `contracts/harness/v1/README.md`). qory
   also writes the same bytes to `inputs.json` in the composed home, mode 0644, so the
   harness's hooks read them as `$QORY_HARNESS_HOME/inputs.json`. In a home from `--home` or
-  `harness.home`, qory removes that copy when the run ends, also after a failure or a stop;
-  a home for that run alone goes as a whole. A run with a run key and no run code gets the
-  same files, with the member `qory` alone, since it has no inputs: `{"qory":
+  `harness.home`, and in an unwalled run's `.qory/harness`, qory removes that copy when the
+  run ends, also after a failure or a stop; a home for that run alone goes as a whole. A run
+  with a run key and no run code gets the same files, with the member `qory` alone, since it
+  has no inputs: `{"qory":
   {"harness_extensions": {…}, "outputs": [], "start_commits": […], "start_artifacts": "…"}}`
   in `in/` (read-only behind a wall), in the composed home, and after `--inputs` of its push
   checks. A run with neither a run code nor a run key, whose composed harness has a submit
   program (see [The submit program](#the-submit-program)), gets the file with the member
   `qory` alone in the composed home only, `[]` as its `start_commits`, `""` as its
   `start_artifacts`, and `qory.outbox` when it has an outbox; its push checks get no
-  `--inputs`. A home that already has `inputs.json` stops the run with exit 1: `Remove
-  inputs.json from the home, or omit --home and harness.home, then take the work item in
-  again.` Inputs that have a member `qory` stop the run before it opens, with exit 1:
+  `--inputs`. The compose replaces the home, so it deletes an `inputs.json` that is already
+  there. Inputs that have a member `qory` stop the run before it opens, with exit 1:
   `remove the input qory: qory adds that member to inputs.json; the code is used`, and so do
   inputs that are not a JSON object: `ask Qory Apiary's instance admin: the run code's
   inputs are not a JSON object; the code is used`;
@@ -3335,8 +3335,9 @@ has as `qory.outbox`, a string. A run from a run code at the access `write` has 
 when it read its work item at the start, as every run of a work item does on an instance
 with the feature `workflow_model`: `.qory/outbox` at the top of the checkout, or of the
 working folder of a run with no repository. A run with neither a run code nor a run key has
-it when the composed harness has a submit program, see [The submit program](#the-submit-program).
-Any other run has no `qory.outbox`.
+it when the composed harness has a submit program, see [The submit program](#the-submit-program),
+and the run may write and works in a copy of a git checkout with a commit: `.qory/outbox` at
+the top of the copy. Any other run, such as an unwalled run or a read run, has no `qory.outbox`.
 For a run on the branch of its work item, qory adds the line `/.qory/outbox/` to the
 checkout's `.git/info/exclude` once before the session starts, with the line `/.qory` that
 the compose adds. That file is local to the clone and no commit has it, so `git add -A` and
