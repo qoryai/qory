@@ -2303,12 +2303,12 @@ and the first 32 lower-case hexadecimal digits of the SHA-256 of the target's `c
 A version with a later withdrawal of its artifact that is not cancelled does not count.
 
 Each step reads the artifacts of all types that have that name, and step 1 comes first: a
-version of the stage in one type wins over an approved version in another type, whatever
-their times. The newest version in step 1 is the one with the highest number among the
-versions of the stage that the artifact index does not mark `cancelled`: a version that a
-cancelled run made counts for no stage. When the stage has no version, when every version of
-the stage is cancelled, and when a withdrawal follows each, step 1 finds none. When several types have a version for a step, the
-version with the latest time wins.
+version of the stage in one type wins over an approved version in another type, whatever their
+times. The newest version in step 1 is the one with the highest number among the versions of
+the stage that the artifact index does not mark `cancelled`: a version that a cancelled run
+made counts for no stage. When the stage has no version, when every version of the stage is
+cancelled, and when a withdrawal follows each, step 1 finds none. When several types have a
+version for a step, the version with the latest time wins.
 
 The start commit is the newest commit that the run which wrote the version pushed to the
 target's repository, from `pushed_commits` in the response to `GET /work-item`, and that a
@@ -2328,16 +2328,17 @@ marks the commits of cancelled runs. A commit of a cancelled run, and a commit t
 commit, moves the run nowhere.
 
 A run whose start version is the one that a gate approved (step 2) does not move. It starts at
-that version's commit, whatever a later run pushed. That is the case for a run whose stage has no
-version that counts: a stage that wrote none, such as Verify, and a stage whose versions are
-all cancelled or followed by a withdrawal, even Build. A work item in no stage is the same. When no version is
-approved either, the run starts at the checkout at `target_version` (step 3) and moves as the
-rule above says.
+that version's commit, whatever a later run pushed. That is the case for a run whose stage has
+no version that counts: a stage that wrote none, such as Verify, and a stage whose versions
+are all cancelled or followed by a withdrawal, even Build. A work item in no stage is the
+same. When no version is approved, or the approved version does not count, the run starts at
+the checkout at `target_version` (step 3) and moves as the rule above says.
 
-When a run that a person did not cancel pushed a commit above the commit of the approved
-version, the run that starts at that version does not move to it. It commits on the start
-commit, and its push fails with the end code `push_head_changed`, because the branch at the
-forge is at the later commit.
+When a later run pushed a commit above the commit of the approved version, the run that starts
+at that version does not move to it. Its push fails with the end code `push_head_changed`,
+because the branch at the forge is at the later commit. The push does not fail when a person
+cancelled the run that pushed that commit, or when the run which wrote the approved version
+pushed it and no version confirms it: the push replaces the commit with a lease.
 
 qory composes the harness at `target_version`, with the read targets at the heads of their
 default branches, before it checks out the work item's branch. A read target whose version

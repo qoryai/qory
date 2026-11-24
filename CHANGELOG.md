@@ -1088,13 +1088,15 @@ release may change what an existing document does, and states it under Upgrading
 - A run whose start version is the one that a gate approved starts at that version's commit. It
   does not move to a commit that a later run pushed. That is the case for a run whose stage has
   no version that counts: a stage that wrote none, such as Verify, and a stage whose versions
-  are all cancelled or followed by a withdrawal, even Build. With no approved version either, the run starts at
-  what the run documents check out. When a run that a person did not cancel pushed above the
-  approved commit, the push of the run that starts there fails with `push_head_changed`. A run
-  whose stage wrote a version that counts starts at its newest one, even when another stage
-  wrote a newer version, and moves to the newest pushed commit that descends from it. A version
-  with a later withdrawal of its artifact that is not cancelled does not count, as a version
-  that a gate approved does not.
+  are all cancelled or followed by a withdrawal, even Build. With no approved version, or one
+  that does not count, the run starts at what the run documents check out. When a later run
+  pushed above the approved commit, the push of a run that starts there fails with
+  `push_head_changed`. It does not fail when a person cancelled the run that pushed that commit,
+  or when the run which wrote the approved version pushed it and no version confirms it: the
+  push replaces the commit with a lease. A run whose stage wrote a version that counts starts at
+  its newest one, even when another stage wrote a newer version, and moves to the newest pushed
+  commit that descends from it. A version with a later withdrawal of its artifact that is not
+  cancelled does not count. This covers a version that a gate approved too.
 - Every run of a work item from a run code with a run API reads the work item through `GET
   /work-item` at its start, with or without a repository, as the stage's outputs come from
   it. A setup past its limit in that read names the step `the read of the work item`. A stage

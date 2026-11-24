@@ -86,7 +86,8 @@ func approvedAs(index *runapi.Index, id string) *runapi.Index {
 
 // TestStartVersion is each rule of the version a run starts at: the newest version of the
 // target's artifact that the work item's stage wrote and that is not cancelled, else the
-// approved version unless the newest version is a withdrawal, else none.
+// approved version, else none. A version before a withdrawal that is not cancelled counts for
+// neither.
 func TestStartVersion(t *testing.T) {
 	for name, c := range map[string]struct {
 		snapshot *runapi.Snapshot
@@ -349,6 +350,35 @@ func TestStartVersionWithTwoTypesAndApprovals(t *testing.T) {
 				t.Errorf("got %+v of %q, want none of %q", got, artifact, c.artifact)
 			case c.want != "" && (got == nil || got.ID != c.want || artifact != c.artifact || approved != c.approved):
 				t.Errorf("got %+v of %q, approved %v; want %s of %q, approved %v", got, artifact, approved, c.want, c.artifact, c.approved)
+			}
+		})
+	}
+}
+
+// TestAWithdrawalOfOneTypeAppliesToNoOtherType is two artifacts of [startTarget]'s collection,
+// the pull-request one with av_1 of the stage and av_2 its withdrawal, and the notes one with a
+// version numbered 1, av_3: the withdrawal leaves no version of the pull-request type, and av_3 counts,
+// as a version of the stage and as the approved version.
+func TestAWithdrawalOfOneTypeAppliesToNoOtherType(t *testing.T) {
+	for name, c := range map[string]struct {
+		stage    string
+		approved bool
+	}{
+		"a version of the stage": {"st_b", false},
+		"the approved version":   {"st_a", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			pullRequest := withdrawnAt(branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_b"}), "av_2").Artifacts[0]
+			stage := c.stage
+			notes := runapi.Artifact{Type: "notes", Name: startName, NewestVersion: 1, Versions: []runapi.Version{{ID: "av_3", Number: 1, StageID: &stage}}}
+			if c.approved {
+				approved := "av_3"
+				notes.ApprovedVersion = &approved
+			}
+			index := &runapi.Index{Artifacts: []runapi.Artifact{pullRequest, notes}}
+			got, artifact, approved := startVersion(stageSnapshot(), index, startTarget)
+			if got == nil || got.ID != "av_3" || artifact != "notes" || approved != c.approved {
+				t.Errorf("got %+v of %q, approved %v; want av_3 of notes, approved %v", got, artifact, approved, c.approved)
 			}
 		})
 	}
