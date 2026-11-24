@@ -2152,9 +2152,11 @@ the run stops as it does for documents that break the schema. Only a run whose s
   also writes the same bytes to `inputs.json` in the composed home, mode 0644, so the
   harness's hooks read them as `$QORY_HARNESS_HOME/inputs.json`. In a home from `--home` or
   `harness.home`, and in an unwalled run's `.qory/harness`, qory removes that copy when the
-  run ends, also after a failure or a stop; a home for that run alone goes as a whole. A run
-  with a run key and no run code gets the same files, with the member `qory` alone, since it
-  has no inputs: `{"qory":
+  run ends, also after a failure or a stop; a home for that run alone goes as a whole. While
+  a person's run without a wall is open and its harness has a submit program, `qory harness
+  compose --check` reports `inputs.json extra` and exits 6. It passes again when the run
+  ends. A run with a run key and no run code gets the same files, with the member `qory`
+  alone, since it has no inputs: `{"qory":
   {"harness_extensions": {…}, "outputs": [], "start_commits": […], "start_artifacts": "…"}}`
   in `in/` (read-only behind a wall), in the composed home, and after `--inputs` of its push
   checks. A run with neither a run code nor a run key, whose composed harness has a submit
