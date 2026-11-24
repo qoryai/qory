@@ -37,6 +37,8 @@ type startAPI struct {
 	// stage is the work item's stage, st_a when "", and approved marks the version approved.
 	stage    string
 	approved bool
+	// newer is the stage of a newer version, av_2, that the later run r2 wrote: "" for none.
+	newer string
 }
 
 // branchAPI serves a run API whose work item has one version of pull-request, with file as
@@ -56,9 +58,14 @@ func (a startAPI) serve(t *testing.T) string {
 		if a.approved {
 			approved = `,"approved_version":"av_1"`
 		}
-		artifacts = fmt.Sprintf(`[{"type":"pull-request","name":%q,"newest_version":1%s,"versions":[{"id":"av_1","number":1,"writer":{"kind":"run","run_id":"r"},"stage_id":"st_a","at":"2026-11-02T09:00:00Z",`+
-			`"files":[{"filename":"pull-request.json","content_type":"application/json","size":%d,"sha256":%q}],"approvals":[]}]}]`,
-			pullRequestName, approved, len(a.file), hex.EncodeToString(sum[:]))
+		newer, number := "", 1
+		if a.newer != "" {
+			number = 2
+			newer = fmt.Sprintf(`,{"id":"av_2","number":2,"writer":{"kind":"run","run_id":"r2"},"stage_id":%q,"at":"2026-11-03T09:00:00Z","files":[],"approvals":[]}`, a.newer)
+		}
+		artifacts = fmt.Sprintf(`[{"type":"pull-request","name":%q,"newest_version":%d%s,"versions":[{"id":"av_1","number":1,"writer":{"kind":"run","run_id":"r"},"stage_id":"st_a","at":"2026-11-02T09:00:00Z",`+
+			`"files":[{"filename":"pull-request.json","content_type":"application/json","size":%d,"sha256":%q}],"approvals":[]}%s]}]`,
+			pullRequestName, number, approved, len(a.file), hex.EncodeToString(sum[:]), newer)
 	}
 	entries := []map[string]any{}
 	for _, p := range a.pushed {
@@ -238,6 +245,12 @@ func TestARunThatStartsAtAnApprovedVersionMovesToNoLaterPush(t *testing.T) {
 				return startAPI{file: file, pushed: []string{head}, later: []string{later}, stage: "st_b", approved: true}
 			},
 			func(head, _ string) string { return head },
+		},
+		"the stage's version, under a newer version of another stage, moves to the later commit": {
+			func(file, head, later string) startAPI {
+				return startAPI{file: file, pushed: []string{head}, later: []string{later}, newer: "st_b", approved: true}
+			},
+			func(_, later string) string { return later },
 		},
 		"the stage's newest version moves to the later commit": {
 			func(file, head, later string) startAPI {

@@ -204,10 +204,9 @@ func TestStartVersionFindsNoApprovedVersionOutsideTheIndex(t *testing.T) {
 
 // TestStartVersionReportsTheApproval is the third result of [startVersion]: true exactly when
 // the version is the one that the approval lists, so the run stays at its commit. A version that
-// the stage wrote is false, with an approval or not. A run whose newest version that is not
-// cancelled was not written by its stage has the approved version, so a Build run stays at it
-// too. Of two types, the version with the later time wins, and the result is true when it is
-// the approved one.
+// the stage wrote is false, with an approval or not, even when another stage wrote a newer
+// version. The approved version is taken only when no type has a version of the stage. Of two
+// types, a version of the stage wins over the approved one whatever their times.
 func TestStartVersionReportsTheApproval(t *testing.T) {
 	// twoTypes is two artifacts of [startTarget]'s collection: the pull-request one has av_1 of
 	// st_a, approved, at pullRequestAt, and the notes one has av_2 of st_b at notesAt.
@@ -239,18 +238,18 @@ func TestStartVersionReportsTheApproval(t *testing.T) {
 		"every version of the stage cancelled leaves the approved version": {
 			stageSnapshot(), approvedAs(cancelledAt(branchIndex([2]string{"av_1", "st_a"}, [2]string{"av_2", "st_b"}), "av_2"), "av_1"), "av_1", true,
 		},
-		"a newer version of another stage leaves the approved version": {
-			stageSnapshot(), approvedAs(branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_a"}), "av_1"), "av_1", true,
+		"a newer version of another stage leaves the stage's newest, approved or not": {
+			stageSnapshot(), approvedAs(branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_a"}), "av_1"), "av_1", false,
 		},
-		"a newer version of another stage, with no approval, is no start": {
-			stageSnapshot(), branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_a"}), "", false,
+		"a newer version of another stage, with no approval, leaves the stage's newest": {
+			stageSnapshot(), branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_a"}), "av_1", false,
 		},
 		"no version": {stageSnapshot(), branchIndex([2]string{"av_1", "st_a"}), "", false},
 		"of two types, the stage's later version wins over the approved one": {
 			stageSnapshot(), twoTypes("2026-11-02T09:00:00Z", "2026-11-02T10:00:00Z"), "av_2", false,
 		},
-		"of two types, the approved later version wins over the stage's": {
-			stageSnapshot(), twoTypes("2026-11-02T10:00:00Z", "2026-11-02T09:00:00Z"), "av_1", true,
+		"of two types, the stage's earlier version wins over a later approved one": {
+			stageSnapshot(), twoTypes("2026-11-02T10:00:00Z", "2026-11-02T09:00:00Z"), "av_2", false,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

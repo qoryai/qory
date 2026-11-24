@@ -2295,14 +2295,16 @@ of the target's collection: the artifact that a delivered output of the target g
 and the first 32 lower-case hexadecimal digits of the SHA-256 of the target's `collection`
 (see [Outputs](../contracts/harness/v1/README.md#outputs)):
 
-1. The newest version of that artifact, when the work item's stage wrote it.
+1. The newest version of that artifact that the work item's stage wrote, even when another
+   stage wrote a newer version.
 2. Else, the version of that artifact that a gate approved, unless the newest version is a
    withdrawal.
 3. Else, the checkout at `target_version`: the run creates the branch there.
 
-The newest version in step 1 is the one with the highest number that the artifact index
-does not mark `cancelled`: a version that a cancelled run made counts for no stage.
-When every version is cancelled, step 1 finds none. When artifacts of several types have
+The newest version in step 1 is the one with the highest number among the versions of the
+stage that the artifact index does not mark `cancelled`: a version that a cancelled run made
+counts for no stage. When the stage has no version, or every version of the stage is
+cancelled, step 1 finds none. When artifacts of several types have
 that name, the version with the latest time wins.
 
 The start commit is the newest commit that the run which wrote the version pushed to the
@@ -2324,10 +2326,10 @@ commit, moves the run nowhere.
 
 A run whose start version is the one that a gate approved (step 2) does not move. It starts at
 that version's commit, whatever a later run pushed. A run of a stage that wrote no version, such
-as Verify, starts there. A run whose newest version that is not cancelled was not written by its
-stage starts at the version that a gate approved (step 2) too. That is the case when its stage has
-no version, when every version of its stage is cancelled, and when the newest version is of
-another stage. A run of Build in one of these cases stays at the commit of the approved version.
+as Verify, starts there. A run whose stage has no version that is not cancelled starts at the
+version that a gate approved (step 2) too. That is the case when its stage wrote no version and
+when every version of its stage is cancelled. A run of Build in one of these cases stays at the
+commit of the approved version.
 
 If a later run pushed a commit above the start of an approved run, the run does not move to it.
 It commits on the start commit, and its push fails with the end code `push_head_changed`, because

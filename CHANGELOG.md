@@ -1088,10 +1088,10 @@ release may change what an existing document does, and states it under Upgrading
   does not move to a commit that a later run pushed, as a run of Verify, whose stage wrote no
   version. Its push fails with `push_head_changed` when a later run pushed above that commit. A
   run whose stage wrote the version still moves to the newest pushed commit that descends from
-  its start. A run whose newest version that is not cancelled was not written by its stage starts
-  at the approved version and stays at its commit, even a run of Build. That is the case when its
-  stage has no version, when every version of its stage is cancelled, and when the newest version
-  is of another stage.
+  its start. A run whose stage has no version that is not cancelled starts at the approved
+  version and stays at its commit, even a run of Build. That is the case when its stage wrote no
+  version and when every version of its stage is cancelled. A run of Build starts at the newest
+  version of its stage that is not cancelled, even when another stage wrote a newer version.
 - Every run of a work item from a run code with a run API reads the work item through `GET
   /work-item` at its start, with or without a repository, as the stage's outputs come from
   it. A setup past its limit in that read names the step `the read of the work item`. A stage
