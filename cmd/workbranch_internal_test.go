@@ -558,6 +558,57 @@ func TestStartCommitIsConfirmedByAnotherVersionOfTheSameRun(t *testing.T) {
 	}
 }
 
+// TestAVersionBeforeAWithdrawalConfirmsNoCommit is one run that stored pull-request av_1, which
+// confirms its first commit A, and notes av_2, which confirms its second commit B, and then a
+// withdrawal of notes, av_3: av_2 has a later withdrawal of its artifact, so it confirms
+// nothing, and the start is A with B skipped.
+func TestAVersionBeforeAWithdrawalConfirmsNoCommit(t *testing.T) {
+	a, b := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	file := func(commit string) string {
+		return `{"target":{"collection":"R_1001"},"head":{"collection":"R_1001","address":{"system":"git.example.com","path":"` + commit + `"}}}`
+	}
+	files := map[string]string{"av_1": file(a), "av_2": file(b)}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for id, content := range files {
+			if strings.HasPrefix(r.URL.Path, "/v1/runs/r/artifacts/"+id+"/files/") {
+				io.WriteString(w, content)
+				return
+			}
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	client, err := runapi.New(server.URL+"/v1/runs/r", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := func(id string, number int) runapi.Version {
+		v := runapi.Version{ID: id, Number: number, Writer: runapi.Writer{Kind: "run", RunID: "run_1"}}
+		if content, ok := files[id]; ok {
+			sum := sha256.Sum256([]byte(content))
+			v.Files = []runapi.File{{Filename: "f.json", Size: int64(len(content)), SHA256: hex.EncodeToString(sum[:])}}
+		}
+		return v
+	}
+	index := &runapi.Index{Artifacts: []runapi.Artifact{
+		{Type: "pull-request", Name: startName, Versions: []runapi.Version{version("av_1", 1)}},
+		{Type: "notes", Name: startName, Versions: []runapi.Version{version("av_2", 1), version("av_3", 2)}},
+	}}
+	index.Artifacts[1].Versions[1].Withdrawn = true
+	pushed := []runapi.PushedEntry{
+		{System: "git.example.com", Path: "acme/shop", Commit: a, RunID: "run_1"},
+		{System: "git.example.com", Path: "acme/shop", Commit: b, RunID: "run_1"},
+	}
+	chosen := &index.Artifacts[0].Versions[0]
+	others := sameRunVersions(index, startTarget, chosen)
+	if len(others) != 0 {
+		t.Fatalf("the other versions are %+v, want none", others)
+	}
+	if got, skipped, err := startCommit(t.Context(), client, chosen, "pull-request", others, pushed, startTarget); err != nil || got != a || !slices.Equal(skipped, []int{1}) {
+		t.Errorf("start %q, skipped %v, %v; want %s and [1]", got, skipped, err, a)
+	}
+}
+
 // TestStartCommitWalksTheRunsCommitsNewestFirst is a run that pushed A, B and C to the
 // target, with an entry of acme/lib and one of another run between them, and stored one
 // version: with the head A, B and C are skipped and A is the start; with the head B, C is

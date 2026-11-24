@@ -282,8 +282,9 @@ type startVersionOf struct {
 }
 
 // sameRunVersions are the versions in index, newest first, that the run which wrote chosen
-// stored in the artifacts of target other than chosen, cancelled ones left out: a stage can
-// store two delivered types for one target, and only one of them may confirm the start.
+// stored in the artifacts of target other than chosen, cancelled ones left out, and those
+// with a later withdrawal of their artifact that is not cancelled, which confirm no commit: a
+// stage can store two delivered types for one target, and only one of them may confirm the start.
 func sameRunVersions(index *runapi.Index, target *contracts.Target, chosen *runapi.Version) []startVersionOf {
 	name := outputName(exports.ProcessType{Send: "delivered"}, target)
 	var out []startVersionOf
@@ -291,9 +292,10 @@ func sameRunVersions(index *runapi.Index, target *contracts.Target, chosen *runa
 		if a.Name != name {
 			continue
 		}
+		after := lastWithdrawal(a)
 		for i := range a.Versions {
 			v := &a.Versions[i]
-			if v.ID != chosen.ID && !v.Cancelled && v.Writer.Kind == "run" && v.Writer.RunID == chosen.Writer.RunID {
+			if v.ID != chosen.ID && !v.Cancelled && v.Number > after && v.Writer.Kind == "run" && v.Writer.RunID == chosen.Writer.RunID {
 				out = append(out, startVersionOf{v, a.Type})
 			}
 		}
