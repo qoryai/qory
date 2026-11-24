@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -324,6 +325,62 @@ func TestAnApprovedStartMovesToNoPushedCommit(t *testing.T) {
 			}
 			if got := run(t, dir, "rev-parse", "HEAD"); got != want || b.Repositories[0].Start != want || b.CommitOf("git.example.com", "acme/shop") != want {
 				t.Errorf("HEAD is %s, the start %s, the version %s, want %s", got, b.Repositories[0].Start, b.CommitOf("git.example.com", "acme/shop"), want)
+			}
+		})
+	}
+}
+
+// TestAnApprovedStartThatCommitsAfterALaterPushFailsAtPush is a version that an approval lists,
+// with a later run's commit that descends from it on the branch at the forge: the approved run
+// starts at the version's commit, commits, and its push stops with the head of the later run's
+// commit, [*HeadChanged], and leaves the branch as it is. With Approved false the run starts at
+// the later commit and its push lands on top of it.
+func TestAnApprovedStartThatCommitsAfterALaterPushFailsAtPush(t *testing.T) {
+	needGit(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	for _, c := range []struct {
+		name     string
+		approved bool
+	}{
+		{"an approved version", true},
+		{"the stage's version", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			base, dir := t.TempDir(), emptyFolder(t)
+			remote(t, base, "acme/shop", "main", nil)
+			bare := filepath.Join(base, "acme", "shop.git")
+			run(t, bare, "config", "http.receivepack", "true")
+			target := run(t, bare, "rev-parse", "main")
+			later := bareCommit(t, bare, testRef, target, "a later run")
+			b := &WorkBranch{
+				Ref:      testRef,
+				Approved: c.approved,
+				Version:  versionOf("acme/shop", target),
+				Pushed:   []Landed{{System: "git.example.com", Path: "acme/shop", Commit: later}},
+			}
+			if _, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: target, Branch: b}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := switchTo(dir, b); err != nil {
+				t.Fatal(err)
+			}
+			leave(t, dir)
+			_, _, err := pushOf(dir, b)
+			if !c.approved {
+				if err != nil {
+					t.Fatalf("push: %v", err)
+				}
+				if got, mine := run(t, bare, "rev-parse", testRef), run(t, dir, "rev-parse", "HEAD"); got != mine || run(t, dir, "rev-parse", "HEAD~1") != later {
+					t.Errorf("the branch is at %s, want the run's commit %s on top of %s", got, mine, later)
+				}
+				return
+			}
+			changed := headError(t, err)
+			if changed.Head != later || changed.Expected != target || changed.LastPush {
+				t.Errorf("refusal %+v, want head %s expected %s, the start commit", changed, later, target)
+			}
+			if got := run(t, bare, "rev-parse", testRef); got != later {
+				t.Errorf("the branch is at %s, want %s", got, later)
 			}
 		})
 	}

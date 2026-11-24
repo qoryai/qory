@@ -309,6 +309,52 @@ func TestOnlyTheTargetIsPushed(t *testing.T) {
 	}
 }
 
+// TestAReadTargetHasNoPushedEntry is a run whose read target has a new commit: the push lists
+// the target alone in [WorkBranch.Landed], the list that Qory Apiary records as pushed commits. A
+// later run that gets that list, with a version that has the read target's commit, starts the read
+// target at that commit with Approved true and with Approved false, since the list has no entry
+// of it to move to, while the target moves to its pushed commit only with Approved false.
+func TestAReadTargetHasNoPushedEntry(t *testing.T) {
+	var apiCommit string
+	dir, b, _ := readsOnBranch(t, func(base string) []Repository {
+		first := run(t, filepath.Join(base, "acme", "api.git"), "rev-list", "--max-parents=0", "main")
+		apiCommit = branchCommit(t, base, "acme/api", first, func(work string) {
+			write(t, filepath.Join(work, "qory.yaml"), "branch\n")
+		})
+		return versionOf("acme/api", apiCommit)
+	})
+	start := b.Repositories[0].Start
+	write(t, filepath.Join(dir, "change.txt"), "target\n")
+	api := filepath.Join(dir, ".qory", "repositories", "acme", "api")
+	write(t, filepath.Join(api, "change.txt"), "read\n")
+	run(t, api, "add", "-A")
+	run(t, api, "commit", "--quiet", "-m", "agent")
+	if _, lines, err := pushOf(dir, b); err != nil {
+		t.Fatalf("%v\n%s", err, lines)
+	}
+	landed := b.Landed()
+	if len(landed) != 1 || landed[0].Path != "acme/shop" {
+		t.Fatalf("landed %+v, want acme/shop alone", landed)
+	}
+	for _, approved := range []bool{true, false} {
+		next := &WorkBranch{Ref: testRef, Approved: approved, Version: versionOf("acme/api", apiCommit), Pushed: landed}
+		at := Target{System: "git.example.com", Path: "acme/shop", Version: start, Branch: next, Reads: []Read{readOn("acme/api"), readOn("acme/docs")}, FromCode: true}
+		folder := emptyFolder(t)
+		if _, err := fetchListAt(folder, "acme/extra", at); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := switchTo(folder, next); err != nil {
+			t.Fatal(err)
+		}
+		if got := run(t, filepath.Join(folder, ".qory", "repositories", "acme", "api"), "rev-parse", "HEAD"); got != apiCommit {
+			t.Errorf("approved %v: the read target is at %s, want %s", approved, got, apiCommit)
+		}
+		if got, want := run(t, folder, "rev-parse", "HEAD"), landed[0].Commit; (got == want) != !approved {
+			t.Errorf("approved %v: the target is at %s, the pushed commit is %s", approved, got, want)
+		}
+	}
+}
+
 // TestAReadCheckoutStopsNoPush is a read-only checkout with an index lock, with the stop of
 // the agent not proven: no check of the read target stops the push of the target, and a
 // read target with no commit gets no line.
