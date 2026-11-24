@@ -1000,7 +1000,8 @@ release may change what an existing document does, and states it under Upgrading
   head only when the record lists that head as one of these, and then checks that it
   descends from the start commit. qory stops on a head below, above or
   beside a recorded head, with no fetch. A run starts at the newest commit that an earlier run
-  pushed and a person did not cancel.
+  pushed and a person did not cancel, unless its start version is one that a gate approved: then
+  it starts at that version's commit.
 - A delivered output's member that `pushed-base-branch` marks has the name of the target
   repository's default branch, read when the run fetched it. A name of more than 255
   characters gives an empty string.
@@ -1085,13 +1086,15 @@ release may change what an existing document does, and states it under Upgrading
   `The version that the run starts from has commit <c>, which is not a commit on <path> on
   <system>, so the run did not start; the code is used`.
 - A run whose start version is the one that a gate approved starts at that version's commit. It
-  does not move to a commit that a later run pushed, as a run of Verify, whose stage wrote no
-  version. Its push fails with `push_head_changed` when a later run pushed above that commit. A
-  run whose stage wrote the version still moves to the newest pushed commit that descends from
-  its start. A run whose stage has no version that is not cancelled starts at the approved
-  version and stays at its commit, even a run of Build. That is the case when its stage wrote no
-  version and when every version of its stage is cancelled. A run of Build starts at the newest
-  version of its stage that is not cancelled, even when another stage wrote a newer version.
+  does not move to a commit that a later run pushed. That is the case for a run whose stage has
+  no version that counts: a stage that wrote none, such as Verify, and a stage whose versions
+  are all cancelled or followed by a withdrawal, even Build. With no approved version either, the run starts at
+  what the run documents check out. When a run that a person did not cancel pushed above the
+  approved commit, the push of the run that starts there fails with `push_head_changed`. A run
+  whose stage wrote a version that counts starts at its newest one, even when another stage
+  wrote a newer version, and moves to the newest pushed commit that descends from it. A version
+  with a later withdrawal of its artifact that is not cancelled does not count, as a version
+  that a gate approved does not.
 - Every run of a work item from a run code with a run API reads the work item through `GET
   /work-item` at its start, with or without a repository, as the stage's outputs come from
   it. A setup past its limit in that read names the step `the read of the work item`. A stage

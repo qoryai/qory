@@ -233,8 +233,8 @@ func TestARunStartsAtTheTargetsEntryOfTheVersionsRun(t *testing.T) {
 // TestARunThatStartsAtAnApprovedVersionMovesToNoLaterPush is a version from run r, with its
 // commit head, and a later run's commit that descends from head, on the default branch: a run
 // of a stage that wrote no version, whose start is the approved version, as Verify, starts
-// at head. A run of the stage that wrote the newest version, as Build, starts at the later
-// commit.
+// at head. A run of the stage that wrote the version, as Build, starts at the later commit,
+// whether the version is the newest or a version of another stage is newer than it.
 func TestARunThatStartsAtAnApprovedVersionMovesToNoLaterPush(t *testing.T) {
 	for name, c := range map[string]struct {
 		api  func(file, head, later string) startAPI

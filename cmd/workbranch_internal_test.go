@@ -261,6 +261,99 @@ func TestStartVersionReportsTheApproval(t *testing.T) {
 	}
 }
 
+// TestStartVersionCountsNoVersionBeforeAWithdrawal is av_1 of the stage, av_2 its withdrawal and
+// av_3 of another stage: av_1 counts for no start, and the run starts at the approved version av_3,
+// or at none when no version is approved. When a member cancelled av_2, av_1 counts again. An
+// approved version before the withdrawal counts for no start either.
+func TestStartVersionCountsNoVersionBeforeAWithdrawal(t *testing.T) {
+	versions := func() *runapi.Index {
+		return withdrawnAt(branchIndex([2]string{"av_1", "st_b"}, [2]string{"av_2", "st_b"}, [2]string{"av_3", "st_a"}), "av_2")
+	}
+	for name, c := range map[string]struct {
+		index    *runapi.Index
+		want     string
+		approved bool
+	}{
+		"the approved version after the withdrawal":                         {approvedAs(versions(), "av_3"), "av_3", true},
+		"no approved version":                                               {versions(), "", false},
+		"an approved version before the withdrawal":                         {approvedAs(versions(), "av_1"), "", false},
+		"an approved version that the index lacks, in a withdrawn artifact": {approvedAs(withdrawnAt(branchIndex([2]string{"av_1", "st_a"}, [2]string{"av_2", "st_a"}), "av_2"), "av_9"), "", false},
+		"a cancelled withdrawal leaves the stage's version":                 {cancelledAt(approvedAs(versions(), "av_3"), "av_2"), "av_1", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, artifact, approved := startVersion(stageSnapshot(), c.index, startTarget)
+			if (got == nil) != (c.want == "") || (got != nil && got.ID != c.want) || approved != c.approved || artifact != "" && got == nil {
+				t.Errorf("got %+v of %q, approved %v; want %q, approved %v", got, artifact, approved, c.want, c.approved)
+			}
+		})
+	}
+}
+
+// TestStartVersionWithTwoTypesAndApprovals is two artifacts of [startTarget]'s collection, each with
+// one version and an approval: a version of the stage in either type wins over an approved
+// version that the index lacks (av_9) and over the other type's approved version, whatever their
+// times. With no version of the stage, the approved version that the index lacks stops the run
+// with the type that lacks it, also when the other type has its approved version, and of two
+// approved versions the later wins, in either order of the types.
+func TestStartVersionWithTwoTypesAndApprovals(t *testing.T) {
+	// part is the one version of a type: id, the stage that wrote it, its time, and the approved
+	// version of the type, "" for none.
+	type part struct{ id, stage, at, approved string }
+	index := func(first, second part) *runapi.Index {
+		var artifacts []runapi.Artifact
+		for i, p := range []part{first, second} {
+			stage := p.stage
+			artifact := runapi.Artifact{Type: []string{"pull-request", "notes"}[i], Name: startName, NewestVersion: 1,
+				Versions: []runapi.Version{{ID: p.id, Number: 1, StageID: &stage, At: p.at}}}
+			if p.approved != "" {
+				approved := p.approved
+				artifact.ApprovedVersion = &approved
+			}
+			artifacts = append(artifacts, artifact)
+		}
+		return &runapi.Index{Artifacts: artifacts}
+	}
+	const early, late = "2026-11-02T09:00:00Z", "2026-11-02T10:00:00Z"
+	for name, c := range map[string]struct {
+		index    *runapi.Index
+		want     string
+		artifact string
+		approved bool
+	}{
+		"a version of the stage in the second type wins over a lost approved version": {
+			index(part{"av_1", "st_a", late, "av_9"}, part{"av_2", "st_b", early, ""}), "av_2", "notes", false,
+		},
+		"a version of the stage in the type with the lost approved version wins": {
+			index(part{"av_1", "st_b", early, "av_9"}, part{"av_2", "st_a", late, "av_2"}), "av_1", "pull-request", false,
+		},
+		"a version of the stage wins over the other type's later approved version": {
+			index(part{"av_1", "st_a", late, "av_1"}, part{"av_2", "st_b", early, ""}), "av_2", "notes", false,
+		},
+		"a lost approved version of the second type stops the run": {
+			index(part{"av_1", "st_a", late, "av_1"}, part{"av_2", "st_a", early, "av_9"}), "", "notes", false,
+		},
+		"a lost approved version of the first type stops the run": {
+			index(part{"av_1", "st_a", early, "av_9"}, part{"av_2", "st_a", late, "av_2"}), "", "pull-request", false,
+		},
+		"the later of two approved versions wins, the first type": {
+			index(part{"av_1", "st_a", late, "av_1"}, part{"av_2", "st_a", early, "av_2"}), "av_1", "pull-request", true,
+		},
+		"the later of two approved versions wins, the second type": {
+			index(part{"av_1", "st_a", early, "av_1"}, part{"av_2", "st_a", late, "av_2"}), "av_2", "notes", true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, artifact, approved := startVersion(stageSnapshot(), c.index, startTarget)
+			switch {
+			case c.want == "" && (got != nil || artifact != c.artifact):
+				t.Errorf("got %+v of %q, want none of %q", got, artifact, c.artifact)
+			case c.want != "" && (got == nil || got.ID != c.want || artifact != c.artifact || approved != c.approved):
+				t.Errorf("got %+v of %q, approved %v; want %s of %q, approved %v", got, artifact, approved, c.want, c.artifact, c.approved)
+			}
+		})
+	}
+}
+
 // TestStartVersionTakesTheLatestOfTwoTypes is two delivered types of the target's collection,
 // each with a version of the stage: the version with the later time wins, with its type. A
 // target with no address has no start.

@@ -188,14 +188,15 @@ func featureOff(err error) bool {
 // collection, the name [outputName] gives a delivered output: the newest version that is not
 // cancelled and that the work item's stage wrote, as for Build, even when another stage wrote
 // a newer one; else the version that a gate approved, as for Verify; nil with none of these,
-// where the run starts at what the run documents check out. An artifact whose newest version
-// that is not cancelled is a withdrawal gives none of these. artifact is the type of the
-// version's artifact; with a nil version it is set only when the approved version is not in
-// the index. approved is true when the version is the one that a gate approved, not one that
+// where the run starts at what the run documents check out. A version counts only when no
+// version of its artifact that is not cancelled, with a higher number, is a withdrawal: a
+// withdrawal as the newest version leaves no version of its artifact. artifact is the type of
+// the version's artifact; with a nil version it is set only when the approved version is not
+// in the index. approved is true when the version is the one that a gate approved, not one that
 // the stage wrote: the run stays at its commit. A run has the approved version when no
-// artifact has a version of its stage (the stage wrote none, or every version of its stage is
-// cancelled), and a work item in no stage has it too. When several types have such versions,
-// the one with the latest time of all wins.
+// artifact has a counting version of its stage (the stage wrote none, every version of its
+// stage is cancelled, or a withdrawal follows each), and a work item in no stage has it too.
+// When several types have such versions, the one with the latest time of all wins.
 // shortcut: two delivered types of one stage written by different runs give the newest one;
 // replace it when the run API names the version a run starts from. [startCommit] confirms the
 // start with another version of the same run when the newest one has no reference to it.
@@ -211,23 +212,28 @@ func startVersion(snapshot *runapi.Snapshot, index *runapi.Index, target *contra
 		missing                 string
 	)
 	for _, a := range index.Artifacts {
-		if a.Name != name || withdrawn(a) {
+		if a.Name != name {
 			continue
 		}
-		if pick := newestOfStage(a, stage); pick != nil && (written == nil || compareAt(pick.At, written.At) > 0) {
+		after := lastWithdrawal(a)
+		if pick := newestOfStage(a, stage, after); pick != nil && (written == nil || compareAt(pick.At, written.At) > 0) {
 			written, writtenType = pick, a.Type
 		}
 		if a.ApprovedVersion == nil {
 			continue
 		}
 		var pick *runapi.Version
+		found := false
 		for i := range a.Versions {
 			if a.Versions[i].ID == *a.ApprovedVersion {
-				pick = &a.Versions[i]
+				found = true
+				if a.Versions[i].Number > after {
+					pick = &a.Versions[i]
+				}
 			}
 		}
 		switch {
-		case pick == nil && missing == "":
+		case !found && missing == "" && !withdrawn(a):
 			missing = a.Type
 		case pick != nil && (agreed == nil || compareAt(pick.At, agreed.At) > 0):
 			agreed, agreedType = pick, a.Type
@@ -242,14 +248,27 @@ func startVersion(snapshot *runapi.Snapshot, index *runapi.Index, target *contra
 	return agreed, agreedType, agreed != nil
 }
 
-// newestOfStage is the version of artifact with the highest number that the index does not
-// mark cancelled, that is no withdrawal, and that the stage wrote: nil for none, and for a
-// work item in no stage.
-func newestOfStage(artifact runapi.Artifact, stage *string) *runapi.Version {
+// lastWithdrawal is the highest number of a version of artifact that is a withdrawal and that
+// the index does not mark cancelled, 0 for none: no version with that number or a lower one
+// counts as a start.
+func lastWithdrawal(artifact runapi.Artifact) int {
+	last := 0
+	for _, v := range artifact.Versions {
+		if v.Withdrawn && !v.Cancelled {
+			last = max(last, v.Number)
+		}
+	}
+	return last
+}
+
+// newestOfStage is the version of artifact with the highest number above after that the index
+// does not mark cancelled and that the stage wrote: nil for none, and for a work item in no
+// stage.
+func newestOfStage(artifact runapi.Artifact, stage *string, after int) *runapi.Version {
 	var newest *runapi.Version
 	for i := range artifact.Versions {
 		v := &artifact.Versions[i]
-		if stage != nil && v.StageID != nil && *v.StageID == *stage && !v.Cancelled && !v.Withdrawn && (newest == nil || v.Number > newest.Number) {
+		if stage != nil && v.StageID != nil && *v.StageID == *stage && !v.Cancelled && v.Number > after && (newest == nil || v.Number > newest.Number) {
 			newest = v
 		}
 	}

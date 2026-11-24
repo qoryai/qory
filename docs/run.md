@@ -2295,17 +2295,20 @@ of the target's collection: the artifact that a delivered output of the target g
 and the first 32 lower-case hexadecimal digits of the SHA-256 of the target's `collection`
 (see [Outputs](../contracts/harness/v1/README.md#outputs)):
 
-1. The newest version of that artifact that the work item's stage wrote, even when another
-   stage wrote a newer version.
-2. Else, the version of that artifact that a gate approved, unless the newest version is a
-   withdrawal.
+1. The newest version that the work item's stage wrote, even when another stage wrote a
+   newer version.
+2. Else, the version that a gate approved.
 3. Else, the checkout at `target_version`: the run creates the branch there.
 
-The newest version in step 1 is the one with the highest number among the versions of the
-stage that the artifact index does not mark `cancelled`: a version that a cancelled run made
-counts for no stage. When the stage has no version, or every version of the stage is
-cancelled, step 1 finds none. When artifacts of several types have
-that name, the version with the latest time wins.
+A version with a later withdrawal of its artifact that is not cancelled does not count.
+
+Each step reads the artifacts of all types that have that name, and step 1 comes first: a
+version of the stage in one type wins over an approved version in another type, whatever
+their times. The newest version in step 1 is the one with the highest number among the
+versions of the stage that the artifact index does not mark `cancelled`: a version that a
+cancelled run made counts for no stage. When the stage has no version, when every version of
+the stage is cancelled, and when a withdrawal follows each, step 1 finds none. When several types have a version for a step, the
+version with the latest time wins.
 
 The start commit is the newest commit that the run which wrote the version pushed to the
 target's repository, from `pushed_commits` in the response to `GET /work-item`, and that a
@@ -2325,15 +2328,16 @@ marks the commits of cancelled runs. A commit of a cancelled run, and a commit t
 commit, moves the run nowhere.
 
 A run whose start version is the one that a gate approved (step 2) does not move. It starts at
-that version's commit, whatever a later run pushed. A run of a stage that wrote no version, such
-as Verify, starts there. A run whose stage has no version that is not cancelled starts at the
-version that a gate approved (step 2) too. That is the case when its stage wrote no version and
-when every version of its stage is cancelled. A run of Build in one of these cases stays at the
-commit of the approved version.
+that version's commit, whatever a later run pushed. That is the case for a run whose stage has no
+version that counts: a stage that wrote none, such as Verify, and a stage whose versions are
+all cancelled or followed by a withdrawal, even Build. A work item in no stage is the same. When no version is
+approved either, the run starts at the checkout at `target_version` (step 3) and moves as the
+rule above says.
 
-If a later run pushed a commit above the start of an approved run, the run does not move to it.
-It commits on the start commit, and its push fails with the end code `push_head_changed`, because
-the branch at the forge is at the later commit.
+When a run that a person did not cancel pushed a commit above the commit of the approved
+version, the run that starts at that version does not move to it. It commits on the start
+commit, and its push fails with the end code `push_head_changed`, because the branch at the
+forge is at the later commit.
 
 qory composes the harness at `target_version`, with the read targets at the heads of their
 default branches, before it checks out the work item's branch. A read target whose version
@@ -3029,7 +3033,8 @@ A write run of a work item ends with a push step: qory commits what the agent le
 it to the branch `qory/<work item id>`, and stores a version of each output that the
 session wrote (see [The outputs of a session](#the-outputs-of-a-session)). The next run
 of the work item starts at the newest commit that a run
-pushed and a person did not cancel, see [What the run takes from the response](#what-the-run-takes-from-the-response). The step runs after each session of the run, once the agent exited, and before the
+pushed and a person did not cancel, unless its start version is one that a gate approved: then
+it starts at that version's commit. See [What the run takes from the response](#what-the-run-takes-from-the-response). The step runs after each session of the run, once the agent exited, and before the
 next session or the run's close. A setup container is gone by then: qory removes it before the step, in the wall step `remove the setup
 container`, so no process in it writes the working folder after the check. Its kind is `push` and its name is `push qory/<work item
 id> to <system>/<path>`. A read target of the documents is fetched and not pushed: the step
