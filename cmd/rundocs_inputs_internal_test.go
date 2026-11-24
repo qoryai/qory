@@ -147,6 +147,27 @@ func TestACopyOfTheInputsOverAFileInTheHomeStops(t *testing.T) {
 	}
 }
 
+// TestAPersonsRunsInputsErrorsAreForThePerson is the two errors of a person's run whose home
+// has inputs.json or takes no file: the fix is for the person, and no line is about a work
+// item or a run code.
+func TestAPersonsRunsInputsErrorsAreForThePerson(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, inputsFile)
+	for name, c := range map[string]struct {
+		err  error
+		want string
+	}{
+		"the home has inputs.json": {os.ErrExist,
+			"Remove inputs.json from the harness home, then run the command again.\nThe home " + home + " has inputs.json, where qory writes the run's inputs."},
+		"the write failed": {os.ErrPermission,
+			"Make the harness home writable for you, then run the command again.\nWriting the run's inputs to " + path + " failed: permission denied"},
+	} {
+		if got := personsInputsNotCopied(home, c.err).Error(); got != c.want {
+			t.Errorf("%s:\n%s\nwant\n%s", name, got, c.want)
+		}
+	}
+}
+
 // TestACopyOfTheInputsThatFailsAfterItsCreationLeavesNoFile is a copy whose mode or write
 // fails once qory created inputs.json in the home: the file is gone, so the next run in a
 // given home does not stop at it. A file that was in the home before stays as it was.

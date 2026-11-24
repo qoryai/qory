@@ -38,6 +38,90 @@ func TestAPersonsUnwalledRunGetsNoInputs(t *testing.T) {
 	}
 }
 
+// TestAPersonsUnwalledRunWithASubmitProgramGetsInputsWithNoOutbox is a run with no run key, no
+// run code and no wall, whose harness has a submit program: the checkout's .qory/harness has
+// inputs.json with the member qory and no outbox while the agent runs, since the run has no
+// copy, and no inputs.json after the run. An inputs.json that was in the home before the run
+// goes with the home, which the compose replaces.
+func TestAPersonsUnwalledRunWithASubmitProgramGetsInputsWithNoOutbox(t *testing.T) {
+	root, _, _ := localProgramCheckout(t)
+	home := filepath.Join(root, ".qory", "harness")
+	writeFile(t, filepath.Join(home, "inputs.json"), "{}\n")
+	var at string
+	var data []byte
+	var readErr error
+	var variables []string
+	agentInCopy(t, func(s session.SessionSpec) {
+		at, variables = s.HarnessHome, outboxVariables(s)
+		data, readErr = os.ReadFile(filepath.Join(s.HarnessHome, "inputs.json"))
+	})
+	if out, err := run(t, "run", "claude", "--wall", "none", "--", "-p", "hi"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	sameFolder(t, "the home", at, home)
+	if readErr != nil {
+		t.Fatalf("the home has no inputs.json while the agent runs: %v", readErr)
+	}
+	want := `{"qory":{"harness_extensions":{},"outputs":[],"start_commits":[],"start_artifacts":""}}` + "\n"
+	if string(data) != want {
+		t.Errorf("inputs.json is\n%s\nwant\n%s", data, want)
+	}
+	if len(variables) != 0 {
+		t.Errorf("the session has the variables %q", variables)
+	}
+	if _, err := os.Lstat(filepath.Join(home, "inputs.json")); !os.IsNotExist(err) {
+		t.Errorf("the home has inputs.json after the run: %v", err)
+	}
+}
+
+// TestAPersonsRunThatCannotWriteItsInputsStops is a person's run with a submit program that
+// cannot write inputs.json to its .qory/harness: an inputs.json appears there between the
+// compose, which replaces the home, and qory's write, while the runtime installs, or the home
+// becomes read-only then. The run stops before the join with exit 1 and the fix for the person,
+// and the file that appeared stays as it was.
+func TestAPersonsRunThatCannotWriteItsInputsStops(t *testing.T) {
+	for name, c := range map[string]struct {
+		meanwhile func(t *testing.T, home string)
+		want      string
+		left      string
+	}{
+		"a file appears after the compose": {
+			meanwhile: func(t *testing.T, home string) { writeFile(t, filepath.Join(home, "inputs.json"), "{}\n") },
+			want:      "Remove inputs.json from the harness home, then run the command again.\nThe home %s has inputs.json, where qory writes the run's inputs.",
+			left:      "{}\n",
+		},
+		"the home becomes read-only": {
+			meanwhile: func(t *testing.T, home string) {
+				if os.Geteuid() == 0 {
+					t.Skip("root writes to a read-only folder")
+				}
+				if err := os.Chmod(home, 0o555); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "Make the harness home writable for you, then run the command again.\nWriting the run's inputs to %s/inputs.json failed: ",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root, _, _ := localProgramCheckout(t)
+			home := filepath.Join(root, ".qory", "harness")
+			t.Cleanup(func() { _ = os.Chmod(home, 0o755) })
+			t.Cleanup(cmd.BeforeInstallStandIn(func() { c.meanwhile(t, home) }))
+			joined := false
+			agentInCopy(t, func(session.SessionSpec) { joined = true })
+			out, err := run(t, "run", "claude", "--wall", "none", "--", "-p", "hi")
+			if cmd.ExitCode(err) != 1 || joined {
+				t.Fatalf("%v (exit %d), joined %v, want exit 1 before the join\n%s", err, cmd.ExitCode(err), joined, out)
+			}
+			wants(t, err.Error(), fmt.Sprintf(c.want, home))
+			lacks(t, out+err.Error(), "the code is used", "work item")
+			if data, _ := os.ReadFile(filepath.Join(home, "inputs.json")); string(data) != c.left {
+				t.Errorf("inputs.json in the home is %q after the run, want %q", data, c.left)
+			}
+		})
+	}
+}
+
 // TestAPersonsWalledRunsPushChecksGetNoInputs is a walled run against a server with no run
 // key and no run code, which has a control plane, whose harness declares a push check for spec: it composes into a home for that run
 // under qory/homes in the cache, and its check's container starts with the pushed files and

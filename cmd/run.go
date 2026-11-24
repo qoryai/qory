@@ -832,10 +832,13 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					checks.setInputs(file, data)
 				}
 				if err := copyInputs(at.home, data); err != nil {
+					if !dispatched {
+						return personsInputsNotCopied(at.home, err)
+					}
 					return keyedError(fromCode, inputsNotCopied(at.home, err))
 				}
-				// A home that is not this run's alone, from --home or harness.home, keeps
-				// no copy once the run is over.
+				// A home that is not this run's alone, from --home or harness.home, or an
+				// unwalled run's .qory/harness, keeps no copy once the run is over.
 				if runHome == "" {
 					copied := filepath.Join(at.home, inputsFile)
 					cleanups = append(cleanups, func() { removeInputsCopy(copied, said) })
@@ -2685,8 +2688,26 @@ func inputsNotCopied(home string, err error) error {
 	return fmt.Errorf(textInputsNotCopied+codeUsed, exports.Value(filepath.Join(home, inputsFile), false), exports.HideError(err))
 }
 
-// removeInputsCopy removes copied, the copy of inputs.json in a home that --home or
-// harness.home sets, when the run ends. report prints a line of qory run.
+// The lines of [personsInputsNotCopied]: the first line is the fix, the second the cause.
+const (
+	textPersonsInputsCopyExists = "Remove inputs.json from the harness home, then run the command again.\n" +
+		"The home %s has inputs.json, where qory writes the run's inputs."
+	textPersonsInputsNotCopied = "Make the harness home writable for you, then run the command again.\n" +
+		"Writing the run's inputs to %s failed: %s"
+)
+
+// personsInputsNotCopied is [inputsNotCopied] for a person's run, which has no work item to
+// take in again and no run code.
+func personsInputsNotCopied(home string, err error) error {
+	if errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf(textPersonsInputsCopyExists, exports.Value(home, false))
+	}
+	return fmt.Errorf(textPersonsInputsNotCopied, exports.Value(filepath.Join(home, inputsFile), false), exports.HideError(err))
+}
+
+// removeInputsCopy removes copied, the copy of inputs.json in a home that is not the run's
+// alone, from --home or harness.home or an unwalled run's .qory/harness, when the run ends.
+// report prints a line of qory run.
 func removeInputsCopy(copied string, report func(string)) {
 	if err := os.Remove(copied); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		report(fmt.Sprintf(textCopyNoRemove, exports.Value(copied, false), shownError(err)))

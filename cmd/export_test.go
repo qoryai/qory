@@ -1268,6 +1268,18 @@ func SetInstallStandIn(root string) func() {
 	return func() { installStandIn = before }
 }
 
+// BeforeInstallStandIn makes a run of Claude Code call f before the stand-in install of
+// [SetInstallStandIn], after the compose and before inputs.json, and returns what restores
+// the default.
+func BeforeInstallStandIn(f func()) func() {
+	before := installStandIn
+	installStandIn = func(command string) (*runtimeinstall.Installed, error) {
+		f()
+		return before(command)
+	}
+	return func() { installStandIn = before }
+}
+
 var (
 	standInMu   sync.Mutex
 	lastStandIn string
