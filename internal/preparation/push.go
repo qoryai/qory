@@ -294,7 +294,8 @@ func commitLeft(ctx context.Context, dir string, r WorkRepository, setup map[str
 		return err
 	}
 	commit := stepGit(noRemote, "", "GIT_AUTHOR_NAME="+commitName, "GIT_AUTHOR_EMAIL="+commitEmail, "GIT_COMMITTER_NAME="+commitName, "GIT_COMMITTER_EMAIL="+commitEmail)
-	_, err = commit(ctx, dir, "commit", "--quiet", "--no-verify", "--no-gpg-sign", "-m", message)
+	// The diff found a change, and git commit counts none in a gitlink alone.
+	_, err = commit(ctx, dir, "commit", "--quiet", "--allow-empty", "--no-verify", "--no-gpg-sign", "-m", message)
 	return err
 }
 
