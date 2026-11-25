@@ -2694,12 +2694,26 @@ func TestAStopAfterThePushShowsBothWaysOut(t *testing.T) {
 // reached the branch, and no line says that qory pushed or to delete the branch.
 func TestACutCheckOfALaterSessionSaysNothingWasPushed(t *testing.T) {
 	p := newPushRepo(t, "write")
-	defer cmd.SetPushTimes(200*time.Millisecond, 400*time.Millisecond)()
+	// Only the second signal cuts the step: its limit after the first one is far off.
+	defer cmd.SetPushTimes(time.Minute, time.Minute)()
+	// The removal of the setup container gets the context of the step.
+	var step context.Context
+	p.removeSetup = func(ctx context.Context) error {
+		step = ctx
+		return nil
+	}
 	second, cut := false, false
 	t.Cleanup(cmd.SetOnOutputsCheck(func() {
-		if second {
-			cut = true
-			term(t)
+		if !second {
+			return
+		}
+		cut = true
+		// The check returns once the step is cut, however late qory handles the signals.
+		for start := time.Now(); step.Err() == nil; {
+			if time.Since(start) > 30*time.Second {
+				t.Error("signals for 30s did not cut the step")
+				return
+			}
 			term(t)
 		}
 	}))
