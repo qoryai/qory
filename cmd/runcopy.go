@@ -545,7 +545,9 @@ func (c *runCopy) gitSession(ctx context.Context, run openedRun, spec *runSpec, 
 	}
 	state, code := c.stepEnd(code)
 	c.stepCode = code
+	lines.mu.Lock()
 	lines.log(stepFailure(errors.New(stop.log)))
+	lines.mu.Unlock()
 	// The line of the stop stays when the exit fails too.
 	_ = step.Exit(state, code)
 	return nil, stop

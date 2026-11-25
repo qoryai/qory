@@ -320,23 +320,17 @@ func lowerASCII(b []byte) []byte {
 // reports that b ends inside a value: the value's next bytes, at the start of the next
 // write, are not written.
 func maskQuery(dst, b []byte, final bool) (out []byte, hold int, open bool) {
-	lower := lowerASCII(b)
 	i := 0
-	for _, loc := range queryOpen.FindAllIndex(lower, -1) {
-		if loc[0] < i {
-			continue
-		}
-		dst = append(append(dst, b[i:loc[1]]...), Placeholder...)
-		i = loc[1]
-		for i < len(b) && valueByte(b[i]) {
-			i++
-		}
+	for _, r := range queryRanges(b) {
+		dst = append(append(dst, b[i:r[0]]...), Placeholder...)
+		i = r[1]
 		if i == len(b) {
 			return dst, len(b), !final
 		}
 	}
 	hold = len(b)
 	if !final {
+		lower := lowerASCII(b)
 		for s := max(i, len(b)-longestOpener+1); s < len(b); s++ {
 			if startsOpener(lower[s:]) {
 				hold = s
@@ -345,6 +339,24 @@ func maskQuery(dst, b []byte, final bool) (out []byte, hold int, open bool) {
 		}
 	}
 	return append(dst, b[i:hold]...), hold, false
+}
+
+// queryRanges is where the value of each query parameter of [QueryNames] is in b, from the
+// byte after its = to the end of the value, in order.
+func queryRanges(b []byte) [][2]int {
+	var out [][2]int
+	i := 0
+	for _, loc := range queryOpen.FindAllIndex(lowerASCII(b), -1) {
+		if loc[0] < i {
+			continue
+		}
+		i = loc[1]
+		for i < len(b) && valueByte(b[i]) {
+			i++
+		}
+		out = append(out, [2]int{loc[1], i})
+	}
+	return out
 }
 
 // startsOpener reports whether one of queryOpeners starts with b, b in lower case.

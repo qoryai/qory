@@ -34,6 +34,7 @@ const (
 	stepCopy
 	stepCodexHome
 	stepImage
+	stepStartHooks
 	stepSetupCommands
 	stepSetupRemoval
 	stepSetupRecord
@@ -53,6 +54,7 @@ var setupSteps = map[prepStep]struct{ name, fix string }{
 	stepCopy:          {"the copy of the checkout", "make the checkout smaller, with less history, Git LFS content and .qory/artifacts"},
 	stepCodexHome:     {"the write of the Codex home", "check your cache directory's disk, or use fewer or smaller Codex skills, rules and agents"},
 	stepImage:         {"the fetch of the run's image", "pull the run's image on this machine before the run, or start fewer runs at once"},
+	stepStartHooks:    {"the hooks at session 1's start", "give the hooks at the start of session 1 shorter limits, then start the run again"},
 	stepSetupCommands: {"the setup commands", "move slow work of the lifecycle commands in devcontainer.json into the run's image"},
 	stepSetupRemoval:  {"the removal of the setup container", "check that this machine's container engine responds, then start the run again"},
 	stepSetupRecord:   {"the record of what the setup changed", "make the setup commands change fewer files in the checkout, then start the run again"},

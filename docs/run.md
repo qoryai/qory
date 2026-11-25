@@ -439,6 +439,7 @@ When the run ends, qory says how, and its exit status goes with it:
   | the copy of the checkout | `make the checkout smaller, with less history, Git LFS content and .qory/artifacts` |
   | the write of the Codex home | `check your cache directory's disk, or use fewer or smaller Codex skills, rules and agents` |
   | the fetch of the run's image | `pull the run's image on this machine before the run, or start fewer runs at once` |
+  | the hooks at session 1's start | `give the hooks at the start of session 1 shorter limits, then start the run again` |
   | the setup commands | `move slow work of the lifecycle commands in devcontainer.json into the run's image` |
   | the removal of the setup container | `check that this machine's container engine responds, then start the run again` |
   | the record of what the setup changed | `make the setup commands change fewer files in the checkout, then start the run again` |
@@ -510,6 +511,11 @@ It does so in qory's lines and errors, in the last error line, in the lines of t
 and of the compose, and in the lines that the fetch and the compose write into the run's
 record. A value split across two writes is replaced whole: qory keeps back the end of
 each write in which a value could start, until the next write or the end of the stream.
+In the log of a step, qory masks each line before and after it removes the terminal's escape
+sequences, so an escape sequence inside a value or right before it does not stop the mask,
+unless the sequence ends with a byte of the value: then the rest of the value can show. For
+the value `fakevalue123`, the line `ESC [ fake ESC [ 0m value123`, without the spaces, leaves
+`akevalue123`.
 `qory run prepare`, `qory run prebuild-step` and `qory
 run pool` mask their output too. Their mask lists contain no value of a run: there qory
 replaces a URL's signature or token and a key of a listed shape, and in `qory run pool`
@@ -1292,10 +1298,10 @@ suite](#the-full-suite)). When the limit is reached:
 
 The steps before the agent's start, from the run's open to the join, may take 30 minutes
 together: the fetch of the run's repositories, the compose, the install of the runtime, the
-copy, the fetch of the run's image, the setup commands and the record of what they changed.
-No setting changes this limit. When it is reached, the step that is running stops, the
-runtime does not start, `dev.qory.run.exited` records `cancelled` with the reason `timeout`,
-and `qory run` exits 124 with a line that names the step (see [What `qory run`
+copy, the fetch of the run's image, the hooks at session 1's start, the setup commands and the
+record of what they changed. No setting changes this limit. When it is reached, the step that
+is running stops, the runtime does not start, `dev.qory.run.exited` records `cancelled` with
+the reason `timeout`, and `qory run` exits 124 with a line that names the step (see [What `qory run`
 does](#what-qory-run-does)). The compose stops at the limit too: qory stops the git command
 that fetches a source of the harness. Setup commands that run inside the agent's container, with
 `wall.setup: inside`, run in the join, so the session's time limit covers them in place of
@@ -4799,6 +4805,192 @@ order of preference:
 The fix is `Refused connections: the run's Connections tab, Denied.` for a red suite, when the run's
 events are not in the run's folder, as with a separate gateway, or when the after step had a
 refused connection.
+
+### Hooks between sessions
+
+A repository adds a check after a session of a workflow with a workflow hook: an entry of
+`harness.hooks` in its `qory.yaml`, at a hook point of the stack's workflow (see
+`contracts/harness/v1/README.md`, §Workflow hooks). The compose writes the hooks to `hooks.json`
+in the home. A run from a run code reads that file before each session's join and runs the hooks
+of the session's workflow:
+
+- a hook at a point with `at: end` runs after the agent exited and the suite's verdict is posted,
+  before the push step, so its result counts before the session's verdict does;
+- a hook at a point with `at: start`, such as `before-matrix`, runs in session 1, the first
+  session of the run, whose workflow declares the point, such as verify-a-ticket: after the
+  fetch of the run's image and before the setup commands start the setup container, so no
+  process of the setup runs beside it. The hooks at session 1's start count in the setup's
+  limit of 30 minutes (see [Time limits](#time-limits)): a hook that runs at that limit is
+  stopped and red, `it ran past the setup's limit`, and the run ends.
+- in a later session of a shared run, the setup container runs from session 1 on, and Forager
+  cannot pause it. A hook at the start of a later session is red, never skipped, and its program
+  does not run: `A later session's start hooks are red: its setup container is already
+  running.`, with `Forager has no pause for it.` on the next line.
+
+A run with no run code has no workflow and runs no hook. When qory cannot read `hooks.json`, or
+the file is not valid, the session does not join and the run closes `failed` with the reason
+`harness_invalid` and the line `qory could not read the run's hooks.`, with the cause on the next
+line. The hooks at a session's end run after a
+session that succeeded, in a run with or without a work branch, and after a failed session whose
+work branch the push step pushes. A failed session in a run with no work branch runs no hooks at
+its end, also when it wrote outputs: it stores no version of them. The hooks at the end also run
+after an error of the suite when the push step pushes the work branch. When an end hook fails or
+stops, qory pushes the branch with the failed end line and stores no output version. Here an end
+hook fails when qory cannot post its verdict. A red hook, such as a program that exits 1, changes
+neither the push nor the store. A restore that fails after a hook stops the push instead, see
+**After each hook**. After a stop of qory run the hooks at the end do not run: each is red,
+stopped, and qory posts no verdict for them. The hooks of a point run one after another, in the
+order of `harness.hooks`. A stop of qory run while a hook at the start runs ends the run before
+the join. A stop while a hook at the end runs, or while qory removes the setup container, reads
+the programs or takes the snapshot before the hooks, closes the run cancelled, and qory posts no
+verdict.
+
+**The program.** qory reads each hook's program from git at the session's start commit, the work
+branch's commit before the session, into a file in the run's folder, `hooks/<session>/<index>`,
+which no agent writes. A run with no work branch, such as a read run, takes the checkout's HEAD
+from before session 1 instead; when qory cannot read that HEAD, every program hook of the run is
+red and does not run. A hook at the start takes the run's start commit. In session 1,
+qory reads the programs before the setup commands. In a later session of a shared run, it reads
+the programs of the hooks at the end after the session, once it has removed the setup container,
+which could write `.git` until then. qory checks the bytes of the commit, of each folder on the
+path and of the file against their ids, so a change that an agent makes to the program during the
+session, committed or not, does not run. A program whose path on that commit is a link, passes
+through a link, or is a folder, a submodule or no file does not run, and the hook is red:
+`Hook <name> is red: its program is not a file in the commit.`, with the cause on the next line.
+A program, or a folder on its path, of more than 64 MiB does not run either:
+`Hook <name> is red: its program is over 64 MiB.`, with the cause on the next line. When the check
+of `.git` fails, git fails, or an object does not match its id, the hook is red with `Hook <name>
+did not run, so it is red.` and the cause on the next line.
+
+**git on this machine.** The agent and the run's setup write `.git` before the hooks run. So each
+git that the hooks need runs with a private git directory
+in the run's folder: qory checks `.git` as the push step does, copies its configuration there,
+checks the copies, and points git at them, with `.git/objects` for the objects and no attributes
+of `.git/info`. For the snapshot and the restore, qory writes attributes there that turn off each
+conversion, such as `eol=crlf`, so git adds and writes the bytes of each file as they are. git
+reads its configuration from the copies alone, with no ignore file of the user, and reaches no
+remote. qory reads HEAD from the files of `.git`, with no git. The check and the copy run again
+before each restore.
+That git runs with `core.filemode` and `core.symlinks` on and `core.ignorecase` and
+`core.precomposeunicode` off, whatever `.git/config` sets, so the restore puts back a link that a
+hook replaced and removes a file whose name differs from a tracked one in case alone. qory fills
+the snapshot's index from HEAD's files, not from the trees of its folders, so a tree object that a
+process wrote over gives the snapshot another tree id, and the check after a restore returns a
+difference when a hook changed files there.
+
+**Where it runs.** Each program hook runs only behind a wall, in a container of the run's image
+that qory starts with no network (`--network none`), no capability, the wall's user and limits,
+no run variable and no route to qory or the run API. The checkout is mounted for writing at its
+path, with its `.git` and `.qory` read-only over it, and the program read-only. The run's read
+targets are read-only repositories in `.qory/repositories`, so a hook writes none of them, and the
+snapshot and the restore cover the target alone. qory makes `.qory` before each hook when the
+checkout has none, so a hook writes nothing to the outbox, `.qory/outbox`; with `.qory` a link or
+a file, the hooks do not run and are red.
+The program runs in the checkout's root with the hook's arguments and `HOME=/tmp`. Its output
+goes into the run's log as a step of kind `build`, `hook <name> at <point>`, and to stderr, but
+never to the status descriptor, so a line of the hook that starts with `qory run: ` stays in the
+log. The log keeps the first 64 KiB of a line of the hook's output, masked, and ends a longer
+line with `[qory cut the rest of this line]`. qory masks the line with the 24 KiB after the cut
+before it cuts, and keeps the masked text of the bytes before the cut. A secret or a query value
+that crosses the cut leaves none of its bytes in the log and shows as `***`, unless qory removes
+the `***` as part of an escape sequence that starts before the secret. A secret whose text has a
+run of `*` can show its first bytes before the cut, when the `***` of other secrets after the cut
+match that run. An escape sequence that crosses the cut leaves none of its bytes. When the line
+goes on past those 24 KiB and escape sequences take up bytes in them, qory moves the cut back
+until 24 KiB of text without escape sequences follow it, in the line masked once. No byte counts
+from the start of a sequence that has not ended at the end of the kept bytes, or 24 KiB before
+that end, or that starts in those 24 KiB and stops at a byte that fits no sequence. When the
+masks make the kept part longer than 64 KiB, qory cuts it at 64 KiB, also in a line of at most
+64 KiB. Before the hooks at a session's end, qory removes the setup container.
+
+**Limit.** A hook may take the `timeout_seconds` of `hooks.json`: the hook's `timeout`, else the
+stack's `extending.hooks.timeout`, else 10 minutes. A hook past its limit is stopped and red, and
+qory removes its container. When that removal fails, the container may still write the checkout:
+no hook runs after it, no push follows, and the run closes `failed` with no reason and the line
+`Hook <name>'s container was not removed, so no push follows.`, then `docker rm --force
+qory-hook-<run id> failed: <docker's output>`. After a hook at the start, that line ends the run
+before the join.
+
+**After each hook.** Before the first hook, qory takes a snapshot of the checkout: every path that
+git does not ignore, from HEAD and the working folder. After each hook it writes back each file
+that differs. It removes each file and folder that git does not ignore and the snapshot does not
+have, with `git clean -fd`. It repeats both until the checkout's tree is the snapshot's. qory
+compares the bytes of each file, not its size and times, and puts back its mode and the modes of
+the folders above it. A file under an ignored path, such as `node_modules`, stays as the hook left
+it. The ignored paths are the ones of the snapshot's rules. The restore first writes back each
+`.gitignore` and `.gitattributes` of the snapshot. It then removes each one that the hook added,
+also one that a rule of its folder matches. A hook therefore changes no product code, test or lock
+file that the push step commits, and it cannot write a verdict. The restore runs also after a stop
+of qory run, for at most 10 minutes, the default limit of a hook. A second stop ends it. A restore
+that ends before it is done fails, and the run ends failed, not cancelled. When the restore fails,
+no hook runs after it and the run closes `failed` with no reason. After a hook at the end, no push
+follows. The line is `qory could not undo what hook <name> changed; no push follows.`, with the
+restore's error on the next line. After a hook at the start, the session does not join.
+
+A restore fails when a hook leaves a repository, since `git clean -fd` keeps it: `the checkout has
+a repository in <folder>`. Any entry `.git` in a folder below the top counts. When the checkout has
+such a folder before the hooks, each hook is red with that cause and does not run. The folder of a
+submodule entry does not count, nor does a folder that git ignores, such as `.qory/repositories`
+with the read targets. A folder that qory cannot read, and that git does not ignore, makes each
+hook red. The cause is the error of the read, with the path from the checkout, such as `open
+<folder>: permission denied`. When a hook leaves such a folder and the snapshot does not have it,
+the restore fails. The restore puts back the mode of a folder below the top and above a snapshot
+file, also when a hook set it to 0. A pipe, a socket or a device that a hook leaves in a folder
+that counts fails the restore. The error is `a hook made the pipe, socket or device <path>`. When
+a hook leaves a pipe at a `.gitignore` or a `.gitattributes` that git reads, git's open of it does
+not return. The restore then fails at its limit, with
+`the restore ran past its limit of 10 minutes`.
+
+A hook can add, change or remove a `.gitattributes` in an ignored folder. Such a change fails the
+restore when git tracks a file in that folder or below it. The error is `a hook changed <path> in
+an ignored folder with tracked files`.
+
+qory leaves the folder of each submodule entry out of its git add. It compares the folder with its
+state in the snapshot: each entry's path and mode, a file's bytes and a link's target. A hook that
+adds, changes or removes anything there fails the restore with `a hook changed the folder <folder>
+of a submodule entry`. A folder that the setup filled passes when the hook leaves it as it was. A
+file there that the submodule's ignore rules match, such as a file in `__pycache__`, fails the
+restore too. qory reads no ignore rules of a nested repository. A file that changes during the read
+there fails with `<path> changed while qory read it`.
+
+After 4 rounds, a restore fails with `the checkout still differs from the snapshot <id> after 4
+restores`. So does a restore after more than 16 new `.gitignore` files in nested folders that each
+match every file. The restore runs as qory's user; with a wall user that differs, a folder that the
+hook made can stay, and the restore fails.
+
+**Red hooks.** A hook is green when its program exits 0. It is red when the program exits with
+another status, runs past its limit, or its container does not start, and also:
+
+- a container that did not start has the line `the hook <name> is red.`, with the cause on the
+  next line: `its container did not start, or its program exited with status 125`. docker run exits
+  125 for both, so no line of the output goes into the cause;
+
+- an agent hook (`agent` in place of `run`) is red, with
+  `Agent hook <name> did not run: agent hooks are not built yet.`, and a hook of kind `review`,
+  with `run` or `agent`, is red, with
+  `Review hook <name> did not run: review hooks are not built yet.`; neither is ever skipped, and
+  no program of theirs runs;
+- in a run with no wall every hook is red, with `Hook <name> is red: this stage runs with no
+  wall.`; no hook runs on this machine.
+
+When a required hook is red, qory posts `changes-requested` with one `run_again` point per red
+hook, such as `The hook check-licences.sh failed: it exited with status 1.`, by the rules of the
+full suite for a cause that the agent can fix: over no verdict or `passed`, the hooks' points; over
+the agent's `changes-requested`, the agent's points and the hooks'; an `escalate` stays
+`escalate`, with the hooks' points added. A verdict has at most 20 points: past 20 red hooks the
+first 20 count. When the agent's points and the hooks' pass 20, qory posts nothing: `qory posted no
+verdict for the red hooks: with the agent's points, it would pass 20 points`. A hook with
+`required: false` changes no verdict. When the post of the hooks' verdict fails, the run closes
+`failed` with the reason `run_api_failed`, as for the suite's verdict; a post that a second stop
+or the time limit cuts closes it `failed` with no reason.
+
+**Records.** qory writes `hooks/session-<n>.json` in the run's folder with each hook's name,
+place, kind, verdict (`green` or `red`), the cause of a red verdict, and its findings. A red hook
+has one finding in the form of the review report (`review-report.schema.json`), with the
+reviewer name `hook-<index>` and the proof `failing check: hook <name> exited <n>`, -1 for a hook
+with no exit status, followed by the cause, or `failing check: hook <name> ran past its limit of
+<n> seconds`. The records of the hooks at a session's start are in the same file, which is
+written also when the session does not join.
 
 ## Credentials the agent never has
 

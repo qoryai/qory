@@ -1518,6 +1518,27 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				said("the record is in " + record)
 				return reported(&exitError{code: exitTimeout})
 			}
+			// hookHead is the commit of the hooks' programs of a run with no work branch, see
+			// [hookCommits].
+			var hookHead hookPin
+			// hooksOf opens the hooks of session n, see [openHooks]. A run with no run code
+			// has none.
+			hooksOf := func(n int) (*sessionHooks, error) {
+				if fromCode == nil {
+					return nil, nil
+				}
+				commit, start := hookCommits(branch, at.root, &hookHead)
+				// The hooks at session 1's start end at the setup's limit, as its other steps do.
+				return openHooks(setupCtx, hookSetup{
+					run: run, spec: &spec, runID: spec.RunID, walled: walled, home: at.home, checkout: at.root,
+					workflow: fromCode.workflow, number: n, commit: commit, start: start, stderr: streams.errOut, said: said,
+					starting: func() { enter(stepStartHooks) }, again: again,
+				})
+			}
+			// firstHooks is the hooks of session 1. The hooks at its start run after the fetch of
+			// the run's image, which their containers start from, and before the setup commands,
+			// so no process of the setup runs beside them.
+			var firstHooks *sessionHooks
 			// A run whose documents set shared_run shares the memo of session 1's compose with the
 			// composes of its later sessions, sealed once session 1's is done.
 			if fromCode != nil && fromCode.shared {
@@ -1539,6 +1560,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				if prepErr == nil && walled {
 					prepErr = imageWork()
+				}
+				if prepErr == nil {
+					firstHooks, prepErr = hooksOf(1)
 				}
 				if prepErr == nil && walled && fetches {
 					prepErr = setupWork()
@@ -1563,6 +1587,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			composing.memo.Seal()
+			// A session 1 that does not join keeps the records of the hooks at its start.
+			if firstHooks != nil && (ctx.Err() != nil || !time.Now().Before(setupDeadline) || prepErr != nil) {
+				firstHooks.write()
+			}
 			switch {
 			case ctx.Err() != nil:
 				return stoppedBeforeJoin(1)
@@ -1722,6 +1750,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					spec.ModelProviderCredentialName = fromCode.modelCredential
 				}
 				spec.After, spec.AfterTimeout = nil, 0
+				// The programs of a later session's hooks are read from git before its join, see
+				// [openHooks]; session 1's were read before its setup commands.
+				hooks := firstHooks
+				if number > 1 {
+					if hooks, laterErr = hooksOf(number); laterErr != nil {
+						break
+					}
+				}
 				suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, fullSuite: fullSuiteOf(fromCode), workflow: planWorkflow, plan: planType, extensions: extensions, said: said})
 				closeRoute := route.open(number)
 				// The session's time limit counts from the agent's start, here, see [sessionDeadline].
@@ -1736,6 +1772,20 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					suiteLimit = deadline
 				}
 				out, suiteErr = suites.after(ctx, again, suiteLimit, res, out)
+				// The hooks at the session's end run once its suite's result is posted, before the
+				// push step, which follows only when the checkout is as before the hooks.
+				// The hooks run before any push of the session's work, also after an error of the
+				// suite, which stops no push, and write their records. After a session that did
+				// not succeed they run only when the push step pushes its branch: that session
+				// stores no version of its outputs.
+				var keptOutputs *runOutputs
+				if out.State == event.StateSucceeded {
+					keptOutputs = outputs
+				}
+				hookOut, hookErr := hooks.after(ctx, again, suiteLimit, out, keepsWork(fromCode, level, branch, keptOutputs, res, err))
+				if suiteErr == nil {
+					out, suiteErr = hookOut, hookErr
+				}
 				// pushWork is the push step of a run with an agent session that may write, see
 				// [keepsWork], before the close: Qory Apiary takes no version of a run that ended.
 				// The step runs under [pushContext], since a stop has ended ctx or spent the time
@@ -1761,7 +1811,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// fails after the close changes only qory run's exit status: only the close proves
 				// that no container is left.
 				ending = pushEnding{session: out, limit: timeout}
-				pushes := keepsWork(fromCode, level, branch, outputs, res, err)
+				pushes := keepsWork(fromCode, level, branch, outputs, res, err) && hooks.restored()
 				returns = copied != nil && !copied.readOnly && (err == nil && res != nil || joined)
 				if copied != nil {
 					copied.cutBy = func() string { return ending.cutLine(stopNow(), returnAfterSignal) }

@@ -57,7 +57,7 @@ const containerRemoveWait = time.Minute
 
 // textCopyContainerRemove is the error of a git container that docker rm could not remove, before
 // or after its docker run.
-const textCopyContainerRemove = "remove the container %[1]s with docker rm --force %[1]s: the git session runs in a container of that name, and docker rm failed: %[2]w: %[3]s"
+const textCopyContainerRemove = "remove the container %[1]s with docker rm --force %[1]s: the git session runs in a container of that name, and docker rm failed: %[2]v: %[3]s"
 
 // exitNotStarted is the exit status of docker run when docker itself failed, so the container
 // did not run.
@@ -139,10 +139,24 @@ func (c gitContainer) remove(ctx context.Context) error {
 	cmd.Env = c.Env
 	out, err := cmd.CombinedOutput()
 	if err != nil && !bytes.Contains(bytes.ToLower(out), []byte("no such container")) {
-		return fmt.Errorf(textCopyContainerRemove, c.Name, err, bytes.TrimSpace(out))
+		return &removeError{name: c.Name, err: err, out: string(bytes.TrimSpace(out))}
 	}
 	return nil
 }
+
+// removeError is the error of [gitContainer.remove]: the container's name, docker rm's error
+// and what docker rm printed.
+type removeError struct {
+	name string
+	err  error
+	out  string
+}
+
+func (e *removeError) Error() string {
+	return fmt.Sprintf(textCopyContainerRemove, e.name, e.err, e.out)
+}
+
+func (e *removeError) Unwrap() error { return e.err }
 
 // bindAt is the --mount value of m at its path, read-write unless m is read-only. The fields
 // are quoted as docker reads them, as CSV, so a path with a comma or a quote binds as it is.

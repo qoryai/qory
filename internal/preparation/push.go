@@ -668,7 +668,7 @@ func setupPaths(ctx context.Context, root, folder string, r WorkRepository, stat
 		return nil, checkFailed(textSetupNotSafe, r, local(err))
 	}
 	defer os.RemoveAll(private)
-	if err := privateGitDir(ctx, root, folder, private, r.Commit); err != nil {
+	if err := privateGitDir(ctx, root, folder, private, r.Commit, false); err != nil {
 		return nil, checkFailed(textSetupNotSafe, r, err)
 	}
 	git := status("GIT_DIR="+private, "GIT_WORK_TREE="+folder, "GIT_OBJECT_DIRECTORY="+filepath.Join(folder, ".git", "objects"))
