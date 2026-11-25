@@ -277,8 +277,8 @@ func composeLinked(t *testing.T, files, links map[string]string, opts compose.Op
 // TestCodexHomeCopiesALinkInsideTheModule composes a skill with a link to a folder
 // elsewhere in its module, skills/review/lib -> ../../lib, for a home that links the
 // module and for one that holds a copy of it: the Codex home has lib as a folder of
-// regular files, each with its permission bits without write for group and others, and
-// without the .git folder.
+// regular files, each of mode 0755 when its owner may run it and 0644 otherwise, as the
+// build sets every file of the home, and without the .git folder.
 func TestCodexHomeCopiesALinkInsideTheModule(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -302,7 +302,7 @@ func TestCodexHomeCopiesALinkInsideTheModule(t *testing.T) {
 			if info, err := os.Lstat(lib); err != nil || !info.IsDir() {
 				t.Fatalf("%s: %v, want a folder", lib, err)
 			}
-			for name, mode := range map[string]os.FileMode{"check.sh": 0o755, "private.txt": 0o600} {
+			for name, mode := range map[string]os.FileMode{"check.sh": 0o755, "private.txt": 0o644} {
 				info, err := os.Lstat(filepath.Join(lib, name))
 				if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != mode {
 					t.Errorf("lib/%s: %v %v, want a regular file of mode %v", name, info, err, mode)

@@ -1,6 +1,7 @@
 package render
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -39,4 +40,9 @@ func SetMaxModuleBytes(t interface{ Cleanup(func()) }, n int64) {
 	old := maxModuleBytes
 	maxModuleBytes = n
 	t.Cleanup(func() { maxModuleBytes = old })
+}
+
+// SetMode is [setMode] for the tests.
+func SetMode(path string, want func(fs.FileMode) (fs.FileMode, bool)) error {
+	return setMode(path, want)
 }

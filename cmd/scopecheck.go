@@ -171,13 +171,7 @@ func (s *runScope) check(ctx context.Context, folder string, r preparation.WorkR
 	if err := copyTree(s.snapshot, snapshot); err != nil {
 		return notRun(contracts.EndCodeMachineSetupInvalid, sentence("copying the launch snapshot failed: "+shownError(exports.HideError(err))))
 	}
-	user := s.checker.ScopeUser()
-	if os.Getuid() == 0 {
-		if err := pushcheck.Chown(user, clone, snapshot); err != nil {
-			return notRun(contracts.EndCodeMachineSetupInvalid, sentence(err.Error()))
-		}
-	}
-	end, err := s.checker.Scope(ctx, command, clone, snapshot, r.Commit, user)
+	end, err := s.checker.Scope(ctx, command, clone, snapshot, r.Commit, pushcheck.ScopeUser())
 	switch {
 	case err != nil:
 		return notRun(contracts.EndCodeMachineSetupInvalid, sentence(shownError(err)))

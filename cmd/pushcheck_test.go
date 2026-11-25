@@ -426,9 +426,8 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 		t.Fatalf("the check's container does not mount the run's home under %s read-only at its path:\n%s", home, created)
 	}
 	program := filepath.Join(composed[1], "modules", "checks", "bin", "check")
-	// The check's folders are in the run directory's push-checks, which is gone after the
-	// run. The run's user, 1000 by walledBy, passes through it and cannot list it, unless
-	// that user is this process's, whose folder it is.
+	// The check's folders are in the run directory's push-checks, qory's user's alone, which
+	// is gone after the run.
 	parent := filepath.Join(p.h.runDir, "push-checks")
 	for _, dst := range []string{"/qory-push-check/artifacts", "/qory-push-check/files"} {
 		folder := regexp.MustCompile(`src=(\S+),dst=` + dst + `,readonly`).FindStringSubmatch(created)
@@ -436,14 +435,8 @@ func TestTheAgentsPushIsCheckedBeforeItLeaves(t *testing.T) {
 			t.Errorf("the folder at %s is not in %s:\n%s", dst, parent, created)
 		}
 	}
-	// The wall's user is 1000:1000. When the test runs as that user too, no other user
-	// passes through the folder, so it stays qory's user's alone.
-	wantMode := fs.FileMode(0o711)
-	if os.Getuid() == 1000 {
-		wantMode = 0o700
-	}
-	if parentMode != wantMode {
-		t.Errorf("%s had mode %o during the check, want %o", parent, parentMode, wantMode)
+	if parentMode != 0o700 {
+		t.Errorf("%s had mode %o during the check, want 700", parent, parentMode)
 	}
 	if _, err := os.Stat(parent); !os.IsNotExist(err) {
 		t.Errorf("%s is left after the run: %v", parent, err)

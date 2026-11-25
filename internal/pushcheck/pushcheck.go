@@ -358,7 +358,6 @@ func (c *Checker) Check(ctx context.Context, artifactType string, files []File) 
 	if err != nil {
 		return nil, fmt.Errorf("the fetch of the artifacts for the check of %s failed: %w", artifactType, err)
 	}
-	opened := []string{pulled, pushed}
 	inputs := ""
 	if c.Inputs != "" {
 		dir, err := c.tempFolder()
@@ -369,10 +368,6 @@ func (c *Checker) Check(ctx context.Context, artifactType string, files []File) 
 		if inputs, err = copyInputs(c.Inputs, c.InputsData, dir); err != nil {
 			return nil, err
 		}
-		opened = append(opened, dir)
-	}
-	if err := c.openTo(opened...); err != nil {
-		return nil, err
 	}
 	binds := []bind{{src: c.Home, dst: c.Home}, {src: pulled, dst: WorkDir},
 		{src: pushed, dst: FilesDir}}
@@ -428,49 +423,13 @@ func (c *Checker) tempFolder() (string, error) {
 }
 
 // copyInputs writes data, the bytes of the run's inputs.json at path, into dir, a folder
-// of [Checker.tempFolder], under the file's name, and returns the copy's path. The run's
-// file is mode 0600 in a folder of mode 0700, which a container that runs as another
-// user cannot read through a mount; [Checker.openTo] opens the copy to that user, and
-// the run's file keeps its mode.
+// of [Checker.tempFolder], under the file's name, and returns the copy's path.
 func copyInputs(path string, data []byte, dir string) (string, error) {
 	copied := filepath.Join(dir, filepath.Base(path))
 	if err := writeNew(copied, data); err != nil {
 		return "", fmt.Errorf("Free space in the check's folder or make it writable, then push again.\nCopying the run's inputs to %s for the check failed: %w", exports.Value(copied, false), exports.HideError(err))
 	}
 	return copied, nil
-}
-
-// otherUser reports whether the run's user is not this process's user.
-func (c *Checker) otherUser() bool {
-	uid, _, _ := strings.Cut(c.User, ":")
-	return c.User != "" && uid != strconv.Itoa(os.Getuid())
-}
-
-// openTo lets the run's user read both folders and everything in them when that user
-// is not this one: the engine shows them to the container with their owner and mode,
-// and a umask such as 077 leaves a new file or folder to its owner alone. Each folder
-// gets mode 755 and each file 644.
-func (c *Checker) openTo(dirs ...string) error {
-	if !c.otherUser() {
-		return nil
-	}
-	for _, dir := range dirs {
-		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-			switch {
-			case err != nil:
-				return err
-			case d.IsDir():
-				return os.Chmod(path, 0o755)
-			case d.Type().IsRegular():
-				return os.Chmod(path, 0o644)
-			}
-			return nil
-		})
-		if err != nil {
-			return fmt.Errorf("opening the check's folder to the run's user failed: %w", exports.HideError(err))
-		}
-	}
-	return nil
 }
 
 // ended is how the check's container ended.

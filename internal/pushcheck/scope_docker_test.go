@@ -81,7 +81,7 @@ func TestARealScopeCheckWritesOnlyTheClone(t *testing.T) {
 		Home: home, Image: image, Label: "dev.qory.run=run-scope-check-test",
 		Limits: wall.Limits{CPUs: "1", Memory: "256m"},
 	}
-	user := c.ScopeUser()
+	user := pushcheck.ScopeUser()
 	uid, _, _ := strings.Cut(user, ":")
 	script := "#!/bin/sh\nset -e\ntest \"$1 $3 $4\" = \"--base --artifacts " + pushcheck.FilesDir + "\"\n" +
 		"git rev-parse HEAD\ngit status --porcelain\ngit merge-base --is-ancestor \"$2\" HEAD\n" +

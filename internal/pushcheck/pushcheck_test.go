@@ -12,10 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -594,15 +592,12 @@ func TestTheRunsInputsThatCannotBeCopiedStopTheCheck(t *testing.T) {
 	}
 }
 
-// TestAnotherUserCanReadTheRunsInputs is a check whose container runs as a user other
-// than this process's, with the run's inputs.json mode 0600 in a folder of mode 0700, as
-// qory run writes it: the file the container mounts at the path of inputs.json has the
-// bytes qory wrote, InputsData, mode 0644, in a folder of mode 755, so that user can read
-// it, and the run's file keeps mode 0600. The file on disk was changed after qory wrote
-// it, and the copy still has qory's bytes. The copy is gone after the check.
-func TestAnotherUserCanReadTheRunsInputs(t *testing.T) {
+// TestTheCheckGetsTheBytesQoryWroteInTheRunsInputs is a check of a run with an inputs.json:
+// the file the container mounts at the path of inputs.json has the bytes qory wrote,
+// InputsData, though the file on disk was changed after qory wrote it, and the run's file
+// keeps mode 0600. The copy is gone after the check.
+func TestTheCheckGetsTheBytesQoryWroteInTheRunsInputs(t *testing.T) {
 	f := newFixture(t, "#!/usr/bin/env node")
-	f.c.User = strconv.Itoa(os.Getuid()+1) + ":" + strconv.Itoa(os.Getgid()+1)
 	f.c.Dir = t.TempDir()
 	const content = `{"version":1,"qory":{"harness_extensions":{}}}`
 	inputs := filepath.Join(t.TempDir(), "in", "inputs.json")
@@ -614,34 +609,25 @@ func TestAnotherUserCanReadTheRunsInputs(t *testing.T) {
 	}
 	f.c.Inputs, f.c.InputsData = inputs, []byte(content)
 	var src, got string
-	var mode, folderMode fs.FileMode
 	f.e.create = func(io.Writer) error {
 		for _, m := range f.e.mounts {
 			if strings.Contains(m, ",dst="+inputs+",") {
 				src = strings.TrimPrefix(strings.Split(m, ",")[1], "src=")
 			}
 		}
-		if info, err := os.Stat(src); err == nil {
-			mode = info.Mode().Perm()
-		}
-		if info, err := os.Stat(filepath.Dir(src)); err == nil {
-			folderMode = info.Mode().Perm()
-		}
 		b, _ := os.ReadFile(src)
 		got = string(b)
 		return errors.New("stop after the create")
 	}
 	f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"}))
-	if src == "" || got != content || mode != 0o644 || folderMode != 0o755 {
-		t.Errorf("the container mounts %q at %s, with %q, mode %o, in a folder of mode %o; want the content, mode 644, folder 755", src, inputs, got, mode, folderMode)
+	if src == "" || src == inputs || got != content {
+		t.Errorf("the container mounts %q at %s, with %q; want a copy with %q", src, inputs, got, content)
 	}
 	if info, err := os.Stat(inputs); err != nil || info.Mode().Perm() != 0o600 {
 		t.Errorf("the run's inputs.json changed: %v, %v", info, err)
 	}
-	if src != inputs {
-		if _, err := os.Stat(src); !errors.Is(err, fs.ErrNotExist) {
-			t.Errorf("the copy %s is left after the check: %v", src, err)
-		}
+	if _, err := os.Stat(src); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the copy %s is left after the check: %v", src, err)
 	}
 }
 
@@ -661,51 +647,6 @@ func TestTheTemporaryFoldersAreInTheCheckersDir(t *testing.T) {
 	}
 	if left, _ := os.ReadDir(f.c.Dir); len(left) != 0 {
 		t.Errorf("%s has %v after the check", f.c.Dir, left)
-	}
-}
-
-// TestAnotherUserGetsFoldersItCanRead is a run whose user is not this process's, under
-// the umask 077: the two folders, the folders in them and their files open to it.
-func TestAnotherUserGetsFoldersItCanRead(t *testing.T) {
-	defer syscall.Umask(syscall.Umask(0o077))
-	f := newFixture(t, "#!/usr/bin/env node")
-	f.c.User = fmt.Sprintf("%d:%d", os.Getuid()+1, os.Getgid())
-	f.c.Fetch = func(_ context.Context, dir string, _ []string) error {
-		if err := os.MkdirAll(filepath.Join(dir, "spec", "main", "v1"), 0o755); err != nil {
-			return err
-		}
-		return os.WriteFile(filepath.Join(dir, "spec", "main", "v1", "spec.md"), []byte("old"), 0o644)
-	}
-	var modes map[string]fs.FileMode
-	f.e.start = func(context.Context, io.Writer, io.Writer) error {
-		modes = map[string]fs.FileMode{}
-		for _, m := range f.e.mounts[1:] {
-			src := strings.TrimPrefix(strings.Split(m, ",")[1], "src=")
-			filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-				if err == nil {
-					info, _ := d.Info()
-					rel, _ := filepath.Rel(src, path)
-					modes[filepath.Base(src)+"/"+filepath.ToSlash(rel)] = info.Mode().Perm()
-				}
-				return err
-			})
-		}
-		return nil
-	}
-	if _, err := f.post(t, "/artifacts", pushBody(t, "spec", [2]string{"spec.md", "x"})); err != nil {
-		t.Fatal(err)
-	}
-	if len(modes) != 7 {
-		t.Errorf("the folders have %v, want 7 entries", modes)
-	}
-	for path, mode := range modes {
-		want := fs.FileMode(0o755)
-		if strings.HasSuffix(path, ".md") {
-			want = 0o644
-		}
-		if mode != want {
-			t.Errorf("%s has mode %o, want %o", path, mode, want)
-		}
 	}
 }
 

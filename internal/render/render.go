@@ -682,7 +682,8 @@ func Build(res *compose.Result, home string, runtimes ...Runtime) (err error) {
 // [ScopeChecksFile], hooks.json when the checkout lists a workflow hook,
 // [HooksFile], roles.json when the harness has a role, [RolesFile], and role-notes.json,
 // [RoleNotesFile], then calls each runtime's Render for the subdirectory named after it and
-// links the runtime's files entries into that subdirectory. The links
+// links the runtime's files entries into that subdirectory. Last, it sets the modes of the
+// tree with [setModes], so a home and a check's stage have the same modes. The links
 // point at the modules by absolute path, so a tree staged anywhere contains the same
 // links. A module the home holds a copy of, see [compose.Module.Copy], is copied in place
 // of each link, and its modules/<name> comes first: a copy of one of its entries leaves
@@ -745,7 +746,69 @@ func BuildAt(res *compose.Result, stage, home string, runtimes ...Runtime) error
 			return err
 		}
 	}
-	return nil
+	// The paths of a module's copy may contain an access key secret.
+	return exports.HideError(setModes(stage))
+}
+
+// setModes gives every directory under root, root included, mode 0755, and every regular
+// file 0644, or 0755 when its owner may run it, whatever the umask was. A link is not
+// followed and keeps its target's mode, so a linked module keeps the modes of its source.
+// In a walled run or a run whose harness is hidden every module is a copy, see
+// [compose.Module.Copy].
+func setModes(root string) error {
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if t := d.Type(); !t.IsDir() && !t.IsRegular() {
+			return nil
+		}
+		return setMode(path, func(m fs.FileMode) (fs.FileMode, bool) {
+			switch {
+			case m.IsDir():
+				return 0o755, true
+			case m.IsRegular() && m&0o100 != 0:
+				return 0o755, true
+			case m.IsRegular():
+				return 0o644, true
+			}
+			return 0, false
+		})
+	})
+}
+
+// setMode sets the file at path to the mode that want returns for the file's mode, its type
+// bits included, when want returns true and that mode is another than the file's
+// permission, setuid, setgid and sticky bits. The mode is set through a descriptor opened
+// with O_NOFOLLOW, so a link that takes the file's place is an error of the open and its
+// target keeps its mode. When the mode is already the one want returns, nothing is opened.
+func setMode(path string, want func(fs.FileMode) (fs.FileMode, bool)) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if mode, ok := want(info.Mode()); !ok || mode == specialAndPerm(info.Mode()) {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_RDONLY|openFlags, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	info, err = f.Stat()
+	if err != nil {
+		return err
+	}
+	mode, ok := want(info.Mode())
+	if !ok || mode == specialAndPerm(info.Mode()) {
+		return nil
+	}
+	return f.Chmod(mode)
+}
+
+// specialAndPerm is m's permission, setuid, setgid and sticky bits.
+func specialAndPerm(m fs.FileMode) fs.FileMode {
+	return m & (fs.ModePerm | fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky)
 }
 
 // PushChecksFile is the file at the root of a home with the push checks the modules

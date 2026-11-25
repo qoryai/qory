@@ -37,6 +37,11 @@ release may change what an existing document does, and states it under Upgrading
   `inputs.json` after the branch switch and the setup.
 - A walled session whose `--mount` or `wall.mounts` is at or inside the read-only inputs
   folder stops before its setup: a run from a run code with `machine_setup_invalid`.
+- A walled run needs qory to run as an ordinary user whose uid is the wall user's uid. A
+  walled run whose qory is root, or whose `wall.user` has another uid than qory's or is not
+  `<uid>` or `<uid>:<gid>` in digits, such as a name, closes `failed` with
+  `machine_setup_invalid` before any container starts. A prebuild from a run code stops
+  before its run opens, so it has no end code. An empty `wall.user` is qory's uid:gid.
 - A run from a run code whose step fails closes `failed` with an end code as the reason,
   where it closed with no reason before: `push_credential_missing` for a run configuration
   with no push credential, `push_refused` for a push that got 403, `push_not_recorded` for a
@@ -2096,6 +2101,10 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- A harness home has the same modes whatever the umask is. Every folder in the home is 0755
+  and every file 0644, or 0755 when its owner may run it. qory sets modes inside the home
+  only, and leaves the folders above it as they are. In the previous release, a home composed
+  under umask 077 was 0700 and 0600.
 - A compose error that has a short form for a long first line switches to it when the
   first line has more than 98 characters. The line that qory prints has the 2 characters
   of `✗ ` before it, so a line of 99 or 100 characters printed at 101 or 102. This covers

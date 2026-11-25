@@ -90,7 +90,8 @@ func (k *heldRunKey) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, "[hi
 // where the images must go. qory's line on the run's gateway goes to stderr, and each
 // line of the prebuild, which contains the output of the programs the build runs, to
 // log, after "qory run: ". machineSteps, "" for none, is the file of the machine's
-// start, from which the prebuild writes the run's machine step. Each error is exit 1.
+// start, from which the prebuild writes the run's machine step. Each error is exit 1:
+// [textPrebuildWall] and the error of [oneUser] stop the prebuild before it opens its run.
 func runCodePrebuild(ctx context.Context, stderr, log io.Writer, r *config.Forager, state, user, exe string, key *runKey, doc contracts.Documents, runID, machineSteps string) error {
 	var w *config.ForagerWall
 	if r != nil {
@@ -98,6 +99,9 @@ func runCodePrebuild(ctx context.Context, stderr, log io.Writer, r *config.Forag
 	}
 	if w == nil || !policy.ImageReference(w.Image) || w.User == "" || w.PrebuildImage == "" {
 		return errors.New(textPrebuildWall)
+	}
+	if err := oneUser(&wall.Docker{User: w.User}, true); err != nil {
+		return err
 	}
 	helper, err := wallHelper(*w, exe)
 	if err != nil {

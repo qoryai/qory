@@ -58,6 +58,12 @@ wall or not, before the run opens and before anything is written:
 set --home to a folder outside /work/app: /work/app/.qory/harness is inside /work/app, and a walled run or a run with a run key writes no harness into the folder it runs in
 ```
 
+qory sets the modes of the home at each compose, whatever your umask is: every folder in the
+home is 0755, a file that its owner may run is 0755, and every other file is 0644. The agent,
+the push checks, and the scope checks of a walled run read the home as qory's uid. A link in
+the home keeps the mode of what it leads to. qory sets modes inside the home only, and leaves
+the folders above it as they are.
+
 A home that is not for one run alone is held for the run's life: your unwalled run's
 `.qory/harness`, and the home of a walled run with `--home` or `harness.home`. Before it
 redeems a run code or composes, `qory run` takes a lock on the file `<home>.lock` beside the
@@ -2650,6 +2656,11 @@ These stop it after the redemption, exit 1. The code is used, so each needs a ne
   19 characters, or `read_targets or the destinations list one entry twice`
 - `set wall.image, pinned by its digest, wall.user and wall.prebuild_image in
   forager.yaml: a prebuild from a run code builds with them; the code is used`
+- `qory and the wall user are not one ordinary user, so the run did not start; the code is
+  used` and the next line `qory runs as uid <uid> and the wall user is uid <uid>; a walled
+  run needs one ordinary user for both.`, where a `wall.user` that is not `<uid>` or
+  `<uid>:<gid>` prints, cleaned, in place of the second `uid <uid>`: see
+  [The wall](#the-wall)
 - `run the prebuild on a machine without an access key: this machine has an access key in
   <path>, and a prebuild fetches the target's code with git on this machine, outside the
   wall; the code is used`, when a file with an access key's secret appeared beside `forager.yaml` while
@@ -5408,6 +5419,13 @@ With a wall:
   the container as they do outside it. See [A run's variables](#a-runs-variables).
 - Forager, the policy, the record, the access key's secret and the run key stay outside.
 
+A walled run needs qory to run as an ordinary user whose uid is the wall user's uid. Run
+qory as a dedicated user, and set `wall.user` in forager.yaml to its uid:gid or leave it
+empty. `wall.user` is numeric, `<uid>` or `<uid>:<gid>`: a name, or any other value, stops
+the run. A walled run that this rule stops closes `failed` with `machine_setup_invalid` before
+any container starts. A prebuild from a run code stops before its run opens, so it has no end
+code.
+
 A wall needs the `docker` command, and an engine behind it. It also needs an image that
 contains the runtime: Qory's, or yours FROM it. See [Qory's images](#qorys-images).
 `wall.images` defines several, and a run's policy selects one: see [The agent's
@@ -6416,10 +6434,8 @@ failure stops the push, and the commits stay local.
    `/qory-push-check/artifacts`, and the session's launch snapshot read-only at
    `/qory-push-check/files`. The clone is the one writable folder, since the check's git
    writes objects, and qory removes it after the check. The check runs as the clone's
-   owner: qory's uid:gid, or, for qory as root, the wall's `user` when its uid is a number
-   above 0, else `65534:65534`, after qory gives that user the clone and the snapshot's copy.
-   A session with no version of its plan type still runs the check, on a snapshot with
-   no plan.
+   owner, qory's uid:gid. A session with no version of its plan type still runs the check,
+   on a snapshot with no plan.
 
 The launch snapshot is what the session's agent read at its start: the newest version of
 the plan type that is neither cancelled nor a withdrawal, and the approved version of each
@@ -6642,8 +6658,8 @@ What the image holds:
   directories are the daemon's whole `PATH`; the run's `PATH` is never searched.
   [Qory's](#qorys-images) `agent-docker` has them there, as does
   `docker:dind`. `qory image check` says whether an image does.
-- The agent's user and group, in its `/etc/passwd` and `/etc/group`, when `wall.user`
-  names the user by name, or by a uid with no gid.
+- The agent's user and group, in its `/etc/passwd` and `/etc/group`, when `wall.user` is a
+  uid with no gid.
 
 How it works:
 
