@@ -327,8 +327,8 @@ release may change what an existing document does, and states it under Upgrading
   commit of the version's run that a version of that run confirms, and a version with a later
   withdrawal of its artifact that is not cancelled confirms none. A commit that a later
   session pushed with no version is skipped, and the next push replaces it with a lease, unless
-  a commit of a run that nobody cancelled lies below it. See The push step of a write run in
-  `docs/run.md`.
+  a commit of a run that nobody cancelled lies below it, except the commits that count as a
+  cancelled run's. See The push step of a write run in `docs/run.md`.
 - A skill reads its work item and stores what it made with `qory work-item show`, `qory
   artifact pull`, `qory artifact push` and `qory run verdict`. In a run they use Qory
   Apiary through the gateway, at `QORY_RUN_API`. Outside a run they use the checkout's
@@ -992,20 +992,21 @@ release may change what an existing document does, and states it under Upgrading
   enrol` says "this machine's access key", and that enrol stops with an error when
   `access-key-secret` exists. `docs/run.md`, `docs/harness.md` and the harness contract
   README call the harness keys of a machine's `qory.yaml` "machine harness settings".
-- The push step stores the outputs of the session, in place of a version of `branch`.
-  The step checks the head of the branch on the forge before it pushes. A head that is not
-  the commit the run expected ends the run `failed` with the code `push_head_changed`, after a
+- The push step stores the outputs of the session, in place of a version of `branch`. The
+  step checks the head of the branch on the forge before it pushes. A head that is not the
+  commit the run expected ends the run `failed` with the code `push_head_changed`, after a
   session that passed, failed or timed out. The push replaces the branch only when its head
-  is a head that the work item's record has for a cancelled run (one head for each push),
-  or for the start's run after the start with no version to confirm it, and that descends
-  from the start commit, with a lease on that head. qory fetches the history of the branch
-  head only when the record lists that head as one of these, and then checks that it
-  descends from the start commit. The push stops with `push_head_changed` when a commit of a
-  run that nobody cancelled is above the start commit and is that head or below it: the lease
-  never drops such a commit. qory stops on a head below, above or
-  beside a recorded head, with no fetch. A run starts at the newest commit that an earlier run
-  pushed and a person did not cancel, unless its start version is one that a gate approved: then
-  it starts at that version's commit.
+  is a head that the work item's record has for a cancelled run (one head for each push), or
+  for the start's run after the start with no version to confirm it, and that descends from
+  the start commit, with a lease on that head. qory fetches the history of the branch head
+  only when the record lists that head as one of these, and then checks that it descends
+  from the start commit. The push stops with `push_head_changed` when a commit of a run that
+  nobody cancelled, except the commits that count as a cancelled run's, is above the start
+  commit and is that head or below it: the lease never drops such a commit. qory reads that
+  with one `git rev-list --ancestry-path` on the fetched history. qory stops on a head
+  below, above or beside a recorded head, with no fetch. A run starts at the newest commit
+  that an earlier run pushed and a person did not cancel, unless its start version is one
+  that a gate approved: then it starts at that version's commit.
 - A delivered output's member that `pushed-base-branch` marks has the name of the target
   repository's default branch, read when the run fetched it. A name of more than 255
   characters gives an empty string.
@@ -1097,11 +1098,11 @@ release may change what an existing document does, and states it under Upgrading
   pushed above the approved commit, the push of a run that starts there fails with
   `push_head_changed`. The push replaces a head with a lease only when a person cancelled the
   run that pushed it, or when the run which wrote the approved version pushed it and no version
-  confirms it. A commit of a run that nobody cancelled is never dropped by the lease push. A run
-  whose stage wrote a version that counts starts at its newest one, even when another stage
-  wrote a newer version, and moves to the newest pushed commit that descends from it. A version
-  with a later withdrawal of its artifact that is not cancelled does not count. This covers a
-  version that a gate approved too.
+  confirms it. The lease push never drops a commit of a run that nobody cancelled, except the
+  commits that count as a cancelled run's. A run whose stage wrote a version that counts starts
+  at its newest one, even when another stage wrote a newer version, and moves to the newest
+  pushed commit that descends from it. A version with a later withdrawal of its artifact that is
+  not cancelled does not count. This covers a version that a gate approved too.
 - Every run of a work item from a run code with a run API reads the work item through `GET
   /work-item` at its start, with or without a repository, as the stage's outputs come from
   it. A setup past its limit in that read names the step `the read of the work item`. A stage

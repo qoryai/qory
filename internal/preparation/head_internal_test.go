@@ -1,6 +1,7 @@
 package preparation
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -409,27 +410,45 @@ func TestALeaseNeverDropsACommitOfARunNobodyCancelled(t *testing.T) {
 		build     shape
 		cancelled func(head string) []string
 		changed   bool
+		path      string // the repository of the commits of Pushed, acme/shop for ""
 	}{
-		{"a commit of a run nobody cancelled under a cancelled commit", []bool{true}, onTop, func(head string) []string { return []string{head} }, true},
+		{"a commit of a run nobody cancelled under a cancelled commit", []bool{true}, onTop, func(head string) []string { return []string{head} }, true, ""},
 		{"a commit of a run nobody cancelled under several cancelled commits", []bool{true}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
 			x := bareCommit(t, bare, testRef, s, "a run that nobody cancelled")
 			one := bareCommit(t, bare, testRef, x, "cancelled one")
 			return bareCommit(t, bare, testRef, one, "cancelled two"), []string{x}, []string{one}
-		}, func(head string) []string { return []string{head} }, true},
+		}, func(head string) []string { return []string{head} }, true, ""},
 		{"a later commit that does not descend from the start", []bool{true, false}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
 			z := bareCommit(t, bare, "other", first, "a later run")
 			x := bareCommit(t, bare, testRef, s, "a run that nobody cancelled")
 			return bareCommit(t, bare, testRef, x, "cancelled"), []string{x, z}, nil
-		}, func(head string) []string { return []string{head} }, true},
+		}, func(head string) []string { return []string{head} }, true, ""},
 		{"cancelled commits on the start", []bool{true, false}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
 			return bareCommit(t, bare, testRef, s, "cancelled"), nil, nil
-		}, func(head string) []string { return []string{head} }, false},
+		}, func(head string) []string { return []string{head} }, false, ""},
+		{"the start is in Pushed", []bool{true, false}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
+			return bareCommit(t, bare, testRef, s, "cancelled"), []string{s}, nil
+		}, func(head string) []string { return []string{head} }, false, ""},
+		{"the head is in Pushed too", []bool{true}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
+			one := bareCommit(t, bare, testRef, s, "cancelled one")
+			head := bareCommit(t, bare, testRef, one, "cancelled two")
+			return head, []string{head}, []string{one}
+		}, func(head string) []string { return []string{head} }, true, ""},
+		{"a commit of another repository above the start", []bool{true, false}, onTop,
+			func(head string) []string { return []string{head} }, false, "acme/lib"},
+		{"a commit below the head that is not above the start", []bool{true, false}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
+			w := bareCommit(t, bare, "other", first, "a side branch")
+			tree := run(t, bare, "rev-parse", s+"^{tree}")
+			merge := run(t, bare, "commit-tree", tree, "-p", s, "-p", w, "-m", "cancelled merge")
+			run(t, bare, "update-ref", "refs/heads/"+testRef, merge)
+			return merge, []string{w}, nil
+		}, func(head string) []string { return []string{head} }, false, ""},
 		{"a commit below the start", []bool{true, false}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
 			return bareCommit(t, bare, testRef, s, "cancelled"), []string{first}, nil
-		}, func(head string) []string { return []string{head} }, false},
+		}, func(head string) []string { return []string{head} }, false, ""},
 		{"a commit that the forge does not have", []bool{true}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
 			return bareCommit(t, bare, testRef, s, "cancelled"), []string{strings.Repeat("a", 40)}, nil
-		}, func(head string) []string { return []string{head} }, false},
+		}, func(head string) []string { return []string{head} }, false, ""},
 	} {
 		for _, approved := range c.approved {
 			t.Run(fmt.Sprintf("%s, approved %v", c.name, approved), func(t *testing.T) {
@@ -442,7 +461,7 @@ func TestALeaseNeverDropsACommitOfARunNobodyCancelled(t *testing.T) {
 				head, pushed, cancelled := c.build(t, bare, s, first)
 				b := &WorkBranch{Ref: testRef, Approved: approved, Version: versionOf("acme/shop", s)}
 				for _, p := range pushed {
-					b.Pushed = append(b.Pushed, Landed{System: "git.example.com", Path: "acme/shop", Commit: p})
+					b.Pushed = append(b.Pushed, Landed{System: "git.example.com", Path: cmp.Or(c.path, "acme/shop"), Commit: p})
 				}
 				for _, cancelledCommit := range append(cancelled, c.cancelled(head)...) {
 					b.Cancelled = append(b.Cancelled, Landed{System: "git.example.com", Path: "acme/shop", Commit: cancelledCommit})
@@ -475,6 +494,51 @@ func TestALeaseNeverDropsACommitOfARunNobodyCancelled(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestTheLeaseCheckReadsNoMoreThanOneFetchAndBoundedHistory is a recorded head of 3 cancelled
+// commits on the start, and a commit in Pushed that the forge does not have: the check makes one
+// fetch, the history of the start and the head, so the missing commit costs no request and is not
+// below the head. A span of 3 commits is read with a limit of 3 and refused as a head that changed
+// with a limit of 2.
+func TestTheLeaseCheckReadsNoMoreThanOneFetchAndBoundedHistory(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		limit   int
+		changed bool
+	}{
+		{"a span within the limit", 3, false},
+		{"a span past the limit", 2, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			old := headSpanLimit
+			headSpanLimit = c.limit
+			t.Cleanup(func() { headSpanLimit = old })
+			dir, b, base := onBranchIn(t, "acme/shop")
+			bare := filepath.Join(base, "acme", "shop.git")
+			head := b.Repositories[0].Commit
+			for i := 0; i < 3; i++ {
+				head = bareCommit(t, bare, b.Ref, head, "cancelled")
+			}
+			b.Cancelled = []Landed{{System: "git.example.com", Path: "acme/shop", Commit: head}}
+			b.Pushed = []Landed{{System: "git.example.com", Path: "acme/shop", Commit: strings.Repeat("a", 40)}}
+			leave(t, dir)
+			commitHere(t, dir)
+			read := &fetchesIn{inner: stepGit(&testProxy, "")}
+			check, err := checkHead(context.Background(), read.run, dir, b, b.Repositories[0])
+			if read.count != 1 {
+				t.Errorf("%d fetches, want 1", read.count)
+			}
+			if c.changed {
+				changed := &HeadChanged{}
+				if !errors.As(err, &changed) || changed.Head != head || check.lease != "" {
+					t.Errorf("lease %q, error %v, want a refusal with the head %s", check.lease, err, head)
+				}
+			} else if err != nil || check.lease != head {
+				t.Errorf("lease %q, error %v, want the head %s", check.lease, err, head)
+			}
+		})
 	}
 }
 
