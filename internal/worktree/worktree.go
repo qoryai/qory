@@ -456,6 +456,7 @@ func Add(main, branch string, o Options) (Added, error) {
 		return a, fmt.Errorf("%s is not a worktree name", exports.Value(name, true))
 	}
 	r := o.runner(main)
+	r.lazy = true
 	remote := r.remoteOf()
 	attach := o.Attach.attached()
 	if attach && remote == "" {
@@ -518,17 +519,17 @@ func Add(main, branch string, o Options) (Added, error) {
 		onRemote := remote != "" && r.refExists("refs/remotes/"+remote+"/"+branch)
 		switch {
 		case local:
-			if _, err := r.git(main, "worktree", "add", a.Path, branch); err != nil {
+			if _, err := r.objects(main, "worktree", "add", a.Path, branch); err != nil {
 				return a, fmt.Errorf("git worktree add: %w", err)
 			}
 			a.How = "local"
 		case attach:
-			if _, err := r.git(main, "worktree", "add", "--no-track", "-b", branch, a.Path, o.Attach.tracking(remote)); err != nil {
+			if _, err := r.objects(main, "worktree", "add", "--no-track", "-b", branch, a.Path, o.Attach.tracking(remote)); err != nil {
 				return a, fmt.Errorf("git worktree add -b %s at %s: %w", value(branch), value(o.Attach.tracking(remote)), err)
 			}
 			a.How = o.Attach.how(remote)
 		case onRemote:
-			if _, err := r.git(main, "worktree", "add", "--track", "-b", branch, a.Path, remote+"/"+branch); err != nil {
+			if _, err := r.objects(main, "worktree", "add", "--track", "-b", branch, a.Path, remote+"/"+branch); err != nil {
 				return a, fmt.Errorf("git worktree add: %w", err)
 			}
 			a.How = "remote"
@@ -537,7 +538,7 @@ func Add(main, branch string, o Options) (Added, error) {
 			if err != nil {
 				return a, err
 			}
-			if _, err := r.git(main, "worktree", "add", "--no-track", "-b", branch, a.Path, base); err != nil {
+			if _, err := r.objects(main, "worktree", "add", "--no-track", "-b", branch, a.Path, base); err != nil {
 				return a, fmt.Errorf("git worktree add -b %s off %s: %w", value(branch), value(base), err)
 			}
 			if err := r.recordBase(a.Path, branch, base); err != nil {
@@ -623,7 +624,7 @@ func Add(main, branch string, o Options) (Added, error) {
 // and a branch that already holds o.Base is left alone. The recorded base may be a
 // branch that moved on, so --base with the same name rebases onto where it is now.
 func (r runner) onto(remote string, a *Added, o Options) error {
-	if status, _ := r.git(a.Path, "status", "--porcelain", "--untracked-files=no"); status != "" {
+	if status, _ := r.objects(a.Path, "status", "--porcelain", "--untracked-files=no"); status != "" {
 		return fmt.Errorf("%s has uncommitted changes, so %s stays where it is; commit or stash them to move it onto %s", value(a.Path), value(a.Branch), value(o.Base))
 	}
 	old := r.recordedBase(a.Branch)
@@ -665,12 +666,12 @@ func (r runner) onto(remote string, a *Added, o Options) error {
 		return nil
 	}
 	if n == 0 {
-		if _, err := r.git(a.Path, "reset", "--hard", "--quiet", o.Base); err != nil {
+		if _, err := r.objects(a.Path, "reset", "--hard", "--quiet", o.Base); err != nil {
 			return fmt.Errorf("git reset --hard %s: %w", value(o.Base), err)
 		}
 		a.How = "moved onto " + value(o.Base) + "; was on " + value(old)
 	} else {
-		if _, err := r.git(a.Path, "rebase", "--quiet", "--onto", o.Base, old, a.Branch); err != nil {
+		if _, err := r.objects(a.Path, "rebase", "--quiet", "--onto", o.Base, old, a.Branch); err != nil {
 			r.git(a.Path, "rebase", "--abort")
 			return fmt.Errorf("rebasing %s onto %s stops at a conflict, so it stays on %s; run git rebase --onto %s %s in %s and resolve it there", value(a.Branch), value(o.Base), value(old), value(o.Base), value(old), value(a.Path))
 		}
@@ -686,7 +687,7 @@ func (r runner) onto(remote string, a *Added, o Options) error {
 func (r runner) fastForward(path, tracking, remote string) string {
 	shown := value(strings.TrimPrefix(tracking, "refs/remotes/"))
 	before, _ := r.git(path, "rev-parse", "HEAD")
-	if _, err := r.git(path, "merge", "--ff-only", "--quiet", tracking); err != nil {
+	if _, err := r.objects(path, "merge", "--ff-only", "--quiet", tracking); err != nil {
 		return "local branch diverged from " + shown + "; git pull merges"
 	}
 	after, _ := r.git(path, "rev-parse", "HEAD")
@@ -715,7 +716,8 @@ func (r runner) mustRev(dir, ref string) string {
 // keep it, delete it anyway, or stop; Options.DeleteBranch answers delete. The base is
 // fetched first, unless Options.Offline, when the branch has commits of its own.
 func Remove(main, path string, o Options) (Removed, error) {
-	r := runner{main: main, timeout: o.Timeout, trace: o.Trace}
+	r := o.runner(main)
+	r.lazy = true
 	rm := Removed{Path: path, Main: main}
 	if path == main {
 		return rm, fmt.Errorf("%s is the main checkout, not a worktree", value(path))
@@ -740,7 +742,7 @@ func Remove(main, path string, o Options) (Removed, error) {
 		rm.Upstream = remote + "/" + branch
 	}
 	if !o.Force {
-		if status, _ := r.git(path, "status", "--porcelain", "--untracked-files=no"); status != "" {
+		if status, _ := r.objects(path, "status", "--porcelain", "--untracked-files=no"); status != "" {
 			return rm, fmt.Errorf("%s has uncommitted changes; commit or stash them, or remove with --force", value(path))
 		}
 	}
@@ -919,7 +921,7 @@ func (r runner) fetchBase(base string) bool {
 // the way git cherry matches them, and the newest match is the one returned; "" when
 // base carries none of it, or not all of it.
 func (r runner) landed(path, base string) string {
-	marks, err := r.git(path, "log", "--cherry-mark", "--right-only", "--no-merges", "--format=%m", base+"...HEAD")
+	marks, err := r.objects(path, "log", "--cherry-mark", "--right-only", "--no-merges", "--format=%m", base+"...HEAD")
 	if err == nil && marks != "" && strings.Trim(strings.ReplaceAll(marks, "\n", ""), "=") == "" {
 		if on := r.matching(path, base, "HEAD"); on != "" {
 			r.say("every commit of the branch is on %s by patch, the newest as %s", value(base), short(on))
@@ -955,7 +957,7 @@ func (r runner) landed(path, base string) string {
 // matching is the newest commit of base, since it met commit, whose patch is that of a
 // commit on commit's side; "" for none.
 func (r runner) matching(path, base, commit string) string {
-	out, err := r.git(path, "log", "--cherry-mark", "--left-only", "--no-merges", "--format=%m%H", base+"..."+commit)
+	out, err := r.objects(path, "log", "--cherry-mark", "--left-only", "--no-merges", "--format=%m%H", base+"..."+commit)
 	if err != nil {
 		return ""
 	}
@@ -997,7 +999,7 @@ func (r runner) recordedBase(branch string) string {
 
 // resolves reports whether ref names a commit of the repository.
 func (r runner) resolves(ref string) bool {
-	_, err := r.git(r.main, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	_, err := r.objects(r.main, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
 	return err == nil
 }
 
@@ -1253,6 +1255,9 @@ type runner struct {
 	main    string
 	timeout time.Duration
 	trace   func(string)
+	// lazy lets the git of [runner.objects] fetch a missing object. [Add] and [Remove] alone
+	// set it: a person runs them, and no session does.
+	lazy bool
 }
 
 // runner is the runner for the repository whose main checkout is main, with o's timeout
@@ -1264,16 +1269,26 @@ func (o Options) runner(main string) runner {
 // git runs one git command in dir and returns its trimmed output; a failure carries the
 // command's own message.
 func (r runner) git(dir string, args ...string) (string, error) {
-	return r.run(dir, 0, args...)
+	return r.run(dir, hostgit.Unchecked, 0, args...)
 }
 
 // net is [runner.git] for a command that reaches the remote, bounded by the timeout; one
-// running past it is stopped and the error says so.
+// running past it is stopped and the error says so. Its git is [hostgit.Remote]'s.
 func (r runner) net(dir string, args ...string) (string, error) {
-	return r.run(dir, r.timeout, args...)
+	return r.run(dir, hostgit.Remote, r.timeout, args...)
 }
 
-func (r runner) run(dir string, timeout time.Duration, args ...string) (string, error) {
+// objects is [runner.git] for a command that can need an object which a partial clone leaves
+// out. With lazy set, its git is [hostgit.LazyFetch]'s, and no timeout bounds the fetch of the
+// object.
+func (r runner) objects(dir string, args ...string) (string, error) {
+	if !r.lazy {
+		return r.git(dir, args...)
+	}
+	return r.run(dir, hostgit.LazyFetch, 0, args...)
+}
+
+func (r runner) run(dir string, command hostgit.Maker, timeout time.Duration, args ...string) (string, error) {
 	if r.trace != nil {
 		// Each argument, a branch name among them, as it can be printed.
 		shown := make([]string, len(args))
@@ -1295,7 +1310,7 @@ func (r runner) run(dir string, timeout time.Duration, args ...string) (string, 
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 	}
 	defer cancel()
-	c, err := hostgit.Command(ctx, dir, args...)
+	c, err := command(ctx, dir, hostgit.Base(ctx), args...)
 	if err != nil {
 		return "", &checkError{err: err}
 	}

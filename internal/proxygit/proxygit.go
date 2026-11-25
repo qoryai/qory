@@ -19,6 +19,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/qoryai/qory/internal/hostgit"
 )
 
 // Proxy is the run's host proxy or stack proxy as a git on this machine uses it.
@@ -49,7 +51,8 @@ var repositoryVariables = []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
 // host's certificate, choose the transports git may use, trace what git does, name
 // replace refs, choose the formats git init writes, or end git's search for a repository
 // early. [Env] drops each, and the ones that set what it sets. GIT_ALLOW_PROTOCOL wins
-// over protocol.allow, so with it set, [HTTPSOnly] would not hold. A caller that needs
+// over protocol.allow, so with it set, [HTTPSOnly] would not hold; the one of a git with
+// no protocol, see [hostgit.NoProtocol], stays. A caller that needs
 // GIT_CEILING_DIRECTORIES adds it after Env.
 var droppedVariables = []string{
 	"GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM",
@@ -94,6 +97,10 @@ var hostPrefixes = []string{"GIT_SSL_", "GIT_HTTP_", "GIT_PROXY_", "GIT_CURL_"}
 func Env(env []string, p *Proxy) []string {
 	out := make([]string, 0, len(env)+14)
 	for _, kv := range env {
+		if hostgit.NoProtocol(kv) {
+			out = append(out, kv)
+			continue
+		}
 		name, _, _ := strings.Cut(kv, "=")
 		if slices.Contains(repositoryVariables, name) || slices.Contains(droppedVariables, name) ||
 			slices.ContainsFunc(droppedPrefixes, func(pre string) bool { return strings.HasPrefix(name, pre) }) {

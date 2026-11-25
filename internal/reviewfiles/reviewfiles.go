@@ -1,5 +1,5 @@
 // Package reviewfiles serves read-only file tools over MCP on a reviewer's copy, for a
-// runtime that has no file tool with its shell off, such as Codex (690 (a)). The server,
+// runtime that has no file tool with its shell off, such as Codex. The server,
 // qory_review, speaks JSON-RPC 2.0 on standard input and output, one message per line, and
 // has three tools: read_file, list_directory and search_in_files. Every path is relative to
 // the copy's root; an absolute path, a .. that leaves the root and a link that points out of

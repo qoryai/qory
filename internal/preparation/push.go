@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -93,10 +94,12 @@ var noMaintenance = []string{"-c", "gc.auto=0", "-c", "maintenance.auto=false"}
 // folder above it for the repository.
 func stepGit(p *proxygit.Proxy, input string, env ...string) gitRunner {
 	return func(ctx context.Context, dir string, args ...string) (string, error) {
-		ceiling := "GIT_CEILING_DIRECTORIES=" + filepath.Dir(dir)
-		return hostRunnerOf(p, noMaintenance, input, append(slices.Clone(env), ceiling))(ctx, dir, args...)
+		return hostRunnerOf(p, hasRemote(p), noMaintenance, input, append(slices.Clone(env), ceiling(dir)))(ctx, dir, args...)
 	}
 }
+
+// ceiling is the variable that keeps git from a folder above dir.
+func ceiling(dir string) string { return "GIT_CEILING_DIRECTORIES=" + filepath.Dir(dir) }
 
 // Push commits what the agent left in the run's target, the first repository of b, in dir,
 // the working folder, and pushes it, when its HEAD is past its [WorkRepository.Commit], to
@@ -328,8 +331,10 @@ func ShownPath(path string) string { return shownPath(path) }
 // commitLeft commits what the agent left in r, the repository at dir, with message, as
 // [commitName]. The index starts from HEAD, so what the agent staged counts only through
 // the file it left. The commit has each path git status lists, by git's rules for
-// untracked and ignored files, but [leftOut]'s and a repository in the repository, for
-// which a line goes to report. A path of [leftOut] that a commit of the agent changed
+// untracked and ignored files, but [leftOut]'s and each path in a repository in the
+// repository, see [repositoryOf], for which a line goes to report, once; such a path keeps
+// what HEAD has there. A path of [isReplaced] goes out of the index by its name, since git
+// add fails on a path behind a link. A path of [leftOut] that a commit of the agent changed
 // goes back to what r.Commit has, because a branch with another .qory stops the later runs
 // of its work item. With no change from HEAD, nothing is committed.
 func commitLeft(ctx context.Context, dir string, r WorkRepository, setup map[string]string, message string, report io.Writer) error {
@@ -341,26 +346,58 @@ func commitLeft(ctx context.Context, dir string, r WorkRepository, setup map[str
 	if err != nil {
 		return err
 	}
-	var paths []string
+	printed := map[string]bool{}
+	line := func(path string) {
+		if !printed[path] {
+			fmt.Fprintf(report, textNestedRepository+"\n", shownText(path), shownPath(r.Path))
+		}
+		printed[path] = true
+	}
+	var paths, gone []string
 	for _, path := range changed {
 		out, err := leftOut(dir, path, setup)
+		var repository string
+		if err == nil && !out {
+			repository, err = repositoryOf(dir, path)
+		}
 		switch {
 		case err != nil:
 			return err
 		case out:
-		case isRepository(dir, strings.TrimSuffix(path, "/")):
-			fmt.Fprintf(report, textNestedRepository+"\n", shownText(strings.TrimSuffix(path, "/")), shownPath(r.Path))
+		case repository != "":
+			line(repository)
 		default:
-			paths = append(paths, path)
+			replaced, stays, err := isReplaced(dir, path, setup)
+			switch {
+			case err != nil:
+				return err
+			case !replaced:
+				paths = append(paths, path)
+			case !stays:
+				gone = append(gone, path)
+			}
 		}
 	}
-	if err := reportGitlinks(ctx, git, dir, r, report); err != nil {
+	if err := reportGitlinks(ctx, git, dir, line); err != nil {
 		return err
 	}
-	if len(paths) > 0 {
-		add := stepGit(noRemote, pathspecs(paths))
-		if _, err := add(ctx, dir, "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
+	if len(gone) > 0 {
+		if _, err := stepGit(noRemote, strings.Join(gone, "\x00")+"\x00")(ctx, dir, "update-index", "--force-remove", "-z", "--stdin"); err != nil {
 			return err
+		}
+	}
+	if len(paths) > 0 {
+		added, err := addLeft(ctx, dir, paths)
+		if err != nil {
+			return err
+		}
+		for _, path := range added {
+			line(path)
+		}
+		if len(added) > 0 {
+			if err := resetPaths(ctx, dir, "HEAD", added); err != nil {
+				return err
+			}
 		}
 	}
 	if err := restoreLeftOut(ctx, git, dir, r.Commit); err != nil {
@@ -373,8 +410,40 @@ func commitLeft(ctx context.Context, dir string, r WorkRepository, setup map[str
 		return err
 	}
 	commit := stepGit(noRemote, "", "GIT_AUTHOR_NAME="+commitName, "GIT_AUTHOR_EMAIL="+commitEmail, "GIT_COMMITTER_NAME="+commitName, "GIT_COMMITTER_EMAIL="+commitEmail)
-	_, err = commit(ctx, dir, "commit", "--quiet", "--no-verify", "--no-gpg-sign", "-m", message)
+	// The diff found a change, and git commit counts none in a gitlink alone.
+	_, err = commit(ctx, dir, "commit", "--quiet", "--allow-empty", "--no-verify", "--no-gpg-sign", "-m", message)
 	return err
+}
+
+// resetPaths sets paths in the index of the repository at dir to what commit has.
+func resetPaths(ctx context.Context, dir, commit string, paths []string) error {
+	_, err := stepGit(noRemote, pathspecs(paths))(ctx, dir, "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul", commit, "--")
+	return err
+}
+
+// addLeft adds paths to the index of the repository at dir as [hostgit.AddAll] does, with the
+// git of [stepGit] and within the limit of one git call, and returns the gitlinks it made.
+func addLeft(ctx context.Context, dir string, paths []string) ([]string, error) {
+	limit := limitOf("add")
+	call, cancel := context.WithTimeoutCause(ctx, limit, errLimit)
+	defer cancel()
+	command := func(ctx context.Context, dir string, env []string, args ...string) (*exec.Cmd, error) {
+		return hostCommand(ctx, noRemote, false, dir, noMaintenance, append(slices.Clone(env), ceiling(dir)), args)
+	}
+	added, err := hostgit.AddAll(call, command, dir, nil, paths)
+	if err == nil {
+		return added, nil
+	}
+	var ae *hostgit.AddError
+	switch {
+	case errors.Is(context.Cause(call), errLimit):
+		err = &gitError{line: fmt.Sprintf(textStopped, "add", limit), exit: -1}
+	case ctx.Err() != nil:
+		err = &gitError{line: fmt.Sprintf(textCut, "add"), exit: -1}
+	case errors.As(err, &ae) && firstLine(ae.Stderr) != "":
+		err = &gitError{line: firstLine(ae.Stderr), exit: -1, output: ae.Stderr}
+	}
+	return nil, err
 }
 
 // pathspecs is paths as git reads them with --pathspec-file-nul: each from the top of the
@@ -387,24 +456,95 @@ func pathspecs(paths []string) string {
 	return list.String()
 }
 
-// isRepository reports whether path, relative to the repository at dir, has a .git entry.
-func isRepository(dir, path string) bool {
-	_, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(path), ".git"))
-	return err == nil
+// repositoryOf is the topmost of path and the folders above it, relative to the repository at
+// dir, that has an entry named .git of any kind, a link too, and "" for none. The walk goes from
+// the top and stops at the first folder above path that is missing or is not a folder, such as a
+// link, since git has no entry below it; at path itself, a link is followed. git status lists the
+// files below a folder whose .git git does not read as a repository, such as a .git file with no
+// gitdir line or an empty .git folder.
+func repositoryOf(dir, path string) (string, error) {
+	path = strings.TrimSuffix(path, "/")
+	hasGit := func(folder string) bool {
+		_, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(folder), ".git"))
+		return err == nil
+	}
+	for i := range len(path) {
+		if path[i] != '/' {
+			continue
+		}
+		info, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(path[:i])))
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return "", nil
+		case err != nil:
+			return "", err
+		case !info.IsDir():
+			return "", nil
+		case hasGit(path[:i]):
+			return path[:i], nil
+		}
+	}
+	if hasGit(path) {
+		return path, nil
+	}
+	return "", nil
 }
 
-// reportGitlinks prints [textNestedRepository] for each gitlink in the index of the
-// repository at dir that has a repository in its folder: git status with
-// --ignore-submodules=all does not list it, and no git runs in that repository.
-func reportGitlinks(ctx context.Context, git gitRunner, dir string, r WorkRepository, report io.Writer) error {
+// notFolder is the first path above path, relative to the repository at dir, whose entry is
+// not a folder, such as a file or a link, and "" for none. Below one, git has no entry: no
+// code reads path through a link, which can lead out of the repository.
+func notFolder(dir, path string) (string, error) {
+	path = strings.TrimSuffix(path, "/")
+	for i := range len(path) {
+		if path[i] != '/' {
+			continue
+		}
+		info, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(path[:i])))
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return "", nil
+		case err != nil:
+			return "", err
+		case !info.IsDir():
+			return path[:i], nil
+		}
+	}
+	return "", nil
+}
+
+// isReplaced reports whether path, which git status lists in dir, is a tracked file that a
+// link took the place of: the link is at a folder above it, see [notFolder]. It also reports
+// whether path stays as it is, since that link is one of [leftOut]. A tracked file below a
+// file, or at a folder now, needs no case: git add -u stages its deletion.
+func isReplaced(dir, path string, setup map[string]string) (replaced, stays bool, err error) {
+	above, err := notFolder(dir, path)
+	if err != nil || above == "" {
+		return false, false, err
+	}
+	info, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(above)))
+	if err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		return false, false, err
+	}
+	stays, err = leftOut(dir, above, setup)
+	return true, stays, err
+}
+
+// reportGitlinks calls report, for each gitlink in the index of the repository at dir, with
+// what [repositoryOf] returns for its path, unless that is "": git status with
+// --ignore-submodules=all does not list the gitlink, and no git runs in that repository. A
+// folder that Lstat cannot read counts as one with no .git entry.
+func reportGitlinks(ctx context.Context, git gitRunner, dir string, report func(path string)) error {
 	entries, err := git(ctx, dir, "ls-files", "--stage", "-z")
 	if err != nil {
 		return err
 	}
 	for entry := range strings.SplitSeq(entries, "\x00") {
 		about, path, ok := strings.Cut(entry, "\t")
-		if ok && strings.HasPrefix(about, gitlinkMode+" ") && isRepository(dir, path) {
-			fmt.Fprintf(report, textNestedRepository+"\n", shownText(path), shownPath(r.Path))
+		if !ok || !strings.HasPrefix(about, gitlinkMode+" ") {
+			continue
+		}
+		if repository, err := repositoryOf(dir, path); err == nil && repository != "" {
+			report(repository)
 		}
 	}
 	return nil
@@ -434,8 +574,7 @@ func restoreLeftOut(ctx context.Context, git gitRunner, dir, start string) error
 	if len(paths) == 0 {
 		return nil
 	}
-	_, err = stepGit(noRemote, pathspecs(paths))(ctx, dir, "reset", "--quiet", start, "--pathspec-from-file=-", "--pathspec-file-nul")
-	return err
+	return resetPaths(ctx, dir, start, paths)
 }
 
 // changedPaths is each path git status lists in dir, with no rename, so a moved file is
@@ -458,15 +597,22 @@ func changedPaths(ctx context.Context, git gitRunner, dir string) ([]string, err
 
 // leftOut reports whether path, relative to the repository at dir, stays out of a commit:
 // it is [checkout.Dir] or under it, a link that qory wrote, or an entry of setup as the
-// setup left it. A run's branch stops every later run of its work item when its commit
-// has another .qory than the target version, or a path where the compose writes a link.
+// setup left it. A path below an entry that is not a folder, see [notFolder], is missing on
+// the disk, and so is no link. A run's branch stops every later run of its work item when its
+// commit has another .qory than the target version, or a path where the compose writes a link.
 func leftOut(dir, path string, setup map[string]string) (bool, error) {
 	trimmed := strings.TrimSuffix(path, "/")
 	if trimmed == checkout.Dir || strings.HasPrefix(trimmed, checkout.Dir+"/") {
 		return true, nil
 	}
-	if link, err := render.OwnLink(dir, filepath.Join(dir, filepath.FromSlash(trimmed))); link || err != nil {
-		return link, err
+	above, err := notFolder(dir, trimmed)
+	if err != nil {
+		return false, err
+	}
+	if above == "" {
+		if link, err := render.OwnLink(dir, filepath.Join(dir, filepath.FromSlash(trimmed))); link || err != nil {
+			return link, err
+		}
 	}
 	recorded, ok := setup[path]
 	if !ok {
@@ -539,6 +685,14 @@ func setupPaths(ctx context.Context, root, folder string, r WorkRepository, stat
 // repository. Any other kind of file has its type alone.
 func entryDigest(dir, path string) (string, error) {
 	sum := sha256.New()
+	above, err := notFolder(dir, path)
+	if err != nil {
+		return "", err
+	}
+	if above != "" {
+		fmt.Fprint(sum, "missing\x00")
+		return hex.EncodeToString(sum.Sum(nil)), nil
+	}
 	if err := addEntry(sum, filepath.Join(dir, filepath.FromSlash(strings.TrimSuffix(path, "/")))); err != nil {
 		return "", err
 	}

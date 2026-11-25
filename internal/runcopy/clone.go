@@ -205,20 +205,20 @@ func (d Dir) cloneAt(ctx context.Context, i int, src, dest, branch string) (stri
 		return "", fmt.Errorf(textPartialClone, shown(src))
 	}
 	bare := d.source(i)
-	if _, err := git(ctx, d.root, "clone", "--quiet", "--bare", "--no-local", "--no-hardlinks", "--", src, bare); err != nil {
+	if _, err := gitByPath(ctx, d.root, nil, "clone", "--quiet", "--bare", "--no-local", "--no-hardlinks", "--", src, bare); err != nil {
 		return "", fmt.Errorf(textNoClone, shown(src), err)
 	}
 	// HEAD by its name, as the branch of the run: the clone copies the branches alone,
 	// and a HEAD on no branch would not be among them.
 	ref := "refs/heads/" + branch
-	if _, err := git(ctx, bare, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", src, "+HEAD:"+ref); err != nil {
+	if _, err := gitByPath(ctx, bare, nil, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", src, "+HEAD:"+ref); err != nil {
 		return "", fmt.Errorf(textNoHead, shown(src), err)
 	}
 	base, err := commitOf(ctx, bare, ref)
 	if err != nil {
 		return "", fmt.Errorf(textNoHead, shown(src), err)
 	}
-	if _, err := git(ctx, d.root, "clone", "--quiet", "--no-local", "--no-hardlinks", "--no-checkout", "--no-recurse-submodules", "--branch", branch, "--", bare, dest); err != nil {
+	if _, err := gitByPath(ctx, d.root, nil, "clone", "--quiet", "--no-local", "--no-hardlinks", "--no-checkout", "--no-recurse-submodules", "--branch", branch, "--", bare, dest); err != nil {
 		return "", fmt.Errorf(textNoClone, shown(src), err)
 	}
 	if err := copyTargetVersion(ctx, src, bare, dest); err != nil {
@@ -248,10 +248,10 @@ func copyTargetVersion(ctx context.Context, src, bare, dest string) error {
 	}
 	ref := "+" + preparation.TargetRef + ":" + preparation.TargetRef
 	fetch := []string{"fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--update-shallow", "--"}
-	if _, err := git(ctx, bare, slices.Concat(fetch, []string{src, ref})...); err != nil {
+	if _, err := gitByPath(ctx, bare, nil, slices.Concat(fetch, []string{src, ref})...); err != nil {
 		return err
 	}
-	if _, err := git(ctx, dest, slices.Concat(fetch, []string{bare, ref})...); err != nil {
+	if _, err := gitByPath(ctx, dest, nil, slices.Concat(fetch, []string{bare, ref})...); err != nil {
 		return err
 	}
 	got, err := commitOf(ctx, dest, preparation.TargetRef)
@@ -288,7 +288,7 @@ func partialClone(ctx context.Context, src string) bool {
 // configuration. The objects come through the bare repository, so nothing in dest links to
 // src.
 func (d Dir) copySettings(ctx context.Context, src, bare, dest string) error {
-	if _, err := git(ctx, bare, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", src, "+refs/remotes/origin/*:refs/remotes/origin/*"); err != nil {
+	if _, err := gitByPath(ctx, bare, nil, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", src, "+refs/remotes/origin/*:refs/remotes/origin/*"); err != nil {
 		return err
 	}
 	// git clone wrote the bare repository's branches as these refs.
@@ -302,7 +302,7 @@ func (d Dir) copySettings(ctx context.Context, src, bare, dest string) error {
 			return err
 		}
 	}
-	if _, err := git(ctx, dest, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", bare, "+refs/remotes/origin/*:refs/remotes/origin/*"); err != nil {
+	if _, err := gitByPath(ctx, dest, nil, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", bare, "+refs/remotes/origin/*:refs/remotes/origin/*"); err != nil {
 		return err
 	}
 	if head, err := git(ctx, src, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"); err == nil {
@@ -591,10 +591,10 @@ func (d Dir) cloneSubmodules(ctx context.Context, src, dest, base string) ([]sub
 			continue
 		}
 		to := filepath.Join(dest, filepath.FromSlash(sub))
-		if _, err := git(ctx, d.root, "clone", "--quiet", "--no-local", "--no-hardlinks", "--no-checkout", "--no-recurse-submodules", "--", from, to); err != nil {
+		if _, err := gitByPath(ctx, d.root, nil, "clone", "--quiet", "--no-local", "--no-hardlinks", "--no-checkout", "--no-recurse-submodules", "--", from, to); err != nil {
 			return nil, fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
 		}
-		if _, err := git(ctx, to, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", from, commit); err != nil {
+		if _, err := gitByPath(ctx, to, nil, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--", from, commit); err != nil {
 			return nil, fmt.Errorf(textNoSubmodule, shown(sub), shown(src), shown(from), err)
 		}
 		args := slices.Concat(checkoutLF, []string{"checkout", "--quiet", "--force", "--detach", commit})

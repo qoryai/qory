@@ -2368,17 +2368,17 @@ func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 		if strings.Contains(proxy, "@") && sub != "push" && sub != "ls-remote" && sub != "fetch" {
 			t.Errorf("git %s reaches no remote and has the password of the proxy %q", all, proxy)
 		}
-		keyList := sub == "config" && strings.Contains(all, "--name-only")
+		// The read of a configuration file, git config --file <path> --list --null, runs in
+		// / on that file alone, so it has no ceiling.
+		rest := args[len(args)-min(len(args), 5):]
+		keyRead := sub == "config" && len(rest) == 5 && rest[0] == "config" && rest[1] == "--file" && rest[3] == "--list" && rest[4] == "--null"
 		if !strings.Contains(strings.Join(args, " "), strings.Join(proxygit.Hardened, " ")) {
 			t.Errorf("git %s has no options %v", all, proxygit.Hardened)
 		}
-		if keyList {
-			continue
-		}
-		if ceiling == "" {
+		if ceiling == "" && !keyRead {
 			t.Errorf("git %s has no GIT_CEILING_DIRECTORIES", all)
 		}
-		if !strings.Contains(all, "-c gc.auto=0 -c maintenance.auto=false") {
+		if !strings.Contains(all, "-c gc.auto=0") || !strings.Contains(all, "-c maintenance.auto=false") {
 			t.Errorf("git %s has no maintenance options", all)
 		}
 	}

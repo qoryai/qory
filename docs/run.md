@@ -3116,18 +3116,21 @@ each read target's checkout as the agent left it: no check, commit or push.
    directory, so a link stops the check and any other lock stays.
 3. qory commits what the agent left in the target, with the message `Changes left by
    run <run number>` and the author and committer `qory <qory@localhost>`. A new file is in
-   the commit unless git ignores it through `.gitignore` or `.git/info/exclude`. `.qory`
-   and the links into it stay out, also when the agent staged them. When a commit of the
-   agent has them, qory's commit puts them back as they were at the start of the run, and
-   the file stays in the working folder. A repository inside a repository stays out, as
-   its files and as a gitlink, and qory prints `have the agent leave plain files in <folder>
-   of <path> to push them: that folder is a repository, so qory left it out of the commit,
-   and what it has stays in the working folder`. A path that the setup
-   changed stays out while it is as the setup left it: after a setup outside the agent's
-   container, qory records each changed path and its content, and commits a path only if
-   the agent changed it again. With `wall.setup: inside`, the setup runs in the agent's
-   container, so what it changed counts as what the agent left. No hook in `.git` runs.
-   A failed commit pushes nothing.
+   the commit unless git ignores it through `.gitignore` or `.git/info/exclude`. The commit
+   has a file or a link that took the place of a folder, and a folder that took the place of
+   a file. `.qory` and the links into it stay out, also when the agent staged them. When a
+   commit of the agent has them, qory's commit puts them back as they were at the start of
+   the run, and the file stays in the working folder. A repository inside a repository stays
+   out, as its files and as a gitlink, and qory prints `have the agent leave plain files in
+   <folder> of <path> to push them: that folder is a repository, so qory left it out of the
+   commit, and what it has stays in the working folder`. A folder with a `.git` entry
+   counts as such a repository also when git does not read it as one, such as a `.git` file
+   with no `gitdir:` line or an empty `.git` folder; the commit has what `HEAD` has at the
+   folder's path. A path that the setup changed stays out while it is as the setup left it:
+   after a setup outside the agent's container, qory records each changed path and its
+   content, and commits a path only if the agent changed it again. With
+   `wall.setup: inside`, the setup runs in the agent's container, so what it changed counts
+   as what the agent left. No hook in `.git` runs. A failed commit pushes nothing.
 4. qory checks each commit from the start commit to `HEAD`, merges included. A commit that
    has a path under `.qory/outbox/`, in any letter case such as `.QORY/Outbox/`, as `git add
    -f` makes one, stops the step before the push, and the run closes `failed`. qory prints

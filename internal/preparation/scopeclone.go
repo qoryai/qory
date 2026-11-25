@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -16,7 +15,8 @@ import (
 )
 
 // localFetch are the options of the one git of [ScopeClone] that fetches from the
-// repository's folder: a local path, which [protocols] turns off for every other git.
+// repository's folder: a local path, which [protocols] turns off for every other git. The
+// check of the folder's .git in [Push] runs before it and must stay there.
 var localFetch = []string{"-c", "protocol.file.allow=always"}
 
 // ScopeClone makes a fresh clone of the commits of r, the repository in folder, at clone,
@@ -39,8 +39,7 @@ func ScopeClone(ctx context.Context, base []string, folder, clone string, r Work
 	if _, err := git(ctx, clone, "init", "--quiet", "--template=", "--object-format="+strings.TrimSpace(format)); err != nil {
 		return cloneFailed("git init", err)
 	}
-	ceiling := "GIT_CEILING_DIRECTORIES=" + filepath.Dir(clone)
-	fetch := hostRunnerOf(noRemote, slices.Concat(noMaintenance, localFetch), "", []string{ceiling})
+	fetch := hostRunnerOf(noRemote, true, slices.Concat(noMaintenance, localFetch), "", []string{ceiling(clone)})
 	if _, err := fetch(ctx, clone, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--update-shallow", "--", folder, head); err != nil {
 		return cloneFailed("the fetch of commit "+shortCommit(head), err)
 	}

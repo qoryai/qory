@@ -206,7 +206,7 @@ func TestAHeadMovedAfterTheLeaseWasReadStopsThePush(t *testing.T) {
 	r := b.Repositories[0]
 	head := commitHere(t, dir)
 	var report strings.Builder
-	err := pushTo(context.Background(), stepGit(&testProxy, ""), hostRunnerOf(&testProxy, noMaintenance, "", nil), dir, b, r, head, old, &report)
+	err := pushTo(context.Background(), stepGit(&testProxy, ""), hostRunnerOf(&testProxy, true, noMaintenance, "", nil), dir, b, r, head, old, &report)
 	changed := headError(t, err)
 	if changed.Head != moved || changed.Expected != start {
 		t.Errorf("refusal %+v, want head %s expected %s", changed, moved, start)
@@ -234,7 +234,7 @@ func TestAHeadMovedAfterTheCheckStopsAPlainPush(t *testing.T) {
 	leave(t, dir)
 	head := commitHere(t, dir)
 	var report strings.Builder
-	err := pushTo(context.Background(), stepGit(&testProxy, ""), hostRunnerOf(&testProxy, noMaintenance, "", nil), dir, b, b.Repositories[0], head, "", &report)
+	err := pushTo(context.Background(), stepGit(&testProxy, ""), hostRunnerOf(&testProxy, true, noMaintenance, "", nil), dir, b, b.Repositories[0], head, "", &report)
 	if changed := headError(t, err); changed.Head != moved {
 		t.Errorf("refusal %+v, want head %s", changed, moved)
 	}

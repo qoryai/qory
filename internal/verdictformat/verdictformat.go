@@ -101,7 +101,8 @@ func Known(kind string) bool {
 
 // commandAction reports whether action is one that a point of qory run verdict takes:
 // answer or run_again. The format takes any action of its form.
-// shortcut: Apiary refuses an unknown kind or action until A-65; open the command when A-65 lands.
+// shortcut: Qory Apiary returns an error for any other verdict kind or point action; allow
+// every kind and action of the format once Qory Apiary stores them.
 func commandAction(action string) bool {
 	return action == runapi.ActionAnswer || action == runapi.ActionRunAgain
 }

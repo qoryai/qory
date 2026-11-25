@@ -1033,7 +1033,8 @@ func shownOrShort(value string) string {
 
 // commandVerdict reports whether verdict is a kind that qory run verdict takes: passed,
 // changes-requested or escalate. The verdict format takes any kind of its form.
-// shortcut: Apiary refuses an unknown kind or action until A-65; open the command when A-65 lands.
+// shortcut: Qory Apiary returns an error for any other verdict kind or point action; allow
+// every kind and action of the format once Qory Apiary stores them.
 func commandVerdict(verdict string) bool { return verdictformat.Known(verdict) }
 
 // readPoints returns the points of verdict from path, the file of --points; given is true

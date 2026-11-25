@@ -1001,8 +1001,8 @@ func TestArtifactPushWithoutWithdrawSendsNoWithdrawMember(t *testing.T) {
 	}
 }
 
-// TestArtifactPushWithdrawRefusals is each refusal of a withdrawal: exit 4, the text of
-// decision 654 (c), and no POST.
+// TestArtifactPushWithdrawRefusals is each refusal of a withdrawal: exit 4, the refusal's
+// text with its fix first, and no POST.
 func TestArtifactPushWithdrawRefusals(t *testing.T) {
 	for name, c := range map[string]struct {
 		args  []string

@@ -403,7 +403,7 @@ func (q *Quarantine) fetchBundle(ctx context.Context, root, source, bundle, chec
 		for _, r := range refs {
 			specs.WriteString(r.name + ":" + r.name + "\n")
 		}
-		_, err = gitWith(ctx, q.Path, nil, strings.NewReader(specs.String()), "-c", "transfer.fsckObjects=true", "-c", "fetch.fsckObjects=true", "-c", "fetch.fsck.hasDotgit=error",
+		_, err = gitByPath(ctx, q.Path, strings.NewReader(specs.String()), "-c", "transfer.fsckObjects=true", "-c", "fetch.fsckObjects=true", "-c", "fetch.fsck.hasDotgit=error",
 			"fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--atomic", "--stdin", "--", checked)
 	} else {
 		err = indexBundle(ctx, q.Path, checked, ref, q.prefix)
@@ -996,7 +996,7 @@ func (q *Quarantine) moved(prefix string) []string {
 func fetchRefs(ctx context.Context, dir, from string, specs []string) error {
 	input := strings.Join(specs, "\n") + "\n"
 	return withLockWaits(ctx, func() error {
-		_, err := gitWith(ctx, dir, nil, strings.NewReader(input), "-c", "transfer.fsckObjects=true", "-c", "fetch.fsckObjects=true",
+		_, err := gitByPath(ctx, dir, strings.NewReader(input), "-c", "transfer.fsckObjects=true", "-c", "fetch.fsckObjects=true",
 			"fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", "--atomic", "--stdin",
 			"--", from)
 		return err

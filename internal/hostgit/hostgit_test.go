@@ -124,7 +124,8 @@ func TestEnvDropsWhatAddsConfigurationOrChoosesARepository(t *testing.T) {
 }
 
 // TestCommandCarriesTheFlagsAndTheEnvironment puts the flags before the caller's
-// arguments, runs in the directory given, and gives git the environment of [hostgit.Env].
+// arguments, runs in the directory given, and gives git the environment of [hostgit.Env] and
+// the two variables of a git with no protocol.
 func TestCommandCarriesTheFlagsAndTheEnvironment(t *testing.T) {
 	hermetic(t)
 	dir := newRepo(t)
@@ -132,12 +133,16 @@ func TestCommandCarriesTheFlagsAndTheEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.ext.allow=never", "-c", "diff.ignoreSubmodules=all", "-c", "submodule.recurse=false", "-c", "fetch.recurseSubmodules=false", "-c", "core.useReplaceRefs=false", "-c", "core.commitGraph=false", "status", "--porcelain"}
+	want := []string{"git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.ext.allow=never", "-c", "diff.ignoreSubmodules=all", "-c", "submodule.recurse=false", "-c", "fetch.recurseSubmodules=false", "-c", "core.useReplaceRefs=false", "-c", "core.commitGraph=false", "-c", "fetch.bundleURI=", "-c", "core.alternateRefsCommand=:", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "status", "--porcelain"}
 	if !slices.Equal(c.Args, want) {
 		t.Errorf("args %q, want %q", c.Args, want)
 	}
-	if c.Dir != dir || !slices.Equal(c.Env, hostgit.Env()) {
-		t.Errorf("dir %s, env %v", c.Dir, c.Env)
+	// No failure prints the environment: it has the name of the one protocol.
+	env := hostgit.Env()
+	if c.Dir != dir || len(c.Env) != len(env)+2 || !slices.Equal(c.Env[:len(env)], env) {
+		t.Errorf("dir %s, %d variables, want %d", c.Dir, len(c.Env), len(env)+2)
+	} else if !hostgit.NoProtocol(c.Env[len(env)]) || c.Env[len(env)+1] != "GIT_NO_LAZY_FETCH=1" {
+		t.Error("the last two variables are not the ones of a git with no protocol")
 	}
 }
 

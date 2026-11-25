@@ -16,7 +16,7 @@ import (
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/sink"
 
-	"github.com/qoryai/qory/internal/hostgit"
+	"github.com/qoryai/qory/internal/hookrun"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/stack"
 	"github.com/qoryai/qory/internal/suite"
@@ -220,18 +220,15 @@ func fullSuiteNoPlan(c *codeRun, workflows map[string]stack.Workflow, later bool
 // suitePlanWait is the longest the read of the plan at the run's start may take.
 const suitePlanWait = 15 * time.Second
 
-// headCommit is the commit that HEAD has in dir, read with git as qory runs it on this machine
-// before the agent runs, "" when dir has none.
-func headCommit(ctx context.Context, dir string) string {
-	cmd, err := hostgit.Command(ctx, dir, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+// headCommit is the commit that HEAD has in dir, "" when dir has none or [hookrun.Head] cannot
+// read it for certain. It runs no git: a run's setup and its agents can write dir, so git here
+// could run a program of their configuration.
+func headCommit(_ context.Context, dir string) string {
+	head, err := hookrun.Head(dir)
 	if err != nil {
 		return ""
 	}
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	return head
 }
 
 // launchFull is the full row of the plan type plan, in the version that the run's work item has at

@@ -1,6 +1,7 @@
 package proxygit_test
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/proxygit"
 )
 
@@ -48,6 +50,35 @@ func TestEnvDropsTheTransportsOfTheEnvironment(t *testing.T) {
 	c.Env = append(proxygit.Env(os.Environ(), nil), "GIT_ALLOW_PROTOCOL=file")
 	if out, err := c.CombinedOutput(); err != nil {
 		t.Errorf("with GIT_ALLOW_PROTOCOL kept, git did not clone, so the test shows nothing: %v\n%s", err, out)
+	}
+}
+
+// TestEnvKeepsNoProtocol is the environment of a git with no protocol, see [hostgit.NoProtocol],
+// made from one that allows a protocol: Env keeps the variable of the git alone, with and
+// without a proxy, and the git does not clone over file://.
+func TestEnvKeepsNoProtocol(t *testing.T) {
+	src := t.TempDir()
+	c, err := hostgit.Unchecked(context.Background(), src, append(os.Environ(), "GIT_ALLOW_PROTOCOL=file"), "ls-remote", "file://"+src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := c.Env
+	for _, p := range []*proxygit.Proxy{nil, {URL: "http://qory:password@127.0.0.1:9"}} {
+		c.Env = proxygit.Env(all, p)
+		n := 0
+		for _, kv := range c.Env {
+			if hostgit.NoProtocol(kv) {
+				n++
+			} else if strings.HasPrefix(kv, "GIT_ALLOW_PROTOCOL=") {
+				t.Errorf("proxy %v: another protocol is allowed", p != nil)
+			}
+		}
+		if n != 1 || !slices.Contains(c.Env, "GIT_NO_LAZY_FETCH=1") {
+			t.Errorf("proxy %v: Env drops what gives git no protocol", p != nil)
+		}
+	}
+	if out, err := c.CombinedOutput(); err == nil || !strings.Contains(string(out), "transport 'file' not allowed") {
+		t.Errorf("git reached file:// (%v): %s", err, out)
 	}
 }
 
