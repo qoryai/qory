@@ -2314,10 +2314,12 @@ The start commit is the newest commit that the run which wrote the version pushe
 target's repository, from `pushed_commits` in the response to `GET /work-item`, and that a
 version of that run confirms: the version's file, or the file of another version of the same
 run, has exactly one top-level `reference` whose `collection` is the target's and whose
-`address.path` is that commit. qory checks the run's commits newest first. A newer commit
+`address.path` is that commit. A version with a later withdrawal of its artifact that is not
+cancelled confirms no commit. qory checks the run's commits newest first. A newer commit
 that no version confirms, such as one that a later session of a shared run pushed before it
 failed, counts as a cancelled run's commit: the run does not move to it, and the push
-replaces it with a lease. A read target starts at the commit that the version lists for its
+replaces it with a lease, unless a commit of a run that nobody cancelled lies below it (see
+[The head check](#the-head-check)). A read target starts at the commit that the version lists for its
 repository, and at the head of its default branch when the version lists none.
 
 Then the run moves to the newest commit of the repository that an earlier run pushed, when
@@ -2336,9 +2338,10 @@ the checkout at `target_version` (step 3) and moves as the rule above says.
 
 When a later run pushed a commit above the commit of the approved version, the run that starts
 at that version does not move to it. Its push fails with the end code `push_head_changed`,
-because the branch at the forge is at the later commit. The push does not fail when a person
-cancelled the run that pushed that commit, or when the run which wrote the approved version
-pushed it and no version confirms it: the push replaces the commit with a lease.
+because the branch at the forge is at the later commit. The push replaces a head with a lease
+only when a person cancelled the run that pushed it, or when the run which wrote the approved
+version pushed it and no version confirms it. A commit of a run that nobody cancelled is never
+dropped by the lease push: see [The head check](#the-head-check).
 
 qory composes the harness at `target_version`, with the read targets at the heads of their
 default branches, before it checks out the work item's branch. A read target whose version
@@ -3307,14 +3310,21 @@ credential alone. The result is one of these:
 - The head is past the start commit, the run has not pushed yet, and the head is one that a
   run which a person cancelled pushed, as the work item's record lists it (one head for each
   push), or one that the run which wrote the start's version pushed after the start, with no
-  version of that run to confirm it, and it descends from the start commit. qory fetches the
-  history of the branch head only when the record lists that head as one of these, and then
-  checks that it descends from the start commit. A head below, above or beside a recorded head, or one that the record does
+  version of that run to confirm it, and it descends from the start commit, and no commit
+  of a run that nobody cancelled is above the start commit and is that head or below it.
+  qory fetches the history of the branch head only when the record lists that head as one of
+  these, and then checks that it descends from the start commit. qory then fetches each
+  commit that `pushed_commits` lists for a run that a person did not cancel, other than the
+  expected commit, and checks that none is above the start commit and at the head or below
+  it. A commit that the forge does not have is not below the head. A head below, above or
+  beside a recorded head, or one that the record does
   not list, is any other head, and the push stops with no fetch. qory pushes with
   `--force-with-lease=refs/heads/qory/<work item id>:<head>`, so the push replaces
   those commits only while the branch is still at the head qory read.
-- Any other head (an unrecorded head, a recorded head after the run's first push, or a
-  recorded head that does not descend from the start commit) or the branch missing where the
+- Any other head (an unrecorded head, a recorded head after the run's first push, a
+  recorded head that does not descend from the start commit, or a recorded head with a
+  commit of a run that nobody cancelled above the start commit and at the head or below
+  it) or the branch missing where the
   run did not start at the checkout: qory pushes nothing, and the step
   fails with the line in the list above, which starts with `Set the branch to the
   expected commit or delete it`, or with `Create the branch at the expected commit on the

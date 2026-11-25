@@ -511,6 +511,26 @@ func TestPushedStartsChecksEachCommit(t *testing.T) {
 	}
 }
 
+// TestPushedStartsKeepsEachCommitOfARunNobodyCancelled is a record with two commits of the
+// repository acme/shop by runs that nobody cancelled, one of a cancelled run, and one of
+// acme/lib: Pushed has the three commits of the runs that nobody cancelled, in the order of the
+// record, so the push check sees each one, and Cancelled has the fourth.
+func TestPushedStartsKeepsEachCommitOfARunNobodyCancelled(t *testing.T) {
+	commit := func(c string) string { return strings.Repeat(c, 40) }
+	entry := func(path, c string, cancelled bool) runapi.PushedEntry {
+		return runapi.PushedEntry{System: "git.example.com", Path: path, Commit: commit(c), Cancelled: cancelled}
+	}
+	branch := &preparation.WorkBranch{}
+	err := pushedStarts(branch, []runapi.PushedEntry{entry("acme/shop", "a", false), entry("acme/lib", "b", false), entry("acme/shop", "c", true), entry("acme/shop", "d", false)})
+	var got []string
+	for _, l := range branch.Pushed {
+		got = append(got, l.Path+" "+l.Commit[:1])
+	}
+	if err != nil || !slices.Equal(got, []string{"acme/shop a", "acme/lib b", "acme/shop d"}) || len(branch.Cancelled) != 1 || branch.Cancelled[0].Commit != commit("c") {
+		t.Errorf("err %v, pushed %v, cancelled %+v", err, got, branch.Cancelled)
+	}
+}
+
 // TestStartCommitIsConfirmedByAnotherVersionOfTheSameRun is a run that stored notes, the
 // newest version, with no reference to its commit, and pull-request with one: the start is
 // confirmed by pull-request. With no other version, notes alone stops with 0 references.
@@ -606,6 +626,49 @@ func TestAVersionBeforeAWithdrawalConfirmsNoCommit(t *testing.T) {
 	}
 	if got, skipped, err := startCommit(t.Context(), client, chosen, "pull-request", others, pushed, startTarget); err != nil || got != a || !slices.Equal(skipped, []int{1}) {
 		t.Errorf("start %q, skipped %v, %v; want %s and [1]", got, skipped, err, a)
+	}
+}
+
+// TestSameRunVersionsCountsWithdrawalsPerArtifact is the versions of one run in two artifacts of
+// [startTarget]'s collection: a withdrawal that a member cancelled leaves the versions before it,
+// and a withdrawal of one artifact leaves the versions of the other.
+func TestSameRunVersionsCountsWithdrawalsPerArtifact(t *testing.T) {
+	version := func(id string, number int, withdrawn, cancelled bool) runapi.Version {
+		return runapi.Version{ID: id, Number: number, Withdrawn: withdrawn, Cancelled: cancelled, Writer: runapi.Writer{Kind: "run", RunID: "run_1"}}
+	}
+	for name, c := range map[string]struct {
+		pullRequest, notes []runapi.Version
+		want               []string
+	}{
+		"a cancelled withdrawal leaves the version before it": {
+			[]runapi.Version{version("av_1", 1, false, false)},
+			[]runapi.Version{version("av_2", 1, false, false), version("av_3", 2, true, true)},
+			[]string{"av_2"},
+		},
+		"a withdrawal of the other artifact leaves the version": {
+			[]runapi.Version{version("av_1", 1, false, false), version("av_4", 3, true, false)},
+			[]runapi.Version{version("av_2", 1, false, false)},
+			[]string{"av_2"},
+		},
+		"a withdrawal that counts leaves no version before it": {
+			[]runapi.Version{version("av_1", 1, false, false)},
+			[]runapi.Version{version("av_2", 1, false, false), version("av_3", 2, true, false)},
+			nil,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			index := &runapi.Index{Artifacts: []runapi.Artifact{
+				{Type: "pull-request", Name: startName, Versions: c.pullRequest},
+				{Type: "notes", Name: startName, Versions: c.notes},
+			}}
+			var got []string
+			for _, o := range sameRunVersions(index, startTarget, &index.Artifacts[0].Versions[0]) {
+				got = append(got, o.version.ID)
+			}
+			if !slices.Equal(got, c.want) {
+				t.Errorf("the other versions are %v, want %v", got, c.want)
+			}
+		})
 	}
 }
 

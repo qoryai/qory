@@ -41,10 +41,11 @@ type WorkBranch struct {
 	// Approved is true when Version is the one that an approval lists, not one that the run's
 	// stage wrote: the run starts at its commit and moves to no later push.
 	Approved bool
-	// Pushed is, per repository, the newest commit pushed by a run that a person did not
-	// cancel, from the work item's record of pushed commits; the run starts there instead of
-	// at Version when that commit descends from the commit of Version, or from the
-	// repository's target commit when Version has none. Cancelled is every commit that a
+	// Pushed is every commit pushed by a run that a person did not cancel, from the work
+	// item's record of pushed commits, oldest first; the run starts at the newest one of a
+	// repository instead of at Version when that commit descends from the commit of Version, or
+	// from the repository's target commit when Version has none. A push never drops a commit of
+	// Pushed that is above the start ([checkHead]). Cancelled is every commit that a
 	// cancelled run pushed, and every commit that the run which wrote the start's version
 	// pushed after the start and that no version of that run confirms. The caller has
 	// checked each commit as a full commit id.

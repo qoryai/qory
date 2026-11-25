@@ -133,8 +133,10 @@ type headCheck struct {
 // plain push only for a repository that [WorkBranch.fresh] says starts at the run
 // documents' checkout. A head of [WorkBranch.Cancelled], which a cancelled run or a session
 // with no version pushed, and that descends from the commit the run started at is a push that
-// replaces the branch with a lease on that head, before the run's first push alone. Any other
-// head is a [*HeadChanged].
+// replaces the branch with a lease on that head, before the run's first push alone, unless a
+// commit of [WorkBranch.Pushed] other than the expected one is above the start commit and is
+// that head or below it: the lease would drop a commit of a run that nobody cancelled. Any
+// other head is a [*HeadChanged].
 //
 // Equality with a recorded head is enough: the record lists one head for each push of a
 // cancelled run, and the push replaces the position of the branch that this run set, with every
@@ -174,7 +176,38 @@ func checkHead(ctx context.Context, read gitRunner, dir string, b *WorkBranch, r
 	if !above {
 		return headCheck{}, changed
 	}
+	// The lease replaces every commit between the start and the head. A commit of a run that
+	// nobody cancelled, [WorkBranch.Pushed], is never dropped with them.
+	for _, p := range b.Pushed {
+		if p.Commit == r.Commit || p.System != b.system || !sameRepository(b.system == ForgeGitHub, p.Path, r.Path) {
+			continue
+		}
+		under, err := h.pastAndUnder(ctx, r.Commit, p.Commit, got)
+		if err != nil {
+			return headCheck{}, fmt.Errorf(textHeadNoRead, shownPath(r.Path), shownPath(b.system), integration.Printable(exports.HideURLError(err).Error()))
+		}
+		if under {
+			return headCheck{}, changed
+		}
+	}
 	return headCheck{lease: got}, nil
+}
+
+// pastAndUnder reports whether commit is above start and is head or below it. A commit that
+// the forge does not have, or that the history lacks for another reason git reports with an
+// exit status, is not below head.
+func (h *history) pastAndUnder(ctx context.Context, start, commit, head string) (bool, error) {
+	if _, err := h.read(ctx, h.dir, "fetch", "--quiet", "--no-tags", "--filter=tree:0", "--", h.url, commit); err != nil {
+		if ge := (*gitError)(nil); errors.As(err, &ge) && (notOurRef.MatchString(ge.line) || notOurRef.MatchString(ge.output)) {
+			return false, nil
+		}
+		return false, err
+	}
+	past, err := h.descends(ctx, start, commit)
+	if err != nil || !past {
+		return false, err
+	}
+	return h.descends(ctx, commit, head)
 }
 
 // cancelledHead reports whether commit is a head that a cancelled run pushed to the repository

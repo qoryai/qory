@@ -138,16 +138,13 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, deadline time.T
 	return branch, nil
 }
 
-// pushedStarts sets what the work item's record of pushed commits gives branch: Pushed,
-// per repository the newest commit of a run that a person did not cancel, and Cancelled,
-// every commit of a cancelled run. The entries come ordered by run number and then by push
-// order, so the last one of a repository is its newest. A commit that is not a full commit id
-// ends the read before git gets it: the run API returns these values, and none of them may be
-// a ref name or an option.
+// pushedStarts sets what the work item's record of pushed commits gives branch: Pushed, every
+// commit of a run that a person did not cancel, and Cancelled, every commit of a cancelled run.
+// The entries come ordered by run number and then by push order, and Pushed keeps that order, so
+// the last entry of a repository is its newest. A commit that is not a full commit id ends the
+// read before git gets it: the run API returns these values, and none of them may be a ref name
+// or an option.
 func pushedStarts(branch *preparation.WorkBranch, pushed []runapi.PushedEntry) error {
-	newest := map[[2]string]preparation.Landed{}
-	order := [][2]string{}
-
 	for _, entry := range pushed {
 		if !lowerCommitID(entry.Commit) {
 			return fmt.Errorf("Report this run to the instance admin of Qory Apiary.\n"+
@@ -157,20 +154,9 @@ func pushedStarts(branch *preparation.WorkBranch, pushed []runapi.PushedEntry) e
 		landed := preparation.Landed{System: entry.System, Path: entry.Path, Commit: entry.Commit}
 		if entry.Cancelled {
 			branch.Cancelled = append(branch.Cancelled, landed)
-
-			continue
+		} else {
+			branch.Pushed = append(branch.Pushed, landed)
 		}
-
-		key := [2]string{entry.System, entry.Path}
-		if _, seen := newest[key]; !seen {
-			order = append(order, key)
-		}
-
-		newest[key] = landed
-	}
-
-	for _, key := range order {
-		branch.Pushed = append(branch.Pushed, newest[key])
 	}
 
 	return nil
