@@ -122,6 +122,26 @@ func TestAPersonsRunThatCannotWriteItsInputsStops(t *testing.T) {
 	}
 }
 
+// TestAPersonsWalledRunThatCannotWriteItsInputsStops is a person's walled run with a submit
+// program, whose home for that run alone gets an inputs.json between the compose and the
+// write: the run stops before the join with exit 1 and the same fix as an unwalled run.
+func TestAPersonsWalledRunThatCannotWriteItsInputsStops(t *testing.T) {
+	root, _, _ := localProgramCheckout(t)
+	var home string
+	t.Cleanup(cmd.BeforeInstallStandIn(func() {
+		home = oneRunHome(t, runHomesFolder(t, root))
+		writeFile(t, filepath.Join(home, "inputs.json"), "{}\n")
+	}))
+	joined := false
+	agentInCopy(t, func(session.SessionSpec) { joined = true })
+	out, err := run(t, "run", "claude", "--", "-p", "hi")
+	if cmd.ExitCode(err) != 1 || joined {
+		t.Fatalf("%v (exit %d), joined %v, want exit 1 before the join\n%s", err, cmd.ExitCode(err), joined, out)
+	}
+	wants(t, err.Error(), "Remove inputs.json from the harness home, then run the command again.\nThe home "+home+" has inputs.json, where qory writes the run's inputs.")
+	lacks(t, out+err.Error(), "the code is used", "work item")
+}
+
 // TestAPersonsWalledRunsPushChecksGetNoInputs is a walled run against a server with no run
 // key and no run code, which has a control plane, whose harness declares a push check for spec: it composes into a home for that run
 // under qory/homes in the cache, and its check's container starts with the pushed files and
