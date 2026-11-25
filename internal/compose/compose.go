@@ -871,10 +871,9 @@ func checkPlans(res *Result, p *stack.Stack, base *Base, as string) error {
 
 // checkReviewGroups refuses a workflow of the stack whose review_group is no group role
 // of the composed harness, or is one with no member, for the first such workflow in sorted
-// order: a review session could expect no report. The group is the key
-// agents/<review_group> of [Result.Groups], which has the key for each group role a
-// module declares, nil for one with no member. The check is the compose's, since the
-// stack alone does not know its modules.
+// order. The group is the key agents/<review_group> of [Result.Groups], which has the
+// key for each group role a module declares, nil for one with no member. The check is
+// the compose's, since the stack alone does not know its modules.
 func checkReviewGroups(res *Result, p *stack.Stack, base *Base, as string) error {
 	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
 		group := p.Workflows[name].ReviewGroup
