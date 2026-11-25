@@ -3415,7 +3415,7 @@ output: the run pushed no commits to the target.`, then `Target: <system>/<path>
 by two spaces, and the output stays in the outbox until the next session starts.
 
 qory checks an output that exists. Qory Apiary checks that the outputs that the stage requires
-exist when the stage's last session ends. A session may end with no output: qory pushes its
+exist when the stage's last session succeeds. A session may end with no output: qory pushes its
 commits, as after every session, and the missing output does not change how the run closes.
 
 Then, for each output, qory:

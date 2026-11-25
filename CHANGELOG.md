@@ -382,7 +382,7 @@ release may change what an existing document does, and states it under Upgrading
   check, stores one version, and removes the version's files from the outbox. The version of a
   delivered type goes to the artifact `t-` and the first 32 hexadecimal digits of the SHA-256 of the target's `collection`; any other
   type's to `main`. qory checks an output that exists, and Qory Apiary checks that the
-  required ones exist when the stage's last session ends. qory reads, fills and checks the
+  required ones exist when the stage's last session succeeds. qory reads, fills and checks the
   outputs before the push with the local head, so an output that fails pushes nothing and
   closes the run `failed` with `outputs_invalid`, and again after the push. qory removes
   the outbox before each session, so an output that a failed session or an earlier run

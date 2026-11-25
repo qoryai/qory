@@ -428,7 +428,8 @@ func recordIn(version []preparation.Repository, ref string, target *contracts.Ta
 // push moved in the target's repository, see [recordOf]. A type that marks pushed-commits,
 // or any member that qory fills from the push ([marksPushFill]), of a run that pushed nothing
 // to the target gets no version, and a line on w. An output that the outbox does not have is
-// no error: Qory Apiary checks that each required output exists.
+// no error: Qory Apiary checks that each required output exists when the stage's last session
+// succeeds.
 func (o *runOutputs) ready(w io.Writer, rec *pushRecord, note string) (out []readyOutput, err error) {
 	for _, stage := range o.stage {
 		t := typeOf(o.types, stage.Type)
