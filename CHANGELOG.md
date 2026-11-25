@@ -18,6 +18,13 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- `wall.step_file_env` in `forager.yaml` lists the variables of a CI job, such as
+  `CI_STEP_ENV_FILE`, that point at its step files. `qory run` stops a walled run before
+  the agent starts when a mount is or contains the file such a variable points at: the
+  mount contains one of Forager's files (`mount_contains_forager_files`). It does the same for `GITHUB_ENV`,
+  `GITHUB_PATH`, `GITHUB_OUTPUT`, `GITHUB_STATE` and `GITHUB_STEP_SUMMARY`. The list adds
+  to those five and never removes one. Every command that reads `forager.yaml` stops at
+  an entry that is not a variable's name.
 - `qory run` from a run code runs the workflow hooks of each session, as `hooks.json` lists
   them: the hooks at the session's end after the agent exited, when the session succeeded or
   its work is pushed, and before the push step; the hooks at the start of session 1 before the

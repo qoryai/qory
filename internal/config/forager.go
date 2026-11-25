@@ -372,6 +372,10 @@ type ForagerWall struct {
 	// the gateway makes an authority for the run: in the container, or on this machine
 	// for a run without a wall. Nil means Forager's defaults.
 	CAEnv []string
+	// StepFileEnv lists the variables that point at a CI job's step files, which a CI
+	// step writes to pass values to the job's next steps or to its summary, beside
+	// GitHub Actions' five that qory run always protects. Nil adds none.
+	StepFileEnv []string
 	// Setup is where the setup commands of a run run, [SetupOutside] or [SetupInside];
 	// empty means outside.
 	Setup string
@@ -479,17 +483,18 @@ type foragerFile struct {
 		PrebuildImage *string `yaml:"prebuild_image"`
 		Command       *string `yaml:"command"`
 		Helper        *string `yaml:"helper"`
-		// Env, Mounts and CAEnv are read as nodes, so an entry that is not a string
-		// is refused by its index.
-		Env     yaml.Node `yaml:"env,omitempty"`
-		User    *string   `yaml:"user"`
-		Mounts  yaml.Node `yaml:"mounts,omitempty"`
-		CPUs    *string   `yaml:"cpus"`
-		Memory  *string   `yaml:"memory"`
-		PIDs    *int      `yaml:"pids_limit"`
-		ShmSize *string   `yaml:"shm_size"`
-		CAEnv   yaml.Node `yaml:"ca_env,omitempty"`
-		Setup   *string   `yaml:"setup"`
+		// Env, Mounts, CAEnv and StepFileEnv are read as nodes, so the error for an
+		// entry that is not a string contains the entry's index.
+		Env         yaml.Node `yaml:"env,omitempty"`
+		User        *string   `yaml:"user"`
+		Mounts      yaml.Node `yaml:"mounts,omitempty"`
+		CPUs        *string   `yaml:"cpus"`
+		Memory      *string   `yaml:"memory"`
+		PIDs        *int      `yaml:"pids_limit"`
+		ShmSize     *string   `yaml:"shm_size"`
+		CAEnv       yaml.Node `yaml:"ca_env,omitempty"`
+		StepFileEnv yaml.Node `yaml:"step_file_env,omitempty"`
+		Setup       *string   `yaml:"setup"`
 		// EngineProxyFile is read as a path alone; qory run reads the file.
 		EngineProxyFile *string `yaml:"engine_proxy_file"`
 
@@ -786,7 +791,7 @@ func LoadForagerIn(dir string) (*Forager, error) {
 		notMount := func(i, _ int) error {
 			return exports.Refuse(fmt.Sprintf("Set wall.mounts[%d] to an absolute path, with :ro after it for a read-only one.", i), "The entry is not an absolute path.", "wall.mounts is in "+exports.HidePath(path)+".")
 		}
-		var mounts, caEnv, env []string
+		var mounts, caEnv, stepFileEnv, env []string
 		if mounts, err = stringList(path, "wall.mounts", &w.Mounts, notMount); err != nil {
 			return nil, err
 		}
@@ -835,6 +840,18 @@ func LoadForagerIn(dir string) (*Forager, error) {
 				return nil, notCAEnv(i, 0)
 			}
 			r.Wall.CAEnv = append(r.Wall.CAEnv, name)
+		}
+		notStepFileEnv := func(i, _ int) error {
+			return exports.Refuse(fmt.Sprintf("Set wall.step_file_env[%d] to a variable's name.", i), "The entry is not one.", "wall.step_file_env is in "+exports.HidePath(path)+".")
+		}
+		if stepFileEnv, err = stringList(path, "wall.step_file_env", &w.StepFileEnv, notStepFileEnv); err != nil {
+			return nil, err
+		}
+		for i, name := range stepFileEnv {
+			if !envName.MatchString(name) {
+				return nil, notStepFileEnv(i, 0)
+			}
+			r.Wall.StepFileEnv = append(r.Wall.StepFileEnv, name)
 		}
 		notEnv := func(i, _ int) error {
 			return exports.Refuse(fmt.Sprintf("Set wall.env[%d] to a variable's name.", i), "The entry is not one. The value comes from the environment, never from this file.", "wall.env is in "+exports.HidePath(path)+".")
@@ -1972,6 +1989,9 @@ func (r *Forager) Rows() []Row {
 		}
 		if len(r.Wall.CAEnv) > 0 {
 			rows = append(rows, Row{"wall.ca_env", strings.Join(shownNames(r.Wall.CAEnv), ", "), origin})
+		}
+		if len(r.Wall.StepFileEnv) > 0 {
+			rows = append(rows, Row{"wall.step_file_env", strings.Join(shownNames(r.Wall.StepFileEnv), ", "), origin})
 		}
 		if r.Wall.PIDs > 0 {
 			rows = append(rows, Row{"wall.pids_limit", strconv.Itoa(r.Wall.PIDs), origin})

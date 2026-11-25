@@ -5651,8 +5651,27 @@ What to know:
     contains it, every link on the way to it;
   - the file of a `<name>_file` setting of an integration the run describes, where its
     path leads, and, for a mount that is or contains it, every link on the way to it;
+  - a CI job's step file, which a CI step writes to pass values to the job's next steps
+    or to its summary. A step file is the regular file that `GITHUB_ENV`, `GITHUB_PATH`,
+    `GITHUB_OUTPUT`, `GITHUB_STATE`, `GITHUB_STEP_SUMMARY` or a variable of
+    `wall.step_file_env` points at. `qory run` protects where the file's path leads and,
+    for a mount that is or contains the file, every link on the way to it.
+    `wall.step_file_env` adds the variables of another CI system, such as
+    `step_file_env: [CI_STEP_ENV_FILE]`, to GitHub Actions' five; it never removes one;
   - one of Forager's program and temporary files, such as a program it starts
     outside the wall.
+
+  For a CI job's step file, the line contains the variable:
+
+  ```
+  qory run: the mount <host path> contains <file>, the file <variable> points at, which a CI step writes to pass values to the job's next steps or to its summary; the agent could change what the job's next steps or its summary receive, so the run does not start. Mount a narrower path
+  ```
+
+  For a read-only mount, it says `the agent could read the file` instead. For a link on
+  the way to the file, it says `the mount <host path> leads through a link to <file>, the
+  file <variable> points at, which a CI step writes to pass values to the job's next
+  steps or to its summary; the agent could point the link elsewhere`; for a read-only
+  mount, `the agent could read the file`.
 
   For a mount that is or contains the access key, `qory run` says:
 

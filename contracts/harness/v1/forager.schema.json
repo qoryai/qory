@@ -581,6 +581,15 @@
             "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
           }
         },
+        "step_file_env": {
+          "description": "The variables of a CI job that point at its step files, which a CI step writes to pass values to the job's next steps or to its summary. qory run counts such a file as one of Forager's files and stops a walled run before the agent starts when a mount is or contains it. The list adds to GITHUB_ENV, GITHUB_PATH, GITHUB_OUTPUT, GITHUB_STATE and GITHUB_STEP_SUMMARY, which qory run always protects. Default none.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          }
+        },
         "setup": {
           "description": "Where a run's setup commands run before the agent starts, for a run from a control plane whose repositories qory fetches: outside, in a separate container of the run's image on the wall's network, or inside, in the agent's container. Default outside.",
           "type": "string",
