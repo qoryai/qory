@@ -326,9 +326,9 @@ release may change what an existing document does, and states it under Upgrading
   commit shows how it ended, and it stores no output. The next run starts at the newest
   commit of the version's run that a version of that run confirms, and a version with a later
   withdrawal of its artifact that is not cancelled confirms none. A commit that a later
-  session pushed with no version is skipped, and the next push replaces it with a lease, unless
-  a commit of a run that nobody cancelled lies below it, except the commits that count as a
-  cancelled run's. See The push step of a write run in `docs/run.md`.
+  session of that run pushed with no version is skipped, and the next push replaces it with a lease, unless
+  a commit of a run that nobody cancelled lies between the start commit and it, except the
+  commits that count as a cancelled run's. See The push step of a write run in `docs/run.md`.
 - A skill reads its work item and stores what it made with `qory work-item show`, `qory
   artifact pull`, `qory artifact push` and `qory run verdict`. In a run they use Qory
   Apiary through the gateway, at `QORY_RUN_API`. Outside a run they use the checkout's
@@ -1003,10 +1003,11 @@ release may change what an existing document does, and states it under Upgrading
   from the start commit. The push stops with `push_head_changed` when a commit of a run that
   nobody cancelled, except the commits that count as a cancelled run's, is above the start
   commit and is that head or below it: the lease never drops such a commit. qory reads that
-  with one `git rev-list --ancestry-path` on the fetched history. qory stops on a head
-  below, above or beside a recorded head, with no fetch. A run starts at the newest commit
-  that an earlier run pushed and a person did not cancel, unless its start version is one
-  that a gate approved: then it starts at that version's commit.
+  with one `git rev-list --ancestry-path` on the fetched history. A span of more than 10000
+  commits stops the push the same way. qory stops on a head below, above or beside a
+  recorded head, with no fetch. A run starts at the newest commit that an earlier run pushed
+  and a person did not cancel, unless its start version is one that a gate approved: then it
+  starts at that version's commit.
 - A delivered output's member that `pushed-base-branch` marks has the name of the target
   repository's default branch, read when the run fetched it. A name of more than 255
   characters gives an empty string.
@@ -1098,11 +1099,13 @@ release may change what an existing document does, and states it under Upgrading
   pushed above the approved commit, the push of a run that starts there fails with
   `push_head_changed`. The push replaces a head with a lease only when a person cancelled the
   run that pushed it, or when the run which wrote the approved version pushed it and no version
-  confirms it. The lease push never drops a commit of a run that nobody cancelled, except the
-  commits that count as a cancelled run's. A run whose stage wrote a version that counts starts
-  at its newest one, even when another stage wrote a newer version, and moves to the newest
-  pushed commit that descends from it. A version with a later withdrawal of its artifact that is
-  not cancelled does not count. This covers a version that a gate approved too.
+  confirms it. The lease push never drops a commit of a run that nobody cancelled that is above
+  the start commit, except the commits that count as a cancelled run's. It does not check a
+  commit that does not descend from the start commit: the push can drop it. A run whose stage
+  wrote a version that counts starts at its newest one, even when another stage wrote a newer
+  version, and moves to the newest pushed commit that descends from it. A version with a later
+  withdrawal of its artifact that is not cancelled does not count. This covers a version that a
+  gate approved too.
 - Every run of a work item from a run code with a run API reads the work item through `GET
   /work-item` at its start, with or without a repository, as the stage's outputs come from
   it. A setup past its limit in that read names the step `the read of the work item`. A stage

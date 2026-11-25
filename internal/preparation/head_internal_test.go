@@ -542,6 +542,24 @@ func TestTheLeaseCheckReadsNoMoreThanOneFetchAndBoundedHistory(t *testing.T) {
 	}
 }
 
+// TestACommitOfAnotherSystemIsNoKeptCommit is a recorded head of two cancelled commits on the start,
+// and a commit in Pushed that is the first of them, with the same path on another system: it is
+// no commit of this repository, so the lease replaces both.
+func TestACommitOfAnotherSystemIsNoKeptCommit(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop")
+	bare := filepath.Join(base, "acme", "shop.git")
+	first := bareCommit(t, bare, b.Ref, b.Repositories[0].Commit, "cancelled one")
+	head := bareCommit(t, bare, b.Ref, first, "cancelled two")
+	b.Cancelled = []Landed{{System: "git.example.com", Path: "acme/shop", Commit: head}}
+	b.Pushed = []Landed{{System: "other.example.com", Path: "acme/shop", Commit: first}}
+	leave(t, dir)
+	commitHere(t, dir)
+	check, err := checkHead(context.Background(), stepGit(&testProxy, ""), dir, b, b.Repositories[0])
+	if err != nil || check.lease != head {
+		t.Errorf("lease %q, error %v, want the head %s", check.lease, err, head)
+	}
+}
+
 // TestAPushOfTwoCancelledCommitsHasOneRecordedHead is the shape the recorder has: a cancelled run
 // pushed 2 commits in one push, so one head is recorded and its parent is not. The branch is at
 // that head, so the next run's first push replaces both with a lease on it.
