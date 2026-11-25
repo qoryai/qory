@@ -3339,7 +3339,8 @@ with the feature `workflow_model`: `.qory/outbox` at the top of the checkout, or
 working folder of a run with no repository. A run with neither a run code nor a run key has
 it when the composed harness has a submit program, see [The submit program](#the-submit-program),
 and the run may write and works in a copy of a git checkout with a commit: `.qory/outbox` at
-the top of the copy. Any other run, such as an unwalled run or a read run, has no `qory.outbox`.
+the top of the copy. Any other run, such as a person's unwalled run or a read run, has no
+`qory.outbox`.
 For a run on the branch of its work item, qory adds the line `/.qory/outbox/` to the
 checkout's `.git/info/exclude` once before the session starts, with the line `/.qory` that
 the compose adds. That file is local to the clone and no commit has it, so `git add -A` and
