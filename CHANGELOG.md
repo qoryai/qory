@@ -19,9 +19,10 @@ release may change what an existing document does, and states it under Upgrading
 ### Added
 
 - A workflow entry of a stack takes `review_group`, the name of a group role:
-  `workflows: {review-changes: {review_group: reviewers}}`. A value that is no string
-  or no group role name stops the compose with exit 2, and so does a group that no
-  module declares or that has no member.
+  `workflows: {review-changes: {review_group: reviewers}}`. The value declares the group
+  role whose members review the work in a session of the workflow. A value that is no
+  string or no group role name stops the compose with exit 2, and so does a group that
+  no module declares or that has no member. `qory run` does not read the key.
 - A workflow entry of a stack takes `judges`, a boolean: `workflows: {implement-changes:
   {judges: false}}`. `false` declares that a later workflow in the loop judges the work
   of the workflow's session. A value other than `true` or `false`, a quoted `"no"`
