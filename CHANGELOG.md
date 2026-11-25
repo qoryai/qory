@@ -373,8 +373,9 @@ release may change what an existing document does, and states it under Upgrading
   the type's `json_schema` with the primitives written out, or `null` for a type that the
   composed `process.yaml` does not define. A stage with no output, and a run with a run key
   and no run code, have `[]`. See The outputs of a session in `docs/run.md`.
-- A session writes each output to the outbox, the folder in `QORY_OUTBOX`: `.qory/outbox`
-  of the checkout, or of the working folder of a run with no repository. After a session
+- A session writes each output to the outbox, the folder whose absolute path `inputs.json`
+  has as `qory.outbox`: `.qory/outbox` of the checkout, or of the working folder of a run
+  with no repository. A run with no outbox has no `qory.outbox`. After a session
   that succeeded, the push step reads each output of the stage, sets `target` of a type
   that `deliver` of the run documents lists, fills the marked members from the push to the
   target's repository, checks the file against the type's schema and, for a delivered
@@ -1006,9 +1007,13 @@ release may change what an existing document does, and states it under Upgrading
   characters gives an empty string.
 - A module manifest can declare `submit_program`, a command of the module that opens the
   draft pull request. A composed harness has one; a second declaration stops the compose.
+- A run with neither a run code nor a run key, whose harness has a submit program, gets
+  `$QORY_HARNESS_HOME/inputs.json` with the member `qory` alone, as a run with a run key does.
+  Such a run has `qory.outbox`, the outbox in its copy, when it may write and works in a copy
+  of a git checkout; a person's unwalled run and a read run have no `qory.outbox`.
 - A session of a run with neither a run code nor a run key hands the draft's title, text and
   the step of each commit to the submit program in its pull-request output,
-  `.qory/outbox/pull-request/pull-request.json` under the folder in `QORY_OUTBOX`. A commit
+  `.qory/outbox/pull-request/pull-request.json` under the folder in `qory.outbox`. A commit
   with no step is `unreviewed`. qory reads the file inside the copy: a link as the file, or
   a link that leads out of the copy, ends the read. qory drops each of these, with a line
   that states the cause and the values: a title with a control character; a title with no

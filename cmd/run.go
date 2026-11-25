@@ -108,8 +108,9 @@ key or a run code, and a walled run, with no --home or harness.home, gets a home
 run alone, which qory removes when the run ends: runs/<name>-<hash>/<run id> under
 qory/homes. The harness report stays per checkout, as runs/<name>-<hash>-report.json
 there. A run from Qory Apiary, with a run code or a run key, finds its inputs in
-$QORY_HARNESS_HOME/inputs.json. A run key's file has the member qory alone. A person's
-run, also one that registers itself through gateway.server.via, has no such file.
+$QORY_HARNESS_HOME/inputs.json. A run key's file has the member qory alone. A person's run
+whose harness has a submit program has the file too, with the member qory alone. Any other
+person's run has none, also one that registers itself through gateway.server.via.
 
 The agent is the runtime of the stack's target. Name another first, and the run composes
 for it instead; name one when the target has several. Arguments after -- go to the
@@ -807,6 +808,16 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// prepareLaunch, which writeSessionInputs writes with the session's start values.
 			var inputsPending qoryInputs
 			writeSessionInputs := func() error {
+				// A person's run gets its inputs folder here: only a run with a run key or a run
+				// code has one from the start.
+				if in == "" {
+					dir, remove, err := fromCode.inputsDir()
+					cleanups = append(cleanups, remove)
+					if err != nil {
+						return keyedError(fromCode, inputsNotWritten(err))
+					}
+					in = dir
+				}
 				q := inputsPending
 				q.StartCommits = startCommits(branch, cwd)
 				if startSnapshot != "" {
@@ -816,12 +827,18 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err != nil {
 					return keyedError(fromCode, inputsNotWritten(err))
 				}
-				checks.setInputs(file, data)
+				// A person's push check gets no --inputs, as it got none before its run had the file.
+				if dispatched {
+					checks.setInputs(file, data)
+				}
 				if err := copyInputs(at.home, data); err != nil {
+					if !dispatched {
+						return personsInputsNotCopied(at.home, err)
+					}
 					return keyedError(fromCode, inputsNotCopied(at.home, err))
 				}
-				// A home that is not this run's alone, from --home or harness.home, keeps
-				// no copy once the run is over.
+				// A home that is not this run's alone, from --home or harness.home, or an
+				// unwalled run's .qory/harness, keeps no copy once the run is over.
 				if runHome == "" {
 					copied := filepath.Join(at.home, inputsFile)
 					cleanups = append(cleanups, func() { removeInputsCopy(copied, said) })
@@ -898,13 +915,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					// inputs.json has the inputs of a run code, if any, and what qory adds, which the
 					// report has. Session 1 writes it once the branch switch and the setup are
 					// done, so its start commits are final; a later session starts at the last
-					// pushed commits, so it writes it here.
+					// pushed commits, so it writes it once its outbox is known.
 					inputsPending = qoryInputs{HarnessExtensions: rep.Extensions, Outputs: fromCode.outputs(types)}
-					if later {
-						if err := writeSessionInputs(); err != nil {
-							return false, err
-						}
-					}
 				}
 				if fromCode != nil {
 					if extra, err = fromCode.workflowArgs(name, rep, in, run.System()); err != nil {
@@ -936,16 +948,23 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return false, err
 					}
 					outputs = &runOutputs{root: at.root, stage: fromCode.snapshot.Outputs, types: delivered, target: fromCode.targetRef, noRepository: !listed.working()}
-					spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{outboxEnv: outboxPath(at.root)})
+					inputsPending.Outbox = outboxPath(at.root)
 				}
 				// The composed harness's submit program runs on a run with neither a run code nor a
 				// run key, on the person's machine and with the person's login of the forge's
 				// command line. A run with a run code or a run key has none: it is a dispatched run,
 				// and the forge's adapter opens its draft from the stored pull-request output.
 				// Everything of the local submit step follows from program: the outbox exclusion
-				// and QORY_OUTBOX of the copy, copied.submits and submitLocal.
+				// and qory.outbox of the copy, copied.submits and submitLocal. Such a run gets
+				// inputs.json with the member qory alone, as a run with a run key does.
 				if code == nil && key == nil && c.submitProgram != nil {
 					program = &submitProgram{command: c.submitProgram.Command, limit: submitLimit}
+					inputsPending = qoryInputs{HarnessExtensions: rep.Extensions}
+				}
+				if dispatched && later {
+					if err := writeSessionInputs(); err != nil {
+						return false, err
+					}
 				}
 				for _, line := range fromCode.deliverLines(rep, submitLevel) {
 					fmt.Fprintln(w, "qory run:", line)
@@ -1319,7 +1338,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err := copied.dir.Exclude(outboxExclude); err != nil {
 						return &runLineError{codeLine(err)}
 					}
-					spec.Variables.Run = withEnv(spec.Variables.Run, map[string]string{outboxEnv: outboxPath(copied.dir.Work())})
+					inputsPending.Outbox = outboxPath(copied.dir.Work())
 					copied.submits = true
 				}
 				return nil
@@ -1523,7 +1542,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				// After the setup, qory writes the session's inputs.json; a step that adds to
 				// inputs.json goes before this one.
-				if prepErr == nil && dispatched {
+				if prepErr == nil && (dispatched || program != nil) {
 					prepErr = writeSessionInputs()
 				}
 				if beforeJoin != nil {
@@ -2669,8 +2688,26 @@ func inputsNotCopied(home string, err error) error {
 	return fmt.Errorf(textInputsNotCopied+codeUsed, exports.Value(filepath.Join(home, inputsFile), false), exports.HideError(err))
 }
 
-// removeInputsCopy removes copied, the copy of inputs.json in a home that --home or
-// harness.home sets, when the run ends. report prints a line of qory run.
+// The lines of [personsInputsNotCopied]: the first line is the fix, the second the cause.
+const (
+	textPersonsInputsCopyExists = "Remove inputs.json from the harness home, then run the command again.\n" +
+		"The home %s has inputs.json, where qory writes the run's inputs."
+	textPersonsInputsNotCopied = "Make the harness home writable for you, then run the command again.\n" +
+		"Writing the run's inputs to %s failed: %s"
+)
+
+// personsInputsNotCopied is [inputsNotCopied] for a person's run, which has no work item to
+// take in again and no run code.
+func personsInputsNotCopied(home string, err error) error {
+	if errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf(textPersonsInputsCopyExists, exports.Value(home, false))
+	}
+	return fmt.Errorf(textPersonsInputsNotCopied, exports.Value(filepath.Join(home, inputsFile), false), exports.HideError(err))
+}
+
+// removeInputsCopy removes copied, the copy of inputs.json in a home that is not the run's
+// alone, from --home or harness.home or an unwalled run's .qory/harness, when the run ends.
+// report prints a line of qory run.
 func removeInputsCopy(copied string, report func(string)) {
 	if err := os.Remove(copied); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		report(fmt.Sprintf(textCopyNoRemove, exports.Value(copied, false), shownError(err)))

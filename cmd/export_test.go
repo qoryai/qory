@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"net/http"
 	"os"
@@ -1229,13 +1230,21 @@ func SetInstallRuntimes(on bool) func() {
 
 // SetInstallStandIn makes a run of Claude Code that installs nothing start a copy of its
 // launch's program, from a new folder under root that others can read, as an install
-// makes one, and returns what restores the default. A launch whose Command is not the
-// absolute path of a file gets a program that exits 0.
+// makes one, and returns what restores the default. A launch whose Command is a name, such
+// as sh, or an absolute path that is no file on this machine, such as the agent of a test's
+// image, gets a program that runs that Command where the session runs, inside its container
+// behind a wall. A launch whose Command is claude, or a file that cannot be read, gets a
+// program that exits 0, so no test starts Claude Code.
 func SetInstallStandIn(root string) func() {
 	before := installStandIn
 	installStandIn = func(command string) (*runtimeinstall.Installed, error) {
 		data, err := os.ReadFile(command)
-		if err != nil || !filepath.IsAbs(command) {
+		switch {
+		case command == "claude":
+			data = []byte("#!/bin/sh\nexit 0\n")
+		case !filepath.IsAbs(command) || errors.Is(err, fs.ErrNotExist):
+			data = []byte("#!/bin/sh\nexec '" + command + "' \"$@\"\n")
+		case err != nil:
 			data = []byte("#!/bin/sh\nexit 0\n")
 		}
 		folder, err := os.MkdirTemp(root, "claude-")
@@ -1255,6 +1264,18 @@ func SetInstallStandIn(root string) func() {
 		lastStandIn = filepath.Join(folder, "bin", "claude")
 		standInMu.Unlock()
 		return &runtimeinstall.Installed{Runtime: "claude", Version: "0", Dir: folder}, nil
+	}
+	return func() { installStandIn = before }
+}
+
+// BeforeInstallStandIn makes a run of Claude Code call f before the stand-in install of
+// [SetInstallStandIn], after the compose and before inputs.json, and returns what restores
+// the default.
+func BeforeInstallStandIn(f func()) func() {
+	before := installStandIn
+	installStandIn = func(command string) (*runtimeinstall.Installed, error) {
+		f()
+		return before(command)
 	}
 	return func() { installStandIn = before }
 }

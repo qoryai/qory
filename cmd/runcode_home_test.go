@@ -296,6 +296,56 @@ func TestARunFromARunCodeWithAGivenHomeRemovesTheCopyOfItsInputs(t *testing.T) {
 	}
 }
 
+// TestADispatchedRunWhoseHomeGetsAnInputsFileKeepsItsText is a run from a run code, and a run
+// with a run key, with --home, where an inputs.json appears in the home between the compose and
+// qory's write, while the runtime installs. Each stops with the text of a run from Qory Apiary
+// and not a person's, and only the run from a run code ends with the code is used.
+func TestADispatchedRunWhoseHomeGetsAnInputsFileKeepsItsText(t *testing.T) {
+	given := filepath.Join(tempDir(t), "homes")
+	t.Cleanup(cmd.BeforeInstallStandIn(func() {
+		homes, err := filepath.Glob(filepath.Join(given, "*", "claude"))
+		if err != nil || len(homes) != 1 {
+			t.Errorf("the composed homes are %v (%v), want one", homes, err)
+			return
+		}
+		writeFile(t, filepath.Join(filepath.Dir(homes[0]), "inputs.json"), "{}\n")
+	}))
+	check := func(t *testing.T, got string, code bool) {
+		t.Helper()
+		wants(t, got, "Remove inputs.json from the home, or omit --home and harness.home, then take the work item in again.")
+		lacks(t, got, "run the command again")
+		if strings.Contains(got, "the code is used") != code {
+			t.Errorf("the text ends with the code is used: %v, want %v\n%s", !code, code, got)
+		}
+	}
+	t.Run("run code", func(t *testing.T) {
+		r := codeHarness{before: func() []string { return []string{"--home", given} }}.run(t)
+		if r.joined || r.err == nil {
+			t.Fatalf("%v, joined %v, want a stop before the join\n%s", r.err, r.joined, r.out)
+		}
+		check(t, r.err.Error(), true)
+	})
+	if err := os.RemoveAll(given); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("run key", func(t *testing.T) {
+		keyedFolder(t, true)
+		walledByDocker(t)
+		gw := newKeyedGateway(t)
+		key := mintRunKey(t, keyRunID, gw.url())
+		t.Setenv("QORY_RUN_KEY", "")
+		_, _, restore := cmd.OpenNowhereWith(cmd.Nowhere{})
+		defer restore()
+		joined := false
+		t.Cleanup(cmd.SetJoinSession(func(session.SessionSpec) { joined = true }))
+		out, err := run(t, "run", "claude", "--run-key-fd", descriptor(t, key), "--home", given)
+		if joined || err == nil {
+			t.Fatalf("%v, joined %v, want a stop before the join\n%s", err, joined, out)
+		}
+		check(t, err.Error(), false)
+	})
+}
+
 // TestARunFromARunCodeWithAGivenHomeRemovesTheCopyAfterAFailure is a run from a run code with
 // --home whose runtime, codex, runs no command by its name from a headless start, and whose
 // harness has the workflow only as a command: the run stops after qory composed the home and

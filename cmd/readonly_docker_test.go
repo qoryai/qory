@@ -168,6 +168,19 @@ const writeAgent = `#!/bin/sh
 echo left > left.txt
 `
 
+// executableScope commits the mode 755 for the scope check [helloScopeProgram] of p on main,
+// and makes that commit p.first: [newPushRepoWith] commits it with the mode 644, and a real
+// engine, unlike the fake docker, runs the program and stops on that mode.
+func executableScope(t *testing.T, p *pushRepo) {
+	t.Helper()
+	work := filepath.Join(tempDir(t), "scope")
+	proxygittest.Git(t, filepath.Dir(work), "clone", "--quiet", p.bare, work)
+	proxygittest.Git(t, work, "update-index", "--chmod=+x", "modules/hello/"+helloScopeProgram)
+	proxygittest.Git(t, work, "-c", "user.name=Example", "-c", "user.email=example@example.com", "commit", "--quiet", "-m", "Make the scope check executable")
+	proxygittest.Git(t, work, "push", "--quiet", "origin", "HEAD:main")
+	p.first = proxygittest.Git(t, work, "rev-parse", "HEAD")
+}
+
 // TestARealWriteRunRemovesTheSetupContainerBeforeThePush is a write run behind a real wall
 // on this machine's engine, whose postStartCommand leaves a process running. As the push
 // step starts, the record has the step "remove the setup container", the run has no setup
@@ -187,6 +200,7 @@ func TestARealWriteRunRemovesTheSetupContainerBeforeThePush(t *testing.T) {
 	})
 	p.real = true
 	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
+	executableScope(t, p)
 	fakeLaunch(t, "/usr/local/bin/write-agent")
 	writeFile(t, filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml"),
 		"wall:\n  adapter: docker\n  helper: "+helper+"\n  user: \"1000:1000\"\n  image: "+image+"\n")

@@ -26,17 +26,20 @@ func TestARunLoweredBelowWriteRunsNoSubmitStep(t *testing.T) {
 				d["access"] = "write"
 				d["deliver"] = []any{map[string]any{"type": "pull-request", "send": "after_gate"}}
 			}
+			var outbox bool
 			var variables []string
-			p.mountsOf = func(spec session.SessionSpec) { variables = spec.Variables.Run }
+			p.mountsOf = func(spec session.SessionSpec) {
+				_, outbox = outboxMember(spec)
+				variables = outboxVariables(spec)
+			}
 			agent := writesAndCommits(t)
 			r := p.run(t, agent, nil)
 			r.wantsClose(t, event.StateSucceeded, 0)
-			outbox := false
-			for _, v := range variables {
-				outbox = outbox || strings.HasPrefix(v, "QORY_OUTBOX=")
-			}
 			if outbox != c.write {
-				t.Errorf("outbox variable %v, want %v", outbox, c.write)
+				t.Errorf("qory.outbox present: %v, want %v", outbox, c.write)
+			}
+			if len(variables) != 0 {
+				t.Errorf("the session has the variables %q", variables)
 			}
 			wantsNoProgram(t, r, log)
 			if c.write {

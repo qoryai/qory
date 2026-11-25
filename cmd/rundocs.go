@@ -703,7 +703,7 @@ func (r *codeRun) startLine(runID string) string {
 // inputs.json, which [codeRun.writeInputs] writes once the harness is composed, and
 // returns in/, links resolved, and what removes the temporary folder. in/ is outside the
 // state directory, which holds the run records that no mount may reach. A nil r, a run
-// with a run key and no run code, gets the same folder. The temporary
+// with no run code, gets the same folder. The temporary
 // folder begins with qory-inputs-: Forager reserves the qory-run-, qory-tool-, qory-wall-
 // and qory-link- folders of the system's temporary directory, and the wall stops a run
 // that mounts one.
@@ -728,14 +728,18 @@ func (r *codeRun) inputsDir() (string, func(), error) {
 const inputsMember = "qory"
 
 // qoryInputs is the value of [inputsMember]: what qory adds to the inputs of a run from
-// a run code, and all that inputs.json has for a run with a run key and no run code. Each
-// field is one member, always written.
+// a run code, and all that inputs.json has for a run with a run key and no run code, or
+// for a person's run whose harness has a submit program. Each field is one member, always
+// written, but Outbox.
 type qoryInputs struct {
 	// HarnessExtensions is the harness report's extensions, {} for none.
 	HarnessExtensions map[string]any `json:"harness_extensions"`
 	// Outputs is the outputs of the run's stage, in the stage's order, [] for none, as
 	// [codeRun.outputs] has them.
 	Outputs []inputOutput `json:"outputs"`
+	// Outbox is the absolute path of the session's outbox, see [outboxPath], and no member
+	// for a run with no outbox.
+	Outbox string `json:"outbox,omitempty"`
 	// StartCommits is the commit each repository the run may push is at when the session
 	// starts, [] for a run with no branch, and StartArtifacts the folder of the session's launch
 	// snapshot, see [startArtifacts]. The push step's scope check reads the same values.
@@ -863,8 +867,7 @@ func harnessTypes(rep report.Report) (types []exports.ProcessType, found bool) {
 // r's inputs as they came, with the member [inputsMember] set to q added after the
 // others. It returns the file's path and the bytes it wrote, which a copy of the file
 // takes from memory: a read of the file could return what something else wrote there. A nil
-// r, a run with a run key and no run code, has no inputs, so the file has the member qory
-// alone.
+// r, a run with no run code, has no inputs, so the file has the member qory alone.
 func (r *codeRun) writeInputs(in string, q qoryInputs) (string, []byte, error) {
 	inputs := []byte("{}")
 	if r != nil {

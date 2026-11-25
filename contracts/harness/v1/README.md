@@ -814,8 +814,9 @@ the one in the primitives file.
 
 A stage lists its outputs in the process (§A factory's process.yaml), each a type and
 whether the stage requires it. A session of a dispatched run at level `write` writes each
-output to the outbox, the folder whose absolute path is in `QORY_OUTBOX`: `.qory/outbox` at
-the top of the checkout, or in the working folder of a run with no repository. The outbox
+output to the outbox, the folder whose absolute path `inputs.json` has as `qory.outbox`, a
+string: `.qory/outbox` at the top of the checkout, or in the working folder of a run with no
+repository. A run with no outbox has no `qory.outbox`. The outbox
 is in the checkout's `.git/info/exclude`, and a push whose commits have a path under it
 stops. `inputs.json` has the stage's outputs as `qory.outputs`: a list in the stage's
 order, each with `type`, `required` and `schema`, the type's `json_schema` with each
@@ -1371,12 +1372,15 @@ of the run's `inputs.json` read-only at the file's path, mode 0644 in a folder o
 command's arguments, before the pushed files' paths, such as `checks.js push spec --inputs
 <in>/inputs.json /qory-push-check/files/spec.md`. Its member `qory.harness_extensions` is
 the report's `extensions` (docs/run.md, §The run key from a run code). `qory.start_commits` has
-the folder and the start commit of each repository that the session may push, and
-`qory.start_artifacts` the folder of the session's launch snapshot, read-only. The file of a run
+the folder and the start commit of each repository that the session may push,
+`qory.start_artifacts` the folder of the session's launch snapshot, read-only, and
+`qory.outbox` the session's outbox (§Outputs). The file of a run
 key has only the member `qory`, since that run has no run documents. The home of such a
 run also contains `inputs.json` with the same bytes, mode 0644, which a hook reads as
-`$QORY_HARNESS_HOME/inputs.json`. A person's run, also one that registers itself through
-`gateway.server.via`, has no `inputs.json`, and its check gets no `--inputs`.
+`$QORY_HARNESS_HOME/inputs.json`. A person's run whose harness has a submit program has
+that file in its home too, with only the member `qory`; its check gets no `--inputs`. Any
+other person's run, also one that registers itself through `gateway.server.via`, has no
+`inputs.json`, and its check gets no `--inputs`.
 
 qory makes the working folder, the pushed files' folder and the copy of `inputs.json` in
 the run directory, in a folder that only its user can list, and removes them after each
