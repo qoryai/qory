@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/qoryai/qory/internal/compose"
@@ -89,56 +88,9 @@ func (c *Checker) Scope(ctx context.Context, command []string, clone, snapshot, 
 	return ScopeEnd{ExitCode: end.exitCode, Lines: lines}, nil
 }
 
-// nobody is the uid:gid a scope check runs as when qory runs as root and the wall sets no
-// other user than root.
-const nobody = "65534:65534"
-
-// ScopeUser is the uid:gid a scope check runs as, the owner of the clone it reads, since
-// git stops on a repository of another user: see [scopeUser].
+// ScopeUser is the uid:gid a scope check runs as, this process's: the owner of the clone it
+// reads, since git stops on a repository of another user. A walled run of qory as root stops
+// before its first container, so it is never root's.
 // shortcut: a rootless engine maps uids, so git's owner check there fails closed; replace
 // it when qory supports such an engine for scope checks.
-func (c *Checker) ScopeUser() string {
-	return scopeUser(os.Getuid(), os.Getgid(), c.User)
-}
-
-// scopeUser is the user of a scope check for a process of uid and gid and the wall's user
-// wall: uid:gid when uid is not 0; for root, wall when its uid is a number above 0, else
-// 65534:65534, so the check never reads the agent's commits as root.
-func scopeUser(uid, gid int, wall string) string {
-	if uid != 0 {
-		return fmt.Sprintf("%d:%d", uid, gid)
-	}
-	text, _, _ := strings.Cut(wall, ":")
-	if id, err := strconv.Atoi(text); err == nil && id > 0 {
-		return wall
-	}
-	return nobody
-}
-
-// Chown makes user, a uid:gid, the owner of each folder of dirs and everything in it, not
-// through a link, so a scope check that runs as user owns the clone it reads.
-func Chown(user string, dirs ...string) error {
-	uidText, gidText, _ := strings.Cut(user, ":")
-	uid, err := strconv.Atoi(uidText)
-	if err != nil {
-		return fmt.Errorf("the user %s has no numeric uid", exports.Value(user, true))
-	}
-	gid := uid
-	if gidText != "" {
-		if gid, err = strconv.Atoi(gidText); err != nil {
-			return fmt.Errorf("the user %s has no numeric gid", exports.Value(user, true))
-		}
-	}
-	for _, dir := range dirs {
-		err := filepath.WalkDir(dir, func(path string, _ fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			return os.Lchown(path, uid, gid)
-		})
-		if err != nil {
-			return fmt.Errorf("making %s the owner of the scope check's folder failed: %w", exports.Value(user, true), exports.HideError(err))
-		}
-	}
-	return nil
-}
+func ScopeUser() string { return fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()) }

@@ -595,11 +595,11 @@ func runCheck(out io.Writer, pr *prepared) error {
 	if _, err := os.Stat(pr.at.home); err != nil {
 		return &staleError{}
 	}
-	stage, err := os.MkdirTemp("", "qory-check-")
+	tmp, stage, err := checkStage()
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(stage)
+	defer os.RemoveAll(tmp)
 	all := allRuntimes(pr.at.home, pr.targets)
 	if err := render.BuildAt(pr.res, stage, pr.at.home, all...); err != nil {
 		return err
@@ -625,6 +625,21 @@ func runCheck(out io.Writer, pr *prepared) error {
 	}
 	u.Fields(append(rows, pr.rows...))
 	return &staleError{Differences: differences}
+}
+
+// checkStage is [newCheckStage]; a test replaces it to see where a check builds.
+var checkStage = newCheckStage
+
+// newCheckStage makes a new temporary directory, tmp, mode 0700, and returns it with stage,
+// the path in it where a check builds the home again, which does not exist yet. The build
+// gives stage mode 0755, and tmp keeps other users from listing it or reading the module
+// copies in it.
+func newCheckStage() (tmp, stage string, err error) {
+	tmp, err = os.MkdirTemp("", "qory-check-")
+	if err != nil {
+		return "", "", err
+	}
+	return tmp, filepath.Join(tmp, "home"), nil
 }
 
 // envDifferences compares the variables a compose sets in each runtime's launch, want,

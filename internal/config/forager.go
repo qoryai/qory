@@ -355,8 +355,8 @@ type ForagerWall struct {
 	// model credential. Nothing else of the environment does.
 	Env []string
 	// User is the uid:gid the container runs as; empty means qory run's own, so the
-	// checkout's files keep their owner. Root is refused, so a machine where qory runs
-	// as root sets one.
+	// checkout's files keep their owner. A walled run stops when qory runs as root, or as
+	// another uid than this one.
 	User string
 	// Mounts are what the container sees of this machine beside the checkout and the
 	// composed home, each at its own path; --mount adds to them.

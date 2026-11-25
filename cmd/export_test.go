@@ -337,6 +337,22 @@ func SetWriteWalledHome(f func(dir, files string, run codex.WalledRun) ([]codex.
 	return func() { writeWalledHome = before }
 }
 
+// SetQoryUID sets the uid that [oneUser] takes as qory's until the function it returns is
+// called.
+func SetQoryUID(uid int) func() {
+	before := qoryUID
+	qoryUID = func() int { return uid }
+	return func() { qoryUID = before }
+}
+
+// SetCheckStage makes a check take its temporary folder and stage from f, and returns what
+// restores the function before.
+func SetCheckStage(f func() (tmp, stage string, err error)) func() {
+	before := checkStage
+	checkStage = f
+	return func() { checkStage = before }
+}
+
 // SetLoadPushChecks makes qory run read the push checks of a home with f, and returns
 // what restores the reader.
 func SetLoadPushChecks(f func(home string) ([]compose.PushCheck, error)) func() {

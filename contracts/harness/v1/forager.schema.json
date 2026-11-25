@@ -539,7 +539,7 @@
           }
         },
         "user": {
-          "description": "The uid:gid the container runs as. Default qory run's, so the checkout's files keep their owner. Root is refused; a machine where qory runs as root sets another.",
+          "description": "The uid:gid the container runs as. Default qory run's, so the checkout's files keep their owner. A walled run needs qory as an ordinary user whose uid is the wall user's uid, so root is refused.",
           "type": "string",
           "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]*)?$"
         },

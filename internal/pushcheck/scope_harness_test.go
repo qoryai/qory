@@ -98,7 +98,7 @@ func (r *harnessRig) scope(step, work, clone, snapshot, start string) pushcheck.
 	if err := preparation.ScopeClone(context.Background(), os.Environ(), work, clone, preparation.WorkRepository{Commit: start}, r.git(work, "rev-parse", "HEAD")); err != nil {
 		r.t.Fatal(err)
 	}
-	end, err := r.c.Scope(context.Background(), []string{r.program, "scope", "--plan"}, clone, snapshot, start, r.c.ScopeUser())
+	end, err := r.c.Scope(context.Background(), []string{r.program, "scope", "--plan"}, clone, snapshot, start, pushcheck.ScopeUser())
 	if err != nil {
 		r.t.Fatal(err)
 	}

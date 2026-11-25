@@ -712,6 +712,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// sessions with a run API, checks each POST of its run API from behind the
 			// wall, see [runPushChecks].
 			checks := &runPushChecks{report: said, fromCode: code != nil}
+			// The open starts the wall's relay, so a walled run that [oneUser] stops opens with
+			// no container. It writes its machine step, if it has one, and closes before any
+			// other step, with the error's end code.
+			var userErr error
+			if walled {
+				if userErr = oneUser(spec.Wall, code != nil); userErr != nil {
+					spec.Wall = noContainers{spec.Wall}
+				}
+			}
 			run, err := openRun(ctx, spec.OpenSpec)
 			if err != nil {
 				closeGateway()
@@ -1496,7 +1505,8 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// more.
 			var prepErr error
 			if ctx.Err() == nil && time.Now().Before(setupDeadline) {
-				if walled && in != "" {
+				prepErr = userErr
+				if prepErr == nil && walled && in != "" {
 					prepErr = fromCode.inputsMounted(in, spec.given)
 				}
 				if prepErr == nil {

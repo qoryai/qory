@@ -7,11 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -291,20 +289,11 @@ func newChecker(ctx context.Context, run openedRun, home, runID string, spec *ru
 		}
 		return nil, checksStop(fromCode, textChecksNoRuntime, textChecksNoRuntimeFromCode, exports.Value(checker.Runtime, false))
 	}
-	// The folder is qory's user's alone. For a run's user that is another user, its mode
-	// lets that user pass through to the folders of a check, which it cannot list.
-	mode := fs.FileMode(0o700)
-	if uid, _, _ := strings.Cut(user, ":"); uid != strconv.Itoa(os.Getuid()) {
-		mode = 0o711
-	}
+	// The folder is qory's user's alone, who is the run's user too, see [oneUser].
 	noFolder := func(err error) error {
 		return checksStop(fromCode, textChecksNoFolder, textChecksNoFolderFromCode, exports.Value(checker.Dir, false), strings.TrimSuffix(shownError(exports.HideError(err)), "."))
 	}
 	if err := os.Mkdir(checker.Dir, 0o700); err != nil {
-		return nil, noFolder(err)
-	}
-	if err := os.Chmod(checker.Dir, mode); err != nil {
-		os.RemoveAll(checker.Dir)
 		return nil, noFolder(err)
 	}
 	return checker, nil
