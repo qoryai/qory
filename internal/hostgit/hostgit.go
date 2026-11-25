@@ -16,7 +16,9 @@
 //     programs that do nothing. GIT_SSH, GIT_SSH_COMMAND, GIT_ASKPASS,
 //     GIT_PROXY_COMMAND, GIT_EXTERNAL_DIFF and XDG_CONFIG_HOME are kept from the
 //     person's environment, which is sound only while nothing loads qory's environment
-//     from a file a run wrote.
+//     from a file a run wrote;
+//   - with no protocol and no fetch of a missing object, see [noProtocol]. The one git
+//     that reaches a remote, or a repository by its path, is made by [Remote].
 //
 // [Unchecked] makes git for a command that reads no repository, such as git config
 // --file, with the same flags and the same rules for the environment, applied to an
@@ -26,6 +28,7 @@ package hostgit
 
 import (
 	"context"
+	"crypto/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,6 +50,32 @@ var flags = []string{
 	"-c", "core.commitGraph=false",
 }
 
+// noProtocol are the variables of every git but the ones of [Remote] and [LazyFetch]. A
+// read of an object that a repository with a promisor remote does not have starts git
+// fetch, which runs programs of the repository's configuration. GIT_NO_LAZY_FETCH stops
+// that fetch on a git that reads it. GIT_ALLOW_PROTOCOL wins over each protocol key of a
+// configuration file, and the one protocol it allows has a name made for this process:
+// with a name that is known before, such as none, a remote with vcs = none and the alias
+// remote-none pass the check and run the alias.
+var noProtocol = []string{"GIT_ALLOW_PROTOCOL=none-" + rand.Text(), noLazyFetch}
+
+// noLazyFetch is the variable that stops the fetch of a missing object, which [Remote]'s git
+// has too.
+const noLazyFetch = "GIT_NO_LAZY_FETCH=1"
+
+// noFetch are the -c flags of every git with [noProtocol], for a git that does not read
+// GIT_NO_LAZY_FETCH: what git fetch runs before it checks the protocol.
+var noFetch = []string{
+	"-c", "fetch.bundleURI=",
+	"-c", "core.alternateRefsCommand=:",
+	"-c", "maintenance.auto=false",
+	"-c", "gc.auto=0",
+}
+
+// NoProtocol reports whether kv is the variable that gives a git of this package no
+// protocol. Code that drops git's variables from such a git's environment keeps it.
+func NoProtocol(kv string) bool { return kv == noProtocol[0] }
+
 // dropped are the variables taken out of git's environment: the ones that add
 // configuration git would read after the repository's files, the one that chooses git's
 // programs, and the ones that choose another repository than the one in dir. The
@@ -62,7 +91,8 @@ var dropped = []string{
 // nothing.
 var quiet = []string{"GIT_PAGER=cat", "GIT_EDITOR=:", "GIT_SEQUENCE_EDITOR=:"}
 
-// Env is the environment of every git command [Command] makes: this process's, without
+// Env is the environment of every git command [Command] makes, but for [noProtocol], which
+// this package adds to the command alone: this process's, without
 // the [dropped] variables and every GIT_CONFIG_KEY_<n> and GIT_CONFIG_VALUE_<n>, with
 // the PATH's empty and relative entries taken out, /usr/bin:/bin when none is left or
 // there is no PATH, and with the pager and the editors set to programs that do nothing.
@@ -171,9 +201,14 @@ func command(ctx context.Context, dir string, args ...string) *exec.Cmd {
 }
 
 // commandIn is [command] with env, which [envFrom] made, in place of [Env]. Every git
-// qory runs on this machine is made here.
+// qory runs on this machine is made here, but the ones of [Remote] and [LazyFetch].
 func commandIn(ctx context.Context, dir string, env []string, args ...string) *exec.Cmd {
-	c := exec.CommandContext(ctx, "git", append(append([]string{}, flags...), args...)...)
+	return commandOf(ctx, dir, slices.Concat(env, noProtocol), slices.Concat(flags, noFetch, args))
+}
+
+// commandOf is git with all of its arguments and environment, at [gitIn]'s path.
+func commandOf(ctx context.Context, dir string, env, args []string) *exec.Cmd {
+	c := exec.CommandContext(ctx, "git", args...)
 	c.Dir = dir
 	c.Env = env
 	c.Path, c.Err = gitIn(c.Env)
@@ -195,6 +230,30 @@ func Unchecked(ctx context.Context, dir string, base []string, args ...string) (
 		return nil, err
 	}
 	return commandIn(ctx, dir, env, args...), nil
+}
+
+// Remote is [Unchecked] for the one command that reaches a remote, or a repository by its
+// path, such as git fetch, git push or git clone: the protocols are the ones that the
+// caller's flags, the configuration and base allow. A folder that a run can write gets a
+// git of Remote only after the check of its .git that the push step makes.
+func Remote(ctx context.Context, dir string, base []string, args ...string) (*exec.Cmd, error) {
+	env := envFrom(base)
+	if err := ready(ctx, env); err != nil {
+		return nil, err
+	}
+	return commandOf(ctx, dir, slices.Concat(env, []string{noLazyFetch}), slices.Concat(flags, args)), nil
+}
+
+// LazyFetch is [Unchecked] for a git of a person's qory worktree command that needs the
+// objects which a partial clone leaves out: git fetches each missing one from the promisor
+// remote, with any protocol that the configuration and base allow, as a git that the person
+// runs there does. internal/worktree alone calls it.
+func LazyFetch(ctx context.Context, dir string, base []string, args ...string) (*exec.Cmd, error) {
+	env := envFrom(base)
+	if err := ready(ctx, env); err != nil {
+		return nil, err
+	}
+	return commandOf(ctx, dir, env, slices.Concat(flags, args)), nil
 }
 
 // gitIn returns the git that the PATH of env finds: the first entry that holds a file

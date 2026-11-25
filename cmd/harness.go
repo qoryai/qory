@@ -537,6 +537,10 @@ type composeOptions struct {
 	// compose's lock: qory run adds the rows of a run of several sessions, see
 	// [report.Report.Sessions].
 	sessions func(*report.Report)
+	// launched, when set, is the report of the run's first compose: the compose of a later
+	// session takes its worktree section, so it runs no git that reads objects of the
+	// checkout, which a session before could write.
+	launched *report.Report
 	// alone is set for the compose of a later session of a qory run in the home that the
 	// run made for itself: the home holds the session's runtime alone, see
 	// [composeOptions.homeRuntimes].
@@ -1242,7 +1246,11 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 		rep.Qory = &report.Build{Version: b.Version, Commit: b.Commit, Source: b.Source}
 	}
 	var baseErr error
-	rep.Worktree, baseErr = reportBase(at.root, conf)
+	if o.launched != nil {
+		rep.Worktree = o.launched.Worktree
+	} else {
+		rep.Worktree, baseErr = reportBase(at.root, conf)
+	}
 	// The machine harness settings of a qory.yaml at the checkout root are not read
 	// under extends, and a row says so, on a dry run as well, so the person who wrote
 	// them learns that the base stack decides.

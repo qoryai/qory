@@ -1004,7 +1004,9 @@ func cacheName(v string) string {
 // limit. A command still running when opts.Context ends is killed too, and the error
 // wraps the context's cause.
 //
-// With opts.Git nil, git runs through [hostgit.Command], with every prompt off, the
+// fetch and ls-remote run through [hostgit.Remote]; every other git has no protocol.
+//
+// With opts.Git nil, git runs as [hostgit.Command] makes it, with every prompt off, the
 // terminal's, an askpass program's and ssh's, so a remote that wants a password or an
 // unknown host key fails instead of waiting. A GIT_SSH_COMMAND the environment already
 // carries is kept.
@@ -1024,10 +1026,14 @@ func git(dir string, opts Options, args ...string) ([]byte, error) {
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 	}
 	defer cancel()
+	command := hostgit.Unchecked
+	if args[0] == "fetch" || args[0] == "ls-remote" {
+		command = hostgit.Remote
+	}
 	if opts.Git != nil {
 		p := &opts.Git.Proxy
 		full := append(append(append([]string{}, proxygit.Hardened...), proxygit.HTTPSOnly...), args...)
-		cmd, err := hostgit.Unchecked(ctx, dir, os.Environ(), full...)
+		cmd, err := command(ctx, dir, os.Environ(), full...)
 		if err != nil {
 			return nil, err
 		}
@@ -1053,7 +1059,7 @@ func git(dir string, opts Options, args ...string) ([]byte, error) {
 		}
 		return out, err
 	}
-	cmd, err := hostgit.Command(ctx, dir, args...)
+	cmd, err := command(ctx, dir, hostgit.Base(ctx), args...)
 	if err != nil {
 		return nil, err
 	}

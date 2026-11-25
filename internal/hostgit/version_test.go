@@ -122,6 +122,7 @@ func TestEveryEntryStopsOnAGitOlderThan236(t *testing.T) {
 			_, err := hostgit.Unchecked(ctx, dir, os.Environ(), "config", "--list")
 			return err
 		},
+		"LazyFetch": func() error { _, err := hostgit.LazyFetch(ctx, dir, os.Environ(), "status"); return err },
 	} {
 		t.Run(name, func(t *testing.T) {
 			log := fakeGit(t, "git version 2.34.1", false, true)

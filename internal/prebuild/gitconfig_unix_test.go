@@ -161,7 +161,7 @@ func TestBuildRunsGitFromThePathOfItsPrograms(t *testing.T) {
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "git.log"))
 	// hostgit puts its -c flags before every git command.
-	flags := "-c core.hooksPath=/dev/null -c core.fsmonitor=false -c protocol.ext.allow=never -c diff.ignoreSubmodules=all -c submodule.recurse=false -c fetch.recurseSubmodules=false -c core.useReplaceRefs=false -c core.commitGraph=false "
+	flags := "-c core.hooksPath=/dev/null -c core.fsmonitor=false -c protocol.ext.allow=never -c diff.ignoreSubmodules=all -c submodule.recurse=false -c fetch.recurseSubmodules=false -c core.useReplaceRefs=false -c core.commitGraph=false -c fetch.bundleURI= -c core.alternateRefsCommand=: -c maintenance.auto=false -c gc.auto=0 "
 	if want := flags + "config --file " + filepath.Join(repo, ".git", "config") + " --no-includes --list -z\n"; err != nil || string(data) != want {
 		t.Errorf("the git of the options' PATH ran %q, %v; want %q", data, err, want)
 	}

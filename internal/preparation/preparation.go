@@ -1010,30 +1010,50 @@ func Clone(ctx context.Context, system, path, dest string) error {
 // p: the git [hostgit.Unchecked] finds in the environment [hostgit.Base] of ctx, with
 // its options, the [hardened] ones and [protocols], and the environment [proxygit.Env]
 // makes for p, which sets the proxy and the CA bundle and reads no configuration but
-// the repository's. No error's text
+// the repository's. With [hasRemote] of p, the subcommands of [remoteCommands] run through
+// [hostgit.Remote]; every other git has no protocol. No error's text
 // contains the password of p's URL.
 func hostRunner(p *proxygit.Proxy) gitRunner { return hostRunnerWith(p, "") }
 
 // hostRunnerWith is [hostRunner] with input on git's stdin and env added to its
 // environment.
 func hostRunnerWith(p *proxygit.Proxy, input string, env ...string) gitRunner {
-	return hostRunnerOf(p, nil, input, env)
+	return hostRunnerOf(p, hasRemote(p), nil, input, env)
 }
 
-// hostRunnerOf is [hostRunnerWith] with options added to git's options.
-func hostRunnerOf(p *proxygit.Proxy, options []string, input string, env []string) gitRunner {
+// hasRemote reports whether a git with p may reach a remote: p is set and is not [noRemote].
+func hasRemote(p *proxygit.Proxy) bool { return p != nil && p != noRemote }
+
+// remoteCommands are the git subcommands that reach a remote.
+var remoteCommands = []string{"clone", "fetch", "ls-remote", "push"}
+
+// hostRunnerOf is [hostRunnerWith] with options added to git's options, and with remote for
+// whether the subcommands of [remoteCommands] run through [hostgit.Remote].
+func hostRunnerOf(p *proxygit.Proxy, remote bool, options []string, input string, env []string) gitRunner {
 	return func(ctx context.Context, dir string, args ...string) (string, error) {
 		return runGit(ctx, p, func(ctx context.Context) (*exec.Cmd, error) {
-			full := slices.Concat(hardened, protocols, options, args)
-			cmd, err := hostgit.Unchecked(ctx, dir, hostgit.Base(ctx), full...)
+			cmd, err := hostCommand(ctx, p, remote && slices.Contains(remoteCommands, args[0]), dir, options, env, args)
 			if err != nil {
 				return nil, err
 			}
-			cmd.Env = append(proxygit.Env(cmd.Env, p), env...)
 			cmd.Stdin = strings.NewReader(input)
 			return cmd, nil
 		}, args[0])
 	}
+}
+
+// hostCommand is the git of [hostRunnerOf], made by [hostgit.Remote] with remote set.
+func hostCommand(ctx context.Context, p *proxygit.Proxy, remote bool, dir string, options, env, args []string) (*exec.Cmd, error) {
+	command := hostgit.Unchecked
+	if remote {
+		command = hostgit.Remote
+	}
+	cmd, err := command(ctx, dir, hostgit.Base(ctx), slices.Concat(hardened, protocols, options, args)...)
+	if err != nil {
+		return nil, err
+	}
+	cmd.Env = append(proxygit.Env(cmd.Env, p), env...)
+	return cmd, nil
 }
 
 // runGit runs the git make makes, subcommand its first argument, for at most [limitOf]

@@ -2100,6 +2100,19 @@ release may change what an existing document does, and states it under Upgrading
   the JSON escape `\u0000` decodes to a raw control character, and a reader fails on a
   file that has one. The patterns accept and stop the same characters as before. A test
   fails when a pattern of a contract schema has a raw control character.
+- Each git that qory runs on your machine has `GIT_ALLOW_PROTOCOL` set to a protocol name
+  that no remote uses, so it reaches no remote. qory's `git fetch`, `git clone`, `git push`
+  and `git ls-remote`, and the gits of `qory worktree add` and `qory worktree remove` that
+  fetch a missing object, are the exceptions: they use the protocols that your git
+  configuration allows. Each git but these exceptions also starts no automatic maintenance
+  or garbage collection. Every git of qory but those of `qory worktree` that fetch a missing
+  object has `GIT_NO_LAZY_FETCH=1`, so on git 2.45 or later it fetches no object that a
+  partial clone left out.
+- `qory worktree add` and `qory worktree remove` fetch an object that a partial clone left
+  out from the clone's promisor remote, as git does when you run it there, in the gits that
+  read one: the checkout of the worktree, `git status`, `git reset --hard`, `git rebase`,
+  `git merge --ff-only`, the patch match of `git log --cherry-mark`, and the check that a
+  base is a commit. Each other git of the two commands fetches no object.
 
 ### Removed
 
@@ -2109,6 +2122,19 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- The push step commits a tracked folder that the agent turned into a file or a link. Until
+  now, such a change that the agent did not commit failed the step.
+- The push step commits a tracked file that the agent turned into a folder with a repository
+  inside: the commit has the deletion of the file and the other files of the folder, and
+  leaves out the repository, and the step prints a line for it. Until now, such a change
+  that the agent did not commit failed the step.
+- The push step leaves out each file in a folder with a `.git` entry, and the commit has
+  what `HEAD` has at the folder's path. This covers a `.git` that git does not read as a
+  repository, such as a `.git` file with no `gitdir:` line or an empty `.git` folder, and a
+  tracked folder that became a repository. Until now, the step committed the files of such
+  a folder, also when it printed that it left the folder out of the commit.
+- The push step commits the change or the deletion of a tracked file below a folder that git
+  ignores. Until now, git add stopped the step on such a file, and nothing was pushed.
 - A harness home has the same modes whatever the umask is. Every folder in the home is 0755
   and every file 0644, or 0755 when its owner may run it. qory sets modes inside the home
   only, and leaves the folders above it as they are. In the previous release, a home composed

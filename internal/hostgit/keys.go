@@ -23,7 +23,12 @@ func Shown(s string) string {
 var written = []string{
 	"core.repositoryformatversion", "core.filemode", "core.bare", "core.logallrefupdates",
 	"core.ignorecase", "core.precomposeunicode", "core.symlinks",
-	"extensions.objectformat", "extensions.refstorage",
+	"extensions.objectformat",
+}
+
+// writtenValues are the keys that git writes with one of a few values, without a subsection.
+var writtenValues = map[string][]string{
+	"extensions.refstorage": {"files", "reftable"},
 }
 
 // writtenUnder are the variables of the keys qory and git write under a subsection of
@@ -34,8 +39,37 @@ var writtenUnder = map[string][]string{
 	"branch": {"remote", "merge", "qory-base"},
 }
 
-// Written reports whether qory or git writes key, with any value.
-func Written(key string) bool {
+// Setting is one entry of a configuration file.
+type Setting struct {
+	// Key is the entry's key as git prints it.
+	Key string
+	// Value is the entry's value, "" for an empty one and for none.
+	Value string
+	// HasValue reports whether the entry has a value, which can be empty.
+	HasValue bool
+}
+
+// Settings are the entries that list has, the output of git config --list --null, in its order.
+// A key that a file has twice is in it twice.
+func Settings(list string) []Setting {
+	var settings []Setting
+	for entry := range strings.SplitSeq(list, "\x00") {
+		if entry == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(entry, "\n")
+		settings = append(settings, Setting{Key: key, Value: value, HasValue: ok})
+	}
+	return settings
+}
+
+// Written reports whether qory or git writes s: its key, with one of the key's values in
+// [writtenValues], or with any value for a key that is not in there.
+func Written(s Setting) bool {
+	key := s.Key
+	if values, ok := writtenValues[key]; ok {
+		return s.HasValue && slices.Contains(values, s.Value)
+	}
 	if slices.Contains(written, key) {
 		return true
 	}

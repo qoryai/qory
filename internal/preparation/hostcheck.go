@@ -227,18 +227,19 @@ func keysOf(ctx context.Context, gitDir string, fetched, afterRun bool) error {
 // dir, a git directory or copies of its files.
 func keysIn(ctx context.Context, dir string, files []string, fetched, afterRun bool) error {
 	for _, name := range files {
-		keys, err := configKeys(ctx, filepath.Join(dir, name))
+		settings, err := configSettings(ctx, filepath.Join(dir, name))
 		if err != nil {
 			return gitFailed(err)
 		}
-		for _, key := range keys {
-			if name == "config" && (fetched && fetchKey(key) || afterRun && hostgit.Identity(key)) {
+		for _, s := range settings {
+			key := s.Key
+			if name == "config" && (fetched && fetchKey(s) || afterRun && hostgit.Identity(key)) {
 				continue
 			}
 			if name == "config" && !fetched && strings.HasPrefix(key, "remote.") && strings.Count(key, ".") >= 2 {
 				return errors.New(textHasRemote)
 			}
-			if name == "config.worktree" || !initKey(key) {
+			if name == "config.worktree" || !initKey(s) {
 				// A key's subsection can be a URL with a password, as in
 				// http.<url>.sslVerify: it is shown without its userinfo, as hostgit shows it.
 				shown := hostgit.ShownKey(accesskey.ShownName(key, false))
@@ -354,26 +355,26 @@ func gitFiles(gitDir string) ([]string, error) {
 	return files, nil
 }
 
-// initKey reports whether git init writes key in a repository: a key of [hostgit.Written]
-// with no subsection, such as core.bare. A remote's or a branch's key is not one: the
+// initKey reports whether git init writes s in a repository: a setting of [hostgit.Written]
+// with no subsection in its key, such as core.bare. A remote's or a branch's key is not one: the
 // repository the run's repository is fetched into has no remote and no commit.
-func initKey(key string) bool {
-	return hostgit.Written(key) && strings.Count(key, ".") == 1
+func initKey(s hostgit.Setting) bool {
+	return hostgit.Written(s) && strings.Count(s.Key, ".") == 1
 }
 
-// fetchKey reports whether the fetch of a run's repository writes key: origin's url and
+// fetchKey reports whether the fetch of a run's repository writes s: origin's url and
 // refspec, and a local branch's upstream, which a clone of a further repository has.
-func fetchKey(key string) bool {
-	return key == "remote.origin.url" || key == "remote.origin.fetch" || strings.HasPrefix(key, "branch.") && hostgit.Written(key)
+func fetchKey(s hostgit.Setting) bool {
+	return s.Key == "remote.origin.url" || s.Key == "remote.origin.fetch" || strings.HasPrefix(s.Key, "branch.") && hostgit.Written(s)
 }
 
-// configKeys lists the keys of the configuration file at path, as git reads it, without
+// configSettings lists the entries of the configuration file at path, as git reads it, without
 // following an include and without acting on any key: git config --file from the root
 // folder, with no global or system configuration, run as a git on this machine is, from
 // the environment [hostgit.Base] of ctx.
-func configKeys(ctx context.Context, path string) ([]string, error) {
+func configSettings(ctx context.Context, path string) ([]hostgit.Setting, error) {
 	out, err := runGit(ctx, nil, func(ctx context.Context) (*exec.Cmd, error) {
-		args := append(slices.Clone(hardened), "config", "--file", path, "--list", "--null", "--name-only")
+		args := append(slices.Clone(hardened), "config", "--file", path, "--list", "--null")
 		cmd, err := hostgit.Unchecked(ctx, "/", hostgit.Base(ctx), args...)
 		if err != nil {
 			return nil, err
@@ -384,11 +385,5 @@ func configKeys(ctx context.Context, path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var keys []string
-	for _, key := range strings.Split(out, "\x00") {
-		if key = strings.TrimSpace(key); key != "" {
-			keys = append(keys, key)
-		}
-	}
-	return keys, nil
+	return hostgit.Settings(out), nil
 }

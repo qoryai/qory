@@ -121,7 +121,7 @@ func subcommand(args []string) string {
 // git runs git with args in dir on this machine, as the push step runs it: the flags of
 // [hostgit], [proxygit.Hardened], the environment of [proxygit.Env] with no proxy, so
 // git reads no system or global configuration file and no file of the person's home,
-// and no transport but a local path. It returns what git printed on stdout.
+// and no transport. It returns what git printed on stdout.
 func git(ctx context.Context, dir string, args ...string) (string, error) {
 	return gitWith(ctx, dir, nil, nil, args...)
 }
@@ -129,8 +129,19 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 // gitWith is [git] with env added to git's environment and stdin as its input; nil is
 // none.
 func gitWith(ctx context.Context, dir string, env []string, stdin io.Reader, args ...string) (string, error) {
+	return gitOf(ctx, hostgit.Unchecked, dir, env, stdin, args)
+}
+
+// gitByPath is [git], with stdin as its input, for a git clone or git fetch from a
+// repository or a bundle by its path, the one transport it has.
+func gitByPath(ctx context.Context, dir string, stdin io.Reader, args ...string) (string, error) {
+	return gitOf(ctx, hostgit.Remote, dir, nil, stdin, args)
+}
+
+// gitOf is [gitWith] with the git that command makes.
+func gitOf(ctx context.Context, command func(context.Context, string, []string, ...string) (*exec.Cmd, error), dir string, env []string, stdin io.Reader, args []string) (string, error) {
 	full := slices.Concat(proxygit.Hardened, localOnly, noMaintenance, args)
-	cmd, err := hostgit.Unchecked(ctx, dir, hostgit.Base(ctx), full...)
+	cmd, err := command(ctx, dir, hostgit.Base(ctx), full...)
 	if err != nil {
 		return "", &gitError{subcommand: subcommand(args), line: hidden(err.Error()), exit: -1}
 	}

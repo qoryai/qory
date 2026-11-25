@@ -1,6 +1,24 @@
 package worktree
 
-import "testing"
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// TestNetAloneReachesARemote: a git of [runner.git] fetches from no path, and one of [runner.net]
+// does.
+func TestNetAloneReachesARemote(t *testing.T) {
+	from, to := repository(t), filepath.Join(t.TempDir(), "to")
+	gitIn(t, from, "init", "--quiet", to)
+	r := runner{main: to}
+	if _, err := r.git(to, "fetch", "--quiet", from, "main"); err == nil || !strings.Contains(err.Error(), "transport 'file' not allowed") {
+		t.Errorf("git: %v", err)
+	}
+	if _, err := r.net(to, "fetch", "--quiet", from, "main"); err != nil {
+		t.Errorf("net: %v", err)
+	}
+}
 
 // TestOnlyOnJoinsTheClauses is the definition the remove trace gives of the commits it
 // counts, with and without the main checkout's HEAD and a recorded base: the clauses

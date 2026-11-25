@@ -260,9 +260,9 @@ func TestAForbiddenPushNamesTheThreeCauses(t *testing.T) {
 	}
 }
 
-// TestPushFailureFirstLinesAreShort is the first line of each text that Q-14 changed, with
-// a long host and a long path: at most 100 characters, a capital after "qory run: ", and
-// no path in it.
+// TestPushFailureFirstLinesAreShort is the first line of a push that failed with HTTP 403
+// from the forge and of a push that did not reach the forge, with a long host and a long
+// path: at most 100 characters, a capital after "qory run: ", and no path in it.
 func TestPushFailureFirstLinesAreShort(t *testing.T) {
 	b := &WorkBranch{Ref: testRef, system: "git.internal.example.com"}
 	path := "acme/" + strings.Repeat("long-repository-name-", 4)
@@ -1239,5 +1239,57 @@ func TestTheCheckGetsTheVersionThePushLeaves(t *testing.T) {
 	}
 	if head := run(t, filepath.Join(base, "acme", "shop.git"), "rev-parse", b.Ref); head != got[0].Commit {
 		t.Errorf("the forge's branch is at %s, and the check got %s", head, got[0].Commit)
+	}
+}
+
+// TestARefStorageOfAnotherValueStopsThePushStep is a target whose configuration has
+// extensions.refstorage: each entry must have one of the two values that git writes. Any other
+// value stops the push step as another key does, and the same check in the run's start.
+func TestARefStorageOfAnotherValueStopsThePushStep(t *testing.T) {
+	for _, c := range []struct {
+		name, entries string
+		passes        bool
+	}{
+		{"files", "refstorage = files\n", true},
+		{"reftable", "refStorage = reftable\n", true},
+		{"files twice", "refstorage = files\nrefstorage = files\n", true},
+		{"no value", "refstorage\n", false},
+		{"an empty value", "refstorage =\n", false},
+		{"another word", "refstorage = other\n", false},
+		{"another letter case", "refstorage = Files\n", false},
+		{"a colon", "refstorage = files:other\n", false},
+		{"the other one first", "refstorage = other\nrefstorage = files\n", false},
+		{"the other one last", "refstorage = files\nrefstorage = other\n", false},
+		{"no value first", "refstorage\nrefstorage = files\n", false},
+		{"no value last", "refstorage = reftable\nrefstorage\n", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir, b := onBranch(t, "acme/shop")
+			config := filepath.Join(dir, ".git", "config")
+			data, err := os.ReadFile(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			write(t, config, string(data)+"[extensions]\n"+c.entries)
+			write(t, filepath.Join(dir, "left.txt"), "left\n")
+			err = safeAfterRun(context.Background(), dir)
+			if c.passes {
+				if err != nil {
+					t.Errorf("the check: %v", err)
+				}
+				return
+			}
+			want := fmt.Sprintf(causeConfigKey, "extensions.refstorage", ".git/config")
+			if err == nil || !strings.Contains(err.Error(), "remove extensions.refstorage from .git/config") {
+				t.Errorf("the check: %v", err)
+			}
+			if err := safeFurther(context.Background(), dir, dir, false); err == nil || !strings.Contains(err.Error(), "remove extensions.refstorage from .git/config") {
+				t.Errorf("the check of the start: %v", err)
+			}
+			p, lines, err := pushOf(dir, b)
+			if err == nil || p != nil || !strings.Contains(err.Error(), "the check of repository acme/shop failed") || !strings.Contains(err.Error(), want) {
+				t.Errorf("pushed %+v, printed %q, error %v", p, lines, err)
+			}
+		})
 	}
 }

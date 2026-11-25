@@ -887,6 +887,9 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				// The report on disk can be another run's by now, so the run reads what it composed.
 				rep, harness, workflows := c.rep, c.harness, c.workflows
+				if !later {
+					composing.launched = &rep
+				}
 				// types are the artifact types of the composed process.yaml, which inputs.json
 				// and the submit step read; the send of each comes from the documents' deliver.
 				types, _ := harnessTypes(rep)

@@ -18,8 +18,9 @@ import (
 	"github.com/qoryai/qory/internal/sourcetext"
 )
 
-// The texts of qory artifact push --withdraw for a push that qory refuses, from the
-// decision 654 (c). Each starts with its fix; [ExitCode] gives each [ExitArtifactRefused].
+// The texts of qory artifact push --withdraw for a withdrawal that qory stops: before the
+// request, from the index or the command line, or after it, from the error code of the run
+// API. Each starts with its fix; [ExitCode] returns [ExitArtifactRefused] for each.
 const (
 	textWithdrawProcess   = "Push a new version of %s instead.\n  Qory Apiary reads %s itself, so a run cannot withdraw them."
 	textWithdrawLocked    = "Push a new version of %s instead.\n  The artifact type %s has withdrawable set to false, so a run cannot withdraw its names."
