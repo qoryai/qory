@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -80,6 +81,39 @@ func TestUnusedEnvSaysWhy(t *testing.T) {
 	unusedEnv(&out, "")(session.Applied{{Name: "LOG_LEVEL", From: session.FromApiary, Lost: []session.Loss{{From: session.FromRun, Why: session.WhyOverridden}}}})
 	if got := out.String(); got != "qory run: LOG_LEVEL from --env is not used: the server sets it\n" {
 		t.Errorf("no server: %q", got)
+	}
+}
+
+// TestMountRefusedSaysHowTheMountStandsToAStepFile is the line for a mount that
+// contains a CI job's step file, or a link on the way to one, writable and read-only.
+// qory run stops a run with a writable mount beside the checkout before Forager checks
+// the mount, unless the run is a write run from a run code, so a writable line comes
+// from the workspace or from such a run.
+func TestMountRefusedSaysHowTheMountStandsToAStepFile(t *testing.T) {
+	dir := t.TempDir()
+	file, link := filepath.Join(dir, "github_env"), filepath.Join(dir, "commands")
+	place := linkPlace(link)
+	refusal := func(path string) error {
+		return &session.Refusal{Code: "mount_contains_forager_files", Names: []string{dir, path}}
+	}
+	for _, c := range []struct {
+		readOnly bool
+		path     string
+		want     string
+	}{
+		{false, file, "the mount " + dir + " contains " + file + ", the file CI_STEP_ENV_FILE points at, which a CI step writes to pass values to the job's next steps or to its summary; the agent could change what the job's next steps or its summary receive, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{true, file, "the mount " + dir + " contains " + file + ", the file CI_STEP_ENV_FILE points at, which a CI step writes to pass values to the job's next steps or to its summary; the agent could read the file, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{false, place, "the mount " + dir + " leads through a link to " + file + ", the file CI_STEP_ENV_FILE points at, which a CI step writes to pass values to the job's next steps or to its summary; the agent could point the link elsewhere, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+		{true, place, "the mount " + dir + " leads through a link to " + file + ", the file CI_STEP_ENV_FILE points at, which a CI step writes to pass values to the job's next steps or to its summary; the agent could read the file, so the run does not start. Mount a narrower path (mount_contains_forager_files)"},
+	} {
+		p := passed{spec: &runSpec{SessionSpec: session.SessionSpec{Mounts: []wall.Mount{{Path: dir, ReadOnly: c.readOnly}}}}, own: ownFiles{
+			links:       map[string]string{place: link},
+			runner:      map[string]string{file: "CI_STEP_ENV_FILE"},
+			runnerLinks: map[string]runnerFile{place: {file: file, variable: "CI_STEP_ENV_FILE"}},
+		}}
+		if got := mountRefused(refusal(c.path), p).Error(); got != c.want {
+			t.Errorf("read-only %v, %s: %q, want %q", c.readOnly, c.path, got, c.want)
+		}
 	}
 }
 
@@ -480,6 +514,51 @@ func TestSettingFilesAreTheFileSettingsOfTheDescribedIntegrations(t *testing.T) 
 	own := foragerFiles("", state, filepath.Join(state, "runs", "app-0123456789ab"), want, nil)
 	if !slices.Equal(own.files, append([]string{state}, want...)) {
 		t.Errorf("files %q", own.files)
+	}
+}
+
+// TestRunnerFilesAddTheListedVariables is the step files of a CI job: GitHub Actions'
+// five always, then the variables wall.step_file_env lists, each file once, by the first
+// variable that points at it; a variable that is unset, empty, or points at a directory
+// or at nothing adds none, and a list that leaves out a GitHub variable keeps it.
+func TestRunnerFilesAddTheListedVariables(t *testing.T) {
+	dir := t.TempDir()
+	env, path, shared := filepath.Join(dir, "env"), filepath.Join(dir, "path"), filepath.Join(dir, "shared")
+	for _, f := range []string{env, path, shared} {
+		if err := os.WriteFile(f, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range runnerVariables {
+		t.Setenv(name, "")
+	}
+	t.Setenv("GITHUB_ENV", shared)
+	t.Setenv("CI_STEP_ENV_FILE", env)
+	t.Setenv("CI_STEP_PATH_FILE", path)
+	t.Setenv("CI_STEP_SHARED_FILE", shared)
+	t.Setenv("CI_STEP_DIR", dir)
+	t.Setenv("CI_STEP_MISSING", filepath.Join(dir, "missing"))
+	t.Setenv("CI_STEP_EMPTY", "")
+	t.Setenv("CI_STEP_UNSET", "")
+	if err := os.Unsetenv("CI_STEP_UNSET"); err != nil {
+		t.Fatal(err)
+	}
+	if got, named := runnerFiles(nil); !slices.Equal(got, []string{shared}) || named[shared] != "GITHUB_ENV" || len(named) != 1 {
+		t.Errorf("no forager.yaml: %q, %q", got, named)
+	}
+	if got, _ := runnerFiles(&config.Forager{}); !slices.Equal(got, []string{shared}) {
+		t.Errorf("no wall section: %q", got)
+	}
+	r := &config.Forager{Wall: &config.ForagerWall{StepFileEnv: []string{"CI_STEP_SHARED_FILE", "CI_STEP_ENV_FILE", "CI_STEP_DIR", "CI_STEP_MISSING", "CI_STEP_EMPTY", "CI_STEP_UNSET", "CI_STEP_PATH_FILE", "CI_STEP_ENV_FILE"}}}
+	got, named := runnerFiles(r)
+	if want := []string{shared, env, path}; !slices.Equal(got, want) {
+		t.Errorf("files %q, want %q", got, want)
+	}
+	if want := map[string]string{shared: "GITHUB_ENV", env: "CI_STEP_ENV_FILE", path: "CI_STEP_PATH_FILE"}; !maps.Equal(named, want) {
+		t.Errorf("named %q, want %q", named, want)
+	}
+	if !slices.Equal(runnerVariables, []string{"GITHUB_ENV", "GITHUB_PATH", "GITHUB_OUTPUT", "GITHUB_STATE", "GITHUB_STEP_SUMMARY"}) {
+		t.Errorf("the defaults changed to %q", runnerVariables)
 	}
 }
 

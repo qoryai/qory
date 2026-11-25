@@ -462,6 +462,7 @@ wall:
   images: {qak_img: {ref: "example/img:1"}}
   env: [QAK_E, PLAIN_E]
   ca_env: [QRK_CA]
+  step_file_env: [QRK_STEP, PLAIN_STEP]
 `)
 	r, err := config.LoadForager()
 	if err != nil {
@@ -482,6 +483,7 @@ wall:
 		"wall.image":                              accessKeyPhrase + " (wall.images." + accessKeyPhrase + ")",
 		"wall.env":                                accessKeyPhrase + ", PLAIN_E",
 		"wall.ca_env":                             runKeyPhrase,
+		"wall.step_file_env":                      runKeyPhrase + ", PLAIN_STEP",
 	} {
 		if got[key] != value {
 			t.Errorf("row %s = %q, want %q", key, got[key], value)

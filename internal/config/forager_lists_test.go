@@ -42,6 +42,7 @@ var foragerLists = []foragerList{
 		return out
 	}},
 	{"wall: {adapter: docker, ca_env: %s}\n", "SSL_CERT_FILE", "Set wall.ca_env[%d] to a variable's name.\n  The entry is not one.\n  wall.ca_env is in {path}.", func(r *config.Forager) []string { return r.Wall.CAEnv }},
+	{"wall: {adapter: docker, step_file_env: %s}\n", "CI_STEP_ENV_FILE", "Set wall.step_file_env[%d] to a variable's name.\n  The entry is not one.\n  wall.step_file_env is in {path}.", func(r *config.Forager) []string { return r.Wall.StepFileEnv }},
 }
 
 // TestForagerRefusesAListEntryThatIsNotAString writes into every list of strings of

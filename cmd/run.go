@@ -635,7 +635,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 			}
 			// The files the settings name are known once the integrations are described.
-			runner, named := runnerFiles()
+			runner, named := runnerFiles(conf.Forager)
 			files := settingFiles(conf.Forager)
 			// The engine proxy file contains the password of the engine's proxy setting: a
 			// place of the run's that covers it stops the run, as one of Forager's files.
@@ -3046,14 +3046,14 @@ func (p passed) modes(path string) (writable, readOnly, changed bool) {
 // of the runs directory or of qory's state directory, that it could read the run
 // records through a read-only mount and change them through any other; one of a file a
 // runner's step file variable names, the variable and that the agent could read the
-// file through a read-only mount and change what the runner's next steps run through any
-// other; one of any other path, or of the directory without the key, that it could read
-// one of Forager's files through a read-only mount and change it through any other. A
-// link's place, on the way to the records or to the configuration, is named as
-// the link, which leads to them; for a place that is not read-only, the text adds that
-// the agent could point it elsewhere. One on the way to a runner's step file is named
-// by that file and its variable, the place leading through a link to it, with the same
-// addition.
+// file through a read-only mount, and through any other could change what the job's
+// next steps or its summary receive; one of any other path, or of the directory
+// without the key, that it could read one of Forager's files through a read-only mount
+// and change it through any other. A link's place, on the way to the records or to the
+// configuration, is named as the link, which leads to them; for a place that is not
+// read-only, the text adds that the agent could point it elsewhere. One on the way to a
+// runner's step file is named by that file and its variable, the place leading through
+// a link to it, with the same addition.
 //
 // mount_mode_conflict is a place inside another of the other mode, with the modes
 // qory passed. Forager refuses only two places of different modes: the inner's is
@@ -3104,11 +3104,11 @@ func mountRefused(err error, p passed) error {
 		runner, isRunnerLink := p.own.runnerLinks[path]
 		switch {
 		case isLink && isRunnerLink:
-			// A link on the way to a runner's step file: the agent that points it elsewhere
-			// chooses what the runner's next steps take.
-			text = fmt.Sprintf("%s leads through a link to %s, the file %s names for the runner's next steps; the agent could point it elsewhere, so the run does not start. Mount a narrower path", p.place(mount), runner.file, runner.variable)
+			// A link on the way to a CI job's step file: if the agent points the link
+			// elsewhere, it could change what the job's next steps or its summary receive.
+			text = fmt.Sprintf("%s leads through a link to %s, the file %s points at, which a CI step writes to pass values to the job's next steps or to its summary; the agent could point the link elsewhere, so the run does not start. Mount a narrower path", p.place(mount), runner.file, runner.variable)
 			if readOnly {
-				text = fmt.Sprintf("%s leads through a link to %s, the file %s names for the runner's next steps; the agent could read it, so the run does not start. Mount a narrower path", p.place(mount), runner.file, runner.variable)
+				text = fmt.Sprintf("%s leads through a link to %s, the file %s points at, which a CI step writes to pass values to the job's next steps or to its summary; the agent could read the file, so the run does not start. Mount a narrower path", p.place(mount), runner.file, runner.variable)
 			}
 		case isLink:
 			// The link's place: named as the link, which leads to the records or to one
@@ -3122,10 +3122,11 @@ func mountRefused(err error, p passed) error {
 				text = fmt.Sprintf("%s %s %s, which leads to %s, so the run does not start. Mount a narrower path", p.place(mount), how, link, what)
 			}
 		case p.own.runner[path] != "":
-			// A runner's step file: what a step writes there, the runner's next steps take.
-			text = fmt.Sprintf("%s %s %s, the file %s names for the runner's next steps; the agent could change what they run, so the run does not start. Mount a narrower path", p.place(mount), how, path, p.own.runner[path])
+			// A CI job's step file, which a CI step writes to pass values to the job's next
+			// steps or to its summary.
+			text = fmt.Sprintf("%s %s %s, the file %s points at, which a CI step writes to pass values to the job's next steps or to its summary; the agent could change what the job's next steps or its summary receive, so the run does not start. Mount a narrower path", p.place(mount), how, path, p.own.runner[path])
 			if readOnly {
-				text = fmt.Sprintf("%s %s %s, the file %s names for the runner's next steps; the agent could read it, so the run does not start. Mount a narrower path", p.place(mount), how, path, p.own.runner[path])
+				text = fmt.Sprintf("%s %s %s, the file %s points at, which a CI step writes to pass values to the job's next steps or to its summary; the agent could read the file, so the run does not start. Mount a narrower path", p.place(mount), how, path, p.own.runner[path])
 			}
 		case path == p.spec.RunsDir || path == p.stateDir || p.own.records[path]:
 			what := "change"
@@ -3323,15 +3324,21 @@ func settingFiles(r *config.Forager) []string {
 }
 
 // runnerVariables name the files a GitHub Actions runner gives a job's steps, which a
-// step writes to set the next steps' variables, PATH, outputs and summary.
+// CI step writes to pass values to the job's next steps or to its summary. qory run
+// always protects them; wall.step_file_env adds the variables of another CI system.
 var runnerVariables = []string{"GITHUB_ENV", "GITHUB_PATH", "GITHUB_OUTPUT", "GITHUB_STATE", "GITHUB_STEP_SUMMARY"}
 
-// runnerFiles are the files [runnerVariables] name, each one set to a path of a file,
-// absolute: a mount of one would let the agent change what the job's next steps run.
-// named maps each file to the first of the variables that names it.
-func runnerFiles() (out []string, named map[string]string) {
+// runnerFiles are the files [runnerVariables] and then wall.step_file_env of r point at,
+// each one set to a path of a file, absolute: through a mount of one, the agent could
+// change what the job's next steps or its summary receive. named maps each file to the
+// first of the variables that points at it.
+func runnerFiles(r *config.Forager) (out []string, named map[string]string) {
+	names := runnerVariables
+	if r != nil && r.Wall != nil {
+		names = slices.Concat(runnerVariables, r.Wall.StepFileEnv)
+	}
 	named = map[string]string{}
-	for _, name := range runnerVariables {
+	for _, name := range names {
 		v := os.Getenv(name)
 		if v == "" {
 			continue

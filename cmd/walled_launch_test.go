@@ -81,7 +81,7 @@ func TestRunGuardsTheRunnersStepFiles(t *testing.T) {
 			writeFile(t, file, "")
 			t.Setenv(name, file)
 			out, err := run(t, "run", "claude", "--mount", runner+":ro", "--", "-p", "hi")
-			want := "the mount " + runner + " contains " + file + ", the file " + name + " names for the runner's next steps; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
+			want := "the mount " + runner + " contains " + file + ", the file " + name + " points at, which a CI step writes to pass values to the job's next steps or to its summary; the agent could read the file, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
 			if err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
 				t.Errorf("read-only: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
 			}
@@ -94,6 +94,52 @@ func TestRunGuardsTheRunnersStepFiles(t *testing.T) {
 	}
 	if out, err := run(t, "run", "claude", "--mount", runner+":ro", "--", "-p", "hi"); cmd.ExitCode(err) != 4 {
 		t.Errorf("unset: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
+	}
+}
+
+// TestRunGuardsTheStepFilesTheMachineLists is a walled run whose forager.yaml lists
+// CI_STEP_ENV_FILE in wall.step_file_env: the file CI_STEP_ENV_FILE points at is one of
+// Forager's files, as a GitHub step file is, and the line contains the variable. The
+// list adds to GitHub Actions' five: GITHUB_ENV, which it leaves out, still stops a
+// mount of its file, and the line contains GITHUB_ENV for a file both point at. A
+// listed variable that points at a directory stops nothing.
+func TestRunGuardsTheStepFilesTheMachineLists(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "claude")
+	walledSection(t)
+	forager := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")
+	section, err := os.ReadFile(forager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, forager, string(section)+"  step_file_env: [CI_STEP_ENV_FILE]\n")
+	for _, name := range []string{"GITHUB_ENV", "GITHUB_PATH", "GITHUB_OUTPUT", "GITHUB_STATE", "GITHUB_STEP_SUMMARY"} {
+		t.Setenv(name, "")
+	}
+	runner := tempDir(t)
+	file := filepath.Join(runner, "ci_env")
+	writeFile(t, file, "")
+	t.Setenv("CI_STEP_ENV_FILE", file)
+	out, err := run(t, "run", "claude", "--mount", runner+":ro", "--", "-p", "hi")
+	want := "the mount " + runner + " contains " + file + ", the file CI_STEP_ENV_FILE points at, which a CI step writes to pass values to the job's next steps or to its summary; the agent could read the file, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
+	if err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
+		t.Errorf("listed: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
+	}
+	t.Setenv("GITHUB_ENV", file)
+	out, err = run(t, "run", "claude", "--mount", runner+":ro", "--", "-p", "hi")
+	want = "the mount " + runner + " contains " + file + ", the file GITHUB_ENV points at, which a CI step writes to pass values to the job's next steps or to its summary; the agent could read the file, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
+	if err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
+		t.Errorf("GITHUB_ENV kept: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
+	}
+	t.Setenv("CI_STEP_ENV_FILE", "")
+	if out, err = run(t, "run", "claude", "--mount", runner+":ro", "--", "-p", "hi"); err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
+		t.Errorf("GITHUB_ENV alone: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
+	}
+	t.Setenv("GITHUB_ENV", "")
+	t.Setenv("CI_STEP_ENV_FILE", runner)
+	if out, err := run(t, "run", "claude", "--mount", runner+":ro", "--", "-p", "hi"); cmd.ExitCode(err) != 4 {
+		t.Errorf("a directory: %v (exit %d)\n%s", err, cmd.ExitCode(err), out)
 	}
 }
 
@@ -114,7 +160,39 @@ func TestRunGuardsALinkToARunnersStepFile(t *testing.T) {
 	file := filepath.Join(runner, "commands", "set_env")
 	t.Setenv("GITHUB_ENV", file)
 	out, err := run(t, "run", "claude", "--mount", runner+":ro", "--", "-p", "hi")
-	want := "the mount " + runner + " leads through a link to " + file + ", the file GITHUB_ENV names for the runner's next steps; the agent could read it, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
+	want := "the mount " + runner + " leads through a link to " + file + ", the file GITHUB_ENV points at, which a CI step writes to pass values to the job's next steps or to its summary; the agent could read the file, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
+	if err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
+		t.Errorf("read-only: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
+	}
+}
+
+// TestRunGuardsALinkToAListedStepFile is a step file that CI_STEP_ENV_FILE, a variable
+// of wall.step_file_env, points at through a link inside the mount that leads out of
+// the mount: qory run stops the walled run before the agent starts, with a line that
+// contains the file and CI_STEP_ENV_FILE, as for a GitHub step file.
+func TestRunGuardsALinkToAListedStepFile(t *testing.T) {
+	root := newCheckout(t)
+	copyFixture(t, "two-modules", root)
+	composedForFake(t, root, "claude")
+	walledSection(t)
+	forager := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "qory", "forager.yaml")
+	section, err := os.ReadFile(forager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, forager, string(section)+"  step_file_env: [CI_STEP_ENV_FILE]\n")
+	for _, name := range []string{"GITHUB_ENV", "GITHUB_PATH", "GITHUB_OUTPUT", "GITHUB_STATE", "GITHUB_STEP_SUMMARY"} {
+		t.Setenv(name, "")
+	}
+	runner, commands := tempDir(t), tempDir(t)
+	writeFile(t, filepath.Join(commands, "ci_env"), "")
+	if err := os.Symlink(commands, filepath.Join(runner, "commands")); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(runner, "commands", "ci_env")
+	t.Setenv("CI_STEP_ENV_FILE", file)
+	out, err := run(t, "run", "claude", "--mount", runner+":ro", "--", "-p", "hi")
+	want := "the mount " + runner + " leads through a link to " + file + ", the file CI_STEP_ENV_FILE points at, which a CI step writes to pass values to the job's next steps or to its summary; the agent could read the file, so the run does not start. Mount a narrower path (mount_contains_forager_files)"
 	if err == nil || err.Error() != want || cmd.ExitCode(err) != 1 {
 		t.Errorf("read-only: %v (exit %d), want %q\n%s", err, cmd.ExitCode(err), want, out)
 	}

@@ -106,6 +106,8 @@ var foragerKeys = []struct{ body, key string }{
 	{"wall: {adapter: docker, shm_size: %s}\n", "wall.shm_size"},
 	{"wall: {adapter: docker, ca_env: %s}\n", "wall.ca_env"},
 	{"wall: {adapter: docker, ca_env: [X, %s]}\n", "wall.ca_env[1]"},
+	{"wall: {adapter: docker, step_file_env: %s}\n", "wall.step_file_env"},
+	{"wall: {adapter: docker, step_file_env: [X, %s]}\n", "wall.step_file_env[1]"},
 	{"wall: {adapter: docker, setup: %s}\n", "wall.setup"},
 	{"wall: {adapter: docker, engine_proxy_file: %s}\n", "wall.engine_proxy_file"},
 	{"machine: %s\n", "machine"},
