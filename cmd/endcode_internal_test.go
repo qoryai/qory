@@ -79,7 +79,7 @@ func TestAFailedPushStepClosesWithItsEndCode(t *testing.T) {
 		"no push credential":         {pushEnding{session: succeeded}, noCredential, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePushCredentialMissing), ExitCode: 1}},
 		"push refused":               {pushEnding{session: succeeded}, refused, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePushRefused), ExitCode: 1}},
 		"push not recorded":          {pushEnding{session: succeeded}, notRecorded, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePushNotRecorded), ExitCode: 1}},
-		"outputs invalid":            {pushEnding{session: succeeded}, &runLineError{&outputsInvalid{errors.New("the output is missing")}}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodeOutputsInvalid), ExitCode: 1}},
+		"outputs invalid":            {pushEnding{session: succeeded}, &runLineError{&outputsInvalid{errors.New("the output breaks its schema")}}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodeOutputsInvalid), ExitCode: 1}},
 		"refused, then not recorded": {pushEnding{session: succeeded}, &runLineError{errors.Join(refused, notRecorded)}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodePushRefused), ExitCode: 1}},
 		"another failure":            {pushEnding{session: succeeded}, &runLineError{errors.New("the push failed")}, session.Outcome{State: event.StateFailed, ExitCode: 1}},
 		"run API call failed":        {pushEnding{session: succeeded}, &runLineError{shown}, session.Outcome{State: event.StateFailed, Reason: string(contracts.EndCodeRunAPIFailed), ExitCode: 1}},

@@ -1425,31 +1425,29 @@ func TestAnOutputThatBreaksItsSchemaPostsNothing(t *testing.T) {
 	notPushed(t, p, r)
 }
 
-// TestAMissingRequiredOutputFailsTheRun is a stage that requires the pull-request output and
-// a session that writes none: qory pushes and posts nothing, and the run fails with the line
-// that names the file to write and the end code outputs_invalid.
-func TestAMissingRequiredOutputFailsTheRun(t *testing.T) {
+// TestAMissingRequiredOutputIsNoFailure is a stage that requires the pull-request output and
+// a session that writes none: qory pushes the session's commits, posts nothing, makes no read
+// of the run's versions after the session, and the run closes as the session ended.
+func TestAMissingRequiredOutputIsNoFailure(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.noOutput = true
 	p.api.outputs = `[{"type":"pull-request","required":true,"version":null,"check":"missing"}]`
 	r := p.run(t, writesAndCommits(t), nil)
-	r.wantsClose(t, event.StateFailed, 1)
-	r.wantsReason(t, string(contracts.EndCodeOutputsInvalid))
-	wants(t, r.out, "Write pull-request to the outbox: the stage requires it and the session wrote none.\n  .qory/outbox/pull-request/pull-request.json\n")
-	if posts, _, _ := p.api.counts(); posts != 0 {
-		t.Errorf("%d POST, want 0", posts)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	r.wantsReason(t, "")
+	if p.branchHead(t) == "" {
+		t.Errorf("the forge has no branch\n%s", r.out)
 	}
-	notPushed(t, p, r)
-	if got := gitOut(t, p.h.dir, "log", "-1", "--format=%s"); got != changesLeft {
-		t.Errorf("the working folder's last commit is %q, want the commit of what the agent left", got)
+	if posts, reads, _ := p.api.counts(); posts != 0 || reads != 2 {
+		t.Errorf("%d POST and %d reads of the index, want 0, and the reads of the fetch and of the launch snapshot", posts, reads)
 	}
 }
 
-// TestAMissingOutputWithNoIndexClosesRunAPIFailed is a stage that requires the pull-request
-// output, a session that writes none, and a read of the run's versions that gets a 500: the
-// check before the push stops the step, qory pushes and posts nothing, and the run closes
-// failed with run_api_failed, since the read failed and no output was found missing.
-func TestAMissingOutputWithNoIndexClosesRunAPIFailed(t *testing.T) {
+// TestAMissingRequiredOutputWithNoIndexIsNoFailure is a stage that requires the pull-request
+// output, a session that writes none, and a run API whose reads of the run's versions get a
+// 500 once the session ran: qory pushes the session's commits, and the run closes as the
+// session ended, since the step makes no such read.
+func TestAMissingRequiredOutputWithNoIndexIsNoFailure(t *testing.T) {
 	p := newPushRepo(t, "write")
 	p.noOutput = true
 	p.api.outputs = `[{"type":"pull-request","required":true,"version":null,"check":"missing"}]`
@@ -1466,13 +1464,14 @@ func TestAMissingOutputWithNoIndexClosesRunAPIFailed(t *testing.T) {
 		writesAndCommits(t)(dir)
 		ran.Store(true)
 	}, nil)
-	r.wantsClose(t, event.StateFailed, 1)
-	r.wantsReason(t, string(contracts.EndCodeRunAPIFailed))
-	wants(t, r.out, "output pull-request was not stored")
+	r.wantsClose(t, event.StateSucceeded, 0)
+	r.wantsReason(t, "")
+	if p.branchHead(t) == "" {
+		t.Errorf("the forge has no branch\n%s", r.out)
+	}
 	if posts, _, _ := p.api.counts(); posts != 0 {
 		t.Errorf("%d POST, want 0", posts)
 	}
-	notPushed(t, p, r)
 }
 
 // notPushed fails the test unless the forge has no branch of the work item, and the working
@@ -2733,35 +2732,40 @@ func TestAStopAfterThePushShowsBothWaysOut(t *testing.T) {
 }
 
 // TestACutCheckOfALaterSessionSaysNothingWasPushed is a run of two sessions: session 1 pushes
-// and stores its pull-request, and session 2 commits and writes no output, so the check before
-// its push reads the artifacts, a read that gets no response until a second signal cuts the
-// step. Session 2 pushed nothing: the line says the commits may not have reached the branch,
-// and no line says that qory pushed or to delete the branch.
+// and stores its pull-request, and session 2 commits, and a second signal cuts its step during
+// the check before its push. Session 2 pushed nothing: the line says the commits may not have
+// reached the branch, and no line says that qory pushed or to delete the branch.
 func TestACutCheckOfALaterSessionSaysNothingWasPushed(t *testing.T) {
 	p := newPushRepo(t, "write")
-	p.api.outputs = `[{"type":"pull-request","required":true,"version":null,"check":"missing"}]`
-	defer cmd.SetPushTimes(200*time.Millisecond, 400*time.Millisecond)()
-	var hang atomic.Bool
-	p.api.index = func(_ int, w http.ResponseWriter) bool {
-		if !hang.Load() {
-			return false
-		}
-		conn, _, err := w.(http.Hijacker).Hijack()
-		if err != nil {
-			t.Error(err)
-			return true
-		}
-		t.Cleanup(func() { conn.Close() })
-		term(t)
-		term(t)
-		return true
+	// Only the second signal cuts the step: its limit after the first one is far off.
+	defer cmd.SetPushTimes(time.Minute, time.Minute)()
+	// The removal of the setup container gets the context of the step.
+	var step context.Context
+	p.removeSetup = func(ctx context.Context) error {
+		step = ctx
+		return nil
 	}
+	second, cut := false, false
+	t.Cleanup(cmd.SetOnOutputsCheck(func() {
+		if !second {
+			return
+		}
+		cut = true
+		// The check returns once the step is cut, however late qory handles the signals.
+		for start := time.Now(); step.Err() == nil; {
+			if time.Since(start) > 30*time.Second {
+				t.Error("signals for 30s did not cut the step")
+				return
+			}
+			term(t)
+		}
+	}))
 	var dir, afterFirst string
 	t.Cleanup(cmd.SetLaterSessions(func() {
 		afterFirst = p.branchHead(t)
 		writeFile(t, filepath.Join(dir, "second.txt"), "second\n")
 		commitAll(t, dir, "Add a second file")
-		hang.Store(true)
+		second = true
 	}))
 	r := p.run(t, func(d string) {
 		dir = d
@@ -2771,8 +2775,8 @@ func TestACutCheckOfALaterSessionSaysNothingWasPushed(t *testing.T) {
 	if afterFirst == "" || p.branchHead(t) != afterFirst {
 		t.Errorf("the branch is at %q after session 1 and %q at the end, want session 1's head\n%s", afterFirst, p.branchHead(t), r.out)
 	}
-	if !hang.Load() {
-		t.Fatalf("session 2 did not run\n%s", r.out)
+	if !cut {
+		t.Fatalf("the check of session 2 did not run\n%s", r.out)
 	}
 	wants(t, r.out, "qory run got a second signal during the push step, and the run's commits may not have reached the branch")
 	lacks(t, r.out, "qory pushed", "delete branch")
@@ -3263,31 +3267,42 @@ func TestARunWithNoRepositoryStoresItsReply(t *testing.T) {
 }
 
 // TestARunWithNoRepositoryThatFailsItsOutputCheckStoresNothing is the run of
-// [TestARunWithNoRepositoryStoresItsReply] whose session writes no reply, which the stage
-// requires, or a reply whose text is not a string: qory stores nothing, and the run closes
-// failed with the end code outputs_invalid and the line of the check.
+// [TestARunWithNoRepositoryStoresItsReply] whose session writes a reply whose text is not a
+// string: qory stores nothing, and the run closes failed with the end code outputs_invalid
+// and the line of the check.
 func TestARunWithNoRepositoryThatFailsItsOutputCheckStoresNothing(t *testing.T) {
-	for name, c := range map[string]struct{ reply, line string }{
-		"missing":       {line: "Write reply to the outbox: the stage requires it and the session wrote none."},
-		"breaks schema": {reply: `{"text":5}`, line: "Fix the reply output: it breaks its schema at "},
-	} {
-		t.Run(name, func(t *testing.T) {
-			p, outbox := replyRepo(t)
-			p.mountsOf = func(spec session.SessionSpec) {
-				*outbox = outboxOf(spec)
-				if *outbox != "" && c.reply != "" {
-					writeFile(t, filepath.Join(*outbox, "reply", "reply.json"), c.reply)
-				}
-			}
-			r := p.run(t, nil, nil)
-			r.wantsClose(t, event.StateFailed, 1)
-			r.wantsReason(t, string(contracts.EndCodeOutputsInvalid))
-			if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
-				t.Errorf("%d POST and %d versions stored, want none", posts, stored)
-			}
-			wants(t, r.out, c.line)
-		})
+	p, outbox := replyRepo(t)
+	p.mountsOf = func(spec session.SessionSpec) {
+		*outbox = outboxOf(spec)
+		if *outbox != "" {
+			writeFile(t, filepath.Join(*outbox, "reply", "reply.json"), `{"text":5}`)
+		}
 	}
+	r := p.run(t, nil, nil)
+	r.wantsClose(t, event.StateFailed, 1)
+	r.wantsReason(t, string(contracts.EndCodeOutputsInvalid))
+	if posts, _, stored := p.api.counts(); posts != 0 || stored != 0 {
+		t.Errorf("%d POST and %d versions stored, want none", posts, stored)
+	}
+	wants(t, r.out, "Fix the reply output: it breaks its schema at ")
+}
+
+// TestARunWithNoRepositoryStoresTheOutputsItHas is the run of
+// [TestARunWithNoRepositoryStoresItsReply] whose stage also requires summary and notes, which
+// the session does not write: qory stores the reply, and the run closes as the session
+// ended.
+func TestARunWithNoRepositoryStoresTheOutputsItHas(t *testing.T) {
+	p, _ := replyRepo(t)
+	p.api.outputs = `[{"type":"summary","required":true,"version":null,"check":"missing"},` +
+		`{"type":"reply","required":true,"version":null,"check":"missing"},` +
+		`{"type":"notes","required":true,"version":null,"check":"missing"}]`
+	r := p.run(t, nil, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	r.wantsReason(t, "")
+	if posts, _, stored := p.api.counts(); posts != 1 || stored != 1 || p.api.kinds[0].typ != "reply" {
+		t.Errorf("%d POST and %d versions stored, want 1 of the reply\n%s", posts, stored, r.out)
+	}
+	wants(t, r.out, "qory run: stored the reply output; the run has no repository to push.\n")
 }
 
 // TestARunWithNoRepositoryWhoseStoreFailsClosesRunAPIFailed is the run of

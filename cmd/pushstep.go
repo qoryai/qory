@@ -294,7 +294,7 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 				if err := checks.scopeCheck(ctx, branch, dir, version); err != nil || end != "" {
 					return err
 				}
-				return outputsBeforePush(outputs, ctx, client, runID, branch.Ref, version)
+				return outputsBeforePush(outputs, branch.Ref, version)
 			}
 			runEnded, err := pushWorkBranch(ctx, run, w, branch, dir, runNumber, end, agentStopped, check)
 			*ended = runEnded
@@ -459,26 +459,20 @@ func pushStepName(branch *preparation.WorkBranch, system string) string {
 
 // store stores a version of each output of the stage that the outbox under o.root has, as
 // [runOutputs.ready] reads them, then removes the files of each stored version from the
-// outbox. A required output that the outbox does not have, and that no version of the run
-// runID has, is an error before any version is stored. note is the versions' note, w gets the
-// step's lines, and branch is the branch that the step pushed, nil for none. A nil o stores
-// nothing.
+// outbox. note is the versions' note, w gets the step's lines, and branch is the branch that
+// the step pushed, nil for none. A nil o stores nothing.
 func (o *runOutputs) store(ctx context.Context, w io.Writer, client *runapi.Client, runID, note string, branch *preparation.WorkBranch, checks *runPushChecks) error {
 	if o == nil {
 		return nil
 	}
 	// The check before the push passed on the version the push leaves, so an error here is
 	// of a pushed head that differs from the local head: the branch has no version, and the
-	// run closes with no end code, or run_api_failed for a failed read of the run's versions.
-	// A run with no branch pushes nothing, so its outputs that fail here close it
-	// outputs_invalid, as before a push.
-	ready, err := o.checked(ctx, w, client, runID, recordOf(branch, o.target), note)
+	// run closes with no end code. A run with no branch pushes nothing, so its outputs that
+	// fail here close it outputs_invalid, as before a push.
+	ready, err := o.ready(w, recordOf(branch, o.target), note)
 	if err != nil {
 		if branch == nil {
-			return err
-		}
-		if invalid := (*outputsInvalid)(nil); errors.As(err, &invalid) {
-			err = invalid.err
+			return &outputsInvalid{err}
 		}
 		return withDeleteBranch(branch, err)
 	}
@@ -499,90 +493,24 @@ func (o *runOutputs) store(ctx context.Context, w io.Writer, client *runapi.Clie
 	return nil
 }
 
-// missingOutput is the error for the first type of missing, the required outputs that the
-// outbox does not have, that no version of the run runID has: a session of a shared run may
-// have stored it already. The error shows where the session writes the output of the type,
-// as types define it, and is a [*outputMissingError]. nil when each has one.
-func missingOutput(ctx context.Context, client *runapi.Client, runID string, types []exports.ProcessType, missing []string) error {
-	read, cancel := context.WithTimeout(ctx, runAPITimeout)
-	index, err := client.Artifacts(read)
-	cancel()
-	if err != nil {
-		return withCause(fmt.Errorf(textOutputNotStored, provisioner.ShownType(missing[0]), shownError(err)), err)
+// outputsBeforePush is [runOutputs.beforePush]; a test replaces it.
+var outputsBeforePush = (*runOutputs).beforePush
+
+// beforePush reads, fills and checks each output of the stage that the outbox has, as
+// [runOutputs.store] does after the push, with what version moves, the version of the branch
+// ref that the push leaves. An output that fails is an [*outputsInvalid]. It prints nothing
+// and stores nothing. A nil o checks nothing.
+func (o *runOutputs) beforePush(ref string, version []preparation.Repository) error {
+	if o == nil {
+		return nil
 	}
-	for _, typ := range missing {
-		if !hasRunVersion(index, typ, runID) {
-			entry := outputPath(shownText(typ), typeOf(types, typ).Schema != nil)
-			if typeOf(types, typ).Schema == nil {
-				entry += "/"
-			}
-			return &outputMissingError{fmt.Errorf(textOutputMissing, provisioner.ShownType(typ), entry)}
-		}
+	if _, err := o.ready(io.Discard, recordIn(version, ref, o.target), ""); err != nil {
+		return &outputsInvalid{err}
 	}
 	return nil
 }
 
-// outputMissingError is the error of [missingOutput] for a required output that no session
-// wrote, apart from a failed read of the run's versions.
-type outputMissingError struct{ err error }
-
-func (e *outputMissingError) Error() string { return e.err.Error() }
-
-func (e *outputMissingError) Unwrap() error { return e.err }
-
-// hasRunVersion reports whether index has a version of the type typ that the run runID wrote.
-func hasRunVersion(index *runapi.Index, typ, runID string) bool {
-	for _, artifact := range index.Artifacts {
-		if artifact.Type != typ {
-			continue
-		}
-		for _, version := range artifact.Versions {
-			if version.Writer.Kind == "run" && version.Writer.RunID == runID {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// outputsBeforePush is [runOutputs.beforePush]; a test replaces it.
-var outputsBeforePush = (*runOutputs).beforePush
-
-// beforePush reads, fills and checks each output of the stage, as [runOutputs.store] does
-// after the push, with what version moves, the version of the branch ref that the push
-// leaves, and stops on a required output that neither the outbox nor a version of the run
-// runID has. It prints nothing and stores nothing. A nil o checks nothing.
-func (o *runOutputs) beforePush(ctx context.Context, client *runapi.Client, runID, ref string, version []preparation.Repository) error {
-	if o == nil {
-		return nil
-	}
-	_, err := o.checked(ctx, io.Discard, client, runID, recordIn(version, ref, o.target), "")
-	return err
-}
-
-// checked is [runOutputs.ready] for rec and note, with the check of [missingOutput] on the
-// required outputs that the outbox does not have. An output that fails, or is missing, is an
-// [*outputsInvalid]; a failed read of the run's versions is not, and closes the run
-// run_api_failed.
-func (o *runOutputs) checked(ctx context.Context, w io.Writer, client *runapi.Client, runID string, rec *pushRecord, note string) ([]readyOutput, error) {
-	ready, missing, err := o.ready(w, rec, note)
-	if err != nil {
-		return nil, &outputsInvalid{err}
-	}
-	if len(missing) == 0 {
-		return ready, nil
-	}
-	err = missingOutput(ctx, client, runID, o.types, missing)
-	switch {
-	case errors.As(err, new(*outputMissingError)):
-		return nil, &outputsInvalid{err}
-	case err != nil:
-		return nil, err
-	}
-	return ready, nil
-}
-
-// outputsInvalid is the error of an output that fails [runOutputs.checked] before the push, or
+// outputsInvalid is the error of an output that fails [runOutputs.ready] before the push, or
 // in a run with no branch before any version is stored: its line, and the end code
 // outputs_invalid. The same failure after a push, in [runOutputs.store], has no end code.
 type outputsInvalid struct{ err error }

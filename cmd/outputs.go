@@ -48,7 +48,6 @@ const (
 // The words of the outputs of a session. Line 1 is the fix, then the cause; a type is cut
 // as [provisioner.ShownType] cuts it.
 const (
-	textOutputMissing   = "Write %s to the outbox: the stage requires it and the session wrote none.\n  %s"
 	textOutputHasMember = "Remove %s from the %s output: qory fills it at the push."
 	textOutputBroken    = "Fix the %s output: it breaks its schema at %s."
 	textOutputNotJSON   = "Write the %s output as one JSON object: the file is not one."
@@ -427,20 +426,18 @@ func recordIn(version []preparation.Repository, ref string, target *contracts.Ta
 // version is stored, so an output that breaks its schema stores nothing. rec is what the
 // push moved in the target's repository, see [recordOf]. A type that marks pushed-commits,
 // or any member that qory fills from the push ([marksPushFill]), of a run that pushed nothing
-// to the target gets no version, and a line on w. missing is each required output that the
-// outbox does not have.
-func (o *runOutputs) ready(w io.Writer, rec *pushRecord, note string) (out []readyOutput, missing []string, err error) {
+// to the target gets no version, and a line on w. An output that the outbox does not have is
+// no error: Qory Apiary checks that each required output exists when the stage's last session
+// succeeds.
+func (o *runOutputs) ready(w io.Writer, rec *pushRecord, note string) (out []readyOutput, err error) {
 	for _, stage := range o.stage {
 		t := typeOf(o.types, stage.Type)
 		shown := provisioner.ShownType(t.Name)
 		files, found, err := readOutput(o.root, t)
 		if err != nil {
-			return nil, nil, fmt.Errorf(textOutputUnread, shown, shownError(err))
+			return nil, fmt.Errorf(textOutputUnread, shown, shownError(err))
 		}
 		if !found {
-			if stage.Required {
-				missing = append(missing, stage.Type)
-			}
 			continue
 		}
 		if t.Schema != nil {
@@ -450,17 +447,17 @@ func (o *runOutputs) ready(w io.Writer, rec *pushRecord, note string) (out []rea
 			}
 			content, err := fillOutput(files[0].Content, t, o.target, rec)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			if err := checkOutput(content, t); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			files[0].Content = content
 		}
 		// The next run reads a delivered output's file to find its start, see [references].
 		for _, f := range files {
 			if t.Send != "" && len(f.Content) > maxStartFile {
-				return nil, nil, fmt.Errorf(textOutputTooBig, shown, maxStartFile, shownText(f.Filename), len(f.Content))
+				return nil, fmt.Errorf(textOutputTooBig, shown, maxStartFile, shownText(f.Filename), len(f.Content))
 			}
 		}
 		sizes := make([]int64, len(files))
@@ -468,12 +465,12 @@ func (o *runOutputs) ready(w io.Writer, rec *pushRecord, note string) (out []rea
 			sizes[i] = int64(len(f.Content))
 		}
 		if err := runapi.CheckVersion(t.Name, sizes); err != nil {
-			return nil, nil, fmt.Errorf(textOutputUnread, shown, shownError(err))
+			return nil, fmt.Errorf(textOutputUnread, shown, shownError(err))
 		}
 		push := runapi.Push{Type: t.Name, Name: outputName(t, o.target), Note: note, Files: files}
 		out = append(out, readyOutput{push: push, folder: path.Join(outboxRel, t.Name)})
 	}
-	return out, missing, nil
+	return out, nil
 }
 
 // targetShown is the target as a line shows it: its address, or its collection when it has no

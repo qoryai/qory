@@ -53,9 +53,9 @@ release may change what an existing document does, and states it under Upgrading
   the cause alone. When the next-session request gets a refusal or a status below 500
   other than 429 with no coded refusal, from Qory Apiary or the gateway, or no answer, the
   run closes `failed` with `next_session_failed`. An output check before the push, or
-  before any version is stored in a run with no repository, that finds a required output
-  missing, or an output that fails its read, fill, schema or size check, closes the run
-  `failed` with `outputs_invalid`; the same failure after the push has no end code. A call
+  before any version is stored in a run with no repository, that finds an output that fails
+  its read, fill, schema or size check, closes the run `failed` with `outputs_invalid`; the
+  same failure after the push has no end code. A call
   from qory to the run API that fails closes the run `failed` with `run_api_failed`: the read
   of the work item or of its versions, the store of an output, the fetch of a push check,
   and the post of the suite's verdict. Any other end code of the failure comes first, and a
@@ -389,10 +389,9 @@ release may change what an existing document does, and states it under Upgrading
   type, against 786432 bytes, the most that the next run reads, runs the type's push
   check, stores one version, and removes the version's files from the outbox. The version of a
   delivered type goes to the artifact `t-` and the first 32 hexadecimal digits of the SHA-256 of the target's `collection`; any other
-  type's to `main`. A required output that the session did not write, and that no version of
-  the run has, fails the step: `Write <type> to the outbox: the stage requires it and the
-  session wrote none.` qory reads, fills and checks the outputs, and checks the required
-  ones, before the push with the local head, so an output that fails pushes nothing and
+  type's to `main`. qory checks an output that exists, and Qory Apiary checks that the
+  required ones exist when the stage's last session succeeds. qory reads, fills and checks the
+  outputs before the push with the local head, so an output that fails pushes nothing and
   closes the run `failed` with `outputs_invalid`, and again after the push. qory removes
   the outbox before each session, so an output that a failed session or an earlier run
   left is never stored; a `.qory` that is a link stops the run with `Remove .qory/outbox,

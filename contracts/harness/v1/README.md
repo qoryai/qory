@@ -840,13 +840,9 @@ checks the file against the type's schema, and stores one version: for a deliver
 in the artifact named `t-` and the first 32 lower-case hexadecimal digits of the
 SHA-256 of the target's `collection`, such as `t-e047707709a59e682f6b3df0e394d0bb` for
 `R_kgDOExample1`, and in `main` for any other type. Once its version is stored, the output
-goes from the outbox. A session that did not succeed stores nothing. A required output
-that the outbox does not have, and that no version of the run has, stops the step:
-
-```text
-Write pull-request to the outbox: the stage requires it and the session wrote none.
-  .qory/outbox/pull-request/pull-request.json
-```
+goes from the outbox. A session that did not succeed stores nothing. qory checks an output
+that exists. Qory Apiary checks that the required outputs exist when the stage's last session
+succeeds, so a session may end with no output: qory pushes its commits, as after every session.
 
 The next run of the work item starts at the head of the version of the target's artifact
 that the stage wrote last, or the version that a gate approved: the newest commit that
