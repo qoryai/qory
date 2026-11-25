@@ -18,6 +18,27 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- `qory run` from a run code runs the workflow hooks of each session, as `hooks.json` lists
+  them: the hooks at the session's end after the agent exited, when the session succeeded or
+  its work is pushed, and before the push step; the hooks at the start of session 1 before the
+  setup commands. A hook at the start of a later session of a shared run is red and does not
+  run: Forager has no pause for the setup container that runs then. Each program hook runs
+  from the file that the session's start commit has, in a container of the run's image with
+  no network, a read-only `.git` and `.qory`, with the read targets under `.qory`, for at most
+  its timeout; qory restores the checkout after each hook. No hook runs, and each is red, in a
+  checkout with a repository that is no submodule entry and that git does not ignore. A hook
+  that leaves one ends the run with no push. So does a hook that changes a submodule entry's
+  folder, or leaves a pipe, a socket or a device in a folder that git does not ignore. So does
+  one that changes a `.gitattributes` in an ignored folder with tracked files. A red required
+  hook turns the verdict into `changes-requested`, and an `escalate` stays `escalate`. An agent
+  hook and a review hook do not run and are red, with the line
+  `Agent hook <name> did not run: agent hooks are not built yet.` or
+  `Review hook <name> did not run: review hooks are not built yet.` Every hook of a run with
+  no wall is red. A stop while a hook runs posts no verdict. Each hook has a record in the
+  run's folder, `hooks/session-<n>.json`. The log keeps the first 64 KiB of a line of a
+  hook's output, masked, and ends a longer line with `[qory cut the rest of this line]`; a
+  secret that crosses the cut leaves none of its bytes in the log, unless the secret's text
+  has a run of `*`.
 - A workflow entry of a stack takes `review_group`, the name of a group role:
   `workflows: {review-changes: {review_group: reviewers}}`. The value declares the group
   role whose members review the work in a session of the workflow. A value that is no
@@ -2237,6 +2258,12 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Security
 
+- An escape sequence inside a secret, or right before it, no longer stops qory from masking
+  the secret in the log of a step, unless the sequence ends with a byte of the secret: then
+  the rest of the secret can show.
+- qory keeps the text of a terminal link in a step's log and removes the string sequences OSC,
+  DCS, SOS, PM and APC whole from it, so a URL that a program prints only inside a terminal
+  link does not show in the log.
 - These errors and lines print "(a value that contains a run key)", or the phrase for
   the kind of key or code, in place of a value that contains `qak_`, `qrk_`, `qecr_` or
   an enrolment code's prefix, in any letter case; line 1 is otherwise as before, and a

@@ -489,7 +489,7 @@ func TestThePrivateGitDirHasNoKeyOfALaterWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	private := t.TempDir()
-	if err := privateGitDir(hostgit.WithBase(context.Background(), proxygit.Env(os.Environ(), nil)), dir, dir, private, r.Commit); err != nil {
+	if err := privateGitDir(hostgit.WithBase(context.Background(), proxygit.Env(os.Environ(), nil)), dir, dir, private, r.Commit, false); err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(t.TempDir(), "filter-ran")
@@ -529,7 +529,7 @@ func TestThePrivateIndexHasTheTimeOfTheIndex(t *testing.T) {
 	}
 	private := t.TempDir()
 	ctx := hostgit.WithBase(context.Background(), proxygit.Env(os.Environ(), nil))
-	if err := privateGitDir(ctx, dir, dir, private, b.Repositories[0].Commit); err != nil {
+	if err := privateGitDir(ctx, dir, dir, private, b.Repositories[0].Commit, false); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(filepath.Join(private, "index"))
@@ -559,7 +559,7 @@ func TestTheCheckReadsThePrivateCopy(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(filepath.ListSeparator)+os.Getenv("PATH"))
 	ctx := hostgit.WithBase(context.Background(), proxygit.Env(os.Environ(), nil))
-	if err := privateGitDir(ctx, dir, dir, private, b.Repositories[0].Commit); err != nil {
+	if err := privateGitDir(ctx, dir, dir, private, b.Repositories[0].Commit, false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(calls)

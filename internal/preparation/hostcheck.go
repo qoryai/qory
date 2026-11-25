@@ -79,8 +79,9 @@ func safeFurther(ctx context.Context, root, dir string, afterRun bool) error {
 // checked, and git reads only those copies, so a key that dir gets after this read has
 // no effect. private also has HEAD at commit, and copies of the index and of
 // info/exclude, as far as dir has them. It has no hooks and no attributes. git reads the
-// objects from dir, which runs no program.
-func privateGitDir(ctx context.Context, root, dir, private, commit string) error {
+// objects from dir, which runs no program. afterRun is for a repository that an agent had
+// open for writing, see [safeFurther].
+func privateGitDir(ctx context.Context, root, dir, private, commit string, afterRun bool) error {
 	if err := noLinkTo(root, dir); err != nil {
 		return err
 	}
@@ -97,7 +98,7 @@ func privateGitDir(ctx context.Context, root, dir, private, commit string) error
 			return local(err)
 		}
 	}
-	if err := keysIn(ctx, private, files, true, false); err != nil {
+	if err := keysIn(ctx, private, files, true, afterRun); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(private, "HEAD"), []byte(commit+"\n"), 0o600); err != nil {

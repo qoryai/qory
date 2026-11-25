@@ -424,7 +424,8 @@ func endedLine(got suite.Outcome) string {
 
 // post posts the verdict for a suite that did not pass, with at most tries requests, and returns
 // the line for what it posted, "" for nothing. The rules by prior verdict are in docs/run.md.
-func (r *suiteRun) post(ctx context.Context, point runapi.Point, kind suiteKind, tries int) (string, error) {
+// more are points after point, which the red hooks of a session add, see [sessionHooks.post].
+func (r *suiteRun) post(ctx context.Context, point runapi.Point, kind suiteKind, tries int, more ...runapi.Point) (string, error) {
 	httpClient, base, err := r.run.RunAPI()
 	if err != nil {
 		return "", err
@@ -455,6 +456,7 @@ func (r *suiteRun) post(ctx context.Context, point runapi.Point, kind suiteKind,
 			verdict = runapi.VerdictEscalate
 		}
 	}
+	points = append(points, more...)
 	if len(points) > maxVerdictPoints {
 		return textSuiteNoRoom, nil
 	}
