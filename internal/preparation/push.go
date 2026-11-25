@@ -374,7 +374,7 @@ func dropGitlinks(ctx context.Context, git gitRunner, dir string, links map[stri
 
 // resetPaths sets paths in the index of the repository at dir to what commit has.
 func resetPaths(ctx context.Context, dir, commit string, paths []string) error {
-	_, err := stepGit(noRemote, pathspecs("top,literal", paths))(ctx, dir, "reset", "--quiet", commit, "--pathspec-from-file=-", "--pathspec-file-nul")
+	_, err := stepGit(noRemote, pathspecs("top,literal", paths))(ctx, dir, "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul", commit, "--")
 	return err
 }
 
