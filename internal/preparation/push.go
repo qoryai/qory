@@ -242,6 +242,7 @@ func commitLeft(ctx context.Context, dir string, r WorkRepository, setup map[str
 		return err
 	}
 	var paths []string
+	added := map[string]bool{}
 	printed := map[string]bool{}
 	line := func(path string) {
 		if !printed[path] {
@@ -259,6 +260,7 @@ func commitLeft(ctx context.Context, dir string, r WorkRepository, setup map[str
 			line(strings.TrimSuffix(path, "/"))
 		default:
 			paths = append(paths, path)
+			added[strings.TrimSuffix(path, "/")] = true
 		}
 	}
 	links, err := gitlinks(ctx, git, dir)
@@ -270,8 +272,7 @@ func commitLeft(ctx context.Context, dir string, r WorkRepository, setup map[str
 		if isRepository(dir, path) {
 			line(path)
 		}
-		// git add stops on an exclusion behind a link, and it removes an entry there.
-		if !behindLink(dir, path) {
+		if reached(dir, added, path) {
 			excluded = append(excluded, path)
 		}
 	}
@@ -316,19 +317,22 @@ func isRepository(dir, path string) bool {
 	return err == nil
 }
 
-// behindLink reports whether a folder on the way from dir to path, relative to dir, is a
-// link.
-func behindLink(dir, path string) bool {
+// reached reports whether an add of the paths in added reaches the gitlink path: added has
+// it or a path above it, and no folder on the way is a link, where git add removes the
+// entry. With an exclusion that no path reaches, git add can leave out other paths.
+func reached(dir string, added map[string]bool, path string) bool {
+	found := added[path]
 	for i := range len(path) {
 		if path[i] != '/' {
 			continue
 		}
 		info, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(path[:i])))
 		if err == nil && info.Mode()&fs.ModeSymlink != 0 {
-			return true
+			return false
 		}
+		found = found || added[path[:i]]
 	}
-	return false
+	return found
 }
 
 // gitlinks is each gitlink in the index of the repository at dir: its mode, commit and
