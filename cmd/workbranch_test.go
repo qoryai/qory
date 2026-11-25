@@ -31,9 +31,14 @@ type startAPI struct {
 	file string
 	// pushed is the pushed commits, each "commit" or "path commit", oldest first.
 	pushed []string
+	// later is the commits that a later run, r2, pushed to acme/site, oldest first, after the
+	// commits of pushed.
+	later []string
 	// stage is the work item's stage, st_a when "", and approved marks the version approved.
 	stage    string
 	approved bool
+	// newer is the stage of a newer version, av_2, that the later run r2 wrote: "" for none.
+	newer string
 }
 
 // branchAPI serves a run API whose work item has one version of pull-request, with file as
@@ -53,9 +58,14 @@ func (a startAPI) serve(t *testing.T) string {
 		if a.approved {
 			approved = `,"approved_version":"av_1"`
 		}
-		artifacts = fmt.Sprintf(`[{"type":"pull-request","name":%q,"newest_version":1%s,"versions":[{"id":"av_1","number":1,"writer":{"kind":"run","run_id":"r"},"stage_id":"st_a","at":"2026-11-02T09:00:00Z",`+
-			`"files":[{"filename":"pull-request.json","content_type":"application/json","size":%d,"sha256":%q}],"approvals":[]}]}]`,
-			pullRequestName, approved, len(a.file), hex.EncodeToString(sum[:]))
+		newer, number := "", 1
+		if a.newer != "" {
+			number = 2
+			newer = fmt.Sprintf(`,{"id":"av_2","number":2,"writer":{"kind":"run","run_id":"r2"},"stage_id":%q,"at":"2026-11-03T09:00:00Z","files":[],"approvals":[]}`, a.newer)
+		}
+		artifacts = fmt.Sprintf(`[{"type":"pull-request","name":%q,"newest_version":%d%s,"versions":[{"id":"av_1","number":1,"writer":{"kind":"run","run_id":"r"},"stage_id":"st_a","at":"2026-11-02T09:00:00Z",`+
+			`"files":[{"filename":"pull-request.json","content_type":"application/json","size":%d,"sha256":%q}],"approvals":[]}%s]}]`,
+			pullRequestName, number, approved, len(a.file), hex.EncodeToString(sum[:]), newer)
 	}
 	entries := []map[string]any{}
 	for _, p := range a.pushed {
@@ -64,6 +74,9 @@ func (a startAPI) serve(t *testing.T) string {
 			path, commit = "acme/site", p
 		}
 		entries = append(entries, map[string]any{"system": proxygittest.Host, "path": path, "commit": commit, "run_id": "r", "cancelled": false, "at": "2026-11-02T09:00:00Z"})
+	}
+	for _, commit := range a.later {
+		entries = append(entries, map[string]any{"system": proxygittest.Host, "path": "acme/site", "commit": commit, "run_id": "r2", "cancelled": false, "at": "2026-11-03T09:00:00Z"})
 	}
 	pushed, _ := json.Marshal(entries)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -212,6 +225,55 @@ func TestARunStartsAtTheTargetsEntryOfTheVersionsRun(t *testing.T) {
 			}
 			if got := gitOut(t, h.dir, "rev-parse", "HEAD"); got != head {
 				t.Errorf("the working folder is at %s, want %s", got, head)
+			}
+		})
+	}
+}
+
+// TestARunThatStartsAtAnApprovedVersionMovesToNoLaterPush is a version from run r, with its
+// commit head, and a later run's commit that descends from head, on the default branch: a run
+// of a stage that wrote no version, whose start is the approved version, as Verify, starts
+// at head. A run of the stage that wrote the version, as Build, starts at the later commit,
+// whether the version is the newest or a version of another stage is newer than it.
+func TestARunThatStartsAtAnApprovedVersionMovesToNoLaterPush(t *testing.T) {
+	for name, c := range map[string]struct {
+		api  func(file, head, later string) startAPI
+		want func(head, later string) string
+	}{
+		"a stage that wrote no version stays at the approved commit": {
+			func(file, head, later string) startAPI {
+				return startAPI{file: file, pushed: []string{head}, later: []string{later}, stage: "st_b", approved: true}
+			},
+			func(head, _ string) string { return head },
+		},
+		"the stage's version, under a newer version of another stage, moves to the later commit": {
+			func(file, head, later string) startAPI {
+				return startAPI{file: file, pushed: []string{head}, later: []string{later}, newer: "st_b", approved: true}
+			},
+			func(_, later string) string { return later },
+		},
+		"the stage's newest version moves to the later commit": {
+			func(file, head, later string) startAPI {
+				return startAPI{file: file, pushed: []string{head}, later: []string{later}}
+			},
+			func(_, later string) string { return later },
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, first, head, _ := versionRepository(t)
+			work := tempDir(t)
+			proxygittest.Git(t, work, "clone", "--quiet", filepath.Join(h.server.Root, "acme", "site.git"), ".")
+			writeFile(t, filepath.Join(work, "later.txt"), "later\n")
+			commitAll(t, work, "A later run's commit")
+			proxygittest.Git(t, work, "push", "--quiet", "origin", "main")
+			later := proxygittest.Git(t, work, "rev-parse", "HEAD")
+
+			out, err, n, _ := runOnBranch(t, h, first, c.api(branchDocument(t, head), head, later).serve(t))
+			if !n.joined {
+				t.Fatalf("%v (exit %d), want the join\n%s", err, cmd.ExitCode(err), out)
+			}
+			if want, got := c.want(head, later), gitOut(t, h.dir, "rev-parse", "HEAD"); got != want {
+				t.Errorf("the working folder is at %s, want %s", got, want)
 			}
 		})
 	}

@@ -111,7 +111,7 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, deadline time.T
 	branch := &preparation.WorkBranch{Ref: preparation.WorkItemRef(r.workItem)}
 	pushed := snapshot.PushedCommits
 
-	version, artifact := startVersion(snapshot, index, r.targetRef)
+	version, artifact, approved := startVersion(snapshot, index, r.targetRef)
 	if version == nil && artifact != "" {
 		return nil, fmt.Errorf(textNoStart, fmt.Sprintf(textNoApproved, shownText(artifact)))
 	}
@@ -121,6 +121,7 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, deadline time.T
 			return nil, err
 		}
 		branch.Version = []preparation.Repository{{System: r.targetRef.Address.System, Path: r.targetRef.Address.Path, Commit: commit}}
+		branch.Approved = approved
 		// A commit that the start's run pushed after the start, which no version of the run
 		// confirms, counts as a cancelled run's: the run does not move there, and its push
 		// replaces it.
@@ -137,16 +138,13 @@ func (r *codeRun) readBranch(ctx context.Context, run openedRun, deadline time.T
 	return branch, nil
 }
 
-// pushedStarts sets what the work item's record of pushed commits gives branch: Pushed,
-// per repository the newest commit of a run that a person did not cancel, and Cancelled,
-// every commit of a cancelled run. The entries come ordered by run number and then by push
-// order, so the last one of a repository is its newest. A commit that is not a full commit id
-// ends the read before git gets it: the run API returns these values, and none of them may be
-// a ref name or an option.
+// pushedStarts sets what the work item's record of pushed commits gives branch: Pushed, every
+// commit of a run that a person did not cancel, and Cancelled, every commit of a cancelled run.
+// The entries come ordered by run number and then by push order, and Pushed keeps that order, so
+// the last entry of a repository is its newest. A commit that is not a full commit id ends the
+// read before git gets it: the run API returns these values, and none of them may be a ref name
+// or an option.
 func pushedStarts(branch *preparation.WorkBranch, pushed []runapi.PushedEntry) error {
-	newest := map[[2]string]preparation.Landed{}
-	order := [][2]string{}
-
 	for _, entry := range pushed {
 		if !lowerCommitID(entry.Commit) {
 			return fmt.Errorf("Report this run to the instance admin of Qory Apiary.\n"+
@@ -156,20 +154,9 @@ func pushedStarts(branch *preparation.WorkBranch, pushed []runapi.PushedEntry) e
 		landed := preparation.Landed{System: entry.System, Path: entry.Path, Commit: entry.Commit}
 		if entry.Cancelled {
 			branch.Cancelled = append(branch.Cancelled, landed)
-
-			continue
+		} else {
+			branch.Pushed = append(branch.Pushed, landed)
 		}
-
-		key := [2]string{entry.System, entry.Path}
-		if _, seen := newest[key]; !seen {
-			order = append(order, key)
-		}
-
-		newest[key] = landed
-	}
-
-	for _, key := range order {
-		branch.Pushed = append(branch.Pushed, newest[key])
 	}
 
 	return nil
@@ -183,46 +170,95 @@ func featureOff(err error) bool {
 	return errors.As(err, &apiError) && apiError.Status == http.StatusNotFound && apiError.Code == ""
 }
 
-// startVersion is the version that a run starts from, of the artifact of target's
-// collection, the name [outputName] gives a delivered output: the newest version that the work
-// item's stage wrote and that is not cancelled, as for Build; else the version that a gate
-// approved, as for Verify; nil with none of these, where the run starts at what the run
-// documents check out. A newest version that is a withdrawal counts as none. artifact is the
-// type of the version's artifact; with a nil version it is set only when the approved version
-// is not in the index. When types of the run's outputs have such artifacts, the version with
-// the latest time of all wins.
+// startVersion is the version that a run starts from, of the artifacts of target's
+// collection, the name [outputName] gives a delivered output: the newest version that is not
+// cancelled and that the work item's stage wrote, as for Build, even when another stage wrote
+// a newer one; else the version that a gate approved, as for Verify; nil with none of these,
+// where the run starts at what the run documents check out. A version counts only when no
+// version of its artifact that is not cancelled, with a higher number, is a withdrawal: a
+// withdrawal as the newest version leaves no version of its artifact. artifact is the type of
+// the version's artifact; with a nil version it is set only when the approved version is not
+// in the index. approved is true when the version is the one that a gate approved, not one that
+// the stage wrote: the run stays at its commit. A run has the approved version when no
+// artifact has a counting version of its stage (the stage wrote none, every version of its
+// stage is cancelled, or a withdrawal follows each), and a work item in no stage has it too.
+// When several types have such versions, the one with the latest time of all wins.
 // shortcut: two delivered types of one stage written by different runs give the newest one;
 // replace it when the run API names the version a run starts from. [startCommit] confirms the
 // start with another version of the same run when the newest one has no reference to it.
-func startVersion(snapshot *runapi.Snapshot, index *runapi.Index, target *contracts.Target) (version *runapi.Version, artifact string) {
+func startVersion(snapshot *runapi.Snapshot, index *runapi.Index, target *contracts.Target) (version *runapi.Version, artifact string, approved bool) {
 	if target == nil || target.Address == nil {
-		return nil, ""
+		return nil, "", false
 	}
 	name := outputName(exports.ProcessType{Send: "delivered"}, target)
 	stage := snapshot.Stage.ID
+	var (
+		written, agreed         *runapi.Version
+		writtenType, agreedType string
+		missing                 string
+	)
 	for _, a := range index.Artifacts {
 		if a.Name != name {
 			continue
 		}
-		pick := newestNotCancelled(a)
-		if pick == nil || stage == nil || pick.StageID == nil || *stage != *pick.StageID {
-			pick = nil
-			if a.ApprovedVersion != nil && !withdrawn(a) {
-				for i := range a.Versions {
-					if a.Versions[i].ID == *a.ApprovedVersion {
-						pick = &a.Versions[i]
-					}
-				}
-				if pick == nil {
-					return nil, a.Type
+		after := lastWithdrawal(a)
+		if pick := newestOfStage(a, stage, after); pick != nil && (written == nil || compareAt(pick.At, written.At) > 0) {
+			written, writtenType = pick, a.Type
+		}
+		if a.ApprovedVersion == nil {
+			continue
+		}
+		var pick *runapi.Version
+		found := false
+		for i := range a.Versions {
+			if a.Versions[i].ID == *a.ApprovedVersion {
+				found = true
+				if a.Versions[i].Number > after {
+					pick = &a.Versions[i]
 				}
 			}
 		}
-		if pick != nil && (version == nil || compareAt(pick.At, version.At) > 0) {
-			version, artifact = pick, a.Type
+		switch {
+		case !found && missing == "" && !withdrawn(a):
+			missing = a.Type
+		case pick != nil && (agreed == nil || compareAt(pick.At, agreed.At) > 0):
+			agreed, agreedType = pick, a.Type
 		}
 	}
-	return version, artifact
+	switch {
+	case written != nil:
+		return written, writtenType, false
+	case missing != "":
+		return nil, missing, false
+	}
+	return agreed, agreedType, agreed != nil
+}
+
+// lastWithdrawal is the highest number of a version of artifact that is a withdrawal and that
+// the index does not mark cancelled, 0 for none: no version with that number or a lower one
+// counts as a start.
+func lastWithdrawal(artifact runapi.Artifact) int {
+	last := 0
+	for _, v := range artifact.Versions {
+		if v.Withdrawn && !v.Cancelled {
+			last = max(last, v.Number)
+		}
+	}
+	return last
+}
+
+// newestOfStage is the version of artifact with the highest number above after that the index
+// does not mark cancelled and that the stage wrote: nil for none, and for a work item in no
+// stage.
+func newestOfStage(artifact runapi.Artifact, stage *string, after int) *runapi.Version {
+	var newest *runapi.Version
+	for i := range artifact.Versions {
+		v := &artifact.Versions[i]
+		if stage != nil && v.StageID != nil && *v.StageID == *stage && !v.Cancelled && v.Number > after && (newest == nil || v.Number > newest.Number) {
+			newest = v
+		}
+	}
+	return newest
 }
 
 // startVersionOf is a version that a run may start from, and its artifact type.
@@ -232,8 +268,9 @@ type startVersionOf struct {
 }
 
 // sameRunVersions are the versions in index, newest first, that the run which wrote chosen
-// stored in the artifacts of target other than chosen, cancelled ones left out: a stage can
-// store two delivered types for one target, and only one of them may confirm the start.
+// stored in the artifacts of target other than chosen, cancelled ones left out, and those
+// with a later withdrawal of their artifact that is not cancelled, which confirm no commit: a
+// stage can store two delivered types for one target, and only one of them may confirm the start.
 func sameRunVersions(index *runapi.Index, target *contracts.Target, chosen *runapi.Version) []startVersionOf {
 	name := outputName(exports.ProcessType{Send: "delivered"}, target)
 	var out []startVersionOf
@@ -241,9 +278,10 @@ func sameRunVersions(index *runapi.Index, target *contracts.Target, chosen *runa
 		if a.Name != name {
 			continue
 		}
+		after := lastWithdrawal(a)
 		for i := range a.Versions {
 			v := &a.Versions[i]
-			if v.ID != chosen.ID && !v.Cancelled && v.Writer.Kind == "run" && v.Writer.RunID == chosen.Writer.RunID {
+			if v.ID != chosen.ID && !v.Cancelled && v.Number > after && v.Writer.Kind == "run" && v.Writer.RunID == chosen.Writer.RunID {
 				out = append(out, startVersionOf{v, a.Type})
 			}
 		}

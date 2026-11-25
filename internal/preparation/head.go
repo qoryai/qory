@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/qoryai/qory/internal/exports"
@@ -133,8 +134,10 @@ type headCheck struct {
 // plain push only for a repository that [WorkBranch.fresh] says starts at the run
 // documents' checkout. A head of [WorkBranch.Cancelled], which a cancelled run or a session
 // with no version pushed, and that descends from the commit the run started at is a push that
-// replaces the branch with a lease on that head, before the run's first push alone. Any other
-// head is a [*HeadChanged].
+// replaces the branch with a lease on that head, before the run's first push alone, unless a
+// commit of [WorkBranch.Pushed] other than the expected one is above the start commit and is
+// that head or below it: the lease would drop a commit of a run that nobody cancelled. The start
+// run's unconfirmed commits are in Cancelled, not in Pushed. Any other head is a [*HeadChanged].
 //
 // Equality with a recorded head is enough: the record lists one head for each push of a
 // cancelled run, and the push replaces the position of the branch that this run set, with every
@@ -167,14 +170,34 @@ func checkHead(ctx context.Context, read gitRunner, dir string, b *WorkBranch, r
 	if err != nil {
 		return headCheck{}, fmt.Errorf(textHeadNoRead, shownPath(r.Path), shownPath(b.system), integration.Printable(exports.HideURLError(err).Error()))
 	}
-	above, err := h.descends(ctx, r.Commit, got)
+	// The commits above the start that are the head or below it: none when the head does not
+	// descend from the start commit. The lease replaces them all, so a commit of a run that
+	// nobody cancelled, [WorkBranch.Pushed], must not be one of them. The history holds the
+	// ancestors of the start and of the head alone, so a commit that the forge lacks is not in it.
+	span, err := h.between(ctx, r.Commit, got)
 	if err != nil {
 		return headCheck{}, fmt.Errorf(textHeadNoRead, shownPath(r.Path), shownPath(b.system), integration.Printable(exports.HideURLError(err).Error()))
 	}
-	if !above {
+	if len(span) == 0 || len(span) > headSpanLimit {
 		return headCheck{}, changed
 	}
+	for _, p := range b.Pushed {
+		if p.System == b.system && sameRepository(b.system == ForgeGitHub, p.Path, r.Path) && slices.Contains(span, p.Commit) {
+			return headCheck{}, changed
+		}
+	}
 	return headCheck{lease: got}, nil
+}
+
+// headSpanLimit is the most commits between the start commit and a recorded head that the head
+// check reads. A span past it is refused as a head that changed, with the check not made.
+var headSpanLimit = 10000
+
+// between lists the commits above start that are head or below it, newest first, at most
+// [headSpanLimit]+1 of them. It reads the fetched history and makes no request to the forge.
+func (h *history) between(ctx context.Context, start, head string) ([]string, error) {
+	out, err := h.read(ctx, h.dir, "rev-list", "--ancestry-path", "--max-count="+strconv.Itoa(headSpanLimit+1), start+".."+head)
+	return strings.Fields(out), err
 }
 
 // cancelledHead reports whether commit is a head that a cancelled run pushed to the repository

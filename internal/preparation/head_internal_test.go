@@ -1,9 +1,11 @@
 package preparation
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -283,6 +285,278 @@ func TestARunStartsAtTheNewestPushedCommitThatDescends(t *testing.T) {
 				t.Errorf("HEAD is %s and the start %s, want %s", got, b.Repositories[0].Start, want)
 			}
 		})
+	}
+}
+
+// TestAnApprovedStartMovesToNoPushedCommit is a version that an approval lists, with a newer
+// commit that descends from the version's commit, pushed by a later run: the run starts at the
+// version's commit and the version stays. With Approved false the same input moves the run
+// to the pushed commit and sets it in the version.
+func TestAnApprovedStartMovesToNoPushedCommit(t *testing.T) {
+	needGit(t)
+	for _, c := range []struct {
+		name     string
+		approved bool
+		moves    bool
+	}{
+		{"an approved version stays", true, false},
+		{"the stage's version moves", false, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			base, dir := t.TempDir(), emptyFolder(t)
+			remote(t, base, "acme/shop", "main", nil)
+			bare := filepath.Join(base, "acme", "shop.git")
+			target := run(t, bare, "rev-parse", "main")
+			pushed := bareCommit(t, bare, "qory/wi_1", target, "a later run")
+			b := &WorkBranch{
+				Ref:      testRef,
+				Approved: c.approved,
+				Version:  []Repository{{System: "git.example.com", Path: "acme/shop", Commit: target}},
+				Pushed:   []Landed{{System: "git.example.com", Path: "acme/shop", Commit: pushed}},
+			}
+			if _, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: target, Branch: b}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := switchTo(dir, b); err != nil {
+				t.Fatal(err)
+			}
+			want := target
+			if c.moves {
+				want = pushed
+			}
+			if got := run(t, dir, "rev-parse", "HEAD"); got != want || b.Repositories[0].Start != want || b.CommitOf("git.example.com", "acme/shop") != want {
+				t.Errorf("HEAD is %s, the start %s, the version %s, want %s", got, b.Repositories[0].Start, b.CommitOf("git.example.com", "acme/shop"), want)
+			}
+		})
+	}
+}
+
+// TestAnApprovedStartThatCommitsAfterALaterPushFailsAtPush is a version that an approval lists,
+// with a later run's commit that descends from it on the branch at the forge: the approved run
+// starts at the version's commit, commits, and its push stops with the head of the later run's
+// commit, [*HeadChanged], and leaves the branch as it is. With Approved false the run starts at
+// the later commit and its push lands on top of it.
+func TestAnApprovedStartThatCommitsAfterALaterPushFailsAtPush(t *testing.T) {
+	needGit(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	for _, c := range []struct {
+		name     string
+		approved bool
+	}{
+		{"an approved version", true},
+		{"the stage's version", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			base, dir := t.TempDir(), emptyFolder(t)
+			remote(t, base, "acme/shop", "main", nil)
+			bare := filepath.Join(base, "acme", "shop.git")
+			run(t, bare, "config", "http.receivepack", "true")
+			target := run(t, bare, "rev-parse", "main")
+			later := bareCommit(t, bare, testRef, target, "a later run")
+			b := &WorkBranch{
+				Ref:      testRef,
+				Approved: c.approved,
+				Version:  versionOf("acme/shop", target),
+				Pushed:   []Landed{{System: "git.example.com", Path: "acme/shop", Commit: later}},
+			}
+			if _, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: target, Branch: b}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := switchTo(dir, b); err != nil {
+				t.Fatal(err)
+			}
+			leave(t, dir)
+			_, _, err := pushOf(dir, b)
+			if !c.approved {
+				if err != nil {
+					t.Fatalf("push: %v", err)
+				}
+				if got, mine := run(t, bare, "rev-parse", testRef), run(t, dir, "rev-parse", "HEAD"); got != mine || run(t, dir, "rev-parse", "HEAD~1") != later {
+					t.Errorf("the branch is at %s, want the run's commit %s on top of %s", got, mine, later)
+				}
+				return
+			}
+			changed := headError(t, err)
+			if changed.Head != later || changed.Expected != target || changed.LastPush {
+				t.Errorf("refusal %+v, want head %s expected %s, the start commit", changed, later, target)
+			}
+			if got := run(t, bare, "rev-parse", testRef); got != later {
+				t.Errorf("the branch is at %s, want %s", got, later)
+			}
+		})
+	}
+}
+
+// TestALeaseNeverDropsACommitOfARunNobodyCancelled is a run that starts at S, the commit of its
+// version, whose branch at the forge has a cancelled run's head Y. The push replaces Y with a lease
+// when only cancelled commits are between S and Y, also when a commit of [WorkBranch.Pushed] is
+// below S or is not at the forge. It stops with [*HeadChanged] and leaves the branch when a commit
+// X of a run that nobody cancelled is above S and is Y or below it: with one cancelled commit on
+// X, with several, and when a later commit Z of another run that does not descend from S follows X
+// in Pushed, with or without an approval.
+func TestALeaseNeverDropsACommitOfARunNobodyCancelled(t *testing.T) {
+	needGit(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	// build makes the branch at the forge and returns its head, the commits of Pushed and the
+	// commits of Cancelled. s is the start, first the commit below it.
+	type shape func(t *testing.T, bare, s, first string) (head string, pushed, cancelled []string)
+	onTop := func(t *testing.T, bare, s, first string) (string, []string, []string) {
+		x := bareCommit(t, bare, testRef, s, "a run that nobody cancelled")
+		return bareCommit(t, bare, testRef, x, "cancelled"), []string{x}, nil
+	}
+	for _, c := range []struct {
+		name      string
+		approved  []bool
+		build     shape
+		cancelled func(head string) []string
+		changed   bool
+		path      string // the repository of the commits of Pushed, acme/shop for ""
+	}{
+		{"a commit of a run nobody cancelled under a cancelled commit", []bool{true}, onTop, func(head string) []string { return []string{head} }, true, ""},
+		{"a commit of a run nobody cancelled under several cancelled commits", []bool{true}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
+			x := bareCommit(t, bare, testRef, s, "a run that nobody cancelled")
+			one := bareCommit(t, bare, testRef, x, "cancelled one")
+			return bareCommit(t, bare, testRef, one, "cancelled two"), []string{x}, []string{one}
+		}, func(head string) []string { return []string{head} }, true, ""},
+		{"a later commit that does not descend from the start", []bool{true, false}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
+			z := bareCommit(t, bare, "other", first, "a later run")
+			x := bareCommit(t, bare, testRef, s, "a run that nobody cancelled")
+			return bareCommit(t, bare, testRef, x, "cancelled"), []string{x, z}, nil
+		}, func(head string) []string { return []string{head} }, true, ""},
+		{"cancelled commits on the start", []bool{true, false}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
+			return bareCommit(t, bare, testRef, s, "cancelled"), nil, nil
+		}, func(head string) []string { return []string{head} }, false, ""},
+		{"the start is in Pushed", []bool{true, false}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
+			return bareCommit(t, bare, testRef, s, "cancelled"), []string{s}, nil
+		}, func(head string) []string { return []string{head} }, false, ""},
+		{"the head is in Pushed too", []bool{true}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
+			one := bareCommit(t, bare, testRef, s, "cancelled one")
+			head := bareCommit(t, bare, testRef, one, "cancelled two")
+			return head, []string{head}, []string{one}
+		}, func(head string) []string { return []string{head} }, true, ""},
+		{"a commit of another repository above the start", []bool{true, false}, onTop,
+			func(head string) []string { return []string{head} }, false, "acme/lib"},
+		{"a commit below the head that is not above the start", []bool{true, false}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
+			w := bareCommit(t, bare, "other", first, "a side branch")
+			tree := run(t, bare, "rev-parse", s+"^{tree}")
+			merge := run(t, bare, "commit-tree", tree, "-p", s, "-p", w, "-m", "cancelled merge")
+			run(t, bare, "update-ref", "refs/heads/"+testRef, merge)
+			return merge, []string{w}, nil
+		}, func(head string) []string { return []string{head} }, false, ""},
+		{"a commit below the start", []bool{true, false}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
+			return bareCommit(t, bare, testRef, s, "cancelled"), []string{first}, nil
+		}, func(head string) []string { return []string{head} }, false, ""},
+		{"a commit that the forge does not have", []bool{true}, func(t *testing.T, bare, s, first string) (string, []string, []string) {
+			return bareCommit(t, bare, testRef, s, "cancelled"), []string{strings.Repeat("a", 40)}, nil
+		}, func(head string) []string { return []string{head} }, false, ""},
+	} {
+		for _, approved := range c.approved {
+			t.Run(fmt.Sprintf("%s, approved %v", c.name, approved), func(t *testing.T) {
+				base, dir := t.TempDir(), emptyFolder(t)
+				remote(t, base, "acme/shop", "main", nil)
+				bare := filepath.Join(base, "acme", "shop.git")
+				run(t, bare, "config", "http.receivepack", "true")
+				s := run(t, bare, "rev-parse", "main")
+				first := run(t, bare, "rev-parse", "main~1")
+				head, pushed, cancelled := c.build(t, bare, s, first)
+				b := &WorkBranch{Ref: testRef, Approved: approved, Version: versionOf("acme/shop", s)}
+				for _, p := range pushed {
+					b.Pushed = append(b.Pushed, Landed{System: "git.example.com", Path: cmp.Or(c.path, "acme/shop"), Commit: p})
+				}
+				for _, cancelledCommit := range append(cancelled, c.cancelled(head)...) {
+					b.Cancelled = append(b.Cancelled, Landed{System: "git.example.com", Path: "acme/shop", Commit: cancelledCommit})
+				}
+				if _, err := fetchListAt(dir, "acme/shop", Target{System: "git.example.com", Path: "acme/shop", Version: s, Branch: b}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := switchTo(dir, b); err != nil {
+					t.Fatal(err)
+				}
+				if got := run(t, dir, "rev-parse", "HEAD"); got != s {
+					t.Fatalf("the run starts at %s, want %s", got, s)
+				}
+				leave(t, dir)
+				_, _, err := pushOf(dir, b)
+				if c.changed {
+					if changed := headError(t, err); changed.Head != head || changed.Expected != s {
+						t.Errorf("refusal %+v, want head %s expected %s", changed, head, s)
+					}
+					if got := run(t, bare, "rev-parse", testRef); got != head {
+						t.Errorf("the branch is at %s, want %s", got, head)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("push: %v", err)
+				}
+				if got, mine := run(t, bare, "rev-parse", testRef), run(t, dir, "rev-parse", "HEAD"); got != mine || run(t, dir, "rev-parse", "HEAD~1") != s {
+					t.Errorf("the branch is at %s, want the run's commit %s on %s", got, mine, s)
+				}
+			})
+		}
+	}
+}
+
+// TestTheLeaseCheckReadsNoMoreThanOneFetchAndBoundedHistory is a recorded head of 3 cancelled
+// commits on the start, and a commit in Pushed that the forge does not have: the check makes one
+// fetch, the history of the start and the head, so the missing commit costs no request and is not
+// below the head. A span of 3 commits is read with a limit of 3 and refused as a head that changed
+// with a limit of 2.
+func TestTheLeaseCheckReadsNoMoreThanOneFetchAndBoundedHistory(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		limit   int
+		changed bool
+	}{
+		{"a span within the limit", 3, false},
+		{"a span past the limit", 2, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			old := headSpanLimit
+			headSpanLimit = c.limit
+			t.Cleanup(func() { headSpanLimit = old })
+			dir, b, base := onBranchIn(t, "acme/shop")
+			bare := filepath.Join(base, "acme", "shop.git")
+			head := b.Repositories[0].Commit
+			for i := 0; i < 3; i++ {
+				head = bareCommit(t, bare, b.Ref, head, "cancelled")
+			}
+			b.Cancelled = []Landed{{System: "git.example.com", Path: "acme/shop", Commit: head}}
+			b.Pushed = []Landed{{System: "git.example.com", Path: "acme/shop", Commit: strings.Repeat("a", 40)}}
+			leave(t, dir)
+			commitHere(t, dir)
+			read := &fetchesIn{inner: stepGit(&testProxy, "")}
+			check, err := checkHead(context.Background(), read.run, dir, b, b.Repositories[0])
+			if read.count != 1 {
+				t.Errorf("%d fetches, want 1", read.count)
+			}
+			if c.changed {
+				changed := &HeadChanged{}
+				if !errors.As(err, &changed) || changed.Head != head || check.lease != "" {
+					t.Errorf("lease %q, error %v, want a refusal with the head %s", check.lease, err, head)
+				}
+			} else if err != nil || check.lease != head {
+				t.Errorf("lease %q, error %v, want the head %s", check.lease, err, head)
+			}
+		})
+	}
+}
+
+// TestACommitOfAnotherSystemIsNoKeptCommit is a recorded head of two cancelled commits on the start,
+// and a commit in Pushed that is the first of them, with the same path on another system: it is
+// no commit of this repository, so the lease replaces both.
+func TestACommitOfAnotherSystemIsNoKeptCommit(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop")
+	bare := filepath.Join(base, "acme", "shop.git")
+	first := bareCommit(t, bare, b.Ref, b.Repositories[0].Commit, "cancelled one")
+	head := bareCommit(t, bare, b.Ref, first, "cancelled two")
+	b.Cancelled = []Landed{{System: "git.example.com", Path: "acme/shop", Commit: head}}
+	b.Pushed = []Landed{{System: "other.example.com", Path: "acme/shop", Commit: first}}
+	leave(t, dir)
+	commitHere(t, dir)
+	check, err := checkHead(context.Background(), stepGit(&testProxy, ""), dir, b, b.Repositories[0])
+	if err != nil || check.lease != head {
+		t.Errorf("lease %q, error %v, want the head %s", check.lease, err, head)
 	}
 }
 

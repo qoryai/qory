@@ -2303,24 +2303,32 @@ of the target's collection: the artifact that a delivered output of the target g
 and the first 32 lower-case hexadecimal digits of the SHA-256 of the target's `collection`
 (see [Outputs](../contracts/harness/v1/README.md#outputs)):
 
-1. The newest version of that artifact, when the work item's stage wrote it.
-2. Else, the version of that artifact that a gate approved, unless the newest version is a
-   withdrawal.
+1. The newest version that the work item's stage wrote, even when another stage wrote a
+   newer version.
+2. Else, the version that a gate approved.
 3. Else, the checkout at `target_version`: the run creates the branch there.
 
-The newest version in step 1 is the one with the highest number that the artifact index
-does not mark `cancelled`: a version that a cancelled run made counts for no stage.
-When every version is cancelled, step 1 finds none. When artifacts of several types have
-that name, the version with the latest time wins.
+A version with a later withdrawal of its artifact that is not cancelled does not count.
+
+Each step reads the artifacts of all types that have that name, and step 1 comes first: a
+version of the stage in one type wins over an approved version in another type, whatever their
+times. The newest version in step 1 is the one with the highest number among the versions of
+the stage that the artifact index does not mark `cancelled`: a version that a cancelled run
+made counts for no stage. When the stage has no version, when every version of the stage is
+cancelled, and when a withdrawal follows each, step 1 finds none. When several types have a
+version for a step, the version with the latest time wins.
 
 The start commit is the newest commit that the run which wrote the version pushed to the
 target's repository, from `pushed_commits` in the response to `GET /work-item`, and that a
 version of that run confirms: the version's file, or the file of another version of the same
 run, has exactly one top-level `reference` whose `collection` is the target's and whose
-`address.path` is that commit. qory checks the run's commits newest first. A newer commit
-that no version confirms, such as one that a later session of a shared run pushed before it
-failed, counts as a cancelled run's commit: the run does not move to it, and the push
-replaces it with a lease. A read target starts at the commit that the version lists for its
+`address.path` is that commit. A version with a later withdrawal of its artifact that is not
+cancelled confirms no commit. qory checks the run's commits newest first. A newer commit of
+that run that no version confirms, such as one that a later session of a shared run pushed
+before it failed, counts as a cancelled run's commit: the run does not move to it, and the
+push replaces it with a lease, unless a commit of a run that nobody cancelled lies between the
+start commit and it, except the commits that count as a cancelled run's (see [The head
+check](#the-head-check)). A read target starts at the commit that the version lists for its
 repository, and at the head of its default branch when the version lists none.
 
 Then the run moves to the newest commit of the repository that an earlier run pushed, when
@@ -2329,6 +2337,23 @@ these commits from `pushed_commits` in the response to `GET /work-item`, which l
 commit of the work item's earlier runs, ordered by run number and then by push order, and
 marks the commits of cancelled runs. A commit of a cancelled run, and a commit that does not descend from the start
 commit, moves the run nowhere.
+
+A run whose start version is the one that a gate approved (step 2) does not move. It starts at
+that version's commit, whatever a later run pushed. That is the case for a run whose stage has
+no version that counts: a stage that wrote none, such as Verify, and a stage whose versions
+are all cancelled or followed by a withdrawal, even Build. A work item in no stage is the
+same. When no version is approved, or the approved version does not count, the run starts at
+the checkout at `target_version` (step 3) and moves as the rule above says.
+
+When a later run pushed a commit above the commit of the approved version, the run that starts
+at that version does not move to it. Its push fails with the end code `push_head_changed`,
+because the branch at the forge is at the later commit. The push replaces a head with a lease
+only when a person cancelled the run that pushed it, or when the run which wrote the approved
+version pushed it and no version confirms it. The lease push never drops a commit of a run
+that nobody cancelled that is above the start commit, except the commits that count as a
+cancelled run's. It does not check a commit that does not descend from the start commit, such
+as one on a side branch that the head merged: the push can drop it from the branch. See [The
+head check](#the-head-check).
 
 qory composes the harness at `target_version`, with the read targets at the heads of their
 default branches, before it checks out the work item's branch. A read target whose version
@@ -3024,7 +3049,8 @@ A write run of a work item ends with a push step: qory commits what the agent le
 it to the branch `qory/<work item id>`, and stores a version of each output that the
 session wrote (see [The outputs of a session](#the-outputs-of-a-session)). The next run
 of the work item starts at the newest commit that a run
-pushed and a person did not cancel, see [What the run takes from the response](#what-the-run-takes-from-the-response). The step runs after each session of the run, once the agent exited, and before the
+pushed and a person did not cancel, unless its start version is one that a gate approved: then
+it starts at that version's commit. See [What the run takes from the response](#what-the-run-takes-from-the-response). The step runs after each session of the run, once the agent exited, and before the
 next session or the run's close. A setup container is gone by then: qory removes it before the step, in the wall step `remove the setup
 container`, so no process in it writes the working folder after the check. Its kind is `push` and its name is `push qory/<work item
 id> to <system>/<path>`. A read target of the documents is fetched and not pushed: the step
@@ -3296,18 +3322,26 @@ credential alone. The result is one of these:
 - The head is past the start commit, the run has not pushed yet, and the head is one that a
   run which a person cancelled pushed, as the work item's record lists it (one head for each
   push), or one that the run which wrote the start's version pushed after the start, with no
-  version of that run to confirm it, and it descends from the start commit. qory fetches the
-  history of the branch head only when the record lists that head as one of these, and then
-  checks that it descends from the start commit. A head below, above or beside a recorded head, or one that the record does
-  not list, is any other head, and the push stops with no fetch. qory pushes with
-  `--force-with-lease=refs/heads/qory/<work item id>:<head>`, so the push replaces
-  those commits only while the branch is still at the head qory read.
-- Any other head (an unrecorded head, a recorded head after the run's first push, or a
-  recorded head that does not descend from the start commit) or the branch missing where the
-  run did not start at the checkout: qory pushes nothing, and the step
-  fails with the line in the list above, which starts with `Set the branch to the
-  expected commit or delete it`, or with `Create the branch at the expected commit on the
-  forge` for a missing branch.
+  version of that run to confirm it, and it descends from the start commit, and no kept commit
+  is above the start commit and is that head or below it. A kept commit is a commit that
+  `pushed_commits` lists for a run that a person did not cancel, other than the expected
+  commit and except the commits that count as a cancelled run's. qory fetches the history of
+  the branch head only when the record lists that head as one of these. It then lists the
+  commits above the start commit that are the head or below it, with one `git rev-list
+  --ancestry-path` on that history and no further request to the forge, and checks that no
+  kept commit is among them. A kept commit that the forge does not have is not among them. A
+  span of more than 10000 commits is refused, as a head that changed. A head below, above or
+  beside a recorded head, or one that the record does not list, is any other head, and the
+  push stops with no fetch. qory pushes with `--force-with-lease=refs/heads/qory/<work item
+  id>:<head>`, so the push replaces those commits only while the branch is still at the head
+  qory read.
+- Any other head (an unrecorded head, a recorded head after the run's first push, a recorded
+  head that does not descend from the start commit, a recorded head with a kept commit above
+  the start commit and at the head or below it, or a recorded head more than 10000 commits
+  above the start commit) or the branch missing where the run did not start at the checkout:
+  qory pushes nothing, and the step fails with the line in the list above, which starts with
+  `Set the branch to the expected commit or delete it`, or with `Create the branch at the
+  expected commit on the forge` for a missing branch.
 
 A push that the forge rejects with the status `[rejected]`, such as a lease that no longer
 matches, also fails the step with that line, with the head read again. When the read of a

@@ -324,9 +324,11 @@ release may change what an existing document does, and states it under Upgrading
   each output that the session wrote to the outbox. The next run in the same stage starts at
   that commit. A session that failed, timed out or was cancelled gets the same step, its
   commit shows how it ended, and it stores no output. The next run starts at the newest
-  commit of the version's run that a version of that run confirms: a commit that a later
-  session pushed with no version is skipped, and the next push replaces it with a lease. See
-  The push step of a write run in `docs/run.md`.
+  commit of the version's run that a version of that run confirms, and a version with a later
+  withdrawal of its artifact that is not cancelled confirms none. A commit that a later
+  session of that run pushed with no version is skipped, and the next push replaces it with a lease, unless
+  a commit of a run that nobody cancelled lies between the start commit and it, except the
+  commits that count as a cancelled run's. See The push step of a write run in `docs/run.md`.
 - A skill reads its work item and stores what it made with `qory work-item show`, `qory
   artifact pull`, `qory artifact push` and `qory run verdict`. In a run they use Qory
   Apiary through the gateway, at `QORY_RUN_API`. Outside a run they use the checkout's
@@ -991,17 +993,22 @@ release may change what an existing document does, and states it under Upgrading
   enrol` says "this machine's access key", and that enrol stops with an error when
   `access-key-secret` exists. `docs/run.md`, `docs/harness.md` and the harness contract
   README call the harness keys of a machine's `qory.yaml` "machine harness settings".
-- The push step stores the outputs of the session, in place of a version of `branch`.
-  The step checks the head of the branch on the forge before it pushes. A head that is not
-  the commit the run expected ends the run `failed` with the code `push_head_changed`, after a
+- The push step stores the outputs of the session, in place of a version of `branch`. The
+  step checks the head of the branch on the forge before it pushes. A head that is not the
+  commit the run expected ends the run `failed` with the code `push_head_changed`, after a
   session that passed, failed or timed out. The push replaces the branch only when its head
-  is a head that the work item's record has for a cancelled run (one head for each push),
-  or for the start's run after the start with no version to confirm it, and that descends
-  from the start commit, with a lease on that head. qory fetches the history of the branch
-  head only when the record lists that head as one of these, and then checks that it
-  descends from the start commit. qory stops on a head below, above or
-  beside a recorded head, with no fetch. A run starts at the newest commit that an earlier run
-  pushed and a person did not cancel.
+  is a head that the work item's record has for a cancelled run (one head for each push), or
+  for the start's run after the start with no version to confirm it, and that descends from
+  the start commit, with a lease on that head. qory fetches the history of the branch head
+  only when the record lists that head as one of these, and then checks that it descends
+  from the start commit. The push stops with `push_head_changed` when a commit of a run that
+  nobody cancelled, except the commits that count as a cancelled run's, is above the start
+  commit and is that head or below it: the lease never drops such a commit. qory reads that
+  with one `git rev-list --ancestry-path` on the fetched history. A span of more than 10000
+  commits stops the push the same way. qory stops on a head below, above or beside a
+  recorded head, with no fetch. A run starts at the newest commit that an earlier run pushed
+  and a person did not cancel, unless its start version is one that a gate approved: then it
+  starts at that version's commit.
 - A delivered output's member that `pushed-base-branch` marks has the name of the target
   repository's default branch, read when the run fetched it. A name of more than 255
   characters gives an empty string.
@@ -1089,6 +1096,21 @@ release may change what an existing document does, and states it under Upgrading
   a commit that is no commit, differs in `.qory` or fails to check out state the fact first:
   `The version that the run starts from has commit <c>, which is not a commit on <path> on
   <system>, so the run did not start; the code is used`.
+- A run whose start version is the one that a gate approved starts at that version's commit. It
+  does not move to a commit that a later run pushed. That is the case for a run whose stage has
+  no version that counts: a stage that wrote none, such as Verify, and a stage whose versions
+  are all cancelled or followed by a withdrawal, even Build. With no approved version, or one
+  that does not count, the run starts at what the run documents check out. When a later run
+  pushed above the approved commit, the push of a run that starts there fails with
+  `push_head_changed`. The push replaces a head with a lease only when a person cancelled the
+  run that pushed it, or when the run which wrote the approved version pushed it and no version
+  confirms it. The lease push never drops a commit of a run that nobody cancelled that is above
+  the start commit, except the commits that count as a cancelled run's. It does not check a
+  commit that does not descend from the start commit: the push can drop it. A run whose stage
+  wrote a version that counts starts at its newest one, even when another stage wrote a newer
+  version, and moves to the newest pushed commit that descends from it. A version with a later
+  withdrawal of its artifact that is not cancelled does not count. This covers a version that a
+  gate approved too.
 - Every run of a work item from a run code with a run API reads the work item through `GET
   /work-item` at its start, with or without a repository, as the stage's outputs come from
   it. A setup past its limit in that read names the step `the read of the work item`. A stage
