@@ -228,10 +228,11 @@ func ShownPath(path string) string { return shownPath(path) }
 // [commitName]. The index starts from HEAD, so what the agent staged counts only through
 // the file it left. The commit has each path git status lists, by git's rules for
 // untracked and ignored files, but [leftOut]'s and a repository in the repository, for
-// which a line goes to report. git add leaves out each gitlink in the index, and for a
-// path where it makes one, the commit has what HEAD has. A path of [leftOut] that a commit
-// of the agent changed goes back to what r.Commit has, because a branch with another .qory
-// stops the later runs of its work item. With no change from HEAD, nothing is committed.
+// which a line goes to report. git add leaves out each gitlink in the index that the add
+// reaches, see [reached], and for a path where it makes one, the commit has what HEAD has. A path of
+// [leftOut] that a commit of the agent changed goes back to what r.Commit has, because a
+// branch with another .qory stops the later runs of its work item. With no change from
+// HEAD, nothing is committed.
 func commitLeft(ctx context.Context, dir string, r WorkRepository, setup map[string]string, message string, report io.Writer) error {
 	git := stepGit(noRemote, "")
 	if _, err := git(ctx, dir, "reset", "--quiet"); err != nil {
