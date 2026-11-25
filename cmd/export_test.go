@@ -123,14 +123,25 @@ func SetLaterSessions(sessions ...func()) func() {
 // from the local head. It returns what restores the default.
 func SetCheckedHeadOneBack() func() {
 	before := outputsBeforePush
-	outputsBeforePush = func(o *runOutputs, ctx context.Context, client *runapi.Client, runID, ref string, version []preparation.Repository) error {
+	outputsBeforePush = func(o *runOutputs, ref string, version []preparation.Repository) error {
 		for i := range version {
 			if n := len(version[i].Commits); n > 1 {
 				version[i].Commits = version[i].Commits[:n-1]
 				version[i].Commit = version[i].Commits[n-2].Commit
 			}
 		}
-		return before(o, ctx, client, runID, ref, version)
+		return before(o, ref, version)
+	}
+	return func() { outputsBeforePush = before }
+}
+
+// SetOnOutputsCheck calls f when the check of the outputs before the push starts. It returns
+// what restores the default.
+func SetOnOutputsCheck(f func()) func() {
+	before := outputsBeforePush
+	outputsBeforePush = func(o *runOutputs, ref string, version []preparation.Repository) error {
+		f()
+		return before(o, ref, version)
 	}
 	return func() { outputsBeforePush = before }
 }

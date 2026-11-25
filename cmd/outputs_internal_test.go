@@ -424,7 +424,7 @@ func TestADeliveredOutputOverTheStartLimitStops(t *testing.T) {
 				t.Fatal(err)
 			}
 			o := &runOutputs{root: root, stage: []runapi.Output{{Type: "reply"}}, types: []exports.ProcessType{c.typ}, target: shopTarget}
-			out, _, err := o.ready(io.Discard, nil, "")
+			out, err := o.ready(io.Discard, nil, "")
 			switch {
 			case c.want == "" && (err != nil || len(out) != 1):
 				t.Errorf("%d ready, %v, want one", len(out), err)
@@ -519,7 +519,7 @@ func TestATypeThatMarksNothingQoryFillsIsStoredWithNoPush(t *testing.T) {
 		typ := exports.ProcessType{Name: "summary", Send: "after_gate", Schema: schema, Marks: map[string]string{"earlier": mark}}
 		o := &runOutputs{root: root, stage: []runapi.Output{{Type: "summary"}}, types: []exports.ProcessType{typ}, target: shopTarget}
 		var lines strings.Builder
-		out, _, err := o.ready(&lines, nil, "")
+		out, err := o.ready(&lines, nil, "")
 		if err != nil || (len(out) == 1) != stored || (lines.Len() == 0) != stored {
 			t.Errorf("%s: %d ready, %v, lines %q; want stored %v", mark, len(out), err, lines.String(), stored)
 		}

@@ -3271,7 +3271,7 @@ Each of these lines fails the step. `<commit>` is the commit's first 12 characte
   then a line indented by two spaces: `With no version of this run, take the work item in
   again. The store had no response: <error>; the code is used`
 - the lines of [The outputs of a session](#the-outputs-of-a-session), when an output of the
-  outbox cannot be read, filled or checked, or a required output is missing
+  outbox cannot be read, filled or checked
 
 #### The head check
 
@@ -3377,18 +3377,15 @@ The run code is used up.` indented by two spaces. A harness with no `process.yam
 no type, so a write run of a work item stops on any type that `deliver` lists.
 
 First, qory reads each output, and fills and checks each output of a type with a
-`json_schema`. For a run with a branch, qory does this, and the check of the required outputs,
-twice: after it commits what the agent left and before the push, with the local head, and
-again after the push, with the head that landed. An output that fails before the push, or a
-required output that no session wrote, stops the step before any push: the commits stay in the
-working folder, the forge gets none of them, and the run closes `failed` with the end code
-`outputs_invalid`. A read of the run's versions in that check that fails at the run API closes
-the run `failed` with the end code `run_api_failed`. An output that fails after the push adds
-the line `Before the round, delete branch qory/<work item id> of <path> on <system>.`,
-indented by two spaces, and the run closes `failed` with no end code. A run with no repository
-checks its outputs once, before it stores any version: an output that fails, or a required
-output that no session wrote, closes the run `failed` with the end code `outputs_invalid`. A
-read of the run's versions or a store that fails at the run API closes the run `failed` with
+`json_schema`. For a run with a branch, qory does this twice: after it commits what the agent
+left and before the push, with the local head, and again after the push, with the head that
+landed. An output that fails before the push stops the step before any push: the commits stay
+in the working folder, the forge gets none of them, and the run closes `failed` with the end
+code `outputs_invalid`. An output that fails after the push adds the line `Before the round,
+delete branch qory/<work item id> of <path> on <system>.`, indented by two spaces, and the run
+closes `failed` with no end code. A run with no repository checks its outputs once, before it
+stores any version: an output that fails closes the run `failed` with the end code
+`outputs_invalid`. A store that fails at the run API closes the run `failed` with
 the end code `run_api_failed`. A version over the limit of a request, which qory does not
 send, and any other failure after a version was stored close it with no end code. An output
 that fails one of these stops the step before any version is stored:
@@ -3417,9 +3414,9 @@ gets its version either way. qory then prints `qory run: stored no <type>
 output: the run pushed no commits to the target.`, then `Target: <system>/<path>` indented
 by two spaces, and the output stays in the outbox until the next session starts.
 
-Then qory checks that the outbox has each output that the stage requires. An output that the
-outbox does not have counts as written when the work item has a version of that type that
-this run wrote, as a session before stored it.
+qory checks an output that exists. Qory Apiary checks that the outputs that the stage requires
+exist when the stage's last session ends. A session may end with no output: qory pushes its
+commits, as after every session, and the missing output does not change how the run closes.
 
 Then, for each output, qory:
 
@@ -3442,9 +3439,6 @@ closes with the end code `outputs_invalid`; after the push, with no end code. Af
 a call to the run API that fails, such as the store of a version or the fetch of a push check,
 closes the run with the end code `run_api_failed`. `<type>` is the output's type:
 
-- `Write <type> to the outbox: the stage requires it and the session wrote none.`, then
-  indented by two spaces `.qory/outbox/<type>/<type>.json` for a type with a `json_schema`,
-  or `.qory/outbox/<type>/` for any other
 - `Remove <member> from the <type> output: qory fills it at the push.`, where `<member>` is
   `target` or a marked member
 - `Fix the <type> output: it breaks its schema at <place>.`, where `<place>` is the first
