@@ -2155,8 +2155,9 @@ the run stops as it does for documents that break the schema. Only a run whose s
   run ends, also after a failure or a stop; a home for that run alone goes as a whole. While
   a person's run without a wall is open and its harness has a submit program, `qory harness
   compose --check` reports `inputs.json extra` and exits 6. It passes again when the run
-  ends. A run with a run key and no run code gets the same files, with the member `qory`
-  alone, since it has no inputs: `{"qory":
+  ends. After a run that was killed, it reports the file until the next `qory harness
+  compose` or `qory harness remove`. A run with a run key and no run code gets the same
+  files, with the member `qory` alone, since it has no inputs: `{"qory":
   {"harness_extensions": {…}, "outputs": [], "start_commits": […], "start_artifacts": "…"}}`
   in `in/` (read-only behind a wall), in the composed home, and after `--inputs` of its push
   checks. A run with neither a run code nor a run key, whose composed harness has a submit
