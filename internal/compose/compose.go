@@ -614,6 +614,9 @@ func ComposeWith(p *stack.Stack, opts Options) (_ *Result, err error) {
 	if err := checkPlans(res, p, opts.Base, opts.StackAs); err != nil {
 		return nil, err
 	}
+	if err := checkReviewGroups(res, p, opts.Base, opts.StackAs); err != nil {
+		return nil, err
+	}
 	if err := checkHooks(res, p, opts); err != nil {
 		return nil, err
 	}
@@ -861,6 +864,29 @@ func checkPlans(res *Result, p *stack.Stack, base *Base, as string) error {
 		}
 		if _, ok := res.ScopeChecks[plan]; !ok {
 			return exports.Errorf("%s\n  No module of the stack declares a scope check for %s.\n  workflows.%s is in %s.", altFix(fmt.Sprintf("Add a scope check for %s to a module's scope_checks", plan), fmt.Sprintf("remove `plan: %s` from %s in the stack", plan, name)), plan, name, stackFile(p, base, as))
+		}
+	}
+	return nil
+}
+
+// checkReviewGroups refuses a workflow of the stack whose review_group is no group role
+// of the composed harness, or is one with no member, for the first such workflow in sorted
+// order: a review session could expect no report. The group is the key
+// agents/<review_group> of [Result.Groups], which has the key for each group role a
+// module declares, nil for one with no member. The check is the compose's, since the
+// stack alone does not know its modules.
+func checkReviewGroups(res *Result, p *stack.Stack, base *Base, as string) error {
+	for _, name := range slices.Sorted(maps.Keys(p.Workflows)) {
+		group := p.Workflows[name].ReviewGroup
+		if group == "" {
+			continue
+		}
+		members, ok := res.Groups["agents/"+group]
+		switch {
+		case !ok:
+			return exports.Errorf("Change review_group of %s to a group role.\n  No module of the stack declares the group role %s.\n  workflows.%s is in %s.", name, shownKey("agents/"+group), name, stackFile(p, base, as))
+		case len(members) == 0:
+			return exports.Errorf("%s\n  The group role %s has no member.\n  workflows.%s is in %s.", altFix("Fill "+shownKey("agents/"+group), fmt.Sprintf("change review_group of %s", name)), shownKey("agents/"+group), name, stackFile(p, base, as))
 		}
 	}
 	return nil

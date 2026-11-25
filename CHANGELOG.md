@@ -18,6 +18,15 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A workflow entry of a stack takes `review_group`, the name of a group role:
+  `workflows: {review-changes: {review_group: reviewers}}`. A review session of the
+  workflow expects a report from the members of the group `agents/<review_group>`. A
+  value that is no string or no group role name stops the compose with exit 2, and so
+  does a group that no module declares.
+- A workflow entry of a stack takes `judges`, a boolean: `workflows: {implement-changes:
+  {judges: false}}`. `false` says that a later workflow in the loop judges the work of
+  the workflow's session; a value other than `true` or `false`, a quoted `"no"` included,
+  stops the compose with exit 2.
 - Before the push after a session of a write run from a run code, `qory run` checks the
   target's commits when its head is past the session's start, on a fresh clone
   that has no ref or hook the agent wrote. For a workflow with a `plan`, the scope check

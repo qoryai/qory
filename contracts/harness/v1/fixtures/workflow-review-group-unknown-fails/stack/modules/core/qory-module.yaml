@@ -1,0 +1,8 @@
+apiVersion: qory.dev/v1alpha1
+name: core
+roles:
+  agents:
+    reviewers: many
+provides:
+  agents:
+    reviewers: [code-reviewer, test-reviewer]

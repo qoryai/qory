@@ -1,0 +1,3 @@
+agents/reviewers code-reviewer provides core group
+agents/reviewers test-reviewer provides core group
+agents/verify-reviewers verify-reviewer provides core group
