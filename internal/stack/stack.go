@@ -464,6 +464,12 @@ type Workflow struct {
 	// dispatched run of the workflow works on: read, write-no-push, or write, "" when the
 	// workflow sets none. [Stack.AccessOf] reads "" as read.
 	Access string `yaml:"access,omitempty"`
+	// Judges is judges as written, true or false, nil when the workflow sets none.
+	Judges *bool `yaml:"judges,omitempty"`
+	// ReviewGroup is review_group as written: the name of a group role, such as
+	// reviewers, "" when the workflow sets none. The compose checks that the harness has
+	// the group and that it has a member.
+	ReviewGroup string `yaml:"review_group,omitempty"`
 	// Tier is tier as written, the tier of [Tiers] that names the main session's model
 	// and effort for a dispatched run of the workflow, "" when the workflow sets none.
 	// Qory Apiary resolves it; qory reads it only to refuse a value that is no tier.
@@ -476,6 +482,51 @@ type Workflow struct {
 	// HookPoints are the points of the workflow where a checkout extending the stack
 	// may add workflow hooks, by the point's name; nil for none.
 	HookPoints map[string]HookPoint `yaml:"hook_points,omitempty"`
+}
+
+// workflowKeys are the keys of a workflow entry.
+var workflowKeys = []string{"access", "judges", "review_group", "tier", "plan", "hook_points"}
+
+// UnmarshalYAML reads an entry of workflows. judges is read only as true or false: the
+// decoder reads a quoted y, yes, on, n, no or off as a boolean, and qory does not.
+// review_group is read only as a non-empty string: the decoder reads a number or a
+// boolean into a string field, and qory does not. A key
+// that the entry does not have is reported as the decoder reports an unknown field: the
+// decode of the entry into plain runs without the decoder's check of keys.
+func (w *Workflow) UnmarshalYAML(n *yaml.Node) error {
+	type plain Workflow
+	var problems []string
+	if n.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			key, value := n.Content[i], n.Content[i+1]
+			if value.Kind == yaml.AliasNode {
+				value = value.Alias
+			}
+			switch {
+			case !slices.Contains(workflowKeys, key.Value):
+				problems = append(problems, fmt.Sprintf("line %d: field %s not found in type stack.Workflow", key.Line, key.Value))
+			case key.Value == "judges" && (value.Kind != yaml.ScalarNode || value.ShortTag() != "!!bool" || (value.Value != "true" && value.Value != "false")):
+				problems = append(problems, fmt.Sprintf("line %d: cannot unmarshal %s into bool", value.Line, value.ShortTag()))
+			case key.Value == "review_group" && (value.Kind != yaml.ScalarNode || value.ShortTag() != "!!str" || value.Value == ""):
+				problems = append(problems, fmt.Sprintf("line %d: cannot unmarshal %s into string", value.Line, value.ShortTag()))
+			}
+		}
+	}
+	if len(problems) > 0 {
+		return &yaml.TypeError{Errors: problems}
+	}
+	var p plain
+	if err := n.Decode(&p); err != nil {
+		var typeErr *yaml.TypeError
+		if errors.As(err, &typeErr) {
+			for i, e := range typeErr.Errors {
+				typeErr.Errors[i] = strings.ReplaceAll(e, "stack.plain", "stack.Workflow")
+			}
+		}
+		return err
+	}
+	*w = Workflow(p)
+	return nil
 }
 
 // RuntimePin is the version a stack pins of a runtime, an entry of runtimes.
@@ -839,6 +890,13 @@ func (p *Stack) validate(compose bool) error {
 				fmt.Sprintf("Set workflows.%s.access to a valid level.", name),
 				"The levels are read, write-no-push, and write.",
 				fmt.Sprintf("The value is %s.", exports.Value(w.Access, true)),
+				fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
+		}
+		if w.ReviewGroup != "" && !entryName(w.ReviewGroup) {
+			return exports.Refuse(
+				fmt.Sprintf("Set workflows.%s.review_group to a group role.", name),
+				"A group role's name is one path segment with no space, @, or leading dot.",
+				fmt.Sprintf("The value is %s.", exports.Value(w.ReviewGroup, true)),
 				fmt.Sprintf("workflows.%s is in %s.", name, exports.FilePlace))
 		}
 		if w.Tier != "" && !IsTier(w.Tier) {

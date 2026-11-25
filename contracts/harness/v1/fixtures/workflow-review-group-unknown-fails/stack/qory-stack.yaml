@@ -1,0 +1,12 @@
+apiVersion: qory.dev/v1alpha1
+name: core
+modules:
+  - name: core
+    source: {path: modules/core}
+extending: {}
+workflows:
+  review-changes:
+    review_group: reviewers
+  verify-a-ticket:
+    access: write-no-push
+    review_group: verify-reviewers
