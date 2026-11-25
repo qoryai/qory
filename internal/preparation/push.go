@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -227,9 +228,10 @@ func ShownPath(path string) string { return shownPath(path) }
 // [commitName]. The index starts from HEAD, so what the agent staged counts only through
 // the file it left. The commit has each path git status lists, by git's rules for
 // untracked and ignored files, but [leftOut]'s and a repository in the repository, for
-// which a line goes to report. A path of [leftOut] that a commit of the agent changed
-// goes back to what r.Commit has, because a branch with another .qory stops the later runs
-// of its work item. With no change from HEAD, nothing is committed.
+// which a line goes to report. git add leaves out each gitlink in the index, and for a
+// path where it makes one, the commit has what HEAD has. A path of [leftOut] that a commit
+// of the agent changed goes back to what r.Commit has, because a branch with another .qory
+// stops the later runs of its work item. With no change from HEAD, nothing is committed.
 func commitLeft(ctx context.Context, dir string, r WorkRepository, setup map[string]string, message string, report io.Writer) error {
 	git := stepGit(noRemote, "")
 	if _, err := git(ctx, dir, "reset", "--quiet"); err != nil {
@@ -240,6 +242,13 @@ func commitLeft(ctx context.Context, dir string, r WorkRepository, setup map[str
 		return err
 	}
 	var paths []string
+	printed := map[string]bool{}
+	line := func(path string) {
+		if !printed[path] {
+			fmt.Fprintf(report, textNestedRepository+"\n", shownText(path), shownPath(r.Path))
+		}
+		printed[path] = true
+	}
 	for _, path := range changed {
 		out, err := leftOut(dir, path, setup)
 		switch {
@@ -247,17 +256,31 @@ func commitLeft(ctx context.Context, dir string, r WorkRepository, setup map[str
 			return err
 		case out:
 		case isRepository(dir, strings.TrimSuffix(path, "/")):
-			fmt.Fprintf(report, textNestedRepository+"\n", shownText(strings.TrimSuffix(path, "/")), shownPath(r.Path))
+			line(strings.TrimSuffix(path, "/"))
 		default:
 			paths = append(paths, path)
 		}
 	}
-	if err := reportGitlinks(ctx, git, dir, r, report); err != nil {
+	links, err := gitlinks(ctx, git, dir)
+	if err != nil {
 		return err
 	}
+	var excluded []string
+	for _, path := range slices.Sorted(maps.Keys(links)) {
+		if isRepository(dir, path) {
+			line(path)
+		}
+		// git add stops on an exclusion behind a link, and it removes an entry there.
+		if !behindLink(dir, path) {
+			excluded = append(excluded, path)
+		}
+	}
 	if len(paths) > 0 {
-		add := stepGit(noRemote, pathspecs(paths))
+		add := stepGit(noRemote, pathspecs("top,literal", paths)+pathspecs("exclude,top,literal", excluded))
 		if _, err := add(ctx, dir, "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
+			return err
+		}
+		if err := dropGitlinks(ctx, git, dir, links, line); err != nil {
 			return err
 		}
 	}
@@ -275,12 +298,13 @@ func commitLeft(ctx context.Context, dir string, r WorkRepository, setup map[str
 	return err
 }
 
-// pathspecs is paths as git reads them with --pathspec-file-nul: each from the top of the
-// repository, with no pattern in it.
-func pathspecs(paths []string) string {
+// pathspecs is paths as git reads them with --pathspec-file-nul, each with magic, the
+// words of a pathspec: top is from the top of the repository, and literal is with no
+// pattern in it.
+func pathspecs(magic string, paths []string) string {
 	var list strings.Builder
 	for _, path := range paths {
-		list.WriteString(":(top,literal)" + path + "\x00")
+		list.WriteString(":(" + magic + ")" + path + "\x00")
 	}
 	return list.String()
 }
@@ -291,21 +315,62 @@ func isRepository(dir, path string) bool {
 	return err == nil
 }
 
-// reportGitlinks prints [textNestedRepository] for each gitlink in the index of the
-// repository at dir that has a repository in its folder: git status with
-// --ignore-submodules=all does not list it, and no git runs in that repository.
-func reportGitlinks(ctx context.Context, git gitRunner, dir string, r WorkRepository, report io.Writer) error {
+// behindLink reports whether a folder on the way from dir to path, relative to dir, is a
+// link.
+func behindLink(dir, path string) bool {
+	for i := range len(path) {
+		if path[i] != '/' {
+			continue
+		}
+		info, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(path[:i])))
+		if err == nil && info.Mode()&fs.ModeSymlink != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// gitlinks is each gitlink in the index of the repository at dir: its mode, commit and
+// stage by its path. git status with --ignore-submodules=all lists none of them.
+func gitlinks(ctx context.Context, git gitRunner, dir string) (map[string]string, error) {
 	entries, err := git(ctx, dir, "ls-files", "--stage", "-z")
+	if err != nil {
+		return nil, err
+	}
+	links := map[string]string{}
+	for entry := range strings.SplitSeq(entries, "\x00") {
+		about, path, ok := strings.Cut(entry, "\t")
+		if ok && strings.HasPrefix(about, gitlinkMode+" ") {
+			links[path] = about
+		}
+	}
+	return links, nil
+}
+
+// dropGitlinks sets the path of each gitlink in the index of the repository at dir that
+// links does not have back to what HEAD has, and calls line with it.
+func dropGitlinks(ctx context.Context, git gitRunner, dir string, links map[string]string, line func(path string)) error {
+	now, err := gitlinks(ctx, git, dir)
 	if err != nil {
 		return err
 	}
-	for entry := range strings.SplitSeq(entries, "\x00") {
-		about, path, ok := strings.Cut(entry, "\t")
-		if ok && strings.HasPrefix(about, gitlinkMode+" ") && isRepository(dir, path) {
-			fmt.Fprintf(report, textNestedRepository+"\n", shownText(path), shownPath(r.Path))
+	var paths []string
+	for _, path := range slices.Sorted(maps.Keys(now)) {
+		if links[path] != now[path] {
+			line(path)
+			paths = append(paths, path)
 		}
 	}
-	return nil
+	if len(paths) == 0 {
+		return nil
+	}
+	return resetPaths(ctx, dir, "HEAD", paths)
+}
+
+// resetPaths sets paths in the index of the repository at dir to what commit has.
+func resetPaths(ctx context.Context, dir, commit string, paths []string) error {
+	_, err := stepGit(noRemote, pathspecs("top,literal", paths))(ctx, dir, "reset", "--quiet", commit, "--pathspec-from-file=-", "--pathspec-file-nul")
+	return err
 }
 
 // restoreLeftOut sets each path of [leftOut] in the index of the repository at dir to what
@@ -332,8 +397,7 @@ func restoreLeftOut(ctx context.Context, git gitRunner, dir, start string) error
 	if len(paths) == 0 {
 		return nil
 	}
-	_, err = stepGit(noRemote, pathspecs(paths))(ctx, dir, "reset", "--quiet", start, "--pathspec-from-file=-", "--pathspec-file-nul")
-	return err
+	return resetPaths(ctx, dir, start, paths)
 }
 
 // changedPaths is each path git status lists in dir, with no rename, so a moved file is
