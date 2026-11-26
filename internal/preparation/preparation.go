@@ -1011,7 +1011,7 @@ func Clone(ctx context.Context, system, path, dest string) error {
 // its options, the [hardened] ones and [protocols], and the environment [proxygit.Env]
 // makes for p, which sets the proxy and the CA bundle and reads no configuration but
 // the repository's. With [hasRemote] of p, the subcommands of [remoteCommands] run through
-// [hostgit.Remote]; every other git has no protocol. No error's text
+// [hostgit.Remote]; every other git has no protocol and no proxy. No error's text
 // contains the password of p's URL.
 func hostRunner(p *proxygit.Proxy) gitRunner { return hostRunnerWith(p, "") }
 
@@ -1042,11 +1042,15 @@ func hostRunnerOf(p *proxygit.Proxy, remote bool, options []string, input string
 	}
 }
 
-// hostCommand is the git of [hostRunnerOf], made by [hostgit.Remote] with remote set.
+// hostCommand is the git of [hostRunnerOf], made by [hostgit.Remote] with remote set. A
+// git without remote has no protocol, so it gets the environment of [noRemote] in place
+// of p's: the password of p's URL is only in the environment of a git that can use it.
 func hostCommand(ctx context.Context, p *proxygit.Proxy, remote bool, dir string, options, env, args []string) (*exec.Cmd, error) {
 	command := hostgit.Unchecked
 	if remote {
 		command = hostgit.Remote
+	} else if hasRemote(p) {
+		p = noRemote
 	}
 	cmd, err := command(ctx, dir, hostgit.Base(ctx), slices.Concat(hardened, protocols, options, args)...)
 	if err != nil {

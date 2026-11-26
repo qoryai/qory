@@ -157,10 +157,15 @@ func TestCheckReviewReportsRefusesPathsItCannotResolve(t *testing.T) {
 		{"an empty home", artifacts, ""},
 		{"a relative artifact folder", "artifacts", filepath.Join(base, "checkout")},
 	} {
-		err := checkReviewReports(reports, checkout, c.artifacts, c.home, nil, os.Geteuid())
-		if !hasStop(err, want) {
-			t.Errorf("%s: returned %v, want %q", c.name, err, want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			if c.home == home && os.Geteuid() == 0 {
+				t.Skip("root searches a folder of mode 0")
+			}
+			err := checkReviewReports(reports, checkout, c.artifacts, c.home, nil, os.Geteuid())
+			if !hasStop(err, want) {
+				t.Errorf("returned %v, want %q", err, want)
+			}
+		})
 	}
 }
 

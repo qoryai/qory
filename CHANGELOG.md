@@ -2507,6 +2507,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Security
 
+- A git on this machine that reaches no remote, such as `git init`, `git merge-base` or
+  `git commit`, no longer has the password of the run's host proxy or push proxy in its
+  environment. Only `git clone`, `git fetch`, `git ls-remote` and `git push` have it.
 - An escape sequence inside a secret, or right before it, no longer stops qory from masking
   the secret in the log of a step, unless the sequence ends with a byte of the secret: then
   the rest of the secret can show.
