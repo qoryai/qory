@@ -1,6 +1,6 @@
 # 🐝 Qory
 
-Qory is an open-source platform for running AI agents on your own machines. It is made of parts that connect through published contracts, so you can use one part alone or replace it. This repository holds the `qory` command, the part you start with:
+Qory is an open-source platform for running AI agents on your own infrastructure. It is made of parts that connect through published contracts, so you can use one part alone or replace it. This repository holds the `qory` command, the part you start with:
 
 1. **It builds the harness.** A harness is what your agent reads: instructions, skills, agents, commands and settings. You write it once, as modules, and `qory` composes it for every agent you use.
 2. **It prepares the workspace.** One worktree per branch, set up and ready to work.
