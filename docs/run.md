@@ -2147,7 +2147,7 @@ the run stops as it does for documents that break the schema. Only a run whose s
   read-only at the same path. The file has the inputs' members as they came, then one
   member that qory adds once the harness is composed, `qory`:
   `{"harness_extensions": {…}, "outputs": […], "outbox": "…", "start_commits": […],
-  "start_artifacts": "…", "workflow": {"judges": true}}`.
+  "start_artifacts": "…", "workflow": {"judges": true, "name": "…"}}`.
   `harness_extensions` is the harness report's `extensions`, or `{}` when the harness has
   none. `outputs` is the outputs of the work item's stage, or `[]` for none and for a run
   with no run API, and `outbox` the absolute path of the session's outbox, left out for a
@@ -2156,11 +2156,11 @@ the run stops as it does for documents that break the schema. Only a run whose s
   `{"path": <the repository's folder, absolute>, "commit": <the commit the session starts
   at>}`, `[]` for a run with no branch; and `start_artifacts` is the folder of the session's
   launch snapshot, `<in>/start-artifacts` (see [The scope check before the
-  push](#the-scope-check-before-the-push)). `workflow` is the values of the session's
-  entry in the composed stack's `workflows` table that the harness reads: `judges` is
-  `false` when the entry has `judges: false`, and `true` when the entry has `judges: true`,
-  has no `judges`, or is missing. A run with no run code has no `workflow` member. Session
-  1 writes the file after the branch
+  push](#the-scope-check-before-the-push)). `workflow` is the session's workflow and the
+  values of its entry in the composed stack's `workflows` table that the harness reads:
+  `name` is the workflow of the session, and `judges` is `false` when the entry has `judges:
+  false`, and `true` when the entry has `judges: true`, has no `judges`, or is missing. A
+  run with no run code has no `workflow` member. Session 1 writes the file after the branch
   switch and the setup, so its start commits are those the agent starts at; a later session
   writes it before it starts, with the commits that the last push landed. A walled session
   whose `--mount` or `wall.mounts` is at or inside `in/` stops before its setup: for a run

@@ -16,10 +16,10 @@ func TestNewWorkflowInputsJudges(t *testing.T) {
 		"plan-the-build":    {},
 	}
 	for name, want := range map[string]string{
-		"implement-changes": `{"judges":false}`,
-		"review-changes":    `{"judges":true}`,
-		"plan-the-build":    `{"judges":true}`,
-		"not-in-the-table":  `{"judges":true}`,
+		"implement-changes": `{"judges":false,"name":"implement-changes"}`,
+		"review-changes":    `{"judges":true,"name":"review-changes"}`,
+		"plan-the-build":    `{"judges":true,"name":"plan-the-build"}`,
+		"not-in-the-table":  `{"judges":true,"name":"not-in-the-table"}`,
 	} {
 		data, err := json.Marshal(newWorkflowInputs(workflows, name))
 		if err != nil {
@@ -32,13 +32,15 @@ func TestNewWorkflowInputsJudges(t *testing.T) {
 }
 
 // TestQoryInputsHaveTheWorkflowOfARunCode is the qory.workflow member as the session of a
-// run code gets it, and as a run with no run code gets it, which has none.
+// run code gets it, with the session's workflow as its name, also for a workflow that the
+// stack's table has no entry for, and as a run with no run code gets it, which has none.
 func TestQoryInputsHaveTheWorkflowOfARunCode(t *testing.T) {
 	no := false
 	workflows := map[string]stack.Workflow{"implement-changes": {Judges: &no}, "plan-the-build": {}}
 	for name, want := range map[string]string{
-		"implement-changes": `"workflow":{"judges":false}`,
-		"plan-the-build":    `"workflow":{"judges":true}`,
+		"implement-changes": `"workflow":{"judges":false,"name":"implement-changes"}`,
+		"plan-the-build":    `"workflow":{"judges":true,"name":"plan-the-build"}`,
+		"not-in-the-table":  `"workflow":{"judges":true,"name":"not-in-the-table"}`,
 	} {
 		inputs := newWorkflowInputs(workflows, name)
 		data, err := json.Marshal(qoryInputs{Workflow: &inputs})

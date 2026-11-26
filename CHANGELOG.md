@@ -156,9 +156,10 @@ release may change what an existing document does, and states it under Upgrading
   `review_group` gets the newest version of every
   plan type that any workflow of the stack declares in `plan`, not only the plan type of
   the session's workflow.
-- `qory.workflow` in the `inputs.json` of a session of a run from a run code: `{"judges":
-  false}` when the session's workflow has `judges: false`, `{"judges": true}` otherwise. A
-  run with no run code has no `workflow` member. See docs/run.md, §What the run takes
+- `qory.workflow` in the `inputs.json` of a session of a run from a run code: `judges` is
+  `false` when the session's workflow has `judges: false`, `true` otherwise, and `name` is
+  the workflow of the session, such as `{"judges": true, "name": "plan-the-build"}`. A run
+  with no run code has no `workflow` member. See docs/run.md, §What the run takes
   from the response.
 - A later session of a run of several sessions whose workflow declares `access: read` and
   a `review_group` joins a run at `write` as a review join: the workspace is read-only for
