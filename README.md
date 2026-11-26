@@ -13,7 +13,7 @@ Qory is an open-source platform for running AI agents on your own machines. It i
 ## Why
 
 You have many repositories. You use more than one agent. Each agent reads a different folder:
-`.claude`, `.codex`, `.cursor`. So every repository keeps copies. The copies drift.
+`.claude`, `.codex` and others. So every repository keeps copies. The copies drift.
 Nobody knows which version a checkout runs.
 
 And an agent acts unsupervised. It calls hosts you don't see. It holds your tokens.
