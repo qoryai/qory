@@ -18,6 +18,105 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- Session 1 of a run at `write-no-push` whose workflow, in a stack from the run's
+  documents, declares `access: write-no-push` and a `review_group` is a Verify session. It
+  gets `qory.review_session` with `commit`, `commit_folder`, `diff` and `reports`, a new
+  reports folder beside its writable checkout, and `previous_findings` as a review join
+  has it, the findings of the session's stage only. It gets no suite result or build
+  report. `commit_folder` is mounted read-only. The run stops before the session,
+  `failed`, when the checkout's `HEAD` is another commit than the branch's
+  (`The checkout's HEAD is not the commit the review reads, so the review did not start`),
+  when the copy container finds that the git folder keeps its refs outside the files that
+  it reads (a `commondir` file, a `reftable` folder, or a `config` that sets `refStorage`
+  or `worktreeConfig`), when the run reads no findings of the work item
+  (`The run reads no findings of the work item, so the review did not start`), or when
+  neither Qory Apiary nor a stage input's pull-request version that a run wrote has a base
+  (`The run has no base commit for the diff, so the review did not start`). A Verify run
+  whose run has no run API stops before the session with
+  `The run has no run API, so the review did not start` on line 1; it sets no check of the
+  run API. A version that a person wrote is not read as a base. A pull-request version's
+  base counts only when it is the target version or the start that a write run takes from
+  the versions before the version's run: the newest commit of a run before that a version
+  which a person did not cancel confirms, found as the start of a run is. Only a version
+  of a type that has a `deliver` entry in `process.yaml` and a required member that qory
+  fills with the pushed commits (`x-qory-fill` set to `pushed-commits`, and listed in the
+  root `required` of the schema) confirms a commit, since a session can store a version
+  of another type under the name of the delivered artifact with `--name`, write the file
+  of a type that has no such member, and leave out a member that is optional. A pushed
+  commit that no such version confirms is no start. A session of an earlier run could set
+  `pushed-base` in a direct push and cut the diff short, so any other base stops the run,
+  `failed`, with
+  `The base of the pull request is not the start of its run, so the review did not start`
+  on line 1 and the version, its run, the base and the commits that the run could have
+  started at on line 2. A failed read of the file of the pull request version stops the
+  run with `Fetching the pull request version failed, so the review did not start`, and a
+  failed read of the file of a version of an earlier run stops it with
+  `Reading a version of an earlier run failed, so the review did not start`. If the target
+  version moves between Build and Verify, Verify stops. qory posts the round of the
+  session once, in the check of its verdict, a `POST /verdict` or a push of an artifact of
+  the type `verdict`, or at its end. Before
+  the check of each verdict and before the post at the end, qory reads the checkout's
+  `HEAD` again from files in the copy container; when the session moved it, qory posts
+  nothing and stores no verdict: the verdict gets 503 `push_check_unavailable` with the
+  status line
+  `the checkout's HEAD moved, so the verdict was not stored (503 push_check_unavailable)`,
+  and the end of the session stops the run, `failed`, with
+  `The checkout's HEAD is not the commit the review read, so the review did not end`. When
+  the post fails, the verdict gets 503 `push_check_unavailable` with the status line
+  `the round was not posted, so the verdict was not stored (503 push_check_unavailable)`.
+  A review session with a writable mount other than its reports folder stops as before;
+  only a Verify session may also write its checkout. On Claude Code, the session's
+  settings get a `Read` rule and an `Edit` rule for the reports folder in
+  `permissions.allow`, and the folder in `permissions.additionalDirectories`. Nothing else
+  in them changes. On another runtime that takes settings with a flag, for which qory has
+  no such settings, the run stops before the session starts: `Run this workflow on
+  another runtime: qory has no Verify settings for <runtime>, so the review did not
+  start`. On a runtime that takes no settings with a flag, the session runs with no added
+  rules, as before. A session after session 1 whose workflow starts reviewers at
+  `write-no-push` stops the run before it starts, `failed`:
+  `Session <n> starts reviewers, and only session 1 of a run does, so the review did not start`,
+  with the workflow on line 2.
+- The read of a Verify session's checkout `HEAD` in the copy container stops, as for a
+  `commondir` file, when the git folder, `refs`, `HEAD`, `packed-refs`, `config` or a part
+  of the path of the ref that `HEAD` points to is a link, or when `packed-refs` has a ref
+  name twice, since git may read the ref from another place than the container. A `config`
+  stops it only for a `refStorage` or `worktreeConfig` key: a branch named
+  `fix-worktreeConfig` no longer does.
+- When the read of a Verify session's checkout `HEAD` exits with a code, line 1 of the
+  stop is the cause that the script wrote, such as
+  `The checkout's .git has a commondir file, so the review did not end`, and line 2 is
+  `Reading the checkout's HEAD exited with <code>`. Line 1 has a capital first letter also
+  when the reason of the script starts with a letter of more than one byte. Two reads of
+  `HEAD` never run at the same time, and a read that writes no commit shows no commit of
+  an earlier read. A check of a verdict that waits for another read of the checkout's
+  `HEAD` stops waiting when its call ends.
+- In a Verify run, a POST of `/verdict` or `/artifacts` that qory cannot read in one way,
+  such as a verdict with a member twice or in another case, or a push with its `type`
+  twice, gets 422 `push_check_failed` before the round is posted. Qory Apiary reads the
+  last of a member that a body has twice, so such a verdict stored nothing that qory had
+  checked. A verdict that a setup command POSTs, before the session joins, gets 422 too,
+  `escalate` included. A POST of `/verdict` that qory cannot read in one way gets the texts
+  of a verdict body: line 1 is
+  `Post the verdict as one JSON object with each member once.`, and line 2 is
+  `The verdict has a member twice, or one that differs only in case.` or
+  `The body is no verdict: <why>.` A POST of `/artifacts` gets the texts of a push: line 1
+  is `Send each member of the push once, in lower case, and push again.` or
+  `Send the push as qory artifact push sends it, and push again.`, and line 2 is
+  `The body is not a push: <why>.` for a body that is no JSON object.
+- A Verify session that records `passed` and leaves no report gets the blocking finding
+  `report-<role>` of each expected role, as a review join does, so Qory Apiary returns 409
+  `open_blocking_findings` for the verdict while they are open. qory posts them in the
+  check of a `POST /verdict` or a push of the type `verdict`, before the POST goes on, and
+  at the end of a session whose newest verdict is `passed`. A verdict value that qory
+  cannot read counts as `passed`. A session that records `changes-requested` or `escalate`
+  and leaves no report still posts nothing. Before, a `passed` with no report posted no
+  finding.
+- `qory run verdict changes-requested` takes `--points <file>`, a file in the form of
+  escalate's: a JSON array of 1 to 20 points, each with the action `run_again`. A point with
+  another action exits 2 with `Set the action of each point of --points to run_again:
+  changes-requested runs the round again.` on line 1. `passed` with `--points` exits 2 with
+  `Leave out --points with passed: a passed verdict has no points.`; the text was `only
+  escalate has points`.
 - `contracts/harness/v1/path-cases.json`: 50 cases of a `paths` glob against a changed
   file, that every matcher of `paths` must pass.
 - `wall.step_file_env` in `forager.yaml` lists the variables of a CI job, such as
@@ -183,8 +282,8 @@ release may change what an existing document does, and states it under Upgrading
   `write-no-push`, still stops the run. See docs/run.md, §A review session in a run that
   writes.
 - A review join reads a fresh copy of the commit that the run pushed, in place of the
-  checkout: qory copies the commit's files, with no `.git`, and the diff from the run's
-  start commit, in a container of the run's image, and checks them against the commit's
+  checkout: qory copies the commit's files, with no `.git`, and the diff from the base
+  commit of the review, in a container of the run's image, and checks them against the commit's
   ids. The join's working folder is an empty folder that qory makes, bound read-only, so
   the runtime finds none of the commit's `.claude`, `CLAUDE.md` or `.mcp.json` files
   there, and the copy is a second read-only mount. The join gets a new, empty reports
@@ -252,15 +351,18 @@ release may change what an existing document does, and states it under Upgrading
   2.43.4 and 2.44.1. Each also has `core.useReplaceRefs=false` and
   `core.commitGraph=false`, so no replace ref or commit-graph of the workspace changes the
   commit that the read of HEAD returns. A review join stops when the run has no such line.
-- The full suite writes a suite result file for each session whose after step ran and moved
-  HEAD: `review/suite-<n>.json` in the run's folder, a new file for each session, in a
+- The full suite writes a suite result file for each session whose after step ran a suite:
+  `review/suite-<n>.json` in the run's folder, a new file for each session, in a
   folder that no session can write. It has the counts of the result file and `output_tail`,
   the last 200 lines of the last 256 KiB of the after step's output, read from
-  `events.jsonl`, cut at the start of a character. `qory run` keeps the path, the commit
-  of the marker line and how the suite ended for the next review session. A session with no
-  suite because of a cause before the after step keeps the record before when HEAD did not
-  move. What qory posts and prints for the suite does not change. See docs/run.md, §The
-  full suite.
+  `events.jsonl`, cut at the start of a line. When no line with text starts in the last
+  256 KiB, since they are part of one long line, line breaks, or both, `output_tail`, and
+  the proof of the finding `suite`, is `No line with text starts in the last 256 KiB of
+  the suite's output, so qory shows none of those bytes.` `qory run` keeps the path, the
+  commit of the marker line and how the suite ended for the next review session. A session
+  with no suite because of a cause before the after step keeps the record before when HEAD
+  is still the commit of the record's marker line. What qory posts and prints for the
+  suite does not change. See docs/run.md, §The full suite.
 - A walled session whose `--mount` or `wall.mounts` is at or inside the read-only inputs
   folder stops before its setup: a run from a run code with `machine_setup_invalid`.
 - A walled run needs qory to run as an ordinary user whose uid is the wall user's uid. A
@@ -992,12 +1094,14 @@ release may change what an existing document does, and states it under Upgrading
   true in `type_settings`. A session runs no suite when `full_suite` is false, when
   `type_settings` has no `full_suite`, when the documents have no `type_settings`, and when
   `full_suite` is outside `type_settings`.
-  Forager's after step runs it after the agent's container is removed: when HEAD moved,
-  the `full` command of the plan type set in `workflows.<name>.plan` for the run's workflow, in the
-  version that the work item had at the launch, runs in a fresh clone of HEAD, in a container
-  of the run's image on the run's network, so the run's egress policy applies. A session that
-  left HEAD where it started runs no suite. The limit is
-  `command_limits_minutes.full_suite`, 60 minutes by default, as the after step's time limit.
+  Forager's after step runs it after the agent's container is removed: the `full` command
+  of the plan type set in `workflows.<name>.plan` for the run's workflow, in the version
+  that the work item had at the launch, runs in a fresh clone of HEAD, in a container of the
+  run's image on the run's network, so the run's egress policy applies. A session whose HEAD
+  is the commit that the run has a suite result for runs no suite, so a session that makes
+  no commit runs the suite on HEAD once, when the run has no suite result for that commit.
+  The limit is `command_limits_minutes.full_suite`, 60 minutes by default, as the after
+  step's time limit.
   A suite that ran and failed posts `changes-requested` with one point over a `passed` verdict
   or none, or adds the point to an `escalate`, and does not end the run `failed`; when the
   proxy refused a host while the suite ran, the point has the host. A suite that did not start
@@ -1082,9 +1186,92 @@ release may change what an existing document does, and states it under Upgrading
   form, and qory checks no value of them. Any other key of an output stops the command
   with `Remove the unknown key from the entry of outputs.` and, on the next line, `... and
   an output has only type, required, when, unless and check.`
+- A run whose work item has a stage round reads and posts the findings of the work item.
+  The diff of a review join starts at the base that Qory Apiary stores for the run's target,
+  else at the commit the run started at; qory fetches a stored base that the checkout lacks
+  by its id, at depth 1. `qory.review_session.previous_findings` is the file of the findings
+  that the group's reviewers raised in the rounds before, with their replies; it is left out
+  when the work item has none. A session that writes gets `open-findings.json` in its inputs
+  folder, the open findings of the work item, and once it has pushed, qory posts the replies
+  of its newest `build-ledger` before the next-session request.
+- A review join ends with the findings of its round. qory reads the report of each expected
+  reviewer from the reports folder, posts the raise, repeat and close events in batches of at
+  most 100 events and 8 MiB, and sends the verdict: `passed` when the answer lists no open
+  blocking finding of the stage, `changes-requested` otherwise. A reviewer with no valid report
+  gets a blocking check finding `report-<role>`. When a session records a verdict, qory posts
+  the events and sends none; when it records one and leaves no report, qory posts nothing. A
+  `report-<role>` finding of a reviewer that no file of the change needs is closed as fixed,
+  only when the work item has a base for the target and the changed files were read in full.
+- The full suite raises or repeats the check finding `suite` when it is red, does not start or
+  is stopped, and closes it when it is green, where qory posts the verdict of the suite.
 
 ### Changed
 
+- A session may not set a member that qory fills at the push, the members that a type's
+  schema marks with `x-qory-fill`, such as `base` of a `pull-request` version. In a walled
+  run through a gateway that sends the run API address, a `qory artifact push` of such a
+  type that sets one gets 422 `push_check_failed` with `Remove <member> from the <type>
+  output: qory fills it at the push.`, the line that the outbox has. It applies in every
+  such run, with or without push checks or a limit on verdicts, and a harness whose types
+  mark such a member turns the run API check on before session 1. The outbox of a session
+  is not checked this way: qory fills the members when it stores it. A review that reads
+  `pushed-base` of a run's version reads the base that qory filled.
+- A reply to a finding comes from the newest `build-ledger` version of the stage that
+  this run wrote. A version that another run or a person wrote is not read for a reply.
+  The ledger is cumulative, so qory posts only the rows of a pass above the highest pass
+  of the same step in the newest ledger of any writer when the session started: a
+  session that does not run `fix:f<n>` again posts no reply to `f<n>`. When that highest
+  pass is above each pass of this run's ledger for an open finding that has a reply there,
+  qory prints `qory run: <n> replies of the build ledger are not posted: an earlier ledger
+  has a higher pass` (`qory run: 1 reply of the build ledger is not posted: an earlier
+  ledger has a higher pass` for one) and posts none of them.
+- A newest `build-ledger` of the stage that another run or a person wrote and qory cannot
+  read no longer stops each later session that writes. It stopped the run before the
+  session. qory skips a withdrawn newest build-ledger version, so it reads the version
+  before it. qory cannot read a ledger that is not JSON in the form of the ledger, that
+  has two files or a file over 4 MiB or a bad file name, or that has a row with a pass
+  below 0 or above 100, since the harness writes 1 to 100. The session now starts, qory
+  prints the line `qory run: this session posts no replies: build ledger version <n> fails
+  qory's checks`, with the ledger's version number, and a second line, `qory run: ` with
+  the first check that the ledger fails, in the words of that check's error, and posts no
+  reply after it. Both lines also go to the status descriptor. A ledger that this run
+  wrote and qory cannot read, and a ledger that cannot be fetched, still stop the run.
+- A findings base is for one target, a collection and an address. qory compares both, so
+  in a work item with two repositories of one collection, the base of one repository is
+  no longer the base of the other, and each repository gets its base.
+- A review report is invalid when it has more than 100 findings or more than 100 closes,
+  or an `id` twice in its findings or twice in its closes. An invalid report gets the
+  blocking finding `report-<role>`, as any other. The limits are in the review report
+  schema and in `contracts/harness/v1/README.md`.
+- qory masks the point, the problem, the fix, the proof, the reason and the place of each
+  event of the findings that it posts, with the masker that it uses for the text that it
+  prints. The reports and the build ledger are files that the agent wrote, and the run's
+  masker has not seen them. qory masks a cause that quotes such a file before it cuts the
+  cause, so a secret across the cut leaves no part of it in the posted text. The cause
+  of a value that breaks a pattern of the report format shows `<value>`; it showed
+  `the value`.
+- When a stop of `qory run` cuts a red full suite, qory posts the finding `suite` after
+  the red verdict, with 5 seconds for its GET and its POST. It shared the 5 seconds of the
+  verdict before, so a slow post could leave the verdict without time.
+- A GET that lists 500 findings, the most it lists, stops the run, where the work item
+  may have more findings:
+  `The GET of the findings lists 500, its limit, so <what qory did not do>` on line 1.
+  This covers the read of the findings at the start, the replies,
+  the finding of the suite, the round of a review and of a Verify session, a post with no
+  events and the GET after a post whose response was lost. qory stops before it writes
+  `open-findings.json` or `previous_findings`, decides to repeat or close a finding,
+  posts, or sends a verdict.
+- When the GET that follows a post of findings whose response was lost lists 500, line 1
+  of the stop is `Findings batch <k> of <n> is stored, so <what qory did not do>`, and
+  line 2 is
+  `The GET of the findings lists 500, its limit, and the work item may have more findings`.
+  It was the line that a GET of 500 findings has elsewhere, which did not say that the
+  batch is stored.
+- The errors of the findings calls, of the replies and of the post of the suite put the
+  cause on line 1, ending with what qory did not do, and the detail on the next line, as
+  the stops of a review session do. Line 1 has at most 100 characters with `qory run: `.
+- The help of `qory artifact push --decision` lists the notes that a decision can answer:
+  a request for changes, a move, an escalation or an answer.
 - The frontmatter `name` of each agent file for Claude Code must be the name of its entry,
   or be missing, in which case qory writes the file with the name added and no longer
   links it to the module. Claude Code registers an agent by that name, so another name
@@ -2393,6 +2580,13 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Fixed
 
+- The finding `suite` masks the point and the proof before it cuts them to 500 and 4,000
+  characters. It cut first, so a cut that fell inside a secret or a signed URL left a part
+  of it that the masker did not match.
+- A stop of the read of a Verify session's checkout `HEAD` that has no commit to read
+  (`The commit of the checkout's HEAD could not be read`) ends with `so the review did not
+  end` at a check of a verdict and at the end of a session. It ended with `so the review
+  did not start`, the words for the start of the run.
 - The push step commits a tracked folder that the agent turned into a file or a link. Until
   now, such a change that the agent did not commit failed the step.
 - The push step commits a tracked file that the agent turned into a folder with a repository

@@ -56,16 +56,16 @@ func commit(t *testing.T, dir, name, content string) string {
 // can write, and git's settings through GIT_CONFIG_COUNT that allow no transport but HTTPS.
 // It returns the exit status and the output. The files extra are names and values of
 // further variables.
-func runScript(t *testing.T, dir, start string, full suite.Full, extra ...string) (int, string) {
+func runScript(t *testing.T, dir, start, tested string, full suite.Full, extra ...string) (int, string) {
 	t.Helper()
-	return runScriptWith(t, dir, start, full, true, extra...)
+	return runScriptWith(t, dir, start, tested, full, true, extra...)
 }
 
 // runScriptWith is runScript with the setting core.hooksPath of Forager's environment left out
 // when hooksPath is false.
-func runScriptWith(t *testing.T, dir, start string, full suite.Full, hooksPath bool, extra ...string) (int, string) {
+func runScriptWith(t *testing.T, dir, start, tested string, full suite.Full, hooksPath bool, extra ...string) (int, string) {
 	t.Helper()
-	cmd := scriptCommand(t, dir, start, full, hooksPath, extra...)
+	cmd := scriptCommand(t, dir, start, tested, full, hooksPath, extra...)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
@@ -79,9 +79,9 @@ func runScriptWith(t *testing.T, dir, start string, full suite.Full, hooksPath b
 }
 
 // scriptCommand is the command of [runScriptWith], not yet started.
-func scriptCommand(t *testing.T, dir, start string, full suite.Full, hooksPath bool, extra ...string) *exec.Cmd {
+func scriptCommand(t *testing.T, dir, start, tested string, full suite.Full, hooksPath bool, extra ...string) *exec.Cmd {
 	t.Helper()
-	words, err := suite.Command(start, full)
+	words, err := suite.Command(start, tested, full)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,12 +120,12 @@ func exists(file string) bool {
 	return err == nil
 }
 
-// TestASessionThatLeftHeadWhereItStartedRunsNoSuite is the skipped end: the script exits 0, the
-// status file says skipped, the command does not run, and Judge says Skipped.
-func TestASessionThatLeftHeadWhereItStartedRunsNoSuite(t *testing.T) {
+// TestASessionWhoseHeadIsTheTestedCommitRunsNoSuite is the skipped end: the script exits
+// 0, the status file is "skipped", the command does not run, and Judge returns Skipped.
+func TestASessionWhoseHeadIsTheTestedCommitRunsNoSuite(t *testing.T) {
 	dir, first := workspace(t)
 	full := suite.Full{Command: "touch " + filepath.Join(dir, "ran-marker")}
-	exit, out := runScript(t, dir, first, full)
+	exit, out := runScript(t, dir, first, first, full)
 	if exit != 0 {
 		t.Fatalf("exit %d\n%s", exit, out)
 	}
@@ -133,7 +133,7 @@ func TestASessionThatLeftHeadWhereItStartedRunsNoSuite(t *testing.T) {
 		t.Errorf("status %q", got)
 	}
 	if exists(filepath.Join(dir, "ran-marker")) {
-		t.Error("the command ran for a session whose HEAD did not move")
+		t.Error("the command ran for a session whose HEAD is the tested commit")
 	}
 	if got := suite.Judge(dir, full, suite.End{Succeeded: true}).State; got != suite.Skipped {
 		t.Errorf("Judge = %q, want skipped", got)
@@ -144,15 +144,58 @@ func TestASessionThatLeftHeadWhereItStartedRunsNoSuite(t *testing.T) {
 	}
 }
 
-// TestASessionWithNoCommitAtStartAndNoneAtEndRunsNoSuite is a workspace with no commit.
+// TestASessionWithNoCommitAtStartAndNoneAtEndRunsNoSuite is a workspace with no commit and
+// a run with no suite result.
 func TestASessionWithNoCommitAtStartAndNoneAtEndRunsNoSuite(t *testing.T) {
 	dir := t.TempDir()
 	git(t, dir, "init", "--quiet")
-	if exit, out := runScript(t, dir, "", suite.Full{Command: "true"}); exit != 0 {
+	if exit, out := runScript(t, dir, "", "", suite.Full{Command: "true"}); exit != 0 {
 		t.Fatalf("exit %d\n%s", exit, out)
 	}
 	if got := suite.Judge(dir, suite.Full{}, suite.End{Succeeded: true}).State; got != suite.Skipped {
 		t.Errorf("Judge = %q, want skipped", got)
+	}
+}
+
+// TestAHeadThatIsNotTheTestedCommitRunsTheSuite: the suite runs on HEAD when the run has
+// no suite result, when its suite result is for an older commit than HEAD that did not
+// move, and when HEAD went back to a commit that the run did not test. It does not run
+// when HEAD went back to the commit that the run tested, whatever the session started at.
+func TestAHeadThatIsNotTheTestedCommitRunsTheSuite(t *testing.T) {
+	dir, first := workspace(t)
+	second := commit(t, dir, "second.txt", "second\n")
+	seen := filepath.Join(t.TempDir(), "seen")
+	full := suite.Full{Command: "git rev-parse HEAD > " + seen}
+	for _, c := range []struct {
+		name          string
+		head, start   string
+		tested        string
+		wantRun, want string
+	}{
+		{"no suite result, HEAD did not move", second, second, "", "ran", second},
+		{"a suite result of an older commit, HEAD did not move", second, second, first, "ran", second},
+		{"HEAD went back to a commit that was not tested", first, second, second, "ran", first},
+		{"HEAD went back to the tested commit", first, second, first, "skipped", ""},
+		{"HEAD is the tested commit", second, second, second, "skipped", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			git(t, dir, "checkout", "--quiet", "--detach", c.head)
+			os.Remove(seen)
+			if exit, out := runScript(t, dir, c.start, c.tested, full); exit != 0 {
+				t.Fatalf("exit %d\n%s", exit, out)
+			}
+			status := readAll(t, filepath.Join(dir, suite.StateFolder, "status"))
+			if kind, _, _ := strings.Cut(strings.TrimSpace(status), " "); kind != c.wantRun {
+				t.Errorf("status %q, want %s", status, c.wantRun)
+			}
+			got := ""
+			if exists(seen) {
+				got = strings.TrimSpace(readAll(t, seen))
+			}
+			if got != c.want {
+				t.Errorf("the suite ran on %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 
@@ -174,7 +217,7 @@ func TestTheSuiteRunsInAFreshCloneOfHead(t *testing.T) {
 
 	out := filepath.Join(t.TempDir(), "seen")
 	command := "{ git rev-parse HEAD; ls -A; pwd; } > " + out
-	exit, log := runScript(t, dir, first, suite.Full{Command: command, ResultFile: "junit.xml"})
+	exit, log := runScript(t, dir, first, "", suite.Full{Command: command, ResultFile: "junit.xml"})
 	if exit != 0 {
 		t.Fatalf("exit %d\n%s", exit, log)
 	}
@@ -214,7 +257,7 @@ func TestTheCloneIsIndependentOfTheWorkspace(t *testing.T) {
 	commit(t, dir, "second.txt", "second\n")
 	out := filepath.Join(t.TempDir(), "seen")
 	command := "{ cat .git/objects/info/alternates; git config --get-all core.hooksPath; git config --get-all core.alternateRefsCommand; } > " + out + " 2>&1; true"
-	if exit, log := runScript(t, dir, first, suite.Full{Command: command}); exit != 0 {
+	if exit, log := runScript(t, dir, first, "", suite.Full{Command: command}); exit != 0 {
 		t.Fatalf("exit %d\n%s", exit, log)
 	}
 	if seen := readAll(t, out); strings.Contains(seen, dir) {
@@ -241,7 +284,7 @@ func TestTheScriptRunsNothingTheWorkspaceConfigures(t *testing.T) {
 	f.Close()
 	write(t, filepath.Join(dir, ".git/hooks/post-checkout"), "#!/bin/sh\ntouch "+marker+"\n")
 	os.Chmod(filepath.Join(dir, ".git/hooks/post-checkout"), 0o755)
-	if exit, log := runScript(t, dir, first, suite.Full{Command: "true"}); exit != 0 {
+	if exit, log := runScript(t, dir, first, "", suite.Full{Command: "true"}); exit != 0 {
 		t.Fatalf("exit %d\n%s", exit, log)
 	}
 	if exists(marker) {
@@ -303,7 +346,7 @@ func TestAPromisorRemoteOfTheWorkspaceRunsNoProgram(t *testing.T) {
 	dir, first := workspace(t)
 	c.lose(t, dir)
 	marker := promisorRemote(t, dir, filepath.Join(dir, ".git"))
-	exit, out := runScript(t, dir, first, suite.Full{Command: "true"})
+	exit, out := runScript(t, dir, first, "", suite.Full{Command: "true"})
 	if exit != c.exit {
 		t.Errorf("exit %d, want %d\n%s", exit, c.exit, out)
 	}
@@ -347,7 +390,7 @@ func TestEachGitOfTheScriptFetchesNoMissingObject(t *testing.T) {
 	commit(t, dir, "second.txt", "second\n")
 	log := filepath.Join(t.TempDir(), "log")
 	bin := gitShim(t, log)
-	if exit, out := runScript(t, dir, first, suite.Full{Command: "true"}, "PATH="+bin+":"+os.Getenv("PATH")); exit != 0 {
+	if exit, out := runScript(t, dir, first, "", suite.Full{Command: "true"}, "PATH="+bin+":"+os.Getenv("PATH")); exit != 0 {
 		t.Fatalf("exit %d\n%s", exit, out)
 	}
 	options := strings.Join(slices.Concat(hostgit.Flags(), []string{"-c", "protocol.allow=never"}, hostgit.NoFetch()), " ")
@@ -384,8 +427,8 @@ func TestEachGitOfTheScriptFetchesNoMissingObject(t *testing.T) {
 			t.Errorf("the clone's upload-pack does not have the name %s: %q", name, args)
 		}
 	}
-	if a, _ := suite.Command("", suite.Full{Command: "true"}); a != nil {
-		if b, _ := suite.Command("", suite.Full{Command: "true"}); b[len(b)-1] == a[len(a)-1] {
+	if a, _ := suite.Command("", "", suite.Full{Command: "true"}); a != nil {
+		if b, _ := suite.Command("", "", suite.Full{Command: "true"}); b[len(b)-1] == a[len(a)-1] {
 			t.Errorf("two scripts have the same protocol name %s", a[len(a)-1])
 		}
 	}
@@ -405,7 +448,7 @@ func TestAPromisorRemoteRunsNoProgramOnAGitThatFetchesMissingObjects(t *testing.
 			c.lose(t, dir)
 			marker := promisorRemote(t, dir, "file://"+filepath.Join(dir, ".git"))
 			bin := gitShim(t, filepath.Join(t.TempDir(), "log"), "GIT_NO_LAZY_FETCH=0")
-			exit, out := runScript(t, dir, first, suite.Full{Command: "true"}, "PATH="+bin+":"+os.Getenv("PATH"))
+			exit, out := runScript(t, dir, first, "", suite.Full{Command: "true"}, "PATH="+bin+":"+os.Getenv("PATH"))
 			if exit != c.exit {
 				t.Errorf("exit %d, want %d\n%s", exit, c.exit, out)
 			}
@@ -429,7 +472,7 @@ func TestTheCommandExitStatusIsTheScriptsAndItsResultFileIsCopied(t *testing.T) 
 		ResultFile: "reports/junit.xml",
 	}
 	full.Command = "mkdir reports && " + full.Command
-	exit, log := runScript(t, dir, first, full)
+	exit, log := runScript(t, dir, first, "", full)
 	if exit != 3 {
 		t.Fatalf("exit %d, want 3\n%s", exit, log)
 	}
@@ -446,7 +489,7 @@ func TestTheCommandRunsWithAWritableHomeAndNoTransportLimit(t *testing.T) {
 	commit(t, dir, "second.txt", "second\n")
 	out := filepath.Join(t.TempDir(), "seen")
 	command := `touch "$HOME/x" && echo "writable" > ` + out + `; echo "count=${GIT_CONFIG_COUNT-unset}" >> ` + out
-	if exit, log := runScript(t, dir, first, suite.Full{Command: command}); exit != 0 {
+	if exit, log := runScript(t, dir, first, "", suite.Full{Command: command}); exit != 0 {
 		t.Fatalf("exit %d\n%s", exit, log)
 	}
 	if seen := readAll(t, out); seen != "writable\ncount=unset\n" {
@@ -465,7 +508,7 @@ func TestACloneThatFailsLeavesAFailedSuiteThatNeverStarted(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chmod(filepath.Join(dir, ".git/objects"), 0o755) })
 	full := suite.Full{Command: "true"}
-	exit, log := runScript(t, dir, first, full)
+	exit, log := runScript(t, dir, first, "", full)
 	if exit == 0 {
 		t.Skipf("the objects can be read as this user: %s", log)
 	}
@@ -489,16 +532,16 @@ func TestCommandRefusesWhatTheScriptCannotTake(t *testing.T) {
 		"a result option": {first, suite.Full{Command: "true", ResultFile: "-x.xml"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if words, err := suite.Command(c.start, c.full); err == nil {
+			if words, err := suite.Command(c.start, "", c.full); err == nil {
 				t.Errorf("Command = %q, want an error", words)
 			}
 		})
 	}
-	words, err := suite.Command("", suite.Full{Command: "make test; echo '$(x)'", ResultFile: "junit.xml"})
+	words, err := suite.Command("", first, suite.Full{Command: "make test; echo '$(x)'", ResultFile: "junit.xml"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"sh", "-c"}; words[0] != want[0] || words[1] != want[1] || words[3] != "sh" || words[4] != "make test; echo '$(x)'" || words[5] != "junit.xml" || words[6] != "" {
+	if want := []string{"sh", "-c"}; words[0] != want[0] || words[1] != want[1] || words[3] != "sh" || words[4] != "make test; echo '$(x)'" || words[5] != "junit.xml" || words[6] != "" || words[7] != first {
 		t.Errorf("the command and the result file are not arguments: %q", words)
 	}
 	if strings.Contains(words[2], "make test") || strings.Contains(words[2], "junit.xml") {
@@ -609,7 +652,7 @@ func TestAResultFileThatIsALinkIsNotCopied(t *testing.T) {
 		Command:    `printf '%s' '<testsuite><testcase name="a"/></testsuite>' > real.xml && ln -s real.xml link.xml`,
 		ResultFile: "link.xml",
 	}
-	if exit, log := runScript(t, dir, first, full); exit != 0 {
+	if exit, log := runScript(t, dir, first, "", full); exit != 0 {
 		t.Fatalf("exit %d\n%s", exit, log)
 	}
 	if exists(filepath.Join(dir, suite.StateFolder, "result")) {
@@ -660,7 +703,7 @@ func TestAnUnreadableHeadStopsTheScript(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			dir, _ := workspace(t)
 			c.setup(t, dir)
-			exit, log := runScript(t, dir, c.start, full)
+			exit, log := runScript(t, dir, c.start, c.start, full)
 			if exit != c.exit {
 				t.Fatalf("exit %d, want %d\n%s", exit, c.exit, log)
 			}
@@ -687,7 +730,7 @@ func TestTheCloneNeedsTheFileProtocolThatTheScriptAllowsForIt(t *testing.T) {
 	if out, err := plain.CombinedOutput(); err == nil || !strings.Contains(string(out), "transport 'file' not allowed") {
 		t.Fatalf("a plain clone under protocol.allow=never: %v\n%s", err, out)
 	}
-	if exit, log := runScript(t, dir, first, suite.Full{Command: "true"}); exit != 0 {
+	if exit, log := runScript(t, dir, first, "", suite.Full{Command: "true"}); exit != 0 {
 		t.Fatalf("the script's clone failed: exit %d\n%s", exit, log)
 	}
 }
@@ -706,7 +749,7 @@ func TestAHookOfTheCloneDoesNotRun(t *testing.T) {
 	if err := os.Chmod(hook, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if exit, log := runScriptWith(t, dir, first, suite.Full{Command: "true"}, false, "GIT_TEMPLATE_DIR="+template); exit != 0 {
+	if exit, log := runScriptWith(t, dir, first, "", suite.Full{Command: "true"}, false, "GIT_TEMPLATE_DIR="+template); exit != 0 {
 		t.Fatalf("exit %d\n%s", exit, log)
 	}
 	if exists(marker) {
@@ -731,15 +774,15 @@ func TestAHookOfTheCloneDoesNotRun(t *testing.T) {
 
 // TestTheScriptPrintsTheHeadMarkerBeforeTheCommandAndSkipsItOtherwise: the output of a
 // suite that ran starts with the marker line of the commit, before what the command
-// prints, and a session whose HEAD did not move prints none.
+// prints, and a skipped suite prints none.
 func TestTheScriptPrintsTheHeadMarkerBeforeTheCommandAndSkipsItOtherwise(t *testing.T) {
 	dir, first := workspace(t)
 	head := commit(t, dir, "second.txt", "second\n")
-	exit, out := runScript(t, dir, first, suite.Full{Command: "echo qory-suite-head forged"})
+	exit, out := runScript(t, dir, first, "", suite.Full{Command: "echo qory-suite-head forged"})
 	if exit != 0 || out != suite.HeadMarker+head+"\nqory-suite-head forged\n" {
 		t.Errorf("exit %d, output %q, want the marker of %s, then the command's line", exit, out, head)
 	}
-	if exit, out := runScript(t, dir, head, suite.Full{Command: "true"}); exit != 0 || out != "" {
+	if exit, out := runScript(t, dir, head, head, suite.Full{Command: "true"}); exit != 0 || out != "" {
 		t.Errorf("a skipped suite: exit %d, output %q, want no output", exit, out)
 	}
 }

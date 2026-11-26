@@ -81,6 +81,9 @@ const (
 	limited = "a session that does not judge"
 	// free is a session that judges: every POST passes.
 	free = "no POST is refused"
+	// reviews is a review session, whose workflow judges: passed is stopped, and
+	// changes-requested and escalate pass.
+	reviews = "a review session"
 )
 
 // wantTry checks that a try has POSTs, since a run that set no check has none, then the
@@ -100,6 +103,8 @@ func wantTry(t *testing.T, when string, got verdictTry, state string) {
 			refused = verdict
 		case limited:
 			refused = verdict && !strings.HasSuffix(name, "escalate")
+		case reviews:
+			refused = verdict && strings.HasSuffix(name, "passed")
 		}
 		if refused != (refusal != nil) {
 			t.Errorf("%s: %s: refusal %+v, refused want %t (%s)", when, name, refusal, refused, state)
@@ -110,8 +115,11 @@ func wantTry(t *testing.T, when string, got verdictTry, state string) {
 		}
 		first, _, _ := strings.Cut(refusal.Message, "\n")
 		fix := "Record escalate or no verdict: the next workflow in the loop judges this work."
-		if state == allRefused {
+		switch state {
+		case allRefused:
 			fix = "Post the verdict from a session of the run."
+		case reviews:
+			fix = "Record changes-requested, escalate or no verdict: qory sends passed after the round."
 		}
 		if refusal.Status != http.StatusUnprocessableEntity || refusal.Code != "push_check_failed" || first != fix {
 			t.Errorf("%s: %s: refusal %d %s %q", when, name, refusal.Status, refusal.Code, refusal.Message)
@@ -187,12 +195,40 @@ func TestTheVerdictRuleFollowsTheSessionThatRuns(t *testing.T) {
 	wantTry(t, "setup", v.tries[0], allRefused)
 	wantTry(t, "session 1, hello, judges false", inside[0], limited)
 	wantTry(t, "between sessions 1 and 2", between[0], allRefused)
-	wantTry(t, "session 2, review-changes", inside[1], free)
+	wantTry(t, "session 2, review-changes", inside[1], reviews)
 	wantTry(t, "between sessions 2 and 3", between[1], allRefused)
 	wantTry(t, "session 3, hello, judges false again", inside[2], limited)
 	wantTry(t, "after the last session", between[2], allRefused)
 	// After the run, the join of the last session returned: nothing is left over.
 	wantTry(t, "after the run", v.try(), allRefused)
+}
+
+// TestAReviewJoinWhoseWorkflowDoesNotJudgeIsLimitedToEscalate is a run whose review
+// session has judges false: its verdicts are limited as those of a session that does not
+// judge, and changes-requested is stopped, which a review session that judges may record.
+func TestAReviewJoinWhoseWorkflowDoesNotJudgeIsLimitedToEscalate(t *testing.T) {
+	var v verdictProbe
+	var mu sync.Mutex
+	var inside []verdictTry
+	r, _, _ := reviewRunWith(t, reviewCfg{
+		stack:      loopWorkflows("") + doesNotJudge,
+		onSetCheck: v.setCheck,
+		next: func(*pushRepo, int) {
+			got := v.try()
+			mu.Lock()
+			inside = append(inside, got)
+			mu.Unlock()
+		},
+	}, answerFor(2, "review-changes"), answerFor(3, "hello"))
+	r.wantsClose(t, event.StateSucceeded, 0)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(inside) != 3 {
+		t.Fatalf("%d sessions, want 3", len(inside))
+	}
+	wantTry(t, "session 1, hello", inside[0], free)
+	wantTry(t, "session 2, review-changes, judges false", inside[1], limited)
+	wantTry(t, "session 3, hello", inside[2], free)
 }
 
 // TestTheVerdictStateIsClearedWhenAJoinReturnsAnError is a join that returns an error
@@ -229,8 +265,9 @@ func TestARunOfOneSessionThatDoesNotJudgeIsLimited(t *testing.T) {
 }
 
 // TestARunWhoseWorkflowsAllJudgeIsNotLimited is a run of hello with no judges member,
-// which judges: a run of one session sets no check, and a shared run sets one that passes
-// every POST in a session.
+// which judges: a run of one session sets a check for the members that qory fills alone,
+// which has no verdict rule, and a shared run sets one that passes every POST in a
+// session.
 func TestARunWhoseWorkflowsAllJudgeIsNotLimited(t *testing.T) {
 	t.Run("one session", func(t *testing.T) {
 		var v verdictProbe
@@ -243,9 +280,10 @@ func TestARunWhoseWorkflowsAllJudgeIsNotLimited(t *testing.T) {
 		p.onSetCheck = v.setCheck
 		r := p.run(t, nil, nil)
 		r.wantsClose(t, event.StateSucceeded, 0)
-		if v.check != nil {
-			t.Error("the run set a check, want none")
+		if len(v.tries) != 1 {
+			t.Fatalf("the check was set %d times, want once", len(v.tries))
 		}
+		wantTry(t, "setup", v.tries[0], free)
 	})
 	t.Run("a shared run", func(t *testing.T) {
 		var v verdictProbe

@@ -102,6 +102,11 @@ type pushAPI struct {
 	// set, is the id of the approved version of each artifact.
 	outputs  string
 	approved string
+	// versionStage, when set, is the stage that the index shows for each version, in place
+	// of st_a, the stage of the run.
+	versionStage string
+	// inputs is the stage's inputs, as JSON, "[]" when "".
+	inputs string
 	// rowRuns is the run id of each row of rows, the run that reported it.
 	rowRuns []string
 	// writer, when set, is the run id the index shows, and shownFile the file whose sum it
@@ -109,9 +114,14 @@ type pushAPI struct {
 	writer    string
 	shownFile []byte
 	bodies    []string
-	posts     int
-	reads     int
-	post      func(n int, w http.ResponseWriter) (handled, store bool)
+	// verdicts is the body of each POST verdict that [suiteServed] served.
+	verdicts []string
+	// refuse, when set, gets the body of each POST verdict that [suiteServed] serves and
+	// returns the code of the 409 to send, "" for a 201.
+	refuse func(body string) string
+	posts  int
+	reads  int
+	post   func(n int, w http.ResponseWriter) (handled, store bool)
 	// recorded is the report of pushed commits: each call's body, as it arrived, and the
 	// rows that its calls added, in order. record, when set, responds to call n in place of 204,
 	// and returns whether it did.
@@ -167,7 +177,7 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 		if a.round != 0 && a.rounds != 0 {
 			stage = fmt.Sprintf(`{"id":"st_a","round":%d,"rounds":%d}`, a.round, a.rounds)
 		}
-		fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"run":%s,"stage":%s,"inputs":[],"outputs":%s,"verdict":%s,"pushed_commits":%s}`, workItem, run, stage, outputs, verdict, pushed)
+		fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"run":%s,"stage":%s,"inputs":%s,"outputs":%s,"verdict":%s,"pushed_commits":%s}`, workItem, run, stage, cmp.Or(a.inputs, "[]"), outputs, verdict, pushed)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/r/artifacts":
 		a.reads++
 		if a.index == nil || !a.index(a.reads, w) {
@@ -205,6 +215,33 @@ func (a *pushAPI) addVersion(typ, filename string, content []byte) {
 	defer a.mu.Unlock()
 	a.files = append(a.files, content)
 	a.kinds = append(a.kinds, storedKind{typ, "main", filename, a.runID})
+}
+
+// thisRun is the writer of a version that the run that reads the index wrote. The run id
+// exists only after the run opens, so the index shows it in place of thisRun.
+const thisRun = "@this-run"
+
+// addRunVersion is addVersion for a version that the run wrote, also when the test adds it
+// before the run starts.
+func (a *pushAPI) addRunVersion(typ, filename string, content []byte) {
+	a.addVersionBy(thisRun, typ, filename, content)
+}
+
+// addVersionBy is addVersion for a version that the run with the id writer wrote.
+func (a *pushAPI) addVersionBy(writer, typ, filename string, content []byte) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.files = append(a.files, content)
+	a.kinds = append(a.kinds, storedKind{typ, "main", filename, writer})
+}
+
+// addDeliveredBy is addVersionBy for a version of the artifact that the delivered type of
+// the target has, the one that a run starts from.
+func (a *pushAPI) addDeliveredBy(writer, typ, filename string, content []byte) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.files = append(a.files, content)
+	a.kinds = append(a.kinds, storedKind{typ, pullRequestName, filename, writer})
 }
 
 // recordedRow is a row of the run's list of pushed commits.
@@ -262,6 +299,14 @@ func (a *pushAPI) pushedRows() string {
 	return string(raw)
 }
 
+// writerOf is the run id that the index shows for kind: [thisRun] is the run's.
+func (a *pushAPI) writerOf(kind storedKind) string {
+	if kind.writer == thisRun {
+		return a.runID
+	}
+	return kind.writer
+}
+
 // writeIndex writes the index of the versions stored so far, grouped by type and name.
 func (a *pushAPI) writeIndex(w http.ResponseWriter) {
 	type group struct {
@@ -286,8 +331,8 @@ func (a *pushAPI) writeIndex(w http.ResponseWriter) {
 			groups = append(groups, g)
 		}
 		g.versions = append(g.versions, map[string]any{
-			"id": fmt.Sprintf("av_%d", i+1), "number": len(g.versions) + 1, "stage_id": "st_a",
-			"at": fmt.Sprintf("2026-11-02T09:%02d:00Z", i), "writer": map[string]any{"kind": "run", "run_id": cmp.Or(a.writer, kind.writer)},
+			"id": fmt.Sprintf("av_%d", i+1), "number": len(g.versions) + 1, "stage_id": cmp.Or(a.versionStage, "st_a"),
+			"at": fmt.Sprintf("2026-11-02T09:%02d:00Z", i), "writer": map[string]any{"kind": "run", "run_id": cmp.Or(a.writer, a.writerOf(kind))},
 			"files": []map[string]any{{
 				"filename": kind.filename, "content_type": "application/json", "size": len(file), "sha256": hex.EncodeToString(sum[:]),
 			}},
@@ -458,6 +503,10 @@ type pushRepo struct {
 	// modules the compose fetches.
 	nextSession func(ctx context.Context, body []byte) ([]byte, error)
 	stackProxy  bool
+	// findings and postFindings, when set, are the run's Findings and PostFindings, see
+	// [cmd.Nowhere].
+	findings     func(ctx context.Context) ([]byte, error)
+	postFindings func(ctx context.Context, body []byte) ([]byte, error)
 	// noOutput has the session write no pull-request output to its outbox.
 	noOutput bool
 	// noSystem gives the run configuration no QORY_RUN_SYSTEM.
@@ -675,7 +724,9 @@ func (p *pushRepo) run(t *testing.T, agent func(dir string), result func() (*ses
 			defer p.api.mu.Unlock()
 			p.api.runID = spec.RunID
 		},
-		NextSession: p.nextSession,
+		NextSession:  p.nextSession,
+		Findings:     p.findings,
+		PostFindings: p.postFindings,
 	}
 	if p.stackProxy {
 		nowhere.StackProxy, nowhere.StackCABundle = p.h.server.Proxy.URL, p.h.server.Proxy.CABundle

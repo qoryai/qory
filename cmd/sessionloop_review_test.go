@@ -60,6 +60,10 @@ type reviewJoined struct {
 	// review-session, copyLeft whether the copy folder of the review join before and
 	// reportsLeft whether its reports folder still existed, all when the session joined.
 	reviewDir, copyLeft, reportsLeft bool
+	// open is the text of open-findings.json in the inputs folder the session mounts, and
+	// hasOpen whether the file exists.
+	open    string
+	hasOpen bool
 }
 
 // reviewSeen is qory.review_session of a join and what it points to, as the session sees
@@ -81,6 +85,8 @@ type reviewSeen struct {
 	// read-only mount, and workWritable whether the folder let this test make a file in it.
 	workFiles    []string
 	workReadOnly bool
+	// checkout is the folder of the session's checkout, set when the review callback runs.
+	checkout string
 }
 
 // inputsOf is the qory member of the inputs.json that the session of spec reads, from the
@@ -118,7 +124,7 @@ func seeReview(rs map[string]any, spec session.SessionSpec) *reviewSeen {
 	seen.diff, seen.hasDiff = read(str("diff"))
 	seen.suite, seen.hasSuite = read(str("suite_result"))
 	seen.build, seen.hasBuild = read(str("build_report"))
-	_, seen.hasPrevious = rs["previous_findings"]
+	seen.previous, seen.hasPrevious = read(str("previous_findings"))
 	if entries, err := os.ReadDir(seen.reports); err == nil {
 		for _, e := range entries {
 			seen.entries = append(seen.entries, e.Name())
@@ -187,8 +193,33 @@ type reviewCfg struct {
 	// between, when set, is called with the number of the session that ended, when the run
 	// asks for the next session: no session runs then.
 	between func(n int)
-	// files are files of the repository beside [reviewFiles].
-	files map[string]string
+	// result, when set, is the result of each join in place of [suiteResultsIn]'s. It gets
+	// the run's events folder.
+	result func(runDir func() string) func() (*session.Result, error)
+	// setup, when set, is called with the run's repository before the run starts, to change
+	// what the forge and the work item have. findings and postFindings are the run's
+	// Findings and PostFindings, see [cmd.Nowhere].
+	setup func(p *pushRepo)
+	// green makes the full suite of each session pass: it leaves no finding of the suite.
+	green bool
+	// fail1 makes session 1 end failed, with its after step as it ran.
+	fail1 bool
+	// agent, when set, is the file of the agent code-reviewer in place of the module's.
+	agent string
+	// review, when set, is called with what the review session of each review join sees,
+	// after its agent ran, to write the session's reports and record its verdict.
+	review func(p *pushRepo, seen *reviewSeen)
+	// verify makes session 1 a Verify session: the workflow hello has the access
+	// write-no-push and the review group reviewers. files and workflows are added to the
+	// files of the module and to the workflows of such a run.
+	verify    bool
+	files     map[string]string
+	workflows map[string]any
+	// checkoutStack, with verify, has the run compose the stack from the checkout's
+	// qory.yaml, and no harness document.
+	checkoutStack bool
+	findings      func(ctx context.Context) ([]byte, error)
+	postFindings  func(ctx context.Context, body []byte) ([]byte, error)
 	// failed, when not 0, is the number of the session whose agent exits 7.
 	failed int
 	// joined, when set, gets the spec of each session as it joins, before its agent runs.
@@ -230,11 +261,33 @@ func reviewRunWith(t *testing.T, cfg reviewCfg, answers ...string) (r pushed, jo
 	if cfg.stack != "" {
 		p = loopRepo(t, cfg.stack, answers...)
 	} else {
-		files := maps.Clone(reviewFiles)
-		maps.Copy(files, cfg.files)
-		p, _ = sharedPushRepoWith(t, files, reviewWorkflows, answers...)
+		files := reviewFiles
+		if cfg.agent != "" || cfg.files != nil {
+			files = maps.Clone(reviewFiles)
+			maps.Copy(files, cfg.files)
+			if cfg.agent != "" {
+				files["modules/hello/agents/code-reviewer.md"] = cfg.agent
+			}
+		}
+		workflows := reviewWorkflows
+		if cfg.verify {
+			workflows = map[string]any{"hello": map[string]any{"access": "write-no-push", "review_group": "reviewers"}}
+			maps.Copy(workflows, cfg.workflows)
+		}
+		if cfg.checkoutStack {
+			files = maps.Clone(files)
+			files["qory.yaml"] = ownStack("apiVersion: qory.dev/v1alpha1\ntarget:\n  runtime: claude\nmodules:\n  - name: hello\n    source: {path: modules/hello}\n" +
+				"workflows:\n  hello:\n    access: write-no-push\n    review_group: reviewers\n")
+			p = newPushRepoWith(t, "write-no-push", files)
+		} else {
+			p, _ = sharedPushRepoWith(t, files, workflows, answers...)
+		}
 	}
 	p.onSetCheck = cfg.onSetCheck
+	p.findings, p.postFindings = cfg.findings, cfg.postFindings
+	if cfg.setup != nil {
+		cfg.setup(p)
+	}
 	if asked := p.nextSession; cfg.between != nil {
 		ended := 0
 		p.nextSession = func(ctx context.Context, body []byte) ([]byte, error) {
@@ -245,7 +298,9 @@ func reviewRunWith(t *testing.T, cfg reviewCfg, answers ...string) (r pushed, jo
 	}
 	change := p.change
 	p.change = func(d map[string]any) {
-		change(d)
+		if change != nil {
+			change(d)
+		}
 		d["type_settings"] = map[string]any{"full_suite": !cfg.noSuite}
 	}
 	suiteServed(t, p, nil)
@@ -285,6 +340,9 @@ func reviewRunWith(t *testing.T, cfg reviewCfg, answers ...string) (r pushed, jo
 			if exists(filepath.Join(m.Path, "review-session")) {
 				j.reviewDir = true
 			}
+			if data, err := os.ReadFile(filepath.Join(m.Path, "open-findings.json")); err == nil {
+				j.open, j.hasOpen = string(data), true
+			}
 		}
 		// The review join before is the last one with qory.review_session.
 		for i := len(joins) - 1; i >= 0; i-- {
@@ -300,6 +358,23 @@ func reviewRunWith(t *testing.T, cfg reviewCfg, answers ...string) (r pushed, jo
 		}
 	}
 	p.noOutput = true
+	results := suiteResultsIn(t, &current, func() string { return p.h.runDir })
+	if cfg.green {
+		results = suiteResultsEnding(t, &current, func() string { return p.h.runDir }, suiteEnd{result: suiteGreen})
+	}
+	if cfg.result != nil {
+		results = cfg.result(func() string { return p.h.runDir })
+	}
+	if cfg.fail1 {
+		inner := results
+		results = func() (*session.Result, error) {
+			res, err := inner()
+			if res != nil && res.Session == 1 {
+				res.State, res.ExitCode = event.StateFailed, 1
+			}
+			return res, err
+		}
+	}
 	r = p.run(t, func(d string) {
 		mu.Lock()
 		n := len(joins)
@@ -318,7 +393,17 @@ func reviewRunWith(t *testing.T, cfg reviewCfg, answers ...string) (r pushed, jo
 		if cfg.next != nil {
 			cfg.next(p, n)
 		}
-	}, failedIn(cfg.failed, suiteResultsIn(t, &current, func() string { return p.h.runDir })))
+		mu.Lock()
+		var seen *reviewSeen
+		if n > 0 && n <= len(joins) {
+			seen = joins[n-1].seen
+		}
+		mu.Unlock()
+		if cfg.review != nil && seen != nil {
+			seen.checkout = d
+			cfg.review(p, seen)
+		}
+	}, failedIn(cfg.failed, results))
 	return r, joins, p
 }
 

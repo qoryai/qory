@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
 
+	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/suite"
 )
 
@@ -99,8 +101,37 @@ func TestOutputOverTheByteCapKeepsOnlyTheEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := readSuiteResult(t, h).OutputTail
-	if strings.Contains(got, "first") || !strings.HasSuffix(got, "\nlast") || len(got) > suite.MaxOutputBytes {
-		t.Errorf("tail has %d bytes and ends %q, want the end of the output within %d bytes", len(got), got[max(0, len(got)-8):], suite.MaxOutputBytes)
+	// The cap cuts inside the line of x, which is dropped whole.
+	if got != "last" {
+		t.Errorf("tail has %d bytes and ends %q, want the line after the cut only", len(got), got[max(0, len(got)-8):])
+	}
+}
+
+// noTextLine is the tail of output in whose last 256 KiB no line with text starts.
+const noTextLine = "No line with text starts in the last 256 KiB of the suite's output, so qory shows none of those bytes."
+
+// TestOutputWithNoTextLineInTheCapHasTheLineInTheFileAndTheFinding: the after step prints
+// one line of more than the cap, so the tail of the result file and the tail of the
+// finding's ending are the line that says qory shows none of it.
+func TestOutputWithNoTextLineInTheCapHasTheLineInTheFileAndTheFinding(t *testing.T) {
+	h := newHelper(t)
+	h.state(t, "ran "+suiteSHA, redResult)
+	writeEvents(t, h.runDir, afterStarted(3, 2), outputLine(4, strings.Repeat("x", 3*suite.MaxOutputBytes)), afterExited(5, 2))
+	res := &session.AfterResult{Step: 2, State: event.StateFailed, ExitCode: 1}
+	if _, err := h.after(res, succeeded); err != nil {
+		t.Fatal(err)
+	}
+	if got := readSuiteResult(t, h).OutputTail; got != noTextLine {
+		t.Errorf("the result file has the tail %q, want %q", got, noTextLine)
+	}
+	var snapshot runapi.Snapshot
+	if err := json.Unmarshal([]byte(`{"stage":{"id":"st_aaa","name":"Build","round":1,"rounds":2,"state":null}}`), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	h.suiteRun.findings = &findingsRun{code: &codeRun{snapshot: &snapshot}}
+	end := h.suiteRun.endingFor(nil, suite.Outcome{State: suite.Failed}, nil, &session.Result{After: res})
+	if end.Tail != noTextLine {
+		t.Errorf("the ending has the tail %q, want %q", end.Tail, noTextLine)
 	}
 }
 
@@ -211,9 +242,10 @@ func TestAFaultWhereHeadDidNotMoveKeepsTheSuiteBefore(t *testing.T) {
 	}
 }
 
-// TestASkippedSuiteKeepsTheRecordBefore: HEAD did not move, so the suite of the commit
-// before still describes it, and kept returns it; a session that ran no suite returns it
-// too.
+// TestASkippedSuiteKeepsTheRecordBefore: HEAD is the commit of the suite before, so that
+// suite still describes it, and kept returns it; a session that ran no suite returns it
+// too. A skipped suite prints a line about the suite result of the run and, for a workflow
+// with no plan type, a line about the start commit.
 func TestASkippedSuiteKeepsTheRecordBefore(t *testing.T) {
 	before := &suiteRecord{path: "/x/suite-1.json"}
 	h := newHelper(t)
@@ -223,6 +255,15 @@ func TestASkippedSuiteKeepsTheRecordBefore(t *testing.T) {
 	}
 	if h.record != nil || h.kept(context.Background(), before) != before {
 		t.Errorf("record %+v, kept %+v, want no record and the one before", h.record, h.kept(context.Background(), before))
+	}
+	if !slices.Contains(*h.said, textSuiteHasLast) {
+		t.Errorf("lines %q, want %q", *h.said, textSuiteHasLast)
+	}
+	h.noPlan = noPlanFault("fix")
+	h.state(t, "skipped", "")
+	*h.said = nil
+	if _, err := h.after(&session.AfterResult{Step: 2, State: event.StateSucceeded}, succeeded); err != nil || !slices.Contains(*h.said, textSuiteSkipped) {
+		t.Errorf("error %v, lines %q, want %q", err, *h.said, textSuiteSkipped)
 	}
 	var none *suiteRun
 	if none.kept(context.Background(), before) != before {

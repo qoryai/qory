@@ -108,6 +108,33 @@ func ReviewGuard(rt Runtime) (CommandGuard, bool) {
 	return guard, true
 }
 
+// VerifyGuard is a runtime that writes the settings of a Verify session: a session that
+// writes its checkout and writes its reports in a folder outside it. A [SettingsInliner]
+// with no VerifyGuard stops a Verify session before it starts, since its settings would
+// get no rules for the reports folder. A runtime that is no SettingsInliner, which
+// passes no settings with a flag, runs the session with no added rules. A run applies
+// the settings only for a guard that is a SettingsInliner too, see [VerifyGuardOf]. A
+// runtime adds its guard by implementing the method in its package, with no change to
+// shared code.
+type VerifyGuard interface {
+	// VerifySettings returns settings, the settings of the harness as one JSON object, as
+	// the JSON of the settings of a Verify session whose reports folder is reports: its
+	// agents may read and edit reports beside the checkout. Every other key of settings
+	// stays as it is. shown is the settings file as an error shows it, "" for none. The
+	// error starts with the fix.
+	VerifySettings(settings map[string]any, shown, reports string) ([]byte, error)
+}
+
+// VerifyGuardOf returns rt as the [VerifyGuard] of a Verify session, or false when rt is
+// no VerifyGuard or no [SettingsInliner], as [ReviewGuard] does.
+func VerifyGuardOf(rt Runtime) (VerifyGuard, bool) {
+	guard, ok := rt.(VerifyGuard)
+	if _, inlines := rt.(SettingsInliner); !ok || !inlines {
+		return nil, false
+	}
+	return guard, true
+}
+
 // EntryCheck is the file of a skill or a command that [CommandGuard.CheckEntry] checks.
 type EntryCheck struct {
 	// Data is the file as the module wrote it, and Source is Data split by [SplitAgent].

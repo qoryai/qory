@@ -65,9 +65,10 @@ func At(hooks []compose.Hook, workflow, pointAt string) []compose.Hook {
 }
 
 // Record is the record of one hook of a session: its name, place and kind, its verdict, the
-// cause of a red verdict, and its findings. Reviewer and Findings are the hook's entry in the
-// round's open findings, [reviewround.ReviewerFindings], so the round's findings can take
-// them: see [Record.Entry].
+// cause of a red verdict, and its findings. Reviewer and Findings have the form of a
+// reviewer's entry of a review report, [reviewround.ReviewerFindings], see [Record.Entry].
+// The point of each finding of a red required hook goes into the changes-requested verdict
+// of the session.
 type Record struct {
 	Name     string `json:"name"`
 	Index    int    `json:"index"`
@@ -83,7 +84,7 @@ type Record struct {
 	Findings []reviewround.Finding `json:"findings"`
 }
 
-// Entry is the record's entry for the round's open findings.
+// Entry is the record's Reviewer and Findings in the form of a review report's entry.
 func (r Record) Entry() reviewround.ReviewerFindings {
 	return reviewround.ReviewerFindings{Reviewer: r.Reviewer, Findings: r.Findings}
 }

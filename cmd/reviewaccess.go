@@ -44,3 +44,14 @@ func joinsAsReview(workflows map[string]stack.Workflow, name, got, level string)
 	return level == stack.AccessWrite && got == stack.AccessRead &&
 		workflowReadsOnly(workflows, name) && startsReviewers(workflows, name)
 }
+
+// verifiesAsReview reports whether session 1 of a run at level is a Verify session: the
+// run is at level write-no-push, and the entry of the workflow name in workflows, the
+// composed stack's table, declares access: write-no-push and a review_group. The access
+// of the entry counts, not the level alone, which the run documents can lower. Such a
+// session writes the checkout, pushes nothing, and starts reviewers, so it joins as it is
+// beside a copy of the commit that its checkout is at, see [reviewJoinPlan].
+func verifiesAsReview(workflows map[string]stack.Workflow, name, level string) bool {
+	return level == stack.AccessWriteNoPush &&
+		(&stack.Stack{Workflows: workflows}).AccessOf(name) == stack.AccessWriteNoPush && startsReviewers(workflows, name)
+}

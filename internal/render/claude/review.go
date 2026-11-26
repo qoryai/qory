@@ -129,12 +129,53 @@ func (claude) ReviewSettings(settings map[string]any, shown string, p render.Rev
 	return withRules(settings, shown, deny, allow, p.Read)
 }
 
+// VerifySettings is settings, Claude Code's settings, as JSON with a Read rule and an Edit
+// rule for reports added to permissions.allow, and reports to
+// permissions.additionalDirectories, each once, with < > & unescaped. An Edit rule covers
+// the Write tool too. Nothing else changes: the session writes its checkout, so it sets no
+// defaultMode and no deny. An empty reports, a permissions that is no object, and an
+// allow or an additionalDirectories that is no array, stop it.
+func (claude) VerifySettings(settings map[string]any, shown, reports string) ([]byte, error) {
+	if reports == "" {
+		return nil, errors.New("set the Verify reports path: an empty one covers all files, so the run does not start")
+	}
+	if _, err := addRules(settings, shown, "a Verify session", []ruleList{
+		{"allow", []string{pathRule("Read", reports), pathRule("Edit", reports)}},
+		{"additionalDirectories", []string{reports}},
+	}); err != nil {
+		return nil, err
+	}
+	return encode(settings)
+}
+
 // withRules is object, Claude Code's settings, as JSON with deny, allow and dirs added to
 // permissions.deny, permissions.allow and permissions.additionalDirectories, each rule
 // once, permissions.defaultMode set to dontAsk and
 // permissions.disableBypassPermissionsMode to disable. shown is the settings file as an
 // error shows it, "" for none.
 func withRules(object map[string]any, shown string, deny, allow, dirs []string) ([]byte, error) {
+	permissions, err := addRules(object, shown, "a run of a read workflow",
+		[]ruleList{{"deny", deny}, {"allow", allow}, {"additionalDirectories", dirs}})
+	if err != nil {
+		return nil, err
+	}
+	permissions["defaultMode"] = "dontAsk"
+	permissions["disableBypassPermissionsMode"] = "disable"
+	return encode(object)
+}
+
+// ruleList is the rules that a session adds to the list permissions.<key> of the settings.
+type ruleList struct {
+	key   string
+	rules []string
+}
+
+// addRules adds each list of adds to the permissions of object, Claude Code's settings,
+// each rule once, creating the permissions or the list when it is missing, and returns
+// the permissions. Every other key stays as it is. who is the session that adds the rules,
+// as an error shows it, and shown is the settings file as an error shows it, "" for none.
+// A permissions that is no object, and a list that is no array, stop it.
+func addRules(object map[string]any, shown, who string, adds []ruleList) (map[string]any, error) {
 	at := "the Claude Code settings " + shown
 	if shown == "" {
 		at = "the Claude Code settings"
@@ -142,17 +183,14 @@ func withRules(object map[string]any, shown string, deny, allow, dirs []string) 
 	permissions := map[string]any{}
 	if v, ok := object["permissions"]; ok {
 		if permissions, ok = v.(map[string]any); !ok {
-			return nil, fmt.Errorf("set permissions in %s to a JSON object: a run of a read workflow adds rules to it, so the run does not start", at)
+			return nil, fmt.Errorf("set permissions in %s to a JSON object: %s adds rules to it, so the run does not start", at, who)
 		}
 	}
-	for _, add := range []struct {
-		key   string
-		rules []string
-	}{{"deny", deny}, {"allow", allow}, {"additionalDirectories", dirs}} {
+	for _, add := range adds {
 		var list []any
 		if v, ok := permissions[add.key]; ok {
 			if list, ok = v.([]any); !ok {
-				return nil, fmt.Errorf("set permissions.%s in %s to a JSON array: a run of a read workflow adds rules to it, so the run does not start", add.key, at)
+				return nil, fmt.Errorf("set permissions.%s in %s to a JSON array: %s adds rules to it, so the run does not start", add.key, at, who)
 			}
 		}
 		for _, rule := range add.rules {
@@ -162,9 +200,12 @@ func withRules(object map[string]any, shown string, deny, allow, dirs []string) 
 		}
 		permissions[add.key] = list
 	}
-	permissions["defaultMode"] = "dontAsk"
-	permissions["disableBypassPermissionsMode"] = "disable"
 	object["permissions"] = permissions
+	return permissions, nil
+}
+
+// encode is object as indented JSON, with < > & unescaped.
+func encode(object map[string]any) ([]byte, error) {
 	var out bytes.Buffer
 	enc := json.NewEncoder(&out)
 	enc.SetEscapeHTML(false)

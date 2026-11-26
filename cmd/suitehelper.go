@@ -32,13 +32,15 @@ func planFile(plan string) string { return plan + ".md" }
 // noPlanCommand is the command of the after step of a session whose workflow has no plan
 // type. The step still checks whether HEAD moved, which the script of [suite.Command] decides: a
 // session that left HEAD where it started is skipped, and the command of any other is not a
-// suite, see [suiteRun.noPlan].
+// suite, see [suiteRun.noPlan]. The step of such a workflow has the start commit as its
+// tested commit, since the workflow has no suite result.
 const noPlanCommand = "true"
 
 // The lines of qory run about the full suite. A line with an instruction starts with the fix,
 // and has at most 100 characters in its first line.
 const (
 	textSuiteSkipped = "the full suite did not run: the session left HEAD at the commit it started at"
+	textSuiteHasLast = "the full suite did not run: the run has a suite result for the commit of HEAD"
 	textSuiteGreen   = "the full suite passed, so qory posts no verdict"
 	textSuiteCut     = "qory run was stopped while the full suite ran, so the run closes cancelled"
 	textSuiteStands  = "the verdict %s of the agent stands over the red full suite"
@@ -111,8 +113,14 @@ type suiteSetup struct {
 	// extensions is the harness extensions of the report that the run composed.
 	extensions map[string]any
 	said       func(string)
+	// last is the last suite record of the run, nil for none: its commit is the tested commit
+	// of the after step, see [testedCommit].
+	last *suiteRecord
 	// session is the number of the session whose suite it is, from 1.
 	session int
+	// findings is the run's findings, nil for a run that has none: the suite's finding is
+	// posted with them.
+	findings *findingsRun
 }
 
 // suiteRun is the full suite of one session: the after step that runs it, and the judgement of
@@ -126,16 +134,18 @@ type suiteRun struct {
 	minutes int
 	// session is the number of the session, which the suite result file's name has.
 	session int
+	// findings is the run's findings, see [suiteSetup].
+	findings *findingsRun
 	// record is the suite of this session that [suiteRun.kept] hands to the loop, set by
-	// [suiteRun.after]: nil for a suite that did not run and for a session whose HEAD did not
-	// move.
+	// [suiteRun.after]: nil for a suite that did not run and for a session whose HEAD is the
+	// commit that the run has a suite result for.
 	record *suiteRecord
 	// faulted is whether record is that of a fault, which has no after step.
 	faulted bool
 	// fault is why no suite runs for this session, nil when the after step is set.
 	fault *suiteFault
 	// noPlan is set for a session whose workflow has no plan type: the fault that a session
-	// whose HEAD moved gets. A session whose HEAD did not move is skipped, as with a plan.
+	// whose HEAD moved gets. A session whose HEAD did not move is skipped.
 	noPlan *suiteFault
 }
 
@@ -145,10 +155,10 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 	if !s.walled || s.readOnly || !s.fullSuite {
 		return nil
 	}
-	r := &suiteRun{run: s.run, runID: s.runID, said: s.said, dir: s.spec.Dir, minutes: suite.LimitMinutes(s.extensions), session: s.session}
+	r := &suiteRun{run: s.run, runID: s.runID, said: s.said, dir: s.spec.Dir, minutes: suite.LimitMinutes(s.extensions), session: s.session, findings: s.findings}
 	if s.plan == "" {
 		// No version of a plan type sets a command, so the after step only checks whether HEAD
-		// moved.
+		// moved: its tested commit is the start commit.
 		r.full, r.noPlan = suite.Full{Command: noPlanCommand}, noPlanFault(s.workflow)
 	} else {
 		// A cause that no After step can show is kept, and judged once the session ends.
@@ -172,7 +182,12 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 		s.said(r.fault.line())
 		return r
 	}
-	after, err := suite.Command(headCommit(ctx, s.spec.Dir), r.full)
+	start := headCommit(ctx, s.spec.Dir)
+	tested := testedCommit(s.last)
+	if r.noPlan != nil {
+		tested = start
+	}
+	after, err := suite.Command(start, tested, r.full)
 	if err != nil {
 		r.fault = faultOf(err, s.plan)
 		s.said(r.fault.line())
@@ -180,6 +195,16 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 	}
 	s.spec.After, s.spec.AfterTimeout = after, afterLimit(r.minutes)
 	return r
+}
+
+// testedCommit is the commit that the run has a suite result for: the commit of the marker
+// line of last, never the commit of its status file, which the suite's code can write. It
+// is "" for no record, a record with no suite result file and a record with no marker.
+func testedCommit(last *suiteRecord) string {
+	if last == nil || last.path == "" {
+		return ""
+	}
+	return last.head
 }
 
 // afterLimit is the time limit of the after step: the suite's cap alone. The session's time
@@ -322,11 +347,11 @@ type suiteRecord struct {
 }
 
 // kept returns the record that the loop keeps after the session: this session's, or before
-// when the session ran no suite or left HEAD where it was, since the suite of an earlier
-// commit still describes that HEAD. A nil r returns before. A session with no suite
-// because of a fault, which has no after step to show whether HEAD moved, keeps before as
-// well when HEAD of the session's folder is still the commit that before has a marker
-// for: the fault does not replace a suite that describes HEAD.
+// when the session ran no suite or HEAD is the commit of before, since that suite still
+// describes HEAD. A nil r returns before. A session with no suite because of a fault,
+// which has no after step to show whether HEAD moved, keeps before as well when HEAD of
+// the session's folder is still the commit that before has a marker for: the fault does
+// not replace a suite that describes HEAD.
 func (r *suiteRun) kept(ctx context.Context, before *suiteRecord) *suiteRecord {
 	if r == nil || r.record == nil {
 		return before
@@ -345,9 +370,10 @@ const reviewDir = "review"
 
 // keep sets r.record for the suite that ended as got, and writes its
 // suite result file for the review session: the counts of the result file and the last
-// lines of the after step's output from the run's events. A session whose HEAD did not
-// move has no record. A fault has a record and no file, since the after step did not run.
-// A file that cannot be written leaves the record with no path and prints the line.
+// lines of the after step's output from the run's events. A session whose HEAD is the
+// commit that the run has a suite result for has no record. A fault has a record and no
+// file, since the after step did not run. A file that cannot be written leaves the record
+// with no path and prints the line.
 func (r *suiteRun) keep(res *session.Result, fault *suiteFault, got suite.Outcome) {
 	switch {
 	case fault != nil:
@@ -431,14 +457,17 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 	if out.State != event.StateSucceeded {
 		return out, nil
 	}
+	ending := r.endingFor(fault, got, point, res)
 	if fault == nil && got.State == suite.Stopped {
-		return r.cut(ctx, again, limit, *point)
+		return r.cut(ctx, again, limit, *point, ending)
 	}
 	switch {
 	case fault != nil:
 		r.said(shownLine(point.Text))
-	case got.State == suite.Skipped:
+	case got.State == suite.Skipped && r.noPlan != nil:
 		r.said(textSuiteSkipped)
+	case got.State == suite.Skipped:
+		r.said(textSuiteHasLast)
 	case got.State == suite.Passed:
 		r.said(endedLine(got))
 		r.said(textSuiteGreen)
@@ -447,14 +476,10 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 	default:
 		r.said(endedLine(got))
 	}
-	if point == nil {
-		return out, nil
-	}
 	postCtx, cancelPost := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
 	defer cancelPost()
-	posted, err := r.post(postCtx, *point, kind, maxSubmissionTries)
-	if err != nil {
-		r.said(fmt.Sprintf(textSuiteNoPost, shownError(err)))
+	fail := func(line string, err error) (session.Outcome, error) {
+		r.said(line)
 		failed := session.Outcome{State: event.StateFailed, ExitCode: 1}
 		// A stop or a limit that ended postCtx cut the post: no call failed, so there is no
 		// end code.
@@ -463,30 +488,71 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 		}
 		return failed, &exitError{code: 1}
 	}
+	if err := r.findings.postSuite(postCtx, ending); err != nil {
+		return fail(err.Error(), err)
+	}
+	if point == nil {
+		return out, nil
+	}
+	posted, err := r.post(postCtx, *point, kind, maxSubmissionTries)
+	if err != nil {
+		return fail(fmt.Sprintf(textSuiteNoPost, shownError(err)), err)
+	}
 	if posted != "" {
 		r.said(posted)
 	}
 	return out, nil
 }
 
-// cutPostWait is the longest the post of the verdict may take once a stop cut the suite, with one
-// try: the push step follows within the time that a signal leaves.
+// endingFor is [endingOf] with the tail of the suite's output, for a red suite that ran.
+func (r *suiteRun) endingFor(fault *suiteFault, got suite.Outcome, point *runapi.Point, res *session.Result) suiteEnding {
+	end := endingOf(fault, got, point)
+	if r.findings.active() && end.State.Red() && fault == nil && res != nil && res.After != nil {
+		output := suite.ReadOutput(filepath.Join(r.run.Dir(), sink.EventsFile), res.After.Step)
+		end.Tail = suite.NewResult(suite.Counts{}, output).OutputTail
+	}
+	return end
+}
+
+// endingOf is how the suite ended, as the findings need it: a suite that did not start
+// (fault) is red, and the point is the text of the point that the verdict has, nil for
+// none.
+func endingOf(fault *suiteFault, got suite.Outcome, point *runapi.Point) suiteEnding {
+	end := suiteEnding{State: got.State}
+	if fault != nil {
+		end.State = suite.Failed
+	}
+	if point != nil {
+		end.Point = point.Text
+	}
+	return end
+}
+
+// cutPostWait is the longest each post may take once a stop cut the suite: the verdict
+// with one try and the finding of the suite. The push step follows within the time that a
+// signal leaves.
 const cutPostWait = 5 * time.Second
 
 // cut ends the run after a stop cut the after step of a session that succeeded: qory posts the
-// red verdict with one try and closes the run cancelled, interrupted, exit 1.
-func (r *suiteRun) cut(ctx, again context.Context, limit time.Time, point runapi.Point) (session.Outcome, error) {
+// red verdict with one try, then the finding of the suite, and closes the run cancelled,
+// interrupted, exit 1. Each post is limited to 5 seconds, [cutPostWait].
+func (r *suiteRun) cut(ctx, again context.Context, limit time.Time, point runapi.Point, ending suiteEnding) (session.Outcome, error) {
 	r.said(textSuiteCut)
 	postCtx, cancelPost := pushContext(ctx, again, limit, pushTimes.limit, pushTimes.signal)
 	defer cancelPost()
-	postCtx, cancelWait := context.WithTimeout(postCtx, cutPostWait)
-	defer cancelWait()
-	posted, err := r.post(postCtx, point, kindRed, 1)
+	verdictCtx, cancelVerdict := context.WithTimeout(postCtx, cutPostWait)
+	defer cancelVerdict()
+	posted, err := r.post(verdictCtx, point, kindRed, 1)
 	switch {
 	case err != nil:
 		r.said(fmt.Sprintf(textSuiteNoPost, shownError(err)))
 	case posted != "":
 		r.said(posted)
+	}
+	findingCtx, cancelFinding := context.WithTimeout(postCtx, cutPostWait)
+	defer cancelFinding()
+	if err := r.findings.postSuite(findingCtx, ending); err != nil {
+		r.said(err.Error())
 	}
 	return session.Outcome{State: event.StateCancelled, Reason: event.ReasonInterrupted, ExitCode: -1}, &exitError{code: 1}
 }

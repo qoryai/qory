@@ -557,11 +557,18 @@ func TestAMissingDefaultImageStopsARunWithPushChecks(t *testing.T) {
 	}
 }
 
-// TestAWalledRunWithoutPushChecksChecksNothing is a walled run whose harness declares
-// no push check: it sets no run API check, and no container of a check starts.
+// TestAWalledRunWithoutPushChecksChecksNothing is a walled run whose harness declares no
+// push check and whose types mark no member that qory fills: it sets no run API check,
+// and no container of a check starts.
 func TestAWalledRunWithoutPushChecksChecksNothing(t *testing.T) {
 	docker, log := checkDocker(t, 1, "a finding\n")
-	p := newPushRepo(t, "write")
+	unmarked := strings.NewReplacer(", x-qory-fill: pushed-commits", "", ", x-qory-fill: pushed-head", "",
+		", x-qory-fill: pushed-base-branch", "", ", x-qory-fill: pushed-base", "", ", x-qory-fill: pushed-branch", "")
+	process := unmarked.Replace(pullRequestProcess)
+	if strings.Contains(process, "x-qory-fill") {
+		t.Fatalf("the process.yaml still has a mark:\n%s", process)
+	}
+	p := newPushRepoWith(t, "write", map[string]string{"modules/hello/process.yaml": process})
 	walledBy(t, docker)
 	p.flags = []string{"--home", filepath.Join(tempDir(t), "home")}
 	r := p.run(t, func(dir string) { writeFile(t, filepath.Join(dir, "left.txt"), "left\n") }, nil)
@@ -910,5 +917,76 @@ func TestAWritableMountInTheHomeStopsARunCodeWithPushChecks(t *testing.T) {
 	r := p.run(t, func(string) { joined = true }, nil)
 	if !joined || r.err != nil {
 		t.Errorf("--mount %s:ro: joined %v, %v, want the agent started\n%s", mount, joined, r.err, r.out)
+	}
+}
+
+// pullRequestPush is a POST body of /artifacts that pushes a version of pull-request with
+// the file content.
+func pullRequestPush(t *testing.T, content string) []byte {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"type": "pull-request", "name": "main", "files": []map[string]any{
+		{"filename": "pull-request.json", "content_type": "application/json", "content_base64": []byte(content)},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+// TestASessionCannotSetAMemberThatQoryFills is a walled write run whose harness declares
+// no push check and whose workflow has no verdict limit: the run still sets its run API
+// check. A push of pull-request that sets base, a member that qory fills, from the setup
+// container and from the session gets 422 with the line of the outbox, and a push that
+// sets none passes. The session's outbox, a push that does not reach the check, is stored
+// with base filled from the push.
+func TestASessionCannotSetAMemberThatQoryFills(t *testing.T) {
+	const line = "Remove base from the pull-request output: qory fills it at the push."
+	p := newPushRepo(t, "write")
+	p.noOutput = true
+	var check func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)
+	p.onSetCheck = func(c func(context.Context, session.RunAPIRequest) (*session.RunAPIRefusal, error)) error {
+		check = c
+		return nil
+	}
+	post := func(content string) (*session.RunAPIRefusal, error) {
+		if check == nil {
+			t.Error("the run set no run API check")
+			return nil, nil
+		}
+		return check(context.Background(), session.RunAPIRequest{Path: "/artifacts", Body: pullRequestPush(t, content)})
+	}
+	wantLine := func(where string, refusal *session.RunAPIRefusal, err error) {
+		t.Helper()
+		if err != nil || refusal == nil || refusal.Status != 422 || refusal.Code != "push_check_failed" || refusal.Message != line {
+			t.Errorf("%s: the push of base got %+v, %v, want 422 with %q", where, refusal, err, line)
+		}
+	}
+	p.setup = func(string) {
+		refusal, err := post(`{"title":"Add a file","base":{"collection":"R_1001"}}`)
+		wantLine("the setup container", refusal, err)
+		// No verdict limit applies to the run: a verdict is not stopped.
+		if check != nil {
+			verdict, err := check(context.Background(), session.RunAPIRequest{Path: "/verdict", Body: []byte(`{"verdict":"passed"}`)})
+			if verdict != nil || err != nil {
+				t.Errorf("the verdict got %+v, %v, want nil, nil: the run has a verdict limit", verdict, err)
+			}
+		}
+	}
+	r := p.run(t, func(dir string) {
+		writeFile(t, filepath.Join(dir, "committed.txt"), "committed\n")
+		commitAll(t, dir, "Add a file")
+		refusal, err := post(`{"title":"Add a file","base":{"collection":"R_1001"}}`)
+		wantLine("the session", refusal, err)
+		if refusal, err := post(`{"title":"Add a file"}`); refusal != nil || err != nil {
+			t.Errorf("the push with no base got %+v, %v, want nil, nil", refusal, err)
+		}
+		writeFile(t, filepath.Join(dir, ".qory", "outbox", "pull-request", "pull-request.json"), `{"title":"Add a file"}`)
+	}, nil)
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if posts, _, stored := p.api.counts(); posts != 1 || stored != 1 {
+		t.Fatalf("%d POST and %d versions, want 1 and 1\n%s", posts, stored, r.out)
+	}
+	if doc := p.api.document(t, 1); pathOf(doc["base"]) != p.first {
+		t.Errorf("the stored base is %v, want the start commit %s that qory filled", doc["base"], p.first)
 	}
 }

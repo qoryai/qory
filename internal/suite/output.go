@@ -21,21 +21,26 @@ type logData struct {
 
 // ReadOutput reads the output of the after step number step from the events file,
 // events.jsonl of the run's folder: the bytes of its dev.qory.run.log events in the order
-// of the file, the last [MaxOutputBytes] of them. Forager has masked the run's secrets in
-// these bytes. A missing or unreadable file, a step below 1 and a step with no output
-// return nil, as does a run whose events go elsewhere, such as one that a separate
-// gateway records. A line that is not JSON ends the read: what came before it counts.
+// of the file, the last [MaxOutputBytes] of them. When that cap cuts inside a line, the
+// result starts after the line break, so no masked value is cut in two, and it is the
+// bytes of [NoTextLine] when no line with text starts in the last [MaxOutputBytes] bytes.
+// Forager has masked the run's secrets in these bytes. A missing or unreadable file, a
+// step below 1 and a step with no output return nil, as does a run whose events go
+// elsewhere, such as one that a separate gateway records. A line that is not JSON ends
+// the read: what came before it counts.
 func ReadOutput(eventsFile string, step int) []byte {
 	var kept []byte
 	eachChunk(eventsFile, step, func(_ string, chunk []byte) bool {
 		kept = append(kept, chunk...)
 		// Cut at twice the cap, so a long output costs a copy for every cap's worth of it.
+		// The byte before the last cap's worth stays, so that lastBytes sees whether a line
+		// starts there.
 		if len(kept) > 2*MaxOutputBytes {
-			kept = append(kept[:0], lastBytes(kept, MaxOutputBytes)...)
+			kept = append(kept[:0], kept[len(kept)-MaxOutputBytes-1:]...)
 		}
 		return true
 	})
-	return lastBytes(kept, MaxOutputBytes)
+	return lastOutput(kept)
 }
 
 // maxHeadScan is the most bytes that the first line of the step's standard output may have

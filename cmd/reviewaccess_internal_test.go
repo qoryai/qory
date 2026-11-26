@@ -104,3 +104,33 @@ func TestJoinsAsReview(t *testing.T) {
 		}
 	}
 }
+
+// A session is a Verify session only when the run is at write-no-push, the entry of its
+// workflow declares write-no-push too, and the entry has a review_group.
+func TestVerifiesAsReview(t *testing.T) {
+	workflows := map[string]stack.Workflow{
+		"verify-a-ticket":   {Access: stack.AccessWriteNoPush, ReviewGroup: "verify-reviewers"},
+		"plan":              {Access: stack.AccessWriteNoPush},
+		"review-changes":    {Access: stack.AccessRead, ReviewGroup: "reviewers"},
+		"implement-changes": {Access: stack.AccessWrite, ReviewGroup: "reviewers"},
+	}
+	for _, c := range []struct {
+		name, workflow, level string
+		want                  bool
+	}{
+		{"a Verify session", "verify-a-ticket", stack.AccessWriteNoPush, true},
+		{"no review group", "plan", stack.AccessWriteNoPush, false},
+		{"a read entry in a run at write-no-push", "review-changes", stack.AccessWriteNoPush, false},
+		{"a write entry in a run at write-no-push", "implement-changes", stack.AccessWriteNoPush, false},
+		{"a write-no-push entry in a run at write", "verify-a-ticket", stack.AccessWrite, false},
+		{"a write-no-push entry in a run at read", "verify-a-ticket", stack.AccessRead, false},
+		{"a workflow the table lacks", "missing", stack.AccessWriteNoPush, false},
+	} {
+		if got := verifiesAsReview(workflows, c.workflow, c.level); got != c.want {
+			t.Errorf("%s: verifiesAsReview is %t, want %t", c.name, got, c.want)
+		}
+	}
+	if verifiesAsReview(nil, "verify-a-ticket", stack.AccessWriteNoPush) {
+		t.Error("a nil table is a Verify session")
+	}
+}

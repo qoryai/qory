@@ -41,8 +41,10 @@ type fakeAPI struct {
 
 	mu       sync.Mutex
 	versions []fakeVersion
-	// verdictStatus is the status POST verdict returns, 201 when 0.
+	// verdictStatus is the status POST verdict returns, 201 when 0, and verdictDelay is how
+	// long it takes before it returns.
 	verdictStatus int
+	verdictDelay  time.Duration
 	// failFiles is whether a request for the file of a version answers 500.
 	failFiles  bool
 	posted     []string
@@ -143,9 +145,12 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		http.NotFound(w, r)
+	case r.Method == http.MethodGet && path == "/work-item":
+		_, _ = io.WriteString(w, `{"version":1,"work_item":{"id":"w","number":1},"run":{"id":"r1"},"stage":{"id":"st_aaa","name":"Build","round":1,"rounds":2},"inputs":[],"outputs":[],"verdict":null,"pushed_commits":[]}`)
 	case r.Method == http.MethodPost && path == "/verdict":
 		body, _ := io.ReadAll(r.Body)
 		f.posted = append(f.posted, string(body))
+		time.Sleep(f.verdictDelay)
 		if f.verdictStatus != 0 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(f.verdictStatus)
@@ -815,6 +820,73 @@ func TestAStopDuringTheAfterStepClosesTheRunCancelled(t *testing.T) {
 	}
 }
 
+// TestAStopDuringTheAfterStepPostsTheFindingOfTheSuite: a stop that cuts the suite of a
+// session that succeeded posts the red verdict first, then raises the check finding
+// suite. Each post is limited to 5 seconds: the verdict takes 1.2 seconds, and the post of
+// the finding still has more than 4.5 seconds left.
+func TestAStopDuringTheAfterStepPostsTheFindingOfTheSuite(t *testing.T) {
+	h := newHelper(t)
+	h.api.verdictDelay = 1200 * time.Millisecond
+	fake := newFakeApiary()
+	var snapshot runapi.Snapshot
+	if err := json.Unmarshal([]byte(`{"stage":{"id":"st_aaa","name":"Build","round":1,"rounds":2,"state":null}}`), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	var verdictsBefore int
+	var left time.Duration
+	fake.onPost = func(ctx context.Context) {
+		verdictsBefore = len(h.api.verdicts())
+		if deadline, ok := ctx.Deadline(); ok {
+			left = time.Until(deadline)
+		}
+	}
+	h.suiteRun.findings = &findingsRun{poster: newFindingsPoster(fake), run: h.suiteRun.run, code: &codeRun{snapshot: &snapshot}, target: ledgerTarget}
+	h.state(t, "ran "+suiteSHA, "")
+	if _, err := h.after(&session.AfterResult{Step: 2, State: event.StateCancelled, ExitCode: -1}, succeeded); ExitCode(err) != 1 {
+		t.Fatalf("exit status %d, want 1", ExitCode(err))
+	}
+	if len(fake.bodies) != 1 || len(fake.bodies[0].Events) != 1 {
+		t.Fatalf("the posts are %+v, want one with one event", fake.bodies)
+	}
+	e := fake.bodies[0].Events[0]
+	if e.Kind != eventRaise || e.By != checkSuite || e.Stage != "build" || e.Point != textPointStopped {
+		t.Errorf("the event is %+v, want a raise of suite on the stage build with the point of a stopped suite", e)
+	}
+	if len(h.api.verdicts()) != 1 || verdictsBefore != 1 {
+		t.Errorf("%d verdicts posted, %d before the finding, want 1 and 1", len(h.api.verdicts()), verdictsBefore)
+	}
+	if left < 4500*time.Millisecond {
+		t.Errorf("the post of the finding had %v left, want a limit of 5 seconds for each post", left)
+	}
+}
+
+// TestAStopDuringTheAfterStepStopsWithTheCauseOfTheFinding: a finding of the suite that
+// cannot be posted prints the cause first, with the code is used, and the verdict was
+// posted before it.
+func TestAStopDuringTheAfterStepStopsWithTheCauseOfTheFinding(t *testing.T) {
+	h := newHelper(t)
+	fake := newFakeApiary()
+	fake.postFate = func(int) postOutcome {
+		return postOutcome{err: apiaryRefusal(http.StatusBadRequest, "invalid_request")}
+	}
+	var snapshot runapi.Snapshot
+	if err := json.Unmarshal([]byte(`{"stage":{"id":"st_aaa","name":"Build","round":1,"rounds":2,"state":null}}`), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	var said []string
+	h.suiteRun.said = func(l string) { said = append(said, l) }
+	h.suiteRun.findings = &findingsRun{poster: newFindingsPoster(fake), run: h.suiteRun.run, code: &codeRun{snapshot: &snapshot}, target: ledgerTarget}
+	h.state(t, "ran "+suiteSHA, "")
+	if _, err := h.after(&session.AfterResult{Step: 2, State: event.StateCancelled, ExitCode: -1}, succeeded); ExitCode(err) != 1 {
+		t.Fatalf("exit status %d, want 1", ExitCode(err))
+	}
+	last := said[len(said)-1]
+	first, _, _ := strings.Cut(last, "\n")
+	if first != "Findings batch 1 of 1 is not stored, so the session did not end" || !strings.HasSuffix(last, codeUsed) || len(h.api.verdicts()) != 1 {
+		t.Errorf("the last line is %q with %d verdicts, want the cause first and the verdict posted", last, len(h.api.verdicts()))
+	}
+}
+
 // TestTheStateFolderIsRemovedAfterEveryEnd: after the helper judged, nothing of the script's
 // files stays in the workspace for the copy step and the push step, whatever the end was.
 func TestTheStateFolderIsRemovedAfterEveryEnd(t *testing.T) {
@@ -943,6 +1015,39 @@ func TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite(t *testing.T)
 	}
 }
 
+// TestTheTestedCommitIsTheMarkerCommitOfALastSuiteWithAResultFile: the after step of a
+// session has as its tested commit the commit of the marker line of the run's last suite
+// record, and "" for no record, a record with no result file, a record with no marker, and
+// a record whose only commit is the one of the status file, which the suite's code can
+// write.
+func TestTheTestedCommitIsTheMarkerCommitOfALastSuiteWithAResultFile(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		last *suiteRecord
+		want string
+	}{
+		{"no record", nil, ""},
+		{"a suite that ran", &suiteRecord{path: "/x/suite-1.json", head: suiteSHA, outcome: suite.Outcome{Started: true}}, suiteSHA},
+		{"no result file", &suiteRecord{head: suiteSHA, outcome: suite.Outcome{Started: true}}, ""},
+		{"no marker", &suiteRecord{path: "/x/suite-1.json", outcome: suite.Outcome{Started: true, Commit: suiteSHA}}, ""},
+		{"a suite that did not start", &suiteRecord{path: "/x/suite-1.json"}, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			api := newFakeAPI(t)
+			api.withPlan(buildPlanText)
+			spec := &runSpec{}
+			spec.Dir = workspaceRepo(t)
+			r := openSuites(context.Background(), suiteSetup{
+				workflow: "fix", plan: "build-plan", last: c.last,
+				run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, fullSuite: true, said: func(string) {},
+			})
+			if r == nil || len(spec.After) != 9 || spec.After[7] != c.want || len(spec.After[6]) != 40 {
+				t.Errorf("suite %v, After %q, want the tested commit %q after the start commit", r, spec.After, c.want)
+			}
+		})
+	}
+}
+
 // TestTheAfterCommandHasTheLaunchPlansCommandNotAPushedOne: the plan is read once at the launch;
 // a plan that the work item gets after it changes no word of After.
 func TestTheAfterCommandHasTheLaunchPlansCommandNotAPushedOne(t *testing.T) {
@@ -1056,7 +1161,7 @@ func allFaults() []*suiteFault {
 // first and the cause on the next line, and a line shortens a point text that is longer.
 func TestTheLinesOfQoryRunStartWithTheFixInAtMost100Characters(t *testing.T) {
 	lines := []string{
-		textSuiteSkipped, textSuiteGreen, textSuiteCut, fmt.Sprintf(textSuiteStands, "changes-requested"),
+		textSuiteSkipped, textSuiteHasLast, textSuiteGreen, textSuiteCut, fmt.Sprintf(textSuiteStands, "changes-requested"),
 		fmt.Sprintf(textSuitePosted, "changes-requested"), textSuiteNoRoom, fmt.Sprintf(textSuiteNoPost, "x"), fmt.Sprintf(textSuiteNoClear, "x"), fmt.Sprintf(textSuiteNoFile, "x"),
 		endedLine(suite.Outcome{State: suite.Timeout, Commit: suiteSHA, Counts: &suite.Counts{Tests: 100000, Failed: 100000}}),
 		endedLine(suite.Outcome{State: suite.Passed, Commit: suiteSHA, Counts: &suite.Counts{Tests: 100000}}),
@@ -1212,7 +1317,8 @@ func TestLaunchFullReadsTheFileOfThePlanTypeAndNoOther(t *testing.T) {
 }
 
 // TestAWorkflowWithNoPlanGetsTheAfterStepThatChecksWhetherHeadMoved: with no plan type, openSuites reads
-// no plan, sets the after step with the command noPlanCommand and no result file, and keeps the
+// no plan, sets the after step with the command noPlanCommand and no result file, and the
+// start commit as its tested commit, whatever the last suite record is, and keeps the
 // fault for a session that moved HEAD; the fault has no fix, and the agent cannot mend it.
 func TestAWorkflowWithNoPlanGetsTheAfterStepThatChecksWhetherHeadMoved(t *testing.T) {
 	api := newFakeAPI(t)
@@ -1220,9 +1326,9 @@ func TestAWorkflowWithNoPlanGetsTheAfterStepThatChecksWhetherHeadMoved(t *testin
 	spec.Dir = workspaceRepo(t)
 	r := openSuites(context.Background(), suiteSetup{
 		run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, fullSuite: true,
-		workflow: "fix", said: func(string) {},
+		workflow: "fix", said: func(string) {}, last: &suiteRecord{path: "/x/suite-1.json", head: suiteSHA},
 	})
-	if r == nil || r.fault != nil || r.noPlan == nil || len(spec.After) != 8 || spec.After[4] != noPlanCommand || spec.After[5] != "" {
+	if r == nil || r.fault != nil || r.noPlan == nil || len(spec.After) != 9 || spec.After[4] != noPlanCommand || spec.After[5] != "" || spec.After[7] != spec.After[6] || spec.After[6] == "" {
 		t.Fatalf("suite %+v, After %q", r, spec.After)
 	}
 	if api.indexCalls != 0 {

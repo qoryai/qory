@@ -300,18 +300,25 @@ func TestASuiteThatRanNoTestsIsFailed(t *testing.T) {
 	}
 }
 
-// TestASessionThatLeftHeadWhereItStartedPostsNothing is the skipped end: the script ends 0, no
-// suite runs, no verdict goes out and the run succeeds.
-func TestASessionThatLeftHeadWhereItStartedPostsNothing(t *testing.T) {
+// TestASessionWithNoCommitRunsTheSuiteWhenTheRunHasNoResult is qory run with a session
+// that made no commit and a run with no suite result for the commit: the suite runs on
+// that commit and is red, qory posts one changes-requested, and the run succeeds. The
+// after step has no tested commit.
+func TestASessionWithNoCommitRunsTheSuiteWhenTheRunHasNoResult(t *testing.T) {
 	api := newSuiteAPI(t, http.StatusCreated)
-	out, err, closed := suiteRun(t, api, suiteEnd{result: suiteRed, exit: 1, stay: true})
+	var seen session.SessionSpec
+	end := suiteEnd{result: suiteRed, exit: 1, stay: true, seen: &seen}
+	out, err, closed := suiteRun(t, api, end)
 	if err != nil || closed.State != event.StateSucceeded {
 		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
 	}
-	if posted := api.posted(); len(posted) != 0 {
-		t.Errorf("posted %q for a session that changed nothing", posted)
+	if posted := api.posted(); len(posted) != 1 || posted[0] != changesRequested {
+		t.Errorf("posted %q, want one changes-requested", posted)
 	}
-	wants(t, out, "the full suite did not run: the session left HEAD at the commit it started at")
+	if len(seen.After) != 9 || seen.After[7] != "" {
+		t.Errorf("After = %q, want 9 words and no tested commit", seen.After)
+	}
+	wants(t, out, "the full suite failed on ")
 }
 
 // TestARunWithFullSuiteFalseRunsNoSuite: with SetFullSuite(true) left out, the session has no

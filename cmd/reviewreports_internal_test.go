@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/qoryai/forager/wall"
+
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // flatStop is the text of err on one line, with each wrap and indent as a single space,
@@ -87,7 +89,7 @@ func TestCheckReviewReports(t *testing.T) {
 
 	if err := checkReviewReports(reports, checkout, artifacts, home, []wall.Mount{
 		{Path: checkout, ReadOnly: true}, {Path: run, ReadOnly: true}, itself,
-	}, os.Geteuid()); err != nil {
+	}, os.Geteuid(), stack.AccessRead); err != nil {
 		t.Errorf("a folder that keeps all three rules returned %v", err)
 	}
 
@@ -118,7 +120,7 @@ func TestCheckReviewReports(t *testing.T) {
 		{"rule 2: over the harness home", dir("h"), artifacts, home, nil, outside},
 		{"rule 3: below a writable mount", reports, artifacts, home, []wall.Mount{{Path: run}, itself}, parent},
 	} {
-		err := checkReviewReports(c.reports, checkout, c.artifacts, c.home, c.mounts, os.Geteuid())
+		err := checkReviewReports(c.reports, checkout, c.artifacts, c.home, c.mounts, os.Geteuid(), stack.AccessRead)
 		if !hasStop(err, c.want) {
 			t.Errorf("%s: returned %v, want %q", c.name, err, c.want)
 		}
@@ -129,7 +131,7 @@ func TestCheckReviewReports(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, p := range []string{link, filepath.Join(base, "missing")} {
-		if err := checkReviewReports(p, checkout, artifacts, home, nil, os.Geteuid()); err == nil {
+		if err := checkReviewReports(p, checkout, artifacts, home, nil, os.Geteuid(), stack.AccessRead); err == nil {
 			t.Errorf("%s returned no error", p)
 		}
 	}
@@ -161,7 +163,7 @@ func TestCheckReviewReportsRefusesPathsItCannotResolve(t *testing.T) {
 			if c.home == home && os.Geteuid() == 0 {
 				t.Skip("root searches a folder of mode 0")
 			}
-			err := checkReviewReports(reports, checkout, c.artifacts, c.home, nil, os.Geteuid())
+			err := checkReviewReports(reports, checkout, c.artifacts, c.home, nil, os.Geteuid(), stack.AccessRead)
 			if !hasStop(err, want) {
 				t.Errorf("returned %v, want %q", err, want)
 			}
@@ -184,7 +186,7 @@ func TestCheckReviewReportsRefusesTheRunCopiesFolder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	err := checkReviewReports(reports, checkout, artifacts, home, []wall.Mount{{Path: reports}}, os.Geteuid())
+	err := checkReviewReports(reports, checkout, artifacts, home, []wall.Mount{{Path: reports}}, os.Geteuid(), stack.AccessRead)
 	if !hasStop(err, "The review's reports folder lies in a folder that the session can write, so the review did not start") {
 		t.Errorf("a folder in the run copies folder %s returned %v", copies, err)
 	}
@@ -203,7 +205,7 @@ func TestCheckReviewReportsWantsANewFolderWithOneMount(t *testing.T) {
 	reports := dir("run", "review-reports-1")
 	itself := wall.Mount{Path: reports}
 	check := func(r string, mounts ...wall.Mount) error {
-		return checkReviewReports(r, checkout, artifacts, home, mounts, os.Geteuid())
+		return checkReviewReports(r, checkout, artifacts, home, mounts, os.Geteuid(), stack.AccessRead)
 	}
 
 	used := dir("run", "review-reports-2")
@@ -230,7 +232,7 @@ func TestCheckReviewReportsWantsANewFolderWithOneMount(t *testing.T) {
 		{"a trailing slash on a link", check(link+"/", wall.Mount{Path: link + "/"}), "The review's reports folder is not an absolute, clean path, so the review did not start"},
 		{"a folder with a report in it", check(used, wall.Mount{Path: used}), "The review's reports folder is not empty, so the review did not start"},
 		{"a group-writable folder", check(shared, wall.Mount{Path: shared}), another},
-		{"a folder of another user than the wall's", checkReviewReports(reports, checkout, artifacts, home, []wall.Mount{itself}, os.Geteuid()+1), another},
+		{"a folder of another user than the wall's", checkReviewReports(reports, checkout, artifacts, home, []wall.Mount{itself}, os.Geteuid()+1, stack.AccessRead), another},
 		{"no mount", check(reports), oneMount + "0 writable mounts, not one, so the review did not start"},
 		{"two writable mounts", check(reports, itself, wall.Mount{Path: reports, Target: "/x"}), reaches},
 		{"a read-only mount beside", check(reports, itself, wall.Mount{Path: reports, ReadOnly: true}), reaches},
@@ -246,5 +248,68 @@ func TestCheckReviewReportsWantsANewFolderWithOneMount(t *testing.T) {
 	}
 	if _, _, err := newReviewReports("run", 1); !hasStop(err, "The review's reports folder is not an absolute, clean path, so the review did not start") {
 		t.Errorf("a relative folder returned %v", err)
+	}
+}
+
+// TestCheckReviewReportsAllowsTheCheckoutOnlyAtWriteNoPush is a reports folder whose
+// session binds its checkout writable: the checkout is the second writable mount only for
+// the access write-no-push, and no other writable mount is allowed at any access. A
+// checkout that contains the reports folder, or that lies inside it, stops at every
+// access.
+func TestCheckReviewReportsAllowsTheCheckoutOnlyAtWriteNoPush(t *testing.T) {
+	base := t.TempDir()
+	dir := func(parts ...string) string {
+		p := filepath.Join(append([]string{base}, parts...)...)
+		if err := os.MkdirAll(p, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	checkout, artifacts, home := dir("checkout"), dir("artifacts"), dir("home")
+	reports := dir("run", "review-reports-1")
+	itself := wall.Mount{Path: reports}
+	writableCheckout := wall.Mount{Path: checkout}
+	extra := wall.Mount{Path: dir("extra")}
+	check := func(access string, mounts ...wall.Mount) error {
+		return checkReviewReports(reports, checkout, artifacts, home, mounts, os.Geteuid(), access)
+	}
+
+	if err := check(stack.AccessWriteNoPush, writableCheckout, itself); err != nil {
+		t.Errorf("write-no-push: a writable checkout beside the reports folder returned %v", err)
+	}
+	if err := check(stack.AccessWriteNoPush, itself, writableCheckout, wall.Mount{Path: checkout, Target: "/again"}); err == nil {
+		t.Error("write-no-push: the checkout mounted writable twice returned no error")
+	}
+	two := "A mount other than the reports folder is writable, so the review did not start"
+	three := "A mount other than the reports folder and the checkout is writable, so the review did not start"
+	for _, c := range []struct {
+		name, access string
+		mounts       []wall.Mount
+		want         string
+	}{
+		{"read, a writable checkout", stack.AccessRead, []wall.Mount{writableCheckout, itself}, two},
+		{"read, another writable mount", stack.AccessRead, []wall.Mount{extra, itself}, two},
+		{"write, a writable checkout", stack.AccessWrite, []wall.Mount{writableCheckout, itself}, two},
+		{"write-no-push, another writable mount", stack.AccessWriteNoPush, []wall.Mount{writableCheckout, extra, itself}, three},
+		{"write-no-push, a writable mount in place of the checkout", stack.AccessWriteNoPush, []wall.Mount{extra, itself}, three},
+		{"write-no-push, the checkout bound at another path", stack.AccessWriteNoPush, []wall.Mount{{Path: checkout, Target: "/work"}, itself}, three},
+	} {
+		if err := check(c.access, c.mounts...); !hasStop(err, c.want) {
+			t.Errorf("%s: returned %v, want %q", c.name, err, c.want)
+		}
+	}
+
+	inside := dir("checkout", "reports")
+	for _, access := range []string{stack.AccessRead, stack.AccessWriteNoPush} {
+		err := checkReviewReports(inside, checkout, artifacts, home, []wall.Mount{writableCheckout, {Path: inside}}, os.Geteuid(), access)
+		if !hasStop(err, "The review's reports folder overlaps a folder that the session reads or writes, so the review did not start") {
+			t.Errorf("%s: reports inside the checkout returned %v", access, err)
+		}
+	}
+	over := dir("over")
+	under := dir("over", "checkout")
+	err := checkReviewReports(over, under, artifacts, home, []wall.Mount{{Path: under}, {Path: over}}, os.Geteuid(), stack.AccessWriteNoPush)
+	if !hasStop(err, "The review's reports folder overlaps a folder that the session reads or writes, so the review did not start") {
+		t.Errorf("a checkout inside the reports folder returned %v", err)
 	}
 }

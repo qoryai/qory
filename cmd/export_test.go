@@ -25,6 +25,7 @@ import (
 	"github.com/qoryai/forager/server"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/compose"
 	"github.com/qoryai/qory/internal/config"
@@ -166,7 +167,7 @@ func SetStepAfterEnd(agent func(), again func(session.Outcome, error)) func() {
 
 // hostGitFolder is the folder of this machine's git, for the PATH of a git session in a
 // test: the run's image has its git in other folders. The session's first argument after
-// the script file is that PATH.
+// the script file is that PATH, and for a script given with -c, the fourth argument.
 func hostGitFolder(spec session.SessionSpec) (session.SessionSpec, error) {
 	path, err := exec.LookPath("git")
 	if err != nil {
@@ -174,7 +175,11 @@ func hostGitFolder(spec session.SessionSpec) (session.SessionSpec, error) {
 	}
 	folders := filepath.Dir(path) + ":/usr/bin:/bin"
 	spec.Args = slices.Clone(spec.Args)
-	spec.Args[1] = folders
+	if spec.Args[0] == "-c" {
+		spec.Args[3] = folders
+	} else {
+		spec.Args[1] = folders
+	}
 	spec.Env = slices.Clone(spec.Env)
 	for i, e := range spec.Env {
 		if strings.HasPrefix(e, "PATH=") {
@@ -545,6 +550,12 @@ type Nowhere struct {
 	// [session.Run.NextSession] sends the request over the link; nil returns Forager's
 	// error of a run with no control plane.
 	NextSession func(ctx context.Context, body []byte) ([]byte, error)
+	// Findings and PostFindings, when not nil, are each Findings and PostFindings of the run,
+	// as Forager's methods of the same names send the requests over the link. nil returns a
+	// work item with no findings, and an answer that numbers each raise f1, f2 and so on and
+	// has no open blocking finding.
+	Findings     func(ctx context.Context) ([]byte, error)
+	PostFindings func(ctx context.Context, body []byte) ([]byte, error)
 }
 
 // StepEvent is one event of a host step of a run [OpenNowhereWith] opened: Type is
@@ -751,6 +762,41 @@ func (n *nowhere) PushedCommits(ctx context.Context, body []byte) ([]byte, error
 		return nil, errors.New("Open the run with a control plane to send the pushed-commits request: this run has none.")
 	}
 	return PushedThroughLink(ctx, n.values.RunAPI, body)
+}
+
+// Findings is [session.Run.Findings] of the run: Nowhere.Findings, else a work item with
+// no findings. After Close it returns an error that wraps [session.ErrRunClosed].
+func (n *nowhere) Findings(ctx context.Context) ([]byte, error) {
+	if n.ended {
+		return nil, fmt.Errorf("Open another run to read the findings: %w.", session.ErrRunClosed)
+	}
+	if n.values.Findings != nil {
+		return n.values.Findings(ctx)
+	}
+	return []byte(`{"bases":[],"findings":[]}`), nil
+}
+
+// PostFindings is [session.Run.PostFindings] of the run: Nowhere.PostFindings, else an
+// answer that numbers each raise of the body f1, f2 and so on. After Close it returns an
+// error that wraps [session.ErrRunClosed].
+func (n *nowhere) PostFindings(ctx context.Context, body []byte) ([]byte, error) {
+	if n.ended {
+		return nil, fmt.Errorf("Open another run to post the findings: %w.", session.ErrRunClosed)
+	}
+	if n.values.PostFindings != nil {
+		return n.values.PostFindings(ctx, body)
+	}
+	var post contracts.FindingsPost
+	if err := json.Unmarshal(body, &post); err != nil {
+		return nil, err
+	}
+	var answer contracts.FindingsPostAnswer
+	for _, e := range post.Events {
+		if e.Kind == "raise" {
+			answer.Created = append(answer.Created, contracts.FindingCreated{Ref: e.Ref, ID: fmt.Sprintf("f%d", len(answer.Created)+1)})
+		}
+	}
+	return json.Marshal(answer)
 }
 
 // NextSession is [session.Run.NextSession] of the run: Nowhere.NextSession, else Forager's

@@ -748,6 +748,8 @@ type composed struct {
 	submitProgram *compose.SubmitProgram
 	// codex is what a walled Codex run writes its Codex home from, see [codexParts].
 	codex codexParts
+	// res is the compose's result, which lists the members of each group role.
+	res *compose.Result
 	// conf is the configuration that the compose read, see [composeOptions.launchedConf].
 	conf config.Config
 }
@@ -831,7 +833,7 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 		checkoutOnly[rt.Name()] = render.CheckoutOnly(rt, res)
 	}
 	parts := codexParts{skills: codex.AllowedSkills(res), readRules: res.CodexReadRules, sourceDirs: res.SourceDirs()}
-	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, runtimes: runtimes, pinFile: pinFile, checkoutOnly: checkoutOnly, submitProgram: res.SubmitProgramFor(at.home), codex: parts, conf: pr.conf}, nil
+	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, runtimes: runtimes, pinFile: pinFile, checkoutOnly: checkoutOnly, submitProgram: res.SubmitProgramFor(at.home), codex: parts, res: res, conf: pr.conf}, nil
 }
 
 // pushChecksWritable stops a walled run before the home is written when a module

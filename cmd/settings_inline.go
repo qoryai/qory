@@ -63,11 +63,21 @@ func setsSettings(flag string, args []string) bool {
 // flag gets the flag with those rules alone. With review, the folders of a review
 // session, the settings get [reviewRules] of home and review, which the runtime's review
 // guard writes, in place of [readRules], also with no readRoot, which the guard stops.
+// With review.verify, the folders of a Verify session, which writes its checkout, the
+// settings, or the flag with these alone, get [verifyRules], which the runtime's Verify
+// guard writes, and nothing else.
 func inlineSettings(flag string, launch, extra []string, home, readRoot string, review *reviewFolders) ([]string, error) {
-	// limited is whether the settings get rules: those of a read run or of a review session.
-	limited := readRoot != "" || review != nil
+	// limited is whether the settings get rules: those of a read run, of a review session,
+	// or of a Verify session, which writes its checkout and its reports folder.
+	limited, who := readRoot != "" || review != nil, "a run of a read workflow"
+	if review != nil && review.verify != nil {
+		who = "a Verify session"
+	}
 	rules := func(object map[string]any, shown string) ([]byte, error) {
-		if review != nil {
+		switch {
+		case review != nil && review.verify != nil:
+			return verifyRules(object, shown, *review)
+		case review != nil:
 			return reviewRules(object, shown, readRoot, home, *review)
 		}
 		return readRules(object, shown, readRoot)
@@ -104,7 +114,7 @@ func inlineSettings(flag string, launch, extra []string, home, readRoot string, 
 		}
 		object, ok := oneObject([]byte(value))
 		if !ok {
-			return nil, refuse("pass one JSON object to %s in harness.launch: a run of a read workflow adds rules to it, and the value is not one JSON object", flag)
+			return nil, refuse("pass one JSON object to %s in harness.launch: %s adds rules to it, and the value is not one JSON object", flag, who)
 		}
 		data, err := rules(object, "of the launch")
 		if err != nil {
@@ -227,6 +237,28 @@ const readDefaultMode = "dontAsk"
 // permissions that is no object, and an allow, a deny or an additionalDirectories that is
 // no array, stop the run.
 func readRules(object map[string]any, shown, root string) ([]byte, error) {
+	permissions, err := addPermissions(object, shown, "a run of a read workflow",
+		[]ruleList{{"deny", readDeny(root)}, {"allow", readAllow()}, {"additionalDirectories", []string{tempStoreDir, destinationsDir}}})
+	if err != nil {
+		return nil, err
+	}
+	permissions["defaultMode"] = readDefaultMode
+	return encodeSettings(object)
+}
+
+// ruleList is the rules that a run adds to the list permissions.<key> of the settings.
+type ruleList struct {
+	key   string
+	rules []string
+}
+
+// addPermissions adds each list of adds to the permissions of object, Claude Code's
+// settings, each rule once, creating the permissions or the list when it is missing, and
+// returns the permissions. Every other key stays as it is. who is the run that adds the
+// rules, as the text of a stop shows it, and shown is the settings file as that text
+// shows it, "" for settings that the launch passes as JSON. A permissions that is no
+// object, and a list that is no array, stop the run.
+func addPermissions(object map[string]any, shown, who string, adds []ruleList) (map[string]any, error) {
 	at := "the Claude Code settings " + shown
 	if shown == "" {
 		at = "the Claude Code settings"
@@ -234,17 +266,14 @@ func readRules(object map[string]any, shown, root string) ([]byte, error) {
 	permissions := map[string]any{}
 	if p, ok := object["permissions"]; ok {
 		if permissions, ok = p.(map[string]any); !ok {
-			return nil, input(fmt.Errorf("set permissions in %s to a JSON object: a run of a read workflow adds rules to it, so the run does not start", at))
+			return nil, input(fmt.Errorf("set permissions in %s to a JSON object: %s adds rules to it, so the run does not start", at, who))
 		}
 	}
-	for _, add := range []struct {
-		key   string
-		rules []string
-	}{{"deny", readDeny(root)}, {"allow", readAllow()}, {"additionalDirectories", []string{tempStoreDir, destinationsDir}}} {
+	for _, add := range adds {
 		var list []any
 		if v, ok := permissions[add.key]; ok {
 			if list, ok = v.([]any); !ok {
-				return nil, input(fmt.Errorf("set permissions.%s in %s to a JSON array: a run of a read workflow adds rules to it, so the run does not start", add.key, at))
+				return nil, input(fmt.Errorf("set permissions.%s in %s to a JSON array: %s adds rules to it, so the run does not start", add.key, at, who))
 			}
 		}
 		for _, rule := range add.rules {
@@ -254,8 +283,12 @@ func readRules(object map[string]any, shown, root string) ([]byte, error) {
 		}
 		permissions[add.key] = list
 	}
-	permissions["defaultMode"] = readDefaultMode
 	object["permissions"] = permissions
+	return permissions, nil
+}
+
+// encodeSettings is object as indented JSON, with < > & unescaped.
+func encodeSettings(object map[string]any) ([]byte, error) {
 	var out bytes.Buffer
 	enc := json.NewEncoder(&out)
 	enc.SetEscapeHTML(false)

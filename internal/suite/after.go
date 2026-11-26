@@ -46,12 +46,13 @@ const (
 )
 
 // script is the shell script of the after step. Its arguments are the full row's command,
-// its result file ("" for none), the commit that the session started at ("" for none) and
-// the protocol name of [scriptGit]. The command and the result file are arguments, never
-// part of the script's text.
+// its result file ("" for none), the commit that the session started at ("" for none), the
+// commit that the run has a suite result for ("" for none) and the protocol name of
+// [scriptGit]. The command and the result file are arguments, never part of the script's
+// text.
 //
 // The script clears [StateFolder]. When git cannot read HEAD, or HEAD has no commit but the
-// session started at one, it exits 72. When HEAD is still the start commit, or has no commit
+// session started at one, it exits 72. When HEAD is the tested commit, or has no commit
 // and the session started at none, it writes "skipped" to the status file and exits 0.
 // Otherwise it clones HEAD into a new folder of the container with git, hooks off and no
 // hard link, so no file that the agent left untracked or ignored reaches the suite. Each
@@ -62,7 +63,7 @@ const (
 // line "qory-suite-head <commit>" to its standard output, writes "ran <commit>" to the
 // status file and runs the command with a home folder that the command can write. It
 // copies the result file to the folder, and exits with the command's status.
-var script = `cmd=$1; file=$2; start=$3; proto=$4
+var script = `cmd=$1; file=$2; start=$3; tested=$4; proto=$5
 d=` + StateFolder + `
 if ! rm -rf "$d" || ! mkdir -m 700 "$d"; then
   echo "qory: could not make the folder $d in the workspace." >&2
@@ -74,7 +75,7 @@ if [ "$st" -gt 1 ] || { [ "$st" -eq 1 ] && [ -n "$start" ]; }; then
   echo "qory: git could not read HEAD of the workspace." >&2
   exit 72
 fi
-if [ "$head" = "$start" ]; then
+if [ -z "$head" ] || [ "$head" = "$tested" ]; then
   echo skipped >"$d/status"
   exit 0
 fi
@@ -148,9 +149,13 @@ var (
 
 // Command is the command of the session's after step, SessionSpec.After, that runs the full
 // suite of full on the commit that HEAD has in the workspace when the session ends, unless
-// HEAD is start, the commit the session started at, or "" for none. The script is
-// described at [script]; each call makes a new protocol name for it.
-func Command(start string, full Full) ([]string, error) {
+// HEAD is tested, the commit that the run has a suite result for, or "" for none. start is
+// the commit the session started at, or "" for none. The script is described at [script];
+// each call makes a new protocol name for it.
+// shortcut: tested is not checked for its form, since a value that is no commit id never
+// equals HEAD and the suite runs; replace it when a caller passes a value that is not
+// from a marker line.
+func Command(start, tested string, full Full) ([]string, error) {
 	switch {
 	case len(full.Command) > MaxCommandBytes || strings.ContainsRune(full.Command, 0):
 		return nil, ErrBadCommand
@@ -159,7 +164,7 @@ func Command(start string, full Full) ([]string, error) {
 	case full.ResultFile != "" && !CleanResultPath(full.ResultFile):
 		return nil, ErrBadResultFile
 	}
-	return []string{"sh", "-c", script, "sh", full.Command, full.ResultFile, start, hostgit.NoProtocolName()}, nil
+	return []string{"sh", "-c", script, "sh", full.Command, full.ResultFile, start, tested, hostgit.NoProtocolName()}, nil
 }
 
 // State is how a suite ended. Failed, Timeout and Stopped are red; Skipped is no suite.
@@ -171,7 +176,7 @@ const (
 	Failed  State = "failed"
 	Timeout State = "timeout"
 	Stopped State = "stopped"
-	// Skipped is a session whose HEAD did not move.
+	// Skipped is a session whose HEAD is the commit that the run has a suite result for.
 	Skipped State = "skipped"
 )
 

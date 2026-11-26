@@ -325,6 +325,32 @@ func RunAt(ctx context.Context, dir string, base []string, getenv func(string) s
 	return fetched, at.stop(err)
 }
 
+// FetchCommit makes the commit of the repository path on system an object of the git
+// folder of dir, a working folder that [RunAt] fetched: when git finds it already, nothing
+// is fetched; otherwise it is fetched by its id, at depth one, from the repository's URL
+// through the host proxy p, with the git that the push step runs, see [stepGit]. Before
+// any git runs, [safeAfterRun] checks dir, as [Push] does: an agent had its .git open for
+// writing. It leaves HEAD, the branches and the working tree where they are. A remote that
+// does not have the commit, or serves no fetch by id, stops it with [textNoCommit] or
+// [textNoFetchByID].
+func FetchCommit(ctx context.Context, dir string, base []string, system, path, commit string, p proxygit.Proxy) error {
+	if !CommitID(commit) {
+		return fmt.Errorf("%s is not a commit id of 40 or 64 hex digits", integration.Printable(exports.Value(commit, false)))
+	}
+	ctx = hostgit.WithBase(ctx, base)
+	if err := safeAfterRun(ctx, dir); err != nil {
+		return checkFailed(textFetchNotSafe, WorkRepository{Path: path}, err)
+	}
+	g := stepGit(&p, "")
+	if _, err := g(ctx, dir, "rev-parse", "--verify", "--quiet", commit+"^{commit}"); err == nil {
+		return nil
+	}
+	if _, err := g(ctx, dir, "fetch", "--quiet", "--depth", "1", repoURL(system, path), "--", commit); err != nil {
+		return notAtCommit(path, system, commit, err)
+	}
+	return nil
+}
+
 // RunPrebuild is [RunAt] for the prebuild from a run code, of the target at, at the head
 // of its default branch: the prebuild fetches the target's repository alone, and a stop
 // has the line of [Target.stop] for a prebuild.

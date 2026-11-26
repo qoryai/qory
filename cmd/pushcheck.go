@@ -33,7 +33,11 @@ const textNotChecked = "the version did not pass the check for %s"
 
 // The texts of qory run for its push checks. The load's errors start with their fix, alone
 // in the first line, and the cause follows on an indented line;
-// textCheckNotFinished is the status line of a push whose check returned an error.
+// textCheckNotFinished is the status line of a push whose check returned an error,
+// textRoundNotPosted that of a verdict whose round the check could not post, and
+// textHeadMoved that of a verdict whose check found the checkout's HEAD at another commit
+// than the one the review read. The last two have no cause: the end of a session that
+// succeeds shows it only when the failure is the same then, see [findingsRun.postVerify].
 const (
 	textChecksNoWall     = "Set wall.adapter to docker, and run again.\n  The push checks of %s run in containers of the docker wall alone."
 	textChecksNoRunAPI   = "Open the run through a gateway that sends the run API address, and run again.\n  The push checks read the artifacts through the run API, which failed: %s."
@@ -46,12 +50,14 @@ const (
 	textChecksBadRuntime = "Fix the runtime name in wall.images, and run again.\n  The push checks' container runs under the runtime %s, and Docker accepts no runtime name with a \"/\"."
 	textChecksNotSet     = "Run again.\n  Turning on the push checks for the POSTs from behind the wall failed, so the run stopped before the setup: %s."
 	textCheckNotFinished = "the check before a push did not finish, and the push was not stored (503 " + runapi.CodePushCheckUnavailable + "): %s"
+	textRoundNotPosted   = "the round was not posted, so the verdict was not stored (503 " + runapi.CodePushCheckUnavailable + ")"
+	textHeadMoved        = "the checkout's HEAD moved, so the verdict was not stored (503 " + runapi.CodePushCheckUnavailable + ")"
 )
 
-// The errors of [runPushChecks.load] and [runPushChecks.set] for a run from a run code. The
-// code is used by then, so the run starts again only from the new run code that taking the
-// work item in again makes. That run opens on the engine selected at its start, so switching
-// the engine back does not help this one.
+// The errors of [runPushChecks.load] and [runPushChecks.set] for a run from a run code.
+// The code is used by then, so the run starts again only from the new run code that taking
+// the work item in again makes. That run opens on the engine selected at its start, so
+// switching the engine back does not help this one.
 const (
 	textChecksNoWallFromCode     = "Set wall.adapter to docker, then take the work item in again in Qory Apiary.\n  The push checks of %s run in containers of the docker wall alone" + codeUsed
 	textChecksNoRunAPIFromCode   = "Take the work item in again in Qory Apiary, through a gateway that sends the run API address.\n  The push checks read the artifacts through the run API, which failed: %s" + codeUsed
@@ -111,13 +117,47 @@ type runPushChecks struct {
 	scope runScope
 	// verdicts is whether the check limits the verdicts of each session, see
 	// [runPushChecks.limitVerdicts]. running is whether a session is joining the run, and
-	// judges whether that session judges the work, see [runPushChecks.joining]. They are
-	// separate from scope, which follows the session that pushes. mu guards all three.
-	verdicts, running, judges bool
+	// mode is how the verdicts of that session are limited, see [runPushChecks.joining].
+	// They are separate from scope, which follows the session that pushes. mu guards all
+	// three.
+	verdicts, running bool
+	mode              joinMode
+	// round posts the findings of the round of a Verify session, see
+	// [findingsRun.postVerify]; nil for any other session. Its second argument is whether
+	// the POST records the verdict passed. mu guards it.
+	round func(ctx context.Context, passed bool) error
+	// types are the artifact types of the latest session's composed process.yaml, which
+	// [pushcheck.FilledMember] reads the members that qory fills from. mu guards it.
+	types []exports.ProcessType
 }
 
-// limitVerdicts makes [runPushChecks.runAPICheck] apply [pushcheck.SessionVerdict] to
-// each POST, with the judges of the session that is running, and
+// setTypes sets the artifact types of the session that the next POST follows, see
+// [runPushChecks.runAPICheck].
+func (p *runPushChecks) setTypes(types []exports.ProcessType) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.types = types
+}
+
+// marksFill reports whether a type of the latest session marks a member that qory fills,
+// so the check of each POST has a [pushcheck.FilledMember] rule to apply.
+func (p *runPushChecks) marksFill() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.ContainsFunc(p.types, func(t exports.ProcessType) bool { return len(t.Marks) > 0 })
+}
+
+// setRound sets the post of a Verify session's round, which [runPushChecks.runAPICheck]
+// runs in the check of the session's POST of /verdict, with whether the POST records
+// passed, see [pushcheck.RecordsPassed]; nil clears it.
+func (p *runPushChecks) setRound(post func(ctx context.Context, passed bool) error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.round = post
+}
+
+// limitVerdicts makes [runPushChecks.runAPICheck] apply [pushcheck.SessionVerdict] or
+// [pushcheck.ReviewVerdict] to each POST, by the mode of the session that is running, and
 // [pushcheck.NoSessionVerdict] while no session runs. Call it before [runPushChecks.set],
 // and set the check with always, since the verdict rule needs no checker.
 func (p *runPushChecks) limitVerdicts() {
@@ -126,37 +166,68 @@ func (p *runPushChecks) limitVerdicts() {
 	p.verdicts = true
 }
 
-// joining records that a session joins the run, whose workflow judges the work when
-// judges is true, see [workflowJudges]; call it right before the join, and
-// [runPushChecks.joined] as soon as the join returns, with any result.
-func (p *runPushChecks) joining(judges bool) {
+// joinMode is how a session that joins the run may record its verdict.
+type joinMode int
+
+const (
+	// joinNone is a session whose workflow does not judge: it records escalate or no
+	// verdict, since a later workflow in the loop judges the work. It is the zero value.
+	joinNone joinMode = iota
+	// joinJudges is a session that judges the work: it records any verdict.
+	joinJudges
+	// joinReviews is a review session: it records changes-requested, escalate or no
+	// verdict, and qory sends passed after the round.
+	joinReviews
+)
+
+// joinModeOf is the mode of a session whose workflow judges the work when judges is true,
+// see [workflowJudges], and that joins as a review join when review is true. A workflow
+// with judges false is [joinNone], whether or not it joins as a review join.
+func joinModeOf(judges, review bool) joinMode {
+	switch {
+	case !judges:
+		return joinNone
+	case review:
+		return joinReviews
+	}
+	return joinJudges
+}
+
+// joining records that a session joins the run, with the mode, see [joinModeOf]; call it
+// right before the join, and [runPushChecks.joined] as soon as the join returns, with any
+// result.
+func (p *runPushChecks) joining(mode joinMode) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.running, p.judges = true, judges
+	p.running, p.mode = true, mode
 }
 
 // joined records that no session runs.
 func (p *runPushChecks) joined() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.running, p.judges = false, false
+	p.running, p.mode = false, joinNone
 }
 
 // verdictRefusal is the refusal of a POST by the verdict rule, nil for a POST that passes
 // or a run that has no such rule.
 func (p *runPushChecks) verdictRefusal(req session.RunAPIRequest) *session.RunAPIRefusal {
 	p.mu.Lock()
-	verdicts, running, judges := p.verdicts, p.running, p.judges
+	verdicts, running, mode := p.verdicts, p.running, p.mode
 	p.mu.Unlock()
 	switch {
 	case !verdicts:
 		return nil
 	case !running:
 		return pushcheck.NoSessionVerdict(req)
+	case mode == joinReviews:
+		return pushcheck.ReviewVerdict(req)
 	}
-	// shortcut: qory does not compare the verdict that a review session records with the
-	// reviewers' reports; replace it when qory reads the reports.
-	return pushcheck.SessionVerdict(judges, req)
+	// shortcut: a session that is no review join, such as Verify, records its verdict itself,
+	// and qory compares it with the reviewers' reports only for a passed with no report,
+	// see [findingsRun.postVerify]; Qory Apiary returns 409 for any passed while a blocking
+	// finding is open. Replace when qory sends the verdict of such a session from its round.
+	return pushcheck.SessionVerdict(mode == joinJudges, req)
 }
 
 // current is the checker, nil before the load or for a home with no push check.
@@ -184,12 +255,44 @@ func (p *runPushChecks) set(run openedRun, always bool) error {
 }
 
 // runAPICheck is the check of each POST for [session.Run.SetRunAPICheck]: the verdict
-// rule, see [runPushChecks.limitVerdicts], then [pushcheck.Checker.RunAPICheck] of
-// the run's checker, which a run with no checker lacks. Forager writes no line for the
-// checker's error, so qory run writes it as a status line.
+// rule, see [runPushChecks.limitVerdicts], the rule of the members that qory fills, see
+// [pushcheck.FilledMember], which applies in every run, then
+// [pushcheck.Checker.RunAPICheck] of the run's checker, which a run with no checker
+// lacks. Forager writes no line for the checker's error, so qory run writes it as a
+// status line.
 func (p *runPushChecks) runAPICheck(ctx context.Context, req session.RunAPIRequest) (*session.RunAPIRefusal, error) {
 	if refusal := p.verdictRefusal(req); refusal != nil {
 		return refusal, nil
+	}
+	p.mu.Lock()
+	types := p.types
+	p.mu.Unlock()
+	if refusal := pushcheck.FilledMember(types, req); refusal != nil {
+		return refusal, nil
+	}
+	// A Verify session's round is posted before its verdict reaches Qory Apiary, so a
+	// finding that the round closes no longer blocks the verdict passed.
+	p.mu.Lock()
+	round := p.round
+	p.mu.Unlock()
+	if round != nil {
+		// Qory Apiary reads the last of a member that a body sends twice, so a POST that qory
+		// cannot read in one way may be a verdict: it stops before the round.
+		if refusal := pushcheck.UnreadablePost(req); refusal != nil {
+			return refusal, nil
+		}
+	}
+	if round != nil && pushcheck.IsVerdict(req) {
+		if err := round(ctx, pushcheck.RecordsPassed(req)); err != nil {
+			if p.report != nil {
+				line := textRoundNotPosted
+				if errors.As(err, new(headMoved)) {
+					line = textHeadMoved
+				}
+				p.report(line)
+			}
+			return nil, err
+		}
 	}
 	c := p.current()
 	if c == nil {
@@ -371,11 +474,11 @@ func checkImage(run openedRun, spec *runSpec) string {
 	return spec.Image
 }
 
-// checkRuntime is the --runtime of the checks' container: the runtime of the image that the
-// run's policy selected, run.Image(), when it has one, so a check never runs under a weaker
-// runtime than the run's container. Otherwise it is the one Forager gives the default
-// image: the entry's runtime, and "" for a default that is a bare reference or for no
-// default, whose run's image has no runtime.
+// checkRuntime is the --runtime of the checks' container: the runtime of the image that
+// the run's policy selected, run.Image(), when it has one, so a check never runs under a
+// weaker runtime than the run's container. Otherwise it is the one Forager gives the
+// default image: the entry's runtime, and "" for a default that is a bare reference or for
+// no default, whose run's image has no runtime.
 func checkRuntime(run openedRun, spec *runSpec) string {
 	if runtime := run.Image().Runtime; runtime != "" {
 		return runtime
@@ -482,10 +585,10 @@ func checkNotes(raw json.RawMessage) ([]byte, error) {
 	return trimmed, nil
 }
 
-// checkOutputVersion runs the push check of push's artifact type on push's files, before the
-// step stores the version. A check that does not pass is the step's error: the step's fix
-// line, then the check's line and its findings, each a line of qory run. So is a check that
-// could not run. branch is the branch that the step pushed, nil for none.
+// checkOutputVersion runs the push check of push's artifact type on push's files, before
+// the step stores the version. A check that does not pass is the step's error: the step's
+// fix line, then the check's line and its findings, each a line of qory run. So is a check
+// that could not run. branch is the branch that the step pushed, nil for none.
 func checkOutputVersion(ctx context.Context, checks *runPushChecks, branch *preparation.WorkBranch, push runapi.Push) error {
 	files := make([]pushcheck.File, len(push.Files))
 	for i, f := range push.Files {

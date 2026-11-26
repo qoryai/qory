@@ -30,8 +30,8 @@ qory exits 4 with that refusal. Outside a run, qory refuses those types itself, 
 template from the factory modules that the checkout exports, and has no approvals to read.
 
 --decision sends the id of the person's note that asked for this version, such as
-gd_01jc4t9…, from the notes that qory work-item show prints: a request for changes, a move
-or an escalation. Later runs read this version in place of the approved one, and the next
+gd_01jc4t9…, from the notes that qory work-item show prints: a request for changes, a move,
+an escalation or an answer. Later runs read this version in place of the approved one, and the next
 approval by a person lists it. A withdrawal takes --decision too. qory exits 4 with a
 fix line when the id is not the id of a person's note on the run's work item.
 

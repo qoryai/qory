@@ -38,7 +38,7 @@ func (r *recorder) Write(p []byte) (int, error) {
 // standard output and the standard error, and the events file of the run.
 func runScriptEvents(t *testing.T, dir, start string, full suite.Full, extra ...string) (exit int, stdout, stderr, events string) {
 	t.Helper()
-	cmd := scriptCommand(t, dir, start, full, true, extra...)
+	cmd := scriptCommand(t, dir, start, "", full, true, extra...)
 	var mu sync.Mutex
 	var lines []string
 	out, errs := &recorder{mu: &mu, lines: &lines, stream: "stdout"}, &recorder{mu: &mu, lines: &lines, stream: "stderr"}

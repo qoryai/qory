@@ -3,6 +3,7 @@ package cmd
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -723,6 +724,66 @@ func TestStartCommitWalksTheRunsCommitsNewestFirst(t *testing.T) {
 	if _, _, err := startCommit(t.Context(), client, version(), "pull-request", nil, pushed, startTarget); err == nil ||
 		!strings.Contains(err.Error(), "has 0 top-level references to commit "+c[:12]+" of git.example.com/acme/shop, not 1.") {
 		t.Errorf("no confirmed commit: %v", err)
+	}
+}
+
+// TestStartCommitReturnsANoStartOnlyForAVersionThatConfirmsNothing: a version with no
+// pushed commit of its run, one whose file has no reference to the commit and one with no
+// one JSON file give a [noStart] with the text that a person reads; a version whose file
+// cannot be downloaded gives another error, a failed read.
+func TestStartCommitReturnsANoStartOnlyForAVersionThatConfirmsNothing(t *testing.T) {
+	commit := strings.Repeat("c", 40)
+	files := map[string]string{
+		"av_none": `{"text":"No reference."}`,
+		"av_down": `{"head":{"collection":"R_1001","address":{"system":"git.example.com","path":"` + commit + `"}}}`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for id, content := range files {
+			if strings.HasPrefix(r.URL.Path, "/v1/runs/r/artifacts/"+id+"/files/") {
+				if id == "av_down" {
+					http.Error(w, "unreadable", http.StatusBadRequest)
+					return
+				}
+				io.WriteString(w, content)
+				return
+			}
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	client, err := runapi.New(server.URL+"/v1/runs/r", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := func(id, run string, size int64) *runapi.Version {
+		sum := sha256.Sum256([]byte(files[id]))
+		return &runapi.Version{ID: id, Number: 1, Writer: runapi.Writer{Kind: "run", RunID: run},
+			Files: []runapi.File{{Filename: "f.json", Size: size, SHA256: hex.EncodeToString(sum[:])}}}
+	}
+	pushed := []runapi.PushedEntry{{System: "git.example.com", Path: "acme/shop", Commit: commit, RunID: "run_1"}}
+	for _, c := range []struct {
+		name    string
+		version *runapi.Version
+		noStart bool
+		text    string
+	}{
+		{"no commit of the run", version("av_none", "run_2", 10), true, "has no pushed commit on git.example.com/acme/shop."},
+		{"no reference to the commit", version("av_none", "run_1", int64(len(files["av_none"]))), true, "has 0 top-level references to commit "},
+		{"a file over the limit", version("av_none", "run_1", maxStartFile+1), true, "has no one JSON file of at most"},
+		{"a file that cannot be downloaded", version("av_down", "run_1", int64(len(files["av_down"]))), false, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, _, err := startCommit(t.Context(), client, c.version, "pull-request", nil, pushed, startTarget)
+			if err == nil || errors.As(err, new(noStart)) != c.noStart {
+				t.Fatalf("startCommit returned %T %v, want a noStart: %v", err, err, c.noStart)
+			}
+			if c.noStart && (!strings.HasPrefix(err.Error(), "Report the run to the instance admin of Qory Apiary: no start found") || !strings.Contains(err.Error(), c.text)) {
+				t.Errorf("the text of the no start is %q, want it to contain %q", err, c.text)
+			}
+			if !c.noStart && errors.Unwrap(err) == nil {
+				t.Errorf("the failed read %v wraps no error", err)
+			}
+		})
 	}
 }
 

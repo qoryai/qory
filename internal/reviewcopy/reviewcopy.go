@@ -26,6 +26,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -34,10 +35,11 @@ import (
 
 // Names of the files and folders below a copy's folder.
 const (
-	commitName  = "commit"
-	diffName    = "commit.diff"
-	stateName   = "state"
-	changedName = "changed"
+	commitName    = "commit"
+	diffName      = "commit.diff"
+	stateName     = "state"
+	changedName   = "changed"
+	diffPathsName = "diff-paths"
 	// ScriptName is the file of the copy's folder that has the session's script. The host
 	// writes it for the session and never reads it back.
 	ScriptName = "qory-review-copy.sh"
@@ -136,6 +138,19 @@ type Session struct {
 // project files, see [render.CommandGuard.ProjectPaths]: each a clean, relative path with
 // forward slashes on one line, with no * ? [ or \.
 func (f Folder) Session(source, commit, base, projectBase string, project []string) (Session, error) {
+	return f.session(source, commit, base, projectBase, project, "")
+}
+
+// SessionWithHead is [Folder.Session] for a source that is a checkout: the script also
+// reads the commit that the source's HEAD points to, and [Folder.Head] returns it. The
+// script reads HEAD and the ref that it points to as files, never with git, so no file of
+// the source's configuration is read.
+func (f Folder) SessionWithHead(source, commit, base, projectBase string, project []string) (Session, error) {
+	return f.session(source, commit, base, projectBase, project, "head")
+}
+
+// session is [Folder.Session] with head "head" to read the source's HEAD, "" for no read.
+func (f Folder) session(source, commit, base, projectBase string, project []string, head string) (Session, error) {
 	if !commitID.MatchString(commit) {
 		return Session{}, &Stop{Cause: "The commit of the review's copy is not a full commit id", Detail: "The commit is " + strconv.Quote(commit)}
 	}
@@ -145,10 +160,10 @@ func (f Folder) Session(source, commit, base, projectBase string, project []stri
 	if projectBase != "" && (!commitID.MatchString(projectBase) || len(projectBase) != len(commit)) {
 		return Session{}, &Stop{Cause: "The project base of the review is not a full commit id of the commit's length", Detail: "The project base is " + strconv.Quote(projectBase)}
 	}
-	if !filepath.IsAbs(source) || filepath.Clean(source) != source || strings.ContainsAny(source, "\n\r\x00") {
-		return Session{}, &Stop{Cause: "The git folder of the review's copy is not an absolute, clean path", Detail: "The path is " + strconv.Quote(source)}
+	if err := checkSource(source); err != nil {
+		return Session{}, err
 	}
-	args := []string{"", sessionPath, source, f.root, commit, base, projectBase}
+	args := []string{"", sessionPath, source, f.root, commit, base, projectBase, head}
 	for _, p := range project {
 		if p == "" || p == "." || path.IsAbs(p) || path.Clean(p) != p || p == ".." || strings.HasPrefix(p, "../") ||
 			strings.ContainsAny(p, "*?[\\\n\r\x00") {
@@ -174,11 +189,42 @@ func (f Folder) Session(source, commit, base, projectBase string, project []stri
 	return Session{
 		Command: "/bin/sh",
 		Args:    args,
-		Env: []string{
-			"PATH=" + sessionPath, "HOME=" + filepath.Join(f.state(), "home"),
-			"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
-		},
-		Dir: f.root,
+		Env:     f.env(),
+		Dir:     f.root,
+	}, nil
+}
+
+// checkSource is a [*Stop] for a git folder that is not an absolute, clean path on one
+// line.
+func checkSource(source string) error {
+	if !filepath.IsAbs(source) || filepath.Clean(source) != source || strings.ContainsAny(source, "\n\r\x00") {
+		return &Stop{Cause: "The git folder of the review's copy is not an absolute, clean path", Detail: "The path is " + strconv.Quote(source)}
+	}
+	return nil
+}
+
+// env is the environment of the sessions of the folder.
+func (f Folder) env() []string {
+	return []string{
+		"PATH=" + sessionPath, "HOME=" + filepath.Join(f.state(), "home"),
+		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
+	}
+}
+
+// HeadSession is the bare session that reads the HEAD of source again, after the copy
+// session ran with [Folder.SessionWithHead]: it replaces the file that [Folder.Head] reads
+// and makes no copy. The script is the same read of files with no git. It needs no file of
+// the copy's folder, and it stops, with its reason on standard error, where the first read
+// stops.
+func (f Folder) HeadSession(source string) (Session, error) {
+	if err := checkSource(source); err != nil {
+		return Session{}, err
+	}
+	return Session{
+		Command: "/bin/sh",
+		Args:    []string{"-c", headScript, "qory-review-head", sessionPath, source, f.root},
+		Env:     f.env(),
+		Dir:     f.root,
 	}, nil
 }
 
@@ -189,9 +235,9 @@ type Entry struct {
 	Path string
 }
 
-// Result reads what the session wrote, once it ended: the paths of the commit that the copy
-// leaves out. The error is a [*Stop] when the session stopped, ended before its end, or
-// left no copy or no diff.
+// Result reads what the session wrote, once it ended: the paths of the commit that the
+// copy leaves out. The error is a [*Stop] when the session stopped, ended before its end,
+// or left no copy or no diff.
 func (f Folder) Result() ([]Entry, error) {
 	if data, err := reportfile.Read(f.root, filepath.Join(stateName, "failed"), maxStateFile); err == nil {
 		return nil, &Stop{Cause: "A check of the commit's copy failed", Detail: strings.TrimSpace(string(data))}
@@ -220,6 +266,51 @@ func (f Folder) Result() ([]Entry, error) {
 		out = append(out, Entry{Mode: mode, Path: path})
 	}
 	return out, nil
+}
+
+// RemoveHead removes the file that [Folder.Head] reads, so that a session of
+// [Folder.HeadSession] that writes none leaves no commit of an earlier read. It is no
+// error when the file is not there. The error is a [*Stop].
+func (f Folder) RemoveHead() error {
+	if err := os.Remove(filepath.Join(f.root, stateName, "head")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return stop("The file of the checkout's HEAD could not be removed", err)
+	}
+	return nil
+}
+
+// Head is the commit that the source's HEAD points to, as the script of
+// [Folder.SessionWithHead] or of [Folder.HeadSession] read it, once the session ended. The
+// error is a [*Stop] when the script wrote none.
+func (f Folder) Head() (string, error) {
+	data, err := reportfile.Read(f.root, filepath.Join(stateName, "head"), maxStateFile)
+	if err != nil {
+		return "", stop("The commit of the checkout's HEAD could not be read", err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// DiffPaths is the paths that the diff from the base commit to the commit changes, as the
+// script wrote them: the files that the commit adds, changes and deletes, and for a rename
+// the old path and the new path. A path is from the root of the checkout, with forward
+// slashes, and the list is in the order of git's diff. Call it after [Folder.Result]
+// returned no error. The error is a [*Stop] when the list is missing or is not a list of
+// paths.
+func (f Folder) DiffPaths() ([]string, error) {
+	data, err := reportfile.Read(f.root, filepath.Join(stateName, diffPathsName), maxStateFile)
+	if err != nil {
+		return nil, stop("The list of changed files could not be read", err)
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	if data[len(data)-1] != 0 {
+		return nil, &Stop{Cause: "The list of changed files does not end with a NUL character"}
+	}
+	paths := strings.Split(string(data[:len(data)-1]), "\x00")
+	if slices.Contains(paths, "") {
+		return nil, &Stop{Cause: "The list of changed files has an empty path"}
+	}
+	return paths, nil
 }
 
 // Changed reads the paths that the session listed in state/changed, once [Folder.Result]
@@ -308,15 +399,20 @@ fresh_objects() (
 
 // script is the session's script. Its arguments are the PATH, the source's git folder, the
 // copy's folder, the commit, the base commit, "" for none, the project base, "" for none,
-// and the pathspecs of the paths of the runtime's project files. It writes the files of
-// the commit to commit, the diff to commit.diff, and in state: failed, with the reason,
-// when it stops at a check; left-out, the list of the links and submodules of the commit
-// as ls-tree lists them; changed, the paths that the pathspecs match and the change from
-// the project base adds, changes or removes, each followed by a NUL; and done, last. The
-// tools it runs besides git are the git session's.
-var script = `set -eu
-PATH=$1 S=$2 R=$3 commit=$4 base=$5 pbase=$6
-shift 6
+// "head" to read the source's HEAD, "" for no read, and the pathspecs of the paths of the
+// runtime's project files. With "head" it writes state/head, the commit that HEAD points
+// to, see [headRead]. It writes the files of the commit to commit, the diff to
+// commit.diff, and in state: failed, with the reason, when it stops at a check; left-out,
+// the list of the links and submodules of the commit as ls-tree lists them; diff-paths,
+// the paths of the diff, each ended by a NUL; changed, the paths that the pathspecs match
+// and the change from the project base adds, changes or removes, each followed by a NUL;
+// and done, last. The tools it runs besides git are the git session's.
+var script = scriptStart + "if [ -n \"$readhead\" ]; then\n" + headRead + "fi\n" + scriptEnd
+
+// scriptStart is the script up to the read of HEAD.
+const scriptStart = `set -eu
+PATH=$1 S=$2 R=$3 commit=$4 base=$5 pbase=$6 readhead=$7
+shift 7
 export PATH
 unset XDG_CONFIG_HOME GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_CONFIG_SYSTEM \
 	GIT_EXEC_PATH GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
@@ -346,7 +442,113 @@ one=$(printf '\001')
 if [ -h "$S" ] || [ -h "$S/objects" ] || [ ! -d "$S/objects" ]; then
 	fail "the source has no objects folder, or it is a link"
 fi
-# A view of the source: a new git folder with an empty configuration, no hooks, no
+`
+
+// headRead is the shell text that reads the source's HEAD into state/head, as its files
+// show it: no git runs on the source, so no setting of its configuration is read. It needs
+// S, T and fail. A source whose refs are not in its files, or are in another place or
+// format, stops the read: a commondir file, a reftable folder, and a configuration that
+// sets refStorage or worktreeConfig as a key, found by a text search of the file. So do a
+// link at the source, at refs, HEAD, packed-refs or config, or in the path of the ref
+// that HEAD points to, since git follows a link that the container may not have, and a
+// packed-refs file with a ref name twice, since git may take another line than the last.
+// A ref is read from its file, else from packed-refs. A ref that is not under refs/ and a
+// ref with an unusual name stop the read. Each reason is a cause with no consequence, so a
+// caller adds what it did not do.
+const headRead = `if [ -h "$S" ]; then
+	fail "the checkout's .git is a link"
+fi
+if [ -e "$S/commondir" ] || [ -h "$S/commondir" ]; then
+	fail "the checkout's .git has a commondir file"
+fi
+if [ -e "$S/reftable" ] || [ -h "$S/reftable" ]; then
+	fail "the checkout's .git has a reftable folder"
+fi
+for name in refs HEAD packed-refs config; do
+	if [ -h "$S/$name" ]; then
+		fail "the checkout's .git has a link at $name"
+	fi
+done
+if [ -f "$S/config" ]; then
+	found=0
+	grep -a -i -E '(^|[]])[[:space:]]*(refstorage|worktreeconfig)[[:space:]]*(=|$)' "$S/config" > /dev/null || found=$?
+	case $found in
+	0) fail "the checkout's .git/config sets refStorage or worktreeConfig" ;;
+	1) ;;
+	*) fail "the checkout's .git/config cannot be read" ;;
+	esac
+fi
+if [ ! -f "$S/HEAD" ]; then
+	fail "the checkout's .git has no HEAD file"
+fi
+line=
+IFS= read -r line < "$S/HEAD" || :
+now=$line
+case $line in
+"ref: refs/"*)
+	ref=${line#ref: }
+	case $ref in
+	*..* | */ | *//* | *[!A-Za-z0-9._/@+-]*) fail "the checkout's HEAD points to a ref with an unusual name" ;;
+	esac
+	now=
+	d=$S
+	rest=$ref
+	while [ -n "$rest" ]; do
+		part=${rest%%/*}
+		case $rest in
+		*/*) rest=${rest#*/} ;;
+		*) rest= ;;
+		esac
+		d=$d/$part
+		if [ -h "$d" ]; then
+			fail "the checkout's .git has a link in the path of the ref that HEAD points to"
+		fi
+	done
+	if [ -f "$S/packed-refs" ]; then
+		# The names of packed-refs, a comment or a peeled line left out, are sorted, so a name
+		# twice is two lines in a row.
+		while IFS=' ' read -r id name || [ -n "$id" ]; do
+			case $id in '#'* | '^'*) continue ;; esac
+			[ -n "$name" ] || continue
+			printf '%s\n' "$name"
+		done < "$S/packed-refs" | sort > "$T/ref-names"
+		before=
+		while IFS= read -r name; do
+			if [ "$name" = "$before" ]; then
+				fail "the checkout's .git/packed-refs has a ref name twice"
+			fi
+			before=$name
+		done < "$T/ref-names"
+	fi
+	if [ -f "$S/$ref" ]; then
+		IFS= read -r now < "$S/$ref" || :
+	elif [ -f "$S/packed-refs" ]; then
+		while IFS=' ' read -r id name || [ -n "$id" ]; do
+			if [ "$name" = "$ref" ]; then now=$id; fi
+		done < "$S/packed-refs"
+	fi
+	;;
+esac
+printf '%s\n' "$now" > "$T/head"
+`
+
+// headScript is the script of [Folder.HeadSession]. Its arguments are the PATH, the
+// source's git folder and the copy's folder.
+var headScript = `set -eu
+PATH=$1 S=$2 R=$3
+export PATH
+export LC_ALL=C
+T=$R/state
+umask 022
+# fail writes the reason to standard error and stops.
+fail() {
+	printf 'qory review copy: %s\n' "$1" >&2
+	exit 1
+}
+` + headRead
+
+// scriptEnd is the script after the read of HEAD.
+const scriptEnd = `# A view of the source: a new git folder with an empty configuration, no hooks, no
 # attribute file, and the source's objects as its alternates, so no file of the source but
 # its objects is read.
 V=$T/source
@@ -380,12 +582,12 @@ fresh_objects "$G" $ids ||
 	fail "the objects of the commit, the base and the project base could not be copied by their ids"
 export GIT_DIR="$G" GIT_INDEX_FILE="$G/index"
 empty=$(g hash-object -t tree /dev/null)
-# git 2.40 and later read attributes from the empty tree alone, so no .gitattributes of the
-# commit changes a file of the copy or the diff. An earlier git reads them; the check of each
-# file below then writes the file again from its object.
+# git 2.40 and later read attributes from the empty tree alone, so no .gitattributes of
+# the commit changes a file of the copy or the diff. An earlier git reads them; the check
+# of each file below then writes the file again from its object.
 export GIT_ATTR_SOURCE="$empty"
-# checked reports whether the object $1 is a commit whose bytes have the id $1, and leaves its
-# bytes in state/object.
+# checked reports whether the object $1 is a commit whose bytes have the id $1, and
+# leaves its bytes in state/object.
 checked() {
 	[ "$(g cat-file -t "$1" 2>/dev/null)" = commit ] || return 1
 	g cat-file commit "$1" > "$T/object" || return 1
@@ -509,6 +711,9 @@ while read -r frommode tomode fromid toid rest; do
 	blob_checked "${frommode#:}" "$fromid" && blob_checked "$tomode" "$toid" ||
 		fail "the diff has a file whose bytes do not have its object id"
 done < "$T/raw"
+# The paths of the diff above, each ended by a NUL, so a path with a line break stays one
+# path. A rename is its old path and its new path.
+g diff --name-only -z --no-renames "$from" "$commit" > "$T/diff-paths"
 # The paths of the project files that the change from the project base adds, changes or
 # removes, or none when the runtime has no project files: a diff with no pathspec would
 # list every path.

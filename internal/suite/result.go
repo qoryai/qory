@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"unicode/utf8"
 
 	"github.com/qoryai/qory/internal/sourcetext"
 )
@@ -30,24 +29,49 @@ type Result struct {
 // NewResult is the [Result] of counts and output, the full suite's output as it ended:
 // OutputTail has at most the last [MaxTailLines] lines of the last [MaxOutputBytes] bytes
 // of output, with each hidden character written as <U+XXXX> (see sourcetext.Escape),
-// since a reviewer reads the text. When the cap cuts the output, the first line of the
-// tail may start in the middle of a line.
+// since a reviewer reads the text. When the cap cuts the output inside a line, the tail
+// starts after that line's break, and it is [NoTextLine] when no line with text starts
+// in the last [MaxOutputBytes] bytes.
 func NewResult(counts Counts, output []byte) Result {
-	return Result{Counts: counts, OutputTail: sourcetext.Escape(Tail(lastBytes(output, MaxOutputBytes), MaxTailLines))}
+	return Result{Counts: counts, OutputTail: sourcetext.Escape(Tail(lastOutput(output), MaxTailLines))}
+}
+
+// NoTextLine is the tail of output in whose last [MaxOutputBytes] bytes no line with text
+// starts: they are part of one long line, line breaks, or both. qory shows none of those
+// bytes, and the line says so. The text contains 256 KiB, the value of [MaxOutputBytes].
+const NoTextLine = "No line with text starts in the last 256 KiB of the suite's output, so qory shows none of those bytes."
+
+// lastOutput is [lastBytes] of the last [MaxOutputBytes] bytes of b, and the bytes of
+// [NoTextLine] when b is longer and what lastBytes keeps is empty or only line breaks:
+// one long line, with or without line breaks at its end, and line breaks alone have no
+// line to show.
+func lastOutput(b []byte) []byte {
+	last := lastBytes(b, MaxOutputBytes)
+	if len(b) > MaxOutputBytes && len(bytes.Trim(last, "\r\n")) == 0 {
+		return []byte(NoTextLine)
+	}
+	return last
 }
 
 // lastBytes is the last n bytes of b, all of b when it is shorter. A cut that falls inside
-// a multi-byte character moves forward to the next character's first byte, so the result
-// has up to 3 bytes fewer than n and starts at a rune start, as far as b is UTF-8.
+// a line drops that line's part in the result, up to and including its line break, so the
+// result starts at the start of a line and a masked value is never cut in two. A cut right
+// after a line break keeps that line. The result is nil when the last n bytes have no
+// line break, and only line breaks when the last n bytes are one line and its breaks.
 func lastBytes(b []byte, n int) []byte {
 	if len(b) <= n {
 		return b
 	}
+	atLineStart := b[len(b)-n-1] == '\n'
 	b = b[len(b)-n:]
-	for skip := 0; skip < utf8.UTFMax-1 && len(b) > 0 && !utf8.RuneStart(b[0]); skip++ {
-		b = b[1:]
+	if atLineStart {
+		return b
 	}
-	return b
+	i := bytes.IndexByte(b, '\n')
+	if i < 0 {
+		return nil
+	}
+	return b[i+1:]
 }
 
 // Tail is the last n lines of output as text, with the line break at the end of the

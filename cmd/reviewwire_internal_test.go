@@ -15,8 +15,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
@@ -1004,6 +1007,303 @@ func nearLongestPath(t *testing.T) string {
 	}
 	t.Fatal("no folder near the longest path can be made")
 	return ""
+}
+
+// TestMakeCopyOfAVerifySessionComparesTheHeadOfTheCheckoutWithTheCommit: a copy session
+// that read the HEAD of the checkout at the commit of the plan ends well, and one that
+// read another id stops the review with both ids; a session of a plan with no verify reads
+// no HEAD, so the copy session does not write the file.
+func TestMakeCopyOfAVerifySessionComparesTheHeadOfTheCheckoutWithTheCommit(t *testing.T) {
+	was := runGitContainer
+	t.Cleanup(func() { runGitContainer = was })
+	spec := &runSpec{}
+	spec.RunID = "r1"
+
+	run := func(verify bool, head string) error {
+		p := copyPlan(t)
+		p.verify = verify
+		var args []string
+		runGitContainer = func(_ context.Context, c gitContainer) (int, error) {
+			args = c.Session.Args
+			root := p.copy.Root()
+			state := filepath.Join(root, "state")
+			for _, d := range []string{state, p.copy.Commit()} {
+				if err := os.MkdirAll(d, 0o755); err != nil {
+					return -1, err
+				}
+			}
+			for path, text := range map[string]string{
+				filepath.Join(state, "done"): "ok\n", filepath.Join(state, "left-out"): "",
+				filepath.Join(root, "commit.diff"): "diff\n", filepath.Join(state, "head"): head + "\n",
+				filepath.Join(state, "changed"): "",
+			} {
+				if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+					return -1, err
+				}
+			}
+			return 0, nil
+		}
+		err := p.makeCopy(t.Context(), copyRun{}, spec, &bytes.Buffer{})
+		if got := args[len(args)-1] == "head"; got != verify {
+			t.Errorf("verify %v: the copy session's last argument is %q", verify, args[len(args)-1])
+		}
+		return err
+	}
+	if err := run(true, headB); err != nil {
+		t.Errorf("a checkout at the commit returned %v", err)
+	}
+	err := run(true, headA)
+	if !hasStop(err, "The checkout's HEAD is not the commit the review reads, so the review did not start") ||
+		!strings.Contains(err.Error(), headA) || !strings.Contains(err.Error(), headB) {
+		t.Errorf("a checkout at another commit returned %v", err)
+	}
+	if err := run(false, headA); err != nil {
+		t.Errorf("a review join, whose HEAD is not read, returned %v", err)
+	}
+}
+
+// TestCheckHeadStopsWithTheCauseOfEachFailure is the second read of the checkout's HEAD of
+// a Verify session: a HEAD at the commit passes, and the mounts, the name and the script
+// of the container are those of the read of HEAD; another HEAD is a headMoved with both
+// ids; a .git that is a link, a container that does not start, an exit with a code and a
+// run that passes the limit each stop with their cause, and none is a headMoved.
+func TestCheckHeadStopsWithTheCauseOfEachFailure(t *testing.T) {
+	was := runGitContainer
+	t.Cleanup(func() { runGitContainer = was })
+	spec := &runSpec{}
+	spec.RunID = "r1"
+	const what = "the review did not end"
+
+	// plan is a plan of a Verify session whose copy folder has the file state/head with head.
+	plan := func(t *testing.T, head string) *reviewJoinPlan {
+		t.Helper()
+		p := copyPlan(t)
+		p.verify, p.copyRun, p.copySpec = true, copyRun{}, spec
+		state := filepath.Join(p.copy.Root(), "state")
+		if err := os.MkdirAll(state, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(state, "head"), []byte(head+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	// writeHead is the file that the script of the container writes.
+	writeHead := func(t *testing.T, p *reviewJoinPlan, head string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(p.copy.Root(), "state", "head"), []byte(head+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("a HEAD at the commit", func(t *testing.T) {
+		p := plan(t, headA)
+		runGitContainer = func(_ context.Context, c gitContainer) (int, error) {
+			writeHead(t, p, headB)
+			if len(c.Mounts) != 2 || !c.Mounts[0].ReadOnly || c.Mounts[0].Path != p.source || c.Mounts[1].ReadOnly || c.Mounts[1].Path != p.copy.Root() {
+				t.Errorf("the container has the mounts %+v, want the source read-only and the copy writable", c.Mounts)
+			}
+			if c.Name != "qory-review-head-r1" || c.Session.Command != "/bin/sh" || c.Session.Args[0] != "-c" {
+				t.Errorf("the container is %q with %s %q", c.Name, c.Session.Command, c.Session.Args[:1])
+			}
+			return 0, nil
+		}
+		if err := p.checkHead(t.Context(), what); err != nil {
+			t.Errorf("a HEAD at the commit returned %v", err)
+		}
+	})
+	t.Run("another HEAD", func(t *testing.T) {
+		p := plan(t, headB)
+		runGitContainer = func(context.Context, gitContainer) (int, error) { writeHead(t, p, headA); return 0, nil }
+		err := p.checkHead(t.Context(), what)
+		var moved headMoved
+		if !errors.As(err, &moved) || !hasStop(err, "The checkout's HEAD is not the commit the review read, so the review did not end") ||
+			!strings.Contains(err.Error(), strconv.Quote(headA)) || !strings.Contains(err.Error(), headB) {
+			t.Errorf("another HEAD returned %v, want a headMoved with both commits", err)
+		}
+	})
+	// A read that writes no file leaves no commit of an earlier read: the file that the plan
+	// has, at the commit of the review, is removed before the container runs.
+	t.Run("a read that writes no HEAD", func(t *testing.T) {
+		p := plan(t, headB)
+		runGitContainer = func(context.Context, gitContainer) (int, error) { return 0, nil }
+		err := p.checkHead(t.Context(), what)
+		var moved headMoved
+		if err == nil || errors.As(err, &moved) {
+			t.Errorf("a read that wrote no HEAD returned %v, want a stop that is no headMoved", err)
+		}
+		// The words after "so" are those of the caller, at the end of a session and at a
+		// check of a verdict, not those of the start of the review.
+		for _, at := range []string{"the review did not end", "the review did not start"} {
+			err := p.checkHead(t.Context(), at)
+			if !hasStop(err, "The commit of the checkout's HEAD could not be read, so "+at) {
+				t.Errorf("a read that wrote no HEAD, for %q, returned %v", at, err)
+			}
+		}
+	})
+	for _, c := range []struct {
+		name string
+		run  func(context.Context, gitContainer) (int, error)
+		want string
+	}{
+		{"a container that does not start", func(context.Context, gitContainer) (int, error) { return -1, errors.New("no engine") },
+			"The container that reads the checkout's HEAD did not start, so the review did not end"},
+		{"an exit with a code", func(_ context.Context, c gitContainer) (int, error) {
+			fmt.Fprintln(c.Output, "qory review copy: the checkout's .git has a commondir file")
+			return 3, nil
+		}, "The checkout's .git has a commondir file, so the review did not end\n  Reading the checkout's HEAD exited with 3"},
+		{"an exit with a code and a line of another program", func(_ context.Context, c gitContainer) (int, error) {
+			fmt.Fprintln(c.Output, "sh: out of memory")
+			return 137, nil
+		}, "Reading the checkout's HEAD exited with 137, so the review did not end\n  sh: out of memory"},
+		{"the limit", func(ctx context.Context, _ gitContainer) (int, error) {
+			<-ctx.Done()
+			return -1, ctx.Err()
+		}, "Reading the checkout's HEAD passed its limit of 10ms, so the review did not end"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			limit := headCheckLimit
+			headCheckLimit = 10 * time.Millisecond
+			t.Cleanup(func() { headCheckLimit = limit })
+			p := plan(t, headB)
+			runGitContainer = c.run
+			err := p.checkHead(t.Context(), what)
+			var moved headMoved
+			// A want with a line end is compared line by line.
+			has := hasStop(err, c.want)
+			if strings.Contains(c.want, "\n") {
+				has = err != nil && strings.HasPrefix(err.Error(), c.want)
+			}
+			if !has || errors.As(err, &moved) {
+				t.Errorf("%s returned %v, want the stop %q", c.name, err, c.want)
+			}
+		})
+	}
+	// A path that the session cannot take stops with the words of the caller too.
+	t.Run("a git folder with a line end in its path", func(t *testing.T) {
+		p := plan(t, headB)
+		p.source = filepath.Join(t.TempDir(), "a\nb")
+		if err := os.Mkdir(p.source, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		runGitContainer = func(context.Context, gitContainer) (int, error) {
+			t.Error("the container started for a path that is not clean")
+			return 0, nil
+		}
+		if err := p.checkHead(t.Context(), what); !hasStop(err, "The git folder of the review's copy is not an absolute, clean path, so the review did not end") {
+			t.Errorf("a git folder with a line end in its path returned %v", err)
+		}
+	})
+	t.Run("a .git that is a link", func(t *testing.T) {
+		p := plan(t, headB)
+		if err := os.Remove(p.source); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(t.TempDir(), p.source); err != nil {
+			t.Fatal(err)
+		}
+		runGitContainer = func(context.Context, gitContainer) (int, error) {
+			t.Error("the container started for a .git that is a link")
+			return 0, nil
+		}
+		if err := p.checkHead(t.Context(), what); !hasStop(err, "The checkout's .git is not a folder any more, so the review did not end") {
+			t.Errorf("a .git that is a link returned %v", err)
+		}
+	})
+}
+
+// TestCheckHeadReadsOneAtATime: two calls of checkHead at once run their containers one
+// after the other, since the container has one name and each read replaces state/head.
+func TestCheckHeadReadsOneAtATime(t *testing.T) {
+	was := runGitContainer
+	t.Cleanup(func() { runGitContainer = was })
+	spec := &runSpec{}
+	spec.RunID = "r1"
+	p := copyPlan(t)
+	p.verify, p.copyRun, p.copySpec = true, copyRun{}, spec
+	if err := os.MkdirAll(filepath.Join(p.copy.Root(), "state"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var running, most, calls atomic.Int32
+	runGitContainer = func(context.Context, gitContainer) (int, error) {
+		n := running.Add(1)
+		for m := most.Load(); n > m && !most.CompareAndSwap(m, n); m = most.Load() {
+		}
+		calls.Add(1)
+		time.Sleep(50 * time.Millisecond)
+		running.Add(-1)
+		if err := os.WriteFile(filepath.Join(p.copy.Root(), "state", "head"), []byte(headB+"\n"), 0o644); err != nil {
+			t.Error(err)
+		}
+		return 0, nil
+	}
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := p.checkHead(t.Context(), "the review did not end"); err != nil {
+				t.Errorf("a read at the same time returned %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if calls.Load() != 2 || most.Load() != 1 {
+		t.Errorf("%d containers ran, at most %d at once, want 2 and 1", calls.Load(), most.Load())
+	}
+}
+
+// TestCheckHeadStopsWaitingWhenItsContextEnds: a call of checkHead that waits for another
+// read returns the error of its context when the context ends, and leaves the other read
+// the lock.
+func TestCheckHeadStopsWaitingWhenItsContextEnds(t *testing.T) {
+	p := &reviewJoinPlan{}
+	if err := p.headLock.acquire(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- p.checkHead(ctx, "the review did not end") }()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("a call that waited returned %v, want %v", err, context.Canceled)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a call that waits for another read did not return when its context ended")
+	}
+	// The lock stays taken by the first read, and a second acquire waits for it.
+	waiting, stop := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer stop()
+	if err := p.headLock.acquire(waiting); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("a second acquire returned %v, want %v", err, context.DeadlineExceeded)
+	}
+	p.headLock.release()
+	if err := p.headLock.acquire(t.Context()); err != nil {
+		t.Errorf("an acquire after the release returned %v", err)
+	}
+}
+
+// TestHeadReadStopCapitalisesTheReasonOfTheScript: line 1 is the reason that the script
+// wrote, with a capital first letter, also for a letter of more than one byte, and the
+// exit code is line 2; a line with no reason, or with no reason after the prefix, follows
+// the exit code.
+func TestHeadReadStopCapitalisesTheReasonOfTheScript(t *testing.T) {
+	const what = "the review did not end"
+	for _, c := range []struct{ name, text, want string }{
+		{"a reason", "qory review copy: the checkout's .git has a commondir file", "The checkout's .git has a commondir file, so the review did not end\n  Reading the checkout's HEAD exited with 3"},
+		{"a reason with a letter of two bytes", "qory review copy: élan of the script", "Élan of the script, so the review did not end\n  Reading the checkout's HEAD exited with 3"},
+		{"a reason that starts with a digit", "qory review copy: 3 files", "3 files, so the review did not end\n  Reading the checkout's HEAD exited with 3"},
+		{"the prefix with no reason", "qory review copy: ", "Reading the checkout's HEAD exited with 3, so the review did not end\n  qory review copy: "},
+		{"an empty line", "", "Reading the checkout's HEAD exited with 3, so the review did not end"},
+		{"a line of another program", "sh: out of memory", "Reading the checkout's HEAD exited with 3, so the review did not end\n  sh: out of memory"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if err := headReadStop(3, c.text, what); err == nil || !strings.HasPrefix(err.Error(), c.want) {
+				t.Errorf("headReadStop returned %q, want %q", err, c.want)
+			}
+		})
+	}
 }
 
 func TestCheckWallUserStopsAnotherUidAndKeepsAnyGid(t *testing.T) {
