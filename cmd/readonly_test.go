@@ -200,8 +200,18 @@ var writeRuns = []struct {
 	{"workflow write-no-push, no target", "write-no-push", noTarget},
 }
 
+// stopText is the text of a stop in the form of a review session's stops: the cause, then
+// the detail on a line indented by two spaces, then "; the code is used". A cause that is
+// over 100 characters with "qory run: " goes on after its last ", so " on the next line.
+func stopText(cause, detail string) string {
+	if i := strings.LastIndex(cause, ", so "); i >= 0 && len("qory run: ")+len(cause) > 100 {
+		cause = cause[:i+1] + "\n  " + cause[i+2:]
+	}
+	return cause + "\n  " + detail + "; the code is used"
+}
+
 // writeNeedsWallLine is the line of a run of [writeRuns] with no wall.
-const writeNeedsWallLine = "run this workflow with a wall: this run of workflow hello writes to the checkout, and a run with no wall runs the agent as this machine's user (write_needs_wall); the code is used"
+const writeNeedsWallLine = "The workflow hello writes to the checkout and the run has no wall,\n  so the run did not start\n  A run with no wall runs the agent as this machine's user; the code is used"
 
 // TestAWriteRunWithNoWallStops is each run of [writeRuns] with no wall: it stops after
 // the compose, before the image's fetch, the setup and the join, exit 1, with its line,
@@ -227,7 +237,7 @@ func TestAGatewayTakesTheCloseOfAWriteRunWithNoWall(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			r := runFromCode(t, declares(c.declared), c.change)
 			checkStopped(t, r, "", "write_needs_wall")
-			wants(t, r.out+r.err.Error(), "(write_needs_wall); the code is used")
+			wants(t, r.out+r.err.Error(), writeNeedsWallLine)
 			checkGatewayRecord(t, r, "write_needs_wall")
 		})
 	}
@@ -333,11 +343,11 @@ var readRefusals = []struct {
 	name, image, wall, policy, reason, line string
 }{
 	{"no wall", "", "", "", "read_needs_wall",
-		"run this workflow with a wall: this run of workflow hello only reads the checkout, and a run with no wall mounts nothing read-only (read_needs_wall); the code is used"},
+		"The workflow hello only reads the checkout and the run has no wall,\n  so the run did not start\n  A run with no wall mounts nothing read-only; the code is used"},
 	{"setup inside", readImage, "  setup: inside\n", "", "read_needs_setup_outside",
-		"set wall.setup to outside in forager.yaml, or remove it: this run of workflow hello only reads the checkout, and setup inside runs in the agent's container, which sees the checkout read-only (read_needs_setup_outside); the code is used"},
+		"The workflow hello only reads the checkout and wall.setup is inside,\n  so the run did not start\n  A setup inside runs in the agent's container, which sees the checkout read-only; the code is used"},
 	{"nested Docker", pinnedImage, readImages, "nested", "read_needs_no_nested_docker",
-		"use an image without nested Docker: this run of workflow hello only reads the checkout, and image nested has nested Docker, so the checkout cannot be made read-only (read_needs_no_nested_docker); the code is used"},
+		"The workflow hello only reads the checkout, so the run did not start\n  The image nested runs nested Docker, and beside it the checkout cannot be made read-only; the code is used"},
 }
 
 // refusedRead runs the run of a refusal of [readRefusals] with image and wall.
@@ -447,7 +457,7 @@ func TestAGatewayTakesTheCloseOfAReadWorkflowThatCannotBeReadOnly(t *testing.T) 
 			selectsImage(t, c.policy)
 			r, _ := refusedRead(t, c.image, c.wall)
 			checkStopped(t, r, "", c.reason)
-			wants(t, r.out+r.err.Error(), "("+c.reason+"); the code is used")
+			wants(t, r.out+r.err.Error(), c.line)
 			checkGatewayRecord(t, r, c.reason)
 		})
 	}
@@ -492,7 +502,7 @@ func TestAReadWorkflowStopsOnNestedDockerHoweverItsImageIsSelected(t *testing.T)
 				}
 				r, log := readRunArgs(t, args, nil, image, readImages)
 				checkStopped(t, r, log, reason)
-				wants(t, r.out+r.err.Error(), "image nested has nested Docker")
+				wants(t, r.out+r.err.Error(), "image nested runs nested Docker")
 				if r.image != nestedEntry {
 					t.Errorf("Image returned %+v, want %+v", r.image, nestedEntry)
 				}
@@ -646,7 +656,7 @@ func TestAReadRunsSetupWorksInACopy(t *testing.T) {
 }
 
 // TestAReadRunWithAReadWriteMountStops is a read run with a read-write mount from --mount: the
-// run stops with exit 2, before the join, with the fix first. A read-only mount passes.
+// run stops with exit 2, before the join, with the cause alone. A read-only mount passes.
 func TestAReadRunWithAReadWriteMountStops(t *testing.T) {
 	mount := tempDir(t)
 	t.Run("read-write", func(t *testing.T) {
@@ -654,7 +664,7 @@ func TestAReadRunWithAReadWriteMountStops(t *testing.T) {
 		if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
 			t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
 		}
-		wants(t, r.err.Error(), "make the mount "+mount+" read-only, with :ro on --mount or in wall.mounts: ", "; the code is used")
+		wants(t, r.err.Error(), stopText("The mount "+mount+" is writable, so the run did not start", "A walled run reads the checkout or works in a copy of it, and a writable mount lets the agent write the machine's files"))
 	})
 	t.Run("read-only", func(t *testing.T) {
 		r, _ := readRunArgs(t, []string{"--mount", mount + ":ro"}, nil, readImage, "")
@@ -665,8 +675,8 @@ func TestAReadRunWithAReadWriteMountStops(t *testing.T) {
 }
 
 // TestAReadRunAtTheHomeFolderStops is a read run with no setup in a checkout that is the home
-// folder or contains it, which it would bind: the run stops before the join, with the fix
-// first. With a setup, the run binds a copy and passes.
+// folder or contains it, which it would bind: the run stops before the join, with the
+// cause alone. With a setup, the run binds a copy and passes.
 func TestAReadRunAtTheHomeFolderStops(t *testing.T) {
 	for name, below := range map[string]string{"at the home folder": "", "above the home folder": "below"} {
 		t.Run(name, func(t *testing.T) {
@@ -687,15 +697,18 @@ func TestAReadRunAtTheHomeFolderStops(t *testing.T) {
 			if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
 				t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
 			}
-			wants(t, r.err.Error(), "start the run from a folder that does not contain your home folder or qory's state directory: the folder ", "your home folder", "; the code is used")
+			// The first line wraps at ", so " when it is long, see [stopText].
+			joined := strings.ReplaceAll(r.err.Error(), ",\n  so the run", ", so the run")
+			wants(t, joined, "The folder ", "your home folder", ", so the run did not start\n  A read run binds the folder into the agent's container; the code is used")
 		})
 	}
 }
 
-// TestACodeWriteRunAtTheHomeFolderStops is a walled write run from a run code, which gets no
-// copy and binds the checkout itself, in a checkout that is the home folder or contains qory's
-// state directory: the run stops before the join, exit 2, with the fix first, and closes failed
-// with no reason and -1, as a read run at the home folder does. A checkout that is neither joins.
+// TestACodeWriteRunAtTheHomeFolderStops is a walled write run from a run code, which gets
+// no copy and binds the checkout itself, in a checkout that is the home folder or contains
+// qory's state directory: the run stops before the join, exit 2, with the cause first, and
+// closes failed with no reason and -1, as a read run at the home folder does. A checkout
+// that is neither joins.
 func TestACodeWriteRunAtTheHomeFolderStops(t *testing.T) {
 	for name, c := range map[string]struct {
 		home, cache bool
@@ -739,7 +752,9 @@ func TestACodeWriteRunAtTheHomeFolderStops(t *testing.T) {
 			if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
 				t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
 			}
-			wants(t, r.err.Error(), "start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder ", c.want, ", and a write run from a run code binds it into the agent's container; the code is used")
+			// The first line wraps at ", so " when it is long, see [stopText].
+			joined := strings.ReplaceAll(r.err.Error(), ",\n  so the run", ", so the run")
+			wants(t, joined, "The folder ", c.want, ", so the run did not start\n  A write run from a run code binds the folder into the agent's container; the code is used")
 			if want := (session.Outcome{State: "failed", ExitCode: -1}); len(r.closes) != 1 || r.closes[0] != want {
 				t.Errorf("the closes %+v, want %+v", r.closes, want)
 			}
@@ -782,8 +797,8 @@ func TestAWriteRunKeepsTheSetupContainer(t *testing.T) {
 // stops before the join, exit 1, closes failed with read_needs_setup_removed and -1, and
 // its line has the error, with a phrase in place of an error that contains a secret.
 func TestAReadRunWhoseSetupContainerStaysStops(t *testing.T) {
-	const head = "start the run again from the work item in Qory Apiary: the setup container of this read run was not removed, so a process in the container can write the checkout: "
-	const tail = " (read_needs_setup_removed); the code is used"
+	const head = "The setup container of this read run was not removed, so the session did not start\n  A process in the container could write the checkout: "
+	const tail = "; the code is used"
 	secret := "qak_" + strings.Repeat("a", 43)
 	for name, c := range map[string]struct {
 		err  error

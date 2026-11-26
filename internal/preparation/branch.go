@@ -105,6 +105,13 @@ type WorkRepository struct {
 	// DefaultBranch is the name of the repository's default branch that [RunAt] read when it
 	// fetched the repository, "" when it did not read one: a delivered output has it as pushed-base-branch.
 	DefaultBranch string
+	// ProjectBase is the merge base of the commit that [Push] pushed with the head of
+	// DefaultBranch at the forge, fetched into the checkout by its id: the commit that a pull
+	// request of the branch into the default branch shows its change from, set by
+	// [ReadProjectBase]. A rerun does not move it. It is "" before a push, with no
+	// DefaultBranch, and when every read or fetch failed; a review then counts each project
+	// file of the commit, see [projectBase].
+	ProjectBase string
 	// ReadOnly is a read target of the run's documents, which the run only reads: [Push]
 	// commits and pushes nothing in it, and the version it returns has no entry of it.
 	ReadOnly bool

@@ -1,6 +1,7 @@
 package module
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -129,6 +130,93 @@ func TestReadRecordsWhereEachReferenceIs(t *testing.T) {
 		if !reflect.DeepEqual(got[name].Paths, want) {
 			t.Errorf("%s: paths = %v, want %v", name, got[name].Paths, want)
 		}
+	}
+}
+
+// TestReadStopsAnAgentFrontmatterOver64KiB: an agent whose frontmatter has exactly 64 KiB
+// reads, and one with a byte more stops the read before its frontmatter is parsed, also
+// with CRLF line ends, a byte order mark, a fence that the parse does not read as one, or
+// a paths key or a tier that the read would parse. Paths that are no globs and a model
+// that is no tier get the error of the parse within the cap and the error of the cap over
+// it, so the cap comes before both parses.
+func TestReadStopsAnAgentFrontmatterOver64KiB(t *testing.T) {
+	front := func(size int, key string) string {
+		line := "description: "
+		return "---\n" + key + line + strings.Repeat("a", size-len(key)-len(line)) + "\n---\n\nReviews.\n"
+	}
+	// bad are keys that a parse stops at, each with a fix line of its error.
+	bad := map[string]string{
+		"paths: {a: b}\n":         "Set paths to globs",
+		"model: ${qory:nosuch}\n": "Use one of the tiers",
+	}
+	for _, key := range []string{"", "paths: [\"**\"]\n", "model: ${qory:light}\n", "paths: {a: b}\n", "model: ${qory:nosuch}\n"} {
+		dir := tree(t, map[string]string{"agents/reviewer.md": front(MaxAgentFront, key)})
+		if fix, isBad := bad[key]; !isBad {
+			if _, err := Read("core", dir, nil, ""); err != nil {
+				t.Errorf("%q, 64 KiB: %v", key, err)
+			}
+		} else if _, err := Read("core", dir, nil, ""); err == nil || !strings.HasPrefix(err.Error(), fix) {
+			t.Errorf("%q, 64 KiB: %v, want the error of the parse, %q", key, err, fix)
+		}
+		want := "Shorten the frontmatter of the agent agents/reviewer.md to 64 KiB or less, then run again\n" +
+			"  The frontmatter has 65537 bytes.\n  The agent is in module core."
+		for name, text := range map[string]string{
+			"LF":              front(MaxAgentFront+1, key),
+			"CRLF":            strings.ReplaceAll(front(MaxAgentFront+1, key), "\n", "\r\n"),
+			"byte order mark": "\ufeff" + front(MaxAgentFront+1, key),
+			// ParseDocument reads no fence in ---\r\r and decodes on to the next fence.
+			"a fence with two carriage returns": "---\nname: a\n---\r\r\n" + strings.TrimPrefix(front(MaxAgentFront+1-len("name: a\n---\r\n"), key), "---\n"),
+		} {
+			dir := tree(t, map[string]string{"agents/reviewer.md": text})
+			if _, err := Read("core", dir, nil, ""); err == nil || err.Error() != want {
+				t.Errorf("%q, %s: %v\nwant %q", key, name, err, want)
+			}
+		}
+	}
+}
+
+// TestReadStopsASkillFrontmatterOver64KiB: a SKILL.md whose frontmatter has exactly 64 KiB
+// reads, also as a note, and one with a byte more stops the read before its frontmatter is
+// parsed, with a note's keys or without. The read drops the errors of a note's parse, so
+// TestTheSkillCapComesBeforeTheParseOfTheNote shows the order.
+func TestReadStopsASkillFrontmatterOver64KiB(t *testing.T) {
+	front := func(size int, key string) string {
+		line := "description: "
+		return "---\n" + key + line + strings.Repeat("a", size-len(key)-len(line)) + "\n---\n\nNotes.\n"
+	}
+	for _, key := range []string{"name: s\n", "name: s\nnotes_for: developer\npaths: [\"**\"]\n"} {
+		dir := tree(t, map[string]string{"skills/s/SKILL.md": front(MaxAgentFront, key)})
+		if _, err := Read("core", dir, nil, ""); err != nil {
+			t.Errorf("%q, 64 KiB: %v", key, err)
+		}
+		dir = tree(t, map[string]string{"skills/s/SKILL.md": front(MaxAgentFront+1, key)})
+		want := "Shorten the frontmatter of the skill skills/s/SKILL.md to 64 KiB or less, then run again\n" +
+			"  The frontmatter has 65537 bytes.\n  The skill is in module core."
+		if _, err := Read("core", dir, nil, ""); err == nil || err.Error() != want {
+			t.Errorf("%q, over 64 KiB: %v\nwant %q", key, err, want)
+		}
+	}
+}
+
+// TestTheSkillCapComesBeforeTheParseOfTheNote reads a SKILL.md with more than 64 KiB of
+// keys of one line each. The read returns the error of the cap whether the cap comes
+// before or after the parse of the note, since the read drops the errors of that parse.
+// The parse allocates for each key, about 90,000 times for this file, and the read
+// with no parse about 200 times. A count under 2,000 shows that the cap stops the read
+// before the parse.
+func TestTheSkillCapComesBeforeTheParseOfTheNote(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("---\nname: s\n")
+	for i := 0; b.Len() < MaxAgentFront+64; i++ {
+		fmt.Fprintf(&b, "k%d: v\n", i)
+	}
+	b.WriteString("---\n\nNotes.\n")
+	dir := tree(t, map[string]string{"skills/s/SKILL.md": b.String()})
+	if _, err := Read("core", dir, nil, ""); err == nil || !strings.HasPrefix(err.Error(), "Shorten the frontmatter of the skill") {
+		t.Fatalf("the read returned %v, want the error of the cap", err)
+	}
+	if n := testing.AllocsPerRun(3, func() { _, _ = Read("core", dir, nil, "") }); n >= 2000 {
+		t.Errorf("the read allocates %.0f times, want under 2000: the note's frontmatter was parsed", n)
 	}
 }
 

@@ -220,17 +220,80 @@ func TierFront(res *compose.Result, e compose.Entry, data []byte) []byte {
 	return data
 }
 
-// AgentFront returns an agent file as a runtime that reads the file whole gets it: with
-// its tier written as [TierFront] writes it, when the agent has one, and without the
-// frontmatter key paths, which qory reads and not every runtime accepts.
-func AgentFront(res *compose.Result, e compose.Entry, data []byte) []byte {
+// AgentFront returns an agent file as the runtime rt that reads the file whole gets it:
+// with its tier written as [TierFront] writes it, when the agent has one, without the
+// frontmatter key paths, which qory reads and not every runtime accepts, with the
+// frontmatter name set to the entry's name when the file has none, and, for a reviewer
+// of a review session, see [IsReviewAgent], written so that it runs no command, as the
+// [CommandGuard] rt writes it. Claude Code registers a plugin's agent by its frontmatter
+// name, so a name other than the entry's would take the place of another agent: that is
+// an error for every agent, the reviewer or not. It also returns an error for an agent
+// whose frontmatter qory cannot read, for one that the CommandGuard rt stops, and for a
+// reviewer when rt is no CommandGuard. Only Claude Code's agent files are written
+// through it.
+func AgentFront(rt Runtime, res *compose.Result, e compose.Entry, data []byte) ([]byte, error) {
+	review := IsReviewAgent(res, e)
+	kind := AgentFile
+	if review {
+		kind = ReviewerAgent
+	}
+	// SetFront gives data with a spaced fence a second frontmatter, so check first.
+	if err := CheckFence(data, e.Path, kind); err != nil {
+		return nil, err
+	}
+	src, err := SplitAgent(data, e.Path, kind)
+	if err != nil {
+		return nil, err
+	}
+	named, err := checkName(src.Keys, e)
+	if err != nil {
+		return nil, err
+	}
+	guard, ok := rt.(CommandGuard)
+	if review && !ok {
+		return nil, fmt.Errorf("Compose the reviewer agent %s for a runtime that can deny it commands, then run again\n"+
+			"  qory cannot write this reviewer agent so that it runs no command", exports.HidePath(e.Path))
+	}
+	if ok {
+		// Check the file as written, before the edits below change it.
+		if err := guard.CheckAgent(AgentCheck{
+			Data: data, Source: src, Path: e.Path, Name: e.Name,
+			Review: review, ReviewSession: HasReviewSession(res),
+		}); err != nil {
+			return nil, err
+		}
+	}
 	if e.Tier != "" {
 		data = TierFront(res, e, data)
 	}
 	if e.Paths != nil {
 		data = module.SetFront(data, "paths", "")
 	}
-	return data
+	if review {
+		return guard.WithoutCommands(data, e.Path, e.Name)
+	}
+	if !named {
+		data = module.SetFront(data, "name", e.Name)
+		if doc, err := module.ParseDocument(data, e.Path); err != nil || doc.Front["name"] != e.Name {
+			return nil, fmt.Errorf("Fix the frontmatter of the agent %s, then run again\n  qory cannot add name: %s to it", exports.HidePath(e.Path), exports.Value(e.Name, false))
+		}
+	}
+	return data, nil
+}
+
+// checkName returns an error when keys, the frontmatter of the agent e, sets a name other
+// than the entry's, and reports whether it sets the entry's name.
+func checkName(keys map[string]any, e compose.Entry) (bool, error) {
+	v, ok := keys["name"]
+	if !ok || v == nil {
+		return false, nil
+	}
+	if s, isString := v.(string); isString && s == e.Name {
+		return true, nil
+	}
+	return false, fmt.Errorf("Set name to %s in the agent %s, or rename the file, then run again\n"+
+		"  The frontmatter has name: %s, and Claude Code registers an agent by that name, not by its file name.",
+		exports.Value(e.Name, false), exports.HidePath(e.Path), exports.Value(fmt.Sprint(v), true))
 }
 
 // Declarer is a runtime whose program reaches hosts of its own, such as its model
@@ -534,9 +597,10 @@ func CopyFile(src, dir, name string) error {
 // same way: Claude Code reads a plugin's agents directory by entry type and passes over a
 // link there, where it follows one in a checkout's .claude/agents and a plugin's skills,
 // so a linked agent registers nowhere and a copied one as <plugin>:<name>. An agent of a
-// module the home holds a copy of is read the way the copy reads its files.
-func WritePlugin(res *compose.Result, dir, manifestDir string, extra map[string]any) error {
-	if err := PlaceEntries(res, dir, PluginAddress, "skills", "commands"); err != nil {
+// module the home holds a copy of is read the way the copy reads its files. rt is the
+// runtime the agents are written for, see [AgentFront].
+func WritePlugin(rt Runtime, res *compose.Result, dir, manifestDir string, extra map[string]any) error {
+	if err := PlaceEntries(rt, res, dir, PluginAddress, "skills", "commands"); err != nil {
 		return err
 	}
 	for _, e := range res.Entries {
@@ -550,7 +614,10 @@ func WritePlugin(res *compose.Result, dir, manifestDir string, extra map[string]
 		if err != nil {
 			return err
 		}
-		data = AgentFront(res, e, []byte(res.Substitute(string(data), PluginAddress)))
+		data, err = AgentFront(rt, res, e, []byte(res.Substitute(string(data), PluginAddress)))
+		if err != nil {
+			return err
+		}
 		if err := WriteFile(dir, filepath.Join("agents", e.Name+".md"), data); err != nil {
 			return err
 		}
@@ -703,7 +770,7 @@ func BuildAt(res *compose.Result, stage, home string, runtimes ...Runtime) error
 	if err := linkModules(res, stage); err != nil {
 		return err
 	}
-	if err := PlaceEntries(res, stage, Bare, "skills", "hooks"); err != nil {
+	if err := PlaceEntries(nil, res, stage, Bare, "skills", "hooks"); err != nil {
 		return err
 	}
 	if res.Instructions != "" {

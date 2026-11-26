@@ -1553,22 +1553,25 @@ func TestARedHookWithMoreFindingsThanAVerdictHasPointsStillPostsChangesRequested
 	}
 }
 
-// TestHookCommitsAreTheWorkBranchsOrHEADBeforeTheFirstJoin: with a work branch, the hooks at the
-// end take the target's commit and those at the start the run's; with none, both take HEAD as
-// the first call read it.
+// TestHookCommitsAreTheWorkBranchsOrHEADBeforeTheFirstJoin: with a work branch, the hooks
+// at the end take the target's commit, those at the end of a review session and those at
+// the start the run's; with none, both take HEAD as the first call read it.
 func TestHookCommitsAreTheWorkBranchsOrHEADBeforeTheFirstJoin(t *testing.T) {
 	branch := &preparation.WorkBranch{Repositories: []preparation.WorkRepository{{Dir: ".", Commit: "c2", Start: "c1"}}}
 	var pinned hookPin
-	if commit, start := hookCommits(branch, "", &pinned); commit != "c2" || start != "c1" {
+	if commit, start := hookCommits(branch, "", &pinned, false); commit != "c2" || start != "c1" {
 		t.Errorf("commits %s, %s", commit, start)
+	}
+	if commit, start := hookCommits(branch, "", &pinned, true); commit != "c1" || start != "c1" {
+		t.Errorf("a review session's commits %s, %s, want the run's start c1", commit, start)
 	}
 	repo := workspaceRepo(t)
 	head := hookGit(t, repo, "rev-parse", "HEAD")
-	if commit, start := hookCommits(nil, repo, &pinned); commit != head || start != head {
+	if commit, start := hookCommits(nil, repo, &pinned, false); commit != head || start != head {
 		t.Errorf("commits %s, %s, want %s", commit, start, head)
 	}
 	hookGit(t, repo, "commit", "--quiet", "--allow-empty", "-m", "the agent's")
-	if commit, _ := hookCommits(nil, repo, &pinned); commit != head {
+	if commit, _ := hookCommits(nil, repo, &pinned, false); commit != head {
 		t.Errorf("a later session's commit %s, want %s", commit, head)
 	}
 	// No git reads HEAD, so a configuration that git cannot read changes nothing.
@@ -1576,7 +1579,7 @@ func TestHookCommitsAreTheWorkBranchsOrHEADBeforeTheFirstJoin(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, ".git", "config"), []byte("[not a configuration\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if commit, _ := hookCommits(nil, repo, new(hookPin)); commit != head {
+	if commit, _ := hookCommits(nil, repo, new(hookPin), false); commit != head {
 		t.Errorf("commit %q, want %s", commit, head)
 	}
 }
@@ -1588,11 +1591,11 @@ func TestAHEADThatCouldNotBeReadMakesTheHooksRed(t *testing.T) {
 	empty := t.TempDir()
 	hookGit(t, empty, "init", "--quiet")
 	var pinned hookPin
-	if commit, start := hookCommits(nil, empty, &pinned); commit != "" || start != "" {
+	if commit, start := hookCommits(nil, empty, &pinned, false); commit != "" || start != "" {
 		t.Errorf("commits %q, %q, want none", commit, start)
 	}
 	hookGit(t, empty, "commit", "--quiet", "--allow-empty", "-m", "the agent's")
-	if commit, _ := hookCommits(nil, empty, &pinned); commit != "" {
+	if commit, _ := hookCommits(nil, empty, &pinned, false); commit != "" {
 		t.Errorf("a later session's commit %s, want none", commit)
 	}
 	hc := newHookCase(t, map[string]string{"scripts/check.sh": "#!/bin/sh\nexit 0\n"}, checkHook(0, "check.sh", "scripts/check.sh"))

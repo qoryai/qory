@@ -90,7 +90,7 @@ func (cursor) Reserved() []render.Reserved {
 // contains any. The target model reaches no file, because Cursor keeps the model in a
 // global CLI setting.
 func (cursor) Render(res *compose.Result, dir, home string) error {
-	if err := render.PlaceEntries(res, dir, render.Bare, "hooks"); err != nil {
+	if err := render.PlaceEntries(cursor{}, res, dir, render.Bare, "hooks"); err != nil {
 		return err
 	}
 	if err := render.WriteAgents(res, render.Bare, dir, "agents", ".md", "name", "description", "model"); err != nil {
@@ -120,7 +120,7 @@ func (cursor) Render(res *compose.Result, dir, home string) error {
 // [render.Addresser] and moves these two calls to it.
 func renderPlugin(res *compose.Result, dir string) error {
 	plugin := filepath.Join(dir, Plugin)
-	if err := render.PlaceEntries(res, plugin, render.Bare, "skills"); err != nil {
+	if err := render.PlaceEntries(cursor{}, res, plugin, render.Bare, "skills"); err != nil {
 		return err
 	}
 	if err := render.WriteAgents(res, render.Bare, plugin, "agents", ".md", "name", "description", "model"); err != nil {

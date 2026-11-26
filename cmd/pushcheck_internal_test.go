@@ -826,3 +826,39 @@ func TestALaterSessionsPushChecksReplaceTheChecksOfTheSessionBefore(t *testing.T
 		t.Errorf("next with no checks: %v, checker %+v", e, empty.current())
 	}
 }
+
+// TestTheVerdictRuleOfARunFollowsTheSession is the verdict rule of a run whose check has
+// no checker: it is off until limitVerdicts, stops every verdict while no session runs,
+// follows the judges of the session that joins, and is off again once the join returns.
+func TestTheVerdictRuleOfARunFollowsTheSession(t *testing.T) {
+	verdict := func(v string) session.RunAPIRequest {
+		return session.RunAPIRequest{Path: "/verdict", Body: []byte(`{"verdict":"` + v + `"}`)}
+	}
+	other := session.RunAPIRequest{Path: "/pushed-commits", Body: []byte(`{}`)}
+	refused := func(what string, p *runPushChecks, req session.RunAPIRequest, want bool) {
+		t.Helper()
+		r, err := p.runAPICheck(context.Background(), req)
+		if err != nil || (r != nil) != want {
+			t.Errorf("%s: got %+v, %v, want refusal %t", what, r, err, want)
+		}
+		if r != nil && (r.Status != http.StatusUnprocessableEntity || r.Code != "push_check_failed") {
+			t.Errorf("%s: refusal is %d %s", what, r.Status, r.Code)
+		}
+	}
+	p := &runPushChecks{}
+	refused("no rule", p, verdict("passed"), false)
+	p.limitVerdicts()
+	refused("no session, passed", p, verdict("passed"), true)
+	refused("no session, escalate", p, verdict("escalate"), true)
+	refused("no session, another POST", p, other, false)
+	p.joining(false)
+	refused("judges false, passed", p, verdict("passed"), true)
+	refused("judges false, escalate", p, verdict("escalate"), false)
+	refused("judges false, another POST", p, other, false)
+	p.joined()
+	refused("after the join, escalate", p, verdict("escalate"), true)
+	p.joining(true)
+	refused("judges true, passed", p, verdict("passed"), false)
+	p.joined()
+	refused("after the join of a session that judges", p, verdict("passed"), true)
+}

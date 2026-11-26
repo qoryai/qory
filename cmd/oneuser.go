@@ -33,6 +33,17 @@ var qoryUID = os.Geteuid
 // digits, with the uid.
 var numericUserShape = regexp.MustCompile(`^([0-9]+)(:[0-9]+)?$`)
 
+// wallUserUID is the uid of a wall.user that matches [numericUserShape], and false for any
+// other value and for a uid that does not fit an int.
+func wallUserUID(user string) (int, bool) {
+	m := numericUserShape.FindStringSubmatch(user)
+	if m == nil {
+		return 0, false
+	}
+	uid, err := strconv.Atoi(m[1])
+	return uid, err == nil
+}
+
 // oneUser stops a walled run, before any container of it starts, when qory runs as root or
 // as another uid than the wall's user; the error closes the run machine_setup_invalid. An
 // empty wall.user is qory's uid:gid, and a wall.user that does not match [numericUserShape],
@@ -44,8 +55,8 @@ func oneUser(w wall.Wall, fromCode bool) error {
 	if d, ok := w.(*wall.Docker); ok && d.User != "" {
 		user, same = integration.Printable(exports.Value(d.User, false)), false
 		if m := numericUserShape.FindStringSubmatch(d.User); m != nil {
-			n, err := strconv.Atoi(m[1])
-			user, same = "uid "+integration.Printable(m[1]), err == nil && n == uid
+			n, ok := wallUserUID(d.User)
+			user, same = "uid "+integration.Printable(m[1]), ok && n == uid
 		}
 	}
 	if uid != 0 && same {

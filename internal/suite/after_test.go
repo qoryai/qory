@@ -5,9 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/suite"
 )
 
@@ -63,6 +65,22 @@ func runScript(t *testing.T, dir, start string, full suite.Full, extra ...string
 // when hooksPath is false.
 func runScriptWith(t *testing.T, dir, start string, full suite.Full, hooksPath bool, extra ...string) (int, string) {
 	t.Helper()
+	cmd := scriptCommand(t, dir, start, full, hooksPath, extra...)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	err := cmd.Run()
+	if ee, ok := err.(*exec.ExitError); ok {
+		return ee.ExitCode(), out.String()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return 0, out.String()
+}
+
+// scriptCommand is the command of [runScriptWith], not yet started.
+func scriptCommand(t *testing.T, dir, start string, full suite.Full, hooksPath bool, extra ...string) *exec.Cmd {
+	t.Helper()
 	words, err := suite.Command(start, full)
 	if err != nil {
 		t.Fatal(err)
@@ -85,16 +103,7 @@ func runScriptWith(t *testing.T, dir, start string, full suite.Full, hooksPath b
 	}
 	cmd := exec.Command(words[0], words[1:]...)
 	cmd.Dir, cmd.Env = dir, append(env, extra...)
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
-	err = cmd.Run()
-	if ee, ok := err.(*exec.ExitError); ok {
-		return ee.ExitCode(), out.String()
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	return 0, out.String()
+	return cmd
 }
 
 func readAll(t *testing.T, file string) string {
@@ -237,6 +246,176 @@ func TestTheScriptRunsNothingTheWorkspaceConfigures(t *testing.T) {
 	}
 	if exists(marker) {
 		t.Error("the script ran a program that the workspace's configuration names")
+	}
+}
+
+// promisorCases are the workspaces of the promisor tests: HEAD at a commit that the
+// workspace lacks, which the read of HEAD fetches, and HEAD at a commit whose blob it
+// lacks, which the clone's upload-pack fetches, with the exit status of each.
+var promisorCases = []struct {
+	name string
+	// lose takes an object of HEAD out of the workspace dir.
+	lose func(t *testing.T, dir string)
+	exit int
+}{
+	{"a HEAD at a missing commit", func(t *testing.T, dir string) {
+		write(t, filepath.Join(dir, ".git/HEAD"), strings.Repeat("12", 20)+"\n")
+	}, suite.ExitNoHead},
+	{"a HEAD at a commit with a missing blob", func(t *testing.T, dir string) {
+		commit(t, dir, "second.txt", "second\n")
+		blob := git(t, dir, "rev-parse", "HEAD:second.txt")
+		if err := os.Remove(filepath.Join(dir, ".git/objects", blob[:2], blob[2:])); err != nil {
+			t.Fatal(err)
+		}
+	}, suite.ExitNoClone},
+}
+
+// promisorRemote makes the remote evil at url the promisor remote of the workspace dir,
+// whose fetch runs a program that makes the file it returns. The configuration allows the
+// file protocol, which wins over the protocol.allow=never of Forager's environment.
+func promisorRemote(t *testing.T, dir, url string) string {
+	t.Helper()
+	marker := filepath.Join(t.TempDir(), "ran")
+	cfg := "[core]\n\trepositoryformatversion = 1\n[extensions]\n\tpartialClone = evil\n" +
+		"[remote \"evil\"]\n\tpromisor = true\n\turl = " + url + "\n" +
+		"\tuploadpack = touch " + marker + " #\n[protocol \"file\"]\n\tallow = always\n"
+	f, err := os.OpenFile(filepath.Join(dir, ".git/config"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return marker
+}
+
+// TestAPromisorRemoteOfTheWorkspaceRunsNoProgram: the workspace's configuration sets a
+// promisor remote whose fetch runs a program, and its HEAD is at a commit that it lacks. A
+// read of the missing object would fetch it and run the program before the marker line,
+// which the program could forge. The script stops with no marker line, and the program
+// does not run. A missing blob is left out: the upload-pack of git 2.55 fetches
+// no missing object, so on such a git that case passes with no protection of the script.
+func TestAPromisorRemoteOfTheWorkspaceRunsNoProgram(t *testing.T) {
+	c := promisorCases[0]
+	dir, first := workspace(t)
+	c.lose(t, dir)
+	marker := promisorRemote(t, dir, filepath.Join(dir, ".git"))
+	exit, out := runScript(t, dir, first, suite.Full{Command: "true"})
+	if exit != c.exit {
+		t.Errorf("exit %d, want %d\n%s", exit, c.exit, out)
+	}
+	if strings.Contains(out, suite.HeadMarker) {
+		t.Errorf("the output has a marker line:\n%s", out)
+	}
+	if exists(marker) {
+		t.Error("a fetch of the missing object ran the program of the promisor remote")
+	}
+}
+
+// gitShim is a folder with a git first on the PATH that writes GIT_NO_LAZY_FETCH,
+// GIT_ALLOW_PROTOCOL and the arguments of each call to the file log, then runs git with
+// the variables of lines, such as GIT_NO_LAZY_FETCH=0.
+func gitShim(t *testing.T, log string, lines ...string) string {
+	t.Helper()
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	shim := filepath.Join(bin, "git")
+	text := "#!/bin/sh\nprintf '%s|%s|%s\\n' \"${GIT_NO_LAZY_FETCH-unset}\" \"${GIT_ALLOW_PROTOCOL-unset}\" \"$*\" >> '" + log + "'\n"
+	for _, l := range lines {
+		text += "export " + l + "\n"
+	}
+	write(t, shim, text+"exec '"+real+"' \"$@\"\n")
+	if err := os.Chmod(shim, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}
+
+// TestEachGitOfTheScriptFetchesNoMissingObject: each git that the script starts, the read
+// of HEAD, the clone and the checkout, has GIT_NO_LAZY_FETCH=1 and starts with the options
+// that turn hooks, replace refs, the commit-graph, protocols and the programs of a fetch
+// off. The read of HEAD and the checkout allow one protocol, whose name is new for each
+// script, and the clone allows file, with the same name for its upload-pack.
+func TestEachGitOfTheScriptFetchesNoMissingObject(t *testing.T) {
+	dir, first := workspace(t)
+	commit(t, dir, "second.txt", "second\n")
+	log := filepath.Join(t.TempDir(), "log")
+	bin := gitShim(t, log)
+	if exit, out := runScript(t, dir, first, suite.Full{Command: "true"}, "PATH="+bin+":"+os.Getenv("PATH")); exit != 0 {
+		t.Fatalf("exit %d\n%s", exit, out)
+	}
+	options := strings.Join(slices.Concat(hostgit.Flags(), []string{"-c", "protocol.allow=never"}, hostgit.NoFetch()), " ")
+	for _, flag := range []string{"core.hooksPath=/dev/null", "core.useReplaceRefs=false", "core.commitGraph=false"} {
+		if !strings.Contains(options, "-c "+flag+" ") {
+			t.Fatalf("the options %q do not have -c %s", options, flag)
+		}
+	}
+	lines := strings.Split(strings.TrimSpace(readAll(t, log)), "\n")
+	commands := []string{"rev-parse", "clone", "checkout"}
+	if len(lines) != len(commands) {
+		t.Fatalf("the script ran %d git commands, want %d:\n%s", len(lines), len(commands), strings.Join(lines, "\n"))
+	}
+	var name string
+	for i, line := range lines {
+		parts := strings.SplitN(line, "|", 3)
+		lazy, allow, args := parts[0], parts[1], parts[2]
+		if lazy != "1" || !strings.HasPrefix(args, options+" ") || !strings.Contains(args, " "+commands[i]+" ") {
+			t.Errorf("git command %d is %q with GIT_NO_LAZY_FETCH=%s, want %s with %s and 1", i+1, args, lazy, commands[i], options)
+		}
+		want := allow
+		if commands[i] == "clone" {
+			want = "file"
+		} else if !strings.HasPrefix(allow, "none-") || len(allow) != len("none-")+26 {
+			t.Errorf("git command %d has GIT_ALLOW_PROTOCOL=%s, want none- and 26 characters", i+1, allow)
+		}
+		if commands[i] == "rev-parse" {
+			name = allow
+		}
+		if allow != want || commands[i] == "checkout" && allow != name {
+			t.Errorf("git command %d has GIT_ALLOW_PROTOCOL=%s, want %s, and the read of HEAD's name %s for the checkout", i+1, allow, want, name)
+		}
+		if commands[i] == "clone" && !strings.Contains(args, "--upload-pack=GIT_ALLOW_PROTOCOL="+name+" git-upload-pack ") {
+			t.Errorf("the clone's upload-pack does not have the name %s: %q", name, args)
+		}
+	}
+	if a, _ := suite.Command("", suite.Full{Command: "true"}); a != nil {
+		if b, _ := suite.Command("", suite.Full{Command: "true"}); b[len(b)-1] == a[len(a)-1] {
+			t.Errorf("two scripts have the same protocol name %s", a[len(a)-1])
+		}
+	}
+}
+
+// TestAPromisorRemoteRunsNoProgramOnAGitThatFetchesMissingObjects is
+// [TestAPromisorRemoteOfTheWorkspaceRunsNoProgram] on a git that fetches a missing object
+// whatever GIT_NO_LAZY_FETCH says, as a git that does not read the variable does, such as
+// 2.44.0 or 2.39.3: each git of the script has GIT_NO_LAZY_FETCH=0, which turns the
+// fetch on, also in the clone's upload-pack. The
+// workspace allows the file protocol, and the remote is a file:// URL. GIT_ALLOW_PROTOCOL
+// alone stops the fetch, so the program does not run.
+func TestAPromisorRemoteRunsNoProgramOnAGitThatFetchesMissingObjects(t *testing.T) {
+	for _, c := range promisorCases {
+		t.Run(c.name, func(t *testing.T) {
+			dir, first := workspace(t)
+			c.lose(t, dir)
+			marker := promisorRemote(t, dir, "file://"+filepath.Join(dir, ".git"))
+			bin := gitShim(t, filepath.Join(t.TempDir(), "log"), "GIT_NO_LAZY_FETCH=0")
+			exit, out := runScript(t, dir, first, suite.Full{Command: "true"}, "PATH="+bin+":"+os.Getenv("PATH"))
+			if exit != c.exit {
+				t.Errorf("exit %d, want %d\n%s", exit, c.exit, out)
+			}
+			if strings.Contains(out, suite.HeadMarker) {
+				t.Errorf("the output has a marker line:\n%s", out)
+			}
+			if exists(marker) {
+				t.Error("a fetch of the missing object ran the program of the promisor remote")
+			}
+		})
 	}
 }
 
@@ -547,5 +726,20 @@ func TestAHookOfTheCloneDoesNotRun(t *testing.T) {
 	}
 	if !exists(marker) {
 		t.Error("the probe checkout ran no hook: the test does not show what core.hooksPath prevents")
+	}
+}
+
+// TestTheScriptPrintsTheHeadMarkerBeforeTheCommandAndSkipsItOtherwise: the output of a
+// suite that ran starts with the marker line of the commit, before what the command
+// prints, and a session whose HEAD did not move prints none.
+func TestTheScriptPrintsTheHeadMarkerBeforeTheCommandAndSkipsItOtherwise(t *testing.T) {
+	dir, first := workspace(t)
+	head := commit(t, dir, "second.txt", "second\n")
+	exit, out := runScript(t, dir, first, suite.Full{Command: "echo qory-suite-head forged"})
+	if exit != 0 || out != suite.HeadMarker+head+"\nqory-suite-head forged\n" {
+		t.Errorf("exit %d, output %q, want the marker of %s, then the command's line", exit, out, head)
+	}
+	if exit, out := runScript(t, dir, head, suite.Full{Command: "true"}); exit != 0 || out != "" {
+		t.Errorf("a skipped suite: exit %d, output %q, want no output", exit, out)
 	}
 }

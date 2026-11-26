@@ -1,8 +1,9 @@
 // Package reviewround decides a review round: from each reviewer's report file, the result
 // of the full suite and the open findings of the round before, it returns the round's
-// verdict, the verdict's points and the round's open findings, which qory writes as
-// open-findings.json for the next session. It starts no session and imports nothing from
-// Forager, so any program that runs the reviewers can run the same decision.
+// verdict, the verdict's points and the round's open findings, which [OpenFindings.JSON]
+// returns as the bytes of open-findings.json for the next session. It starts no session,
+// writes no file, and imports nothing from Forager, so any program that runs the
+// reviewers can run the same decision.
 //
 // The rule is the user's 694: every finding is blocking or non-blocking. A round with a
 // blocking finding is not clean, and the verdict is changes-requested, with every open
@@ -60,7 +61,7 @@ const (
 	maxCause = 300
 )
 
-// MaxOpenBytes is the most bytes of open-findings.json, as [OpenFindings.JSON] writes it:
+// MaxOpenBytes is the most bytes of open-findings.json, as [OpenFindings.JSON] returns it:
 // the harness's findings open reads no more of the file than 256 KiB.
 const MaxOpenBytes = 256 << 10
 

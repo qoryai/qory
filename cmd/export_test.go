@@ -332,6 +332,16 @@ func SetPushTimes(limit, signal time.Duration) func() {
 	return func() { pushTimes = before }
 }
 
+// SetProjectBaseRead makes the push step call read in place of the read of the project
+// base, with the step's context, and returns what restores the read.
+func SetProjectBaseRead(read func(ctx context.Context)) func() {
+	before := readProjectBase
+	readProjectBase = func(ctx context.Context, _ string, _ []string, _ *preparation.WorkBranch, _ proxygit.Proxy) {
+		read(ctx)
+	}
+	return func() { readProjectBase = before }
+}
+
 // ArtifactsForCheck is the fetch of a push check through the run API at base.
 func ArtifactsForCheck(base string) (func(ctx context.Context, dir string, types []string) error, error) {
 	client, err := runapi.New(base, http.DefaultClient)

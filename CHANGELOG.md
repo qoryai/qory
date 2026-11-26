@@ -18,27 +18,32 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- `contracts/harness/v1/path-cases.json`: 50 cases of a `paths` glob against a changed
+  file, that every matcher of `paths` must pass.
 - `wall.step_file_env` in `forager.yaml` lists the variables of a CI job, such as
   `CI_STEP_ENV_FILE`, that point at its step files. `qory run` stops a walled run before
   the agent starts when a mount is or contains the file such a variable points at: the
-  mount contains one of Forager's files (`mount_contains_forager_files`). It does the same for `GITHUB_ENV`,
-  `GITHUB_PATH`, `GITHUB_OUTPUT`, `GITHUB_STATE` and `GITHUB_STEP_SUMMARY`. The list adds
-  to those five and never removes one. Every command that reads `forager.yaml` stops at
-  an entry that is not a variable's name.
+  mount contains one of Forager's files (`mount_contains_forager_files`). It does the
+  same for `GITHUB_ENV`, `GITHUB_PATH`, `GITHUB_OUTPUT`, `GITHUB_STATE` and
+  `GITHUB_STEP_SUMMARY`. The list adds to those five and never removes one. Every command
+  that reads `forager.yaml` stops at an entry that is not a variable's name.
 - `qory run` from a run code runs the workflow hooks of each session, as `hooks.json` lists
   them: the hooks at the session's end after the agent exited, when the session succeeded or
   its work is pushed, and before the push step; the hooks at the start of session 1 before the
   setup commands. A hook at the start of a later session of a shared run is red and does not
   run: Forager has no pause for the setup container that runs then. Each program hook runs
-  from the file that the session's start commit has, in a container of the run's image with
-  no network, a read-only `.git` and `.qory`, with the read targets under `.qory`, for at most
-  its timeout; qory restores the checkout after each hook. No hook runs, and each is red, in a
-  checkout with a repository that is no submodule entry and that git does not ignore. A hook
-  that leaves one ends the run with no push. So does a hook that changes a submodule entry's
-  folder, or leaves a pipe, a socket or a device in a folder that git does not ignore. So does
-  one that changes a `.gitattributes` in an ignored folder with tracked files. A red required
-  hook turns the verdict into `changes-requested`, and an `escalate` stays `escalate`. An agent
-  hook and a review hook do not run and are red, with the line
+  from the file that the session's start commit has, and a hook at the start of session 1
+  or at the end of a review session from the file of the run's start commit, so a program
+  that a session before the review changed does not run. It runs in a container of the
+  run's image with no network, a read-only `.git` and `.qory`, with the read targets under
+  `.qory`, for at most its timeout; qory restores the checkout after each hook. No hook
+  runs, and each is red, in a checkout with a repository that is no submodule entry and
+  that git does not ignore. A hook that leaves one ends the run with no push. So does a
+  hook that changes a submodule entry's folder, or leaves a pipe, a socket or a device in a
+  folder that git does not ignore. So does one that changes a `.gitattributes` in an
+  ignored folder with tracked files. A red required hook turns the verdict into
+  `changes-requested`, and an `escalate` stays `escalate`. An agent hook and a review hook
+  do not run and are red, with the line
   `Agent hook <name> did not run: agent hooks are not built yet.` or
   `Review hook <name> did not run: review hooks are not built yet.` Every hook of a run with
   no wall is red. A stop while a hook runs posts no verdict. Each hook has a record in the
@@ -47,14 +52,90 @@ release may change what an existing document does, and states it under Upgrading
   secret that crosses the cut leaves none of its bytes in the log, unless the secret's text
   has a run of `*`.
 - A workflow entry of a stack takes `review_group`, the name of a group role:
-  `workflows: {review-changes: {review_group: reviewers}}`. The value declares the group
-  role whose members review the work in a session of the workflow. A value that is no
-  string or no group role name stops the compose with exit 2, and so does a group that
-  no module declares or that has no member. `qory run` does not read the key.
+  `workflows: {review-changes: {review_group: reviewers}}`. A review session of the
+  workflow expects a report from the members of the group `agents/<review_group>`. A
+  value that is no string or no group role name stops the compose with exit 2, and so
+  does a group that no module declares or that has no member.
+  The agent files of the members lose Bash and Agent on Claude Code: qory writes their
+  frontmatter itself, with `tools` without any Bash entry and `disallowedTools` with
+  `Bash` and `Agent` first. The build stops, with `Fix the frontmatter of the reviewer
+  agent <path>, then run again` on line 1, for a file whose line 1 is not exactly `---`
+  and a line break, so also for a file with no frontmatter, a byte order mark or CRLF
+  line ends; a frontmatter with a byte that is not printable ASCII or a line break, such
+  as a tab or `é`; a `---` between its fences, a `...` line, a merge key `<<` or a flow
+  mapping; a `*` anywhere in `tools` or `disallowedTools`; an entry of those keys that is
+  not a word of letters, digits and `_` that starts with a letter, or such a word with one
+  `(...)` that has no comma, space or parenthesis in it, so `Bash(git log *)` stops; a
+  value that is not a string, a bool, an int or a list of them; a string with a character
+  outside printable ASCII other than `\n`, `\t` and `\r`, such as `"\u00e9"`; an int or
+  bool written in another form than `true`, `false` or the decimal number, such as `007`,
+  `0x1F` or `True`, and a plain `yes`, `no`, `on`, `off`, `y` or `n`; or a `tools` key that
+  lists only Bash. The step that writes the agent files of Claude Code stops with `Compose
+  the reviewer agent <path> for a runtime that can deny it commands, then run again` on
+  line 1 when it writes a member for a runtime that cannot deny the agent its commands.
+  The frontmatter of a member takes only the keys `name`, `description`, `model`,
+  `effort`, `maxTurns`, `color`, `tools` and `disallowedTools`; each value stays as the
+  file has it. The source file may also set `paths`, which qory reads and does not pass
+  on to the file it writes. Any other key, such as `permissionMode`, `hooks`,
+  `mcpServers` or `skills`, stops the build with `Remove the key <key> from the reviewer
+  agent <path>, then run again` on line 1 and the keys on line 2.
+  In a stack with a `review_group`, the `permissionMode` of every agent on Claude Code must
+  be missing, `default`, `dontAsk` or `plan`, because a review session can start any agent.
+  Any other value, a null or a value that is no string included, stops the build with `Set
+  permissionMode to default, dontAsk or plan in the agent <path>, or remove it, then run
+  again`. So does a line with the key `permissionMode` at any indent with another value,
+  with `Set line <n> to permissionMode: default, dontAsk or plan in the agent <path>, then
+  run again`. In the frontmatter of any agent of such a stack, a character other than a
+  printable one, a tab, a line feed or a carriage return before a line feed, such as
+  U+2028, U+0085, a byte order mark or U+200B, stops the build with `Remove the character
+  U+<hex> from line <n> of the agent <path>, then run again`, and so does a byte that is
+  not UTF-8. One byte order mark before the `---` of line 1 stays allowed.
+  In the same stack, the frontmatter of every skill and command on Claude Code, notes
+  included, sets only `name`, `description`, `argument-hint`, `paths`, `notes_for` and
+  `allowed-tools`, and `allowed-tools` lists only `Read`, `Grep` and `Glob`: Claude Code
+  adds those tools to the allow rules of the session once the skill runs. Any other key,
+  such as `context`, `agent` or `hooks`, stops the build with `Remove the key <key> from
+  the skill <path>, then run again`, another tool with `Set allowed-tools to Read, Grep or
+  Glob in the skill <path>, or remove it, then run again`, and a line with
+  `allowed-tools`, `context`, `agent` or `hooks` at any indent with `Remove the key <key>
+  from line <n> of the skill <path>, then run again`. The text of `allowed-tools` has only
+  those tools, commas and spaces, or lines of `- <tool>`; a `#`, a quote, a bracket or any
+  other character stops the build with `Write allowed-tools on line <n> of the skill
+  <path> as Read, Grep or Glob, then run again`, and a `---` in the frontmatter with
+  `Remove the --- from the frontmatter of the skill <path>, then run again`. An explicit
+  key with `? ` stops the build with `Remove the ? from line <n> of the skill <path>, then
+  run again`, a frontmatter in `{ }` or `[ ]` with `Write the frontmatter of the skill
+  <path> with one key on each line, not in { } or [ ], then run again`, a line that
+  starts with `...`, which ends the YAML document, with `Remove the ... from line <n> of
+  the skill <path>, then run again`, a character other than a printable one, a tab, a
+  line feed or a carriage return before a line feed, as for an agent, with `Remove the
+  character U+<hex> from line <n> of the skill <path>, then run again`, and an
+  `allowed-tools` that qory reads from no plain line with `Write allowed-tools: once,
+  plain, at the start of a line in the skill <path>, then run again`. `name` and
+  `description` are strings, and `argument-hint`, `paths` and `notes_for` strings or lists
+  of strings, so `argument-hint: [message]` builds; a value of another type, such as a
+  map, stops the build with `Set <key> to a string in the skill <path>, then run again`.
+  A command gets `command` in place of `skill`.
 - A workflow entry of a stack takes `judges`, a boolean: `workflows: {implement-changes:
-  {judges: false}}`. `false` declares that a later workflow in the loop judges the work
-  of the workflow's session. A value other than `true` or `false`, a quoted `"no"`
-  included, stops the compose with exit 2. `qory run` does not read the key.
+  {judges: false}}`. `false` says that a later workflow in the loop judges the work of
+  the workflow's session; a value other than `true` or `false`, a quoted `"no"` included,
+  stops the compose with exit 2.
+- A walled run from a run code checks the verdicts that a program behind the wall posts,
+  when a workflow of the run has `judges: false` and in every run of several sessions. A
+  session with `judges: false` that posts `passed` or `changes-requested`, to `/verdict`
+  or in a push of the type `verdict`, gets 422 `push_check_failed` with `Record escalate or
+  no verdict: the next workflow in the loop judges this work.`; `escalate` passes. While no
+  session runs, such as in a setup command or between two sessions, every verdict gets
+  422 with `Post the verdict from a session of the run.`, `escalate` too. For such a
+  session and in that state, a push body that has a member twice or is no push gets 422,
+  and so does a path that spells `/verdict` or `/artifacts` with a trailing or doubled
+  slash: line 1 is `Send the POST to the run's /verdict or /artifacts path.` and line 2
+  is `The path of the POST is another spelling of it.` Forager cuts a query and decodes
+  percent-escapes before it passes the path, so only the slash spellings reach the check;
+  the check stops the other spellings too. A workflow with no entry in the stack's table
+  judges. A push check that a home declares stops a path that spells `/artifacts` in
+  another way with the same 422. See docs/run.md, §The verdict of a session that does
+  not judge.
 - Before the push after a session of a write run from a run code, `qory run` checks the
   target's commits when its head is past the session's start, on a fresh clone
   that has no ref or hook the agent wrote. For a workflow with a `plan`, the scope check
@@ -71,7 +152,114 @@ release may change what an existing document does, and states it under Upgrading
   folder. A fetch that fails stops the session with `run_api_failed`. `inputs.json` has
   the snapshot's folder in `qory.start_artifacts` and the start commit of each repository
   the run may push, not a read target, in `qory.start_commits`. Session 1 writes
-  `inputs.json` after the branch switch and the setup.
+  `inputs.json` after the branch switch and the setup. A session whose workflow has a
+  `review_group` gets the newest version of every
+  plan type that any workflow of the stack declares in `plan`, not only the plan type of
+  the session's workflow.
+- `qory.workflow` in the `inputs.json` of a session of a run from a run code: `{"judges":
+  false}` when the session's workflow has `judges: false`, `{"judges": true}` otherwise. A
+  run with no run code has no `workflow` member. See docs/run.md, §What the run takes
+  from the response.
+- A later session of a run of several sessions whose workflow declares `access: read` and
+  a `review_group` joins a run at `write` as a review join: the workspace is read-only for
+  that join, the agent's arguments end with
+  `--tools Read,Grep,Glob,Skill,Write,Agent,Bash`, the Claude Code settings allow four Bash
+  rules (the checks script, `<helper> run verdict *`, `<helper> work-item show *` and
+  `<helper> artifact pull *`), a Read rule for the copy, the `review-session/` inputs
+  folder, the reports folder and `/tmp/qory-artifacts`, which are also in
+  `permissions.additionalDirectories`, and an Edit rule for the reports folder alone, with
+  no rule for `destination`, `artifact push`, other `work-item` commands or an Edit of
+  `/tmp/qory-artifacts`, and qory removes the setup container first. The settings also
+  set `disableSkillShellExecution` to `true`, over a `false` of the harness, so a
+  reviewer that loads a skill runs none of the skill's `` !`command` `` lines: Claude
+  Code checks those lines against the Bash rules of the session, also for an agent with
+  no Bash. They set `disableBundledSkills` to `true` and `disableAutoMode` and
+  `permissions.disableBypassPermissionsMode` to `disable`, over the values of the
+  harness. The join has no
+  `qory.outbox`. The session has no push step, stores no output, and runs no full suite.
+  The next session joins writable again and pushes. Any other later
+  session whose access differs from the run's level, including a read session in a run at
+  `write-no-push`, still stops the run. See docs/run.md, §A review session in a run that
+  writes.
+- A review join reads a fresh copy of the commit that the run pushed, in place of the
+  checkout: qory copies the commit's files, with no `.git`, and the diff from the run's
+  start commit, in a container of the run's image, and checks them against the commit's
+  ids. The join's working folder is an empty folder that qory makes, bound read-only, so
+  the runtime finds none of the commit's `.claude`, `CLAUDE.md` or `.mcp.json` files
+  there, and the copy is a second read-only mount. The join gets a new, empty reports
+  folder, writable and owned by qory's user, whose uid is the wall user's. The three
+  folders are named by the session's number. qory removes the copy and the working folder
+  before the next session, and the reports folder when the run ends. `inputs.json` has
+  `qory.review_session` with `commit`, `commit_folder`, the path of the copy, `diff`,
+  `reports`, `suite_result`, and `build_report` when the stage has a `build-report`
+  version. The round comes from the run API's `stage.round`. The session does not start,
+  and the run closes `failed`, when its runtime, image or wall cannot run a review
+  session, or when it has no suite result file of the pushed commit, no round, or a wall
+  user whose uid is not qory's. These stops show the cause alone and end with
+  `; the code is used`. The stops of a run with no wall, with `wall.setup: inside` or on
+  an image with nested Docker end with `so the review did not start` in a review join, and
+  with `so the run did not start` in a read run. See docs/run.md, §A review session in a
+  run that writes.
+- A review join stops before the session when the change from the project base adds,
+  changes or removes a project file of the runtime, a `.claude` folder or anything under
+  it, a `.mcp.json`, and the instruction files `CLAUDE.md`, `CLAUDE.local.md` and
+  `AGENTS.md` for Claude Code, at any depth and in any case: the session could load such a
+  file. The project base is the merge base of the pushed head with the head of the
+  repository's default branch at the forge: the commit that a pull request into the
+  default branch shows its change from. The push step reads it after each push, once it
+  has reported the push, and after a session with no new commit when no earlier push of
+  the run read one. It fetches the project base into the checkout by its id. The copy
+  checks the project base's commit, and that its file list builds its tree, as it checks
+  the start commit. Before any check, the copy puts the objects of the pushed head, the
+  start commit and the project base into a new git folder with no alternates, through `git
+  pack-objects` and `git index-pack`, which hashes each object, and reads only that
+  folder: an object of the checkout whose bytes do not have its id, in a loose file or in
+  one of two packs that list one id, stops the copy. A rerun does not move the project
+  base, so a project file that an earlier run of the work item added still stops the
+  review. A file that is the same at the project base does not stop it. With no default
+  branch, or when no read of the run found a base, the review counts each such file of the
+  commit, and a commit with none goes on to the review. qory reads no target branch of a
+  pull request: the default branch is the one that `git ls-remote --symref` shows for the
+  repository's `HEAD` when the run fetches it. Line 1 is `Move the change to project files
+  out of the reviewed change in the Build session`. Line 2 says that the review did not
+  start, since the session could load the settings and tools of those paths, at most five,
+  each cut at 200 characters, and that the run code is used, so the stage starts again
+  from the work item in Qory Apiary. With no project base, line 2 is `The review did not
+  start: qory could not read the change's base, so it treats these files in the commit as
+  changed: "<path>", "<path>". The run code is used: start the stage again from the work
+  item in Qory Apiary.`, with the same cap. A runtime with a review guard lists these
+  paths in its `ProjectPaths`. The git that lists the paths runs with
+  `GIT_LITERAL_PATHSPECS`, `GIT_GLOB_PATHSPECS`, `GIT_NOGLOB_PATHSPECS` and
+  `GIT_ICASE_PATHSPECS` unset, so the run's image cannot change which paths match.
+- A walled write run from a run code, at a checkout or working folder that is your home
+  folder, qory's state directory or contains one, stops with `The folder <folder> is your
+  home folder, so the run did not start`, then `A write run from a run code binds the
+  folder into the agent's container; the code is used`. The line was one sentence that
+  started with the fix.
+- The after step of the full suite prints the line `qory-suite-head <commit>` before the
+  suite's command runs. A review join compares the pushed commit with the commit of that
+  line, which qory reads from `events.jsonl`, and not with the status file, which the
+  suite's code can write. qory takes the commit from the first line of the after step's
+  standard output alone: a marker on standard error or on a later line does not count, and
+  the script's git reads no global or system configuration and prints nothing to the step's
+  output, so a file name or a filter of the commit cannot print a marker. Each git of the
+  script has `GIT_NO_LAZY_FETCH=1`, `protocol.allow=never` and a `GIT_ALLOW_PROTOCOL` with a
+  random name (`file` for the clone, whose upload-pack gets the name), so a workspace with
+  a promisor remote and a missing object runs no program of its configuration before the
+  marker, also on a git that does not read `GIT_NO_LAZY_FETCH`. Git 2.45.0 and later read
+  it, and so do the security releases of 2024-05-14, 2.39.4, 2.40.2, 2.41.1, 2.42.2,
+  2.43.4 and 2.44.1. Each also has `core.useReplaceRefs=false` and
+  `core.commitGraph=false`, so no replace ref or commit-graph of the workspace changes the
+  commit that the read of HEAD returns. A review join stops when the run has no such line.
+- The full suite writes a suite result file for each session whose after step ran and moved
+  HEAD: `review/suite-<n>.json` in the run's folder, a new file for each session, in a
+  folder that no session can write. It has the counts of the result file and `output_tail`,
+  the last 200 lines of the last 256 KiB of the after step's output, read from
+  `events.jsonl`, cut at the start of a character. `qory run` keeps the path, the commit
+  of the marker line and how the suite ended for the next review session. A session with no
+  suite because of a cause before the after step keeps the record before when HEAD did not
+  move. What qory posts and prints for the suite does not change. See docs/run.md, §The
+  full suite.
 - A walled session whose `--mount` or `wall.mounts` is at or inside the read-only inputs
   folder stops before its setup: a run from a run code with `machine_setup_invalid`.
 - A walled run needs qory to run as an ordinary user whose uid is the wall user's uid. A
@@ -113,10 +301,13 @@ release may change what an existing document does, and states it under Upgrading
   another, until Qory Apiary ends the run. After each session, once the suite's result is
   posted and the push step passed, qory sends the next-session request, and joins the next
   session with its workflow, runtime, model settings, model key and time limit. Each
-  session's harness is composed from the run's sources at session 1's commits; a runtime is
-  installed once per run, at the version the stack pins, with npm's signature checked as
-  for session 1; a Codex session gets a new Codex home; each push step stores
-  the session's outputs. In a home that the run made, a later session's compose
+  session's harness is composed from the run's sources at session 1's commits, with the
+  configuration that session 1's compose read, every key of it: a later compose does not
+  read the configuration files again, so a `qory.yaml` that a session writes, such as one
+  with `harness.tiers`, changes no key of the configuration of a later session; a runtime
+  is installed once per run, at the version the stack pins, with npm's signature checked
+  as for session 1; a Codex session gets a new Codex home; each push step stores the
+  session's outputs. In a home that the run made, a later session's compose
   keeps that session's runtime alone. A home from `--home` or `harness.home` keeps every
   runtime composed in it, so a later Codex session there gets no tier models when the home
   also has another runtime's tree. The route to qory serves the session that runs, and the
@@ -834,8 +1025,8 @@ release may change what an existing document does, and states it under Upgrading
   model key` after the runtime's line, exit 1, and qory closes it `failed` with the reason
   `model_key_unauthorized` and the runtime's exit status. See `docs/run.md`.
 - Version 1 of the review report format, `contracts/harness/v1/review-report.schema.json`:
-  the `report.json` that one reviewer of a review round writes and qory's review round
-  reads. It has `reviewer`, the reviewer's agent name, and `findings`, each `blocking` or
+  the `report.json` that one reviewer of a review round writes. No qory command reads
+  it. It has `reviewer`, the reviewer's agent name, and `findings`, each `blocking` or
   `non-blocking`, with `quote`, `problem`, `fix`, `proof` and `point`, a line with at
   least one character that is not a space. A blocking finding has a `failing check` or a
   `failing input` as its proof. See The review report format in
@@ -893,6 +1084,58 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- The frontmatter `name` of each agent file for Claude Code must be the name of its entry,
+  or be missing, in which case qory writes the file with the name added and no longer
+  links it to the module. Claude Code registers an agent by that name, so another name
+  could replace another agent. A name that differs stops the build with exit 1 and
+  `Set name to <name> in the agent <path>, or rename the file, then run again` on line 1.
+  An agent whose frontmatter does not parse stops the build too.
+  So does an agent whose line 1 is `---` followed by spaces, tabs or any other character
+  that JavaScript's `\s` matches, such as a no-break space or a form feed, with `Remove
+  the spaces after --- on line 1 of the agent <path>, then run again`: Claude Code reads
+  the frontmatter after that line, and qory reads none.
+  Three more stops keep Claude Code and qory on one frontmatter for every agent, with the
+  fix on line 1: a line 1 that starts with `---` and has more on it than an `\r` stops
+  with `Write --- alone on line 1 of the agent <path>, then run again`; a `---` between
+  the fences of the frontmatter or in its `name` with `Remove the --- from the
+  frontmatter of the agent <path>, then run again`; and an entry name with a `---` with
+  `Rename the agent <path> to a name with no ---, then run again`. A file whose line 1
+  does not start with `---` has no frontmatter for either, and a line 1 of `---` with
+  CRLF line ends reads the same in both.
+  Three further stops keep every YAML reader on the entry's name. qory checks the text of
+  the frontmatter, line by line, so the stops do not depend on a YAML reader. A `<<`
+  anywhere in the frontmatter, which a reader may read as a merge key, stops with `Remove
+  the << from the frontmatter of the agent <path>, then run again`. A line with the key
+  `name`, bare or in quotes, at any indent, whose value is not the entry's name once a
+  comment, the spaces and one pair of quotes are removed, stops with `Set line <n> to
+  name: <name>, or remove it, in the agent <path>, then run again`. A `name` that qory
+  reads, but that is not on exactly one such line at the start of a line, stops with
+  `Write name: <name> once, not indented, in the agent <path>, then run again`.
+  The checks of a reviewer run before these stops, so a reviewer whose line 1 is not
+  exactly `---`, or whose frontmatter or entry name has a `---`, or whose frontmatter has
+  a merge key `<<`, gets `Fix the frontmatter of the reviewer agent <path>, then run
+  again` in place of the line of every agent. The stops for spaces after `---` on line 1,
+  for a `<<` in a value and for the `name` lines apply to reviewers with their line, with
+  `reviewer agent` in place of `agent`. A line in the body, after the closing fence, stops
+  nothing.
+  A frontmatter of more than 64 KiB stops the compose before qory parses it, on every
+  runtime and for a reviewer too, with `Shorten the frontmatter of the agent <path> to
+  64 KiB or less, then run again` on line 1: the time of the parse grows with the square
+  of the number of keys. A skill's `SKILL.md` has the same cap, with `skill` in place of
+  `agent`.
+- The stops of a run from a run code that cannot start as a read run or a write run show
+  the cause alone, as the stops of a review session do: line 1 is the cause and ends with
+  `so the run did not start` (`so the session did not start` for a setup container that
+  stays), and the detail follows on a line indented by two spaces. When line 1 has more
+  than 100 characters after `qory run: `, `so …` moves to line 2 and the detail is line
+  3. The text ends with `; the code is used`. The stops are a read run or a write run
+  with no wall, a read run with `wall.setup: inside` or on an image with nested Docker, a
+  read run whose setup container stays, a read-write mount in a read run or a review
+  join, a checkout or working folder of a read run that overlaps qory's cache folder or
+  the harness report, and a read run at the home folder. The text has no fix, and no
+  reason code in parentheses: the reason stays the close reason of the run. A run you
+  start yourself, with no run code, shows the fix first for a read-write mount, as
+  before.
 - A run from a run code takes its repositories from its documents, and no longer from
   `QORY_RUN_REPOSITORIES`: the repository of `target` goes into the working folder, and
   the repository of each entry of `read_targets` under `.qory/repositories`. The push step
@@ -1788,11 +2031,9 @@ release may change what an existing document does, and states it under Upgrading
   home that lies inside that folder, as the default one does, passes. qory compares each
   path through links, and in any letter case on a disk that ignores case. The line
   starts `remove <path> from --mount: …` or `remove <path> from wall.mounts in
-  forager.yaml: …` for a mount, `start the run in a checkout that does not contain
-  <path>: …` or `start the run in a checkout outside <path>: …` for the checkout, `run
-  qory from a folder that does not contain <path>: …` or `run qory from a folder outside
-  <path>: …` for the working folder, and `set --home or harness.home to a folder that
-  does not contain <path>: …` or `set --home or harness.home to a folder other than
+  forager.yaml: …` for a mount, `The checkout <path> …` for the checkout, `The working
+  folder <path> …` for the working folder, and `set --home or harness.home to a folder
+  that does not contain <path>: …` or `set --home or harness.home to a folder other than
   <path>: …` for the home. Under that folder qory writes the home and the harness report
   of each run with a run key or a run code that has no `--home` or `harness.home`, and a
   report contains the harness's addresses. A run whose `harness_hidden` is false stops
@@ -2100,7 +2341,7 @@ release may change what an existing document does, and states it under Upgrading
   verification, review comments, proposal sources and verdict formats listed the stopped
   characters themselves, and the lists stopped at U+FFFF: U+0600 and a tag character such
   as U+E0041 passed. Each `$defs` `line` and `text` has the pattern of the primitives.
-  The checks of `qory run verdict` and of the review round stop the same characters.
+  The check of `qory run verdict` stops the same characters.
   The `point` of a finding in `review-report.schema.json` is a `line` too: a tab, U+200B
   and U+E0041 in a point fail the report format.
 - A run with neither a run code nor a run key drops a text of its pull-request output that
@@ -2134,8 +2375,9 @@ release may change what an existing document does, and states it under Upgrading
   fetch a missing object, are the exceptions: they use the protocols that your git
   configuration allows. Each git but these exceptions also starts no automatic maintenance
   or garbage collection. Every git of qory but those of `qory worktree` that fetch a missing
-  object has `GIT_NO_LAZY_FETCH=1`, so on git 2.45 or later it fetches no object that a
-  partial clone left out.
+  object has `GIT_NO_LAZY_FETCH=1`, so on a git that reads the variable, 2.45.0 or later or
+  one of the security releases of 2024-05-14, 2.39.4, 2.40.2, 2.41.1, 2.42.2, 2.43.4 and
+  2.44.1, it fetches no object that a partial clone left out.
 - `qory worktree add` and `qory worktree remove` fetch an object that a partial clone left
   out from the clone's promisor remote, as git does when you run it there, in the gits that
   read one: the checkout of the worktree, `git status`, `git reset --hard`, `git rebase`,
@@ -2265,6 +2507,9 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Security
 
+- A git on this machine that reaches no remote, such as `git init`, `git merge-base` or
+  `git commit`, no longer has the password of the run's host proxy or push proxy in its
+  environment. Only `git clone`, `git fetch`, `git ls-remote` and `git push` have it.
 - An escape sequence inside a secret, or right before it, no longer stops qory from masking
   the secret in the log of a step, unless the sequence ends with a byte of the secret: then
   the rest of the secret can show.

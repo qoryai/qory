@@ -140,7 +140,7 @@ func TestReadAllowOpensOnlyTheCommandsOfAWorkItem(t *testing.T) {
 func TestInlineSettingsAddsTheReadRules(t *testing.T) {
 	content := `{"model": "a-model", "hooks": {"Stop": "a && b <c>"}, "permissions": {"allow": ["WebSearch", "Bash(/qory/qory artifact *)"], "deny": ["Bash", "Write"], "defaultMode": "acceptEdits"}}`
 	home, file := settingsHome(t, content)
-	got, err := inlineSettings("--settings", []string{"--settings", file}, []string{"-p", "hi"}, home, "/co")
+	got, err := inlineSettings("--settings", []string{"--settings", file}, []string{"-p", "hi"}, home, "/co", nil)
 	if err != nil || len(got) != 4 || got[0] != "--settings" || !slices.Equal(got[2:], []string{"-p", "hi"}) {
 		t.Fatalf("got %q, %v", got, err)
 	}
@@ -159,7 +159,7 @@ func TestInlineSettingsAddsTheReadRules(t *testing.T) {
 		t.Errorf("the other keys changed:\n%s", got[1])
 	}
 
-	got, err = inlineSettings("--settings", []string{"--settings=" + `{"model":"x"}`}, nil, home, "/co")
+	got, err = inlineSettings("--settings", []string{"--settings=" + `{"model":"x"}`}, nil, home, "/co", nil)
 	if err != nil || len(got) != 1 || !strings.HasPrefix(got[0], "--settings={") {
 		t.Fatalf("JSON already: got %q, %v", got, err)
 	}
@@ -174,7 +174,7 @@ func TestInlineSettingsAddsTheReadRules(t *testing.T) {
 		t.Errorf("JSON already: permissions %v, want %v", p, want)
 	}
 
-	got, err = inlineSettings("--settings", []string{"--verbose"}, []string{"-p", "hi"}, home, "/co")
+	got, err = inlineSettings("--settings", []string{"--verbose"}, []string{"-p", "hi"}, home, "/co", nil)
 	if err != nil || len(got) != 5 || !slices.Equal(got[:2], []string{"--verbose", "--settings"}) || !slices.Equal(got[3:], []string{"-p", "hi"}) {
 		t.Fatalf("no settings: got %q, %v", got, err)
 	}
@@ -188,11 +188,11 @@ func TestInlineSettingsAddsTheReadRules(t *testing.T) {
 func TestInlineSettingsLeavesAWriteRunsSettings(t *testing.T) {
 	content := `{"permissions": {"deny": ["Bash"]}}`
 	home, file := settingsHome(t, content)
-	got, err := inlineSettings("--settings", []string{"--settings", file}, nil, home, "")
+	got, err := inlineSettings("--settings", []string{"--settings", file}, nil, home, "", nil)
 	if err != nil || !slices.Equal(got, []string{"--settings", content}) {
 		t.Errorf("got %q, %v", got, err)
 	}
-	got, err = inlineSettings("--settings", []string{"--verbose"}, nil, home, "")
+	got, err = inlineSettings("--settings", []string{"--verbose"}, nil, home, "", nil)
 	if err != nil || !slices.Equal(got, []string{"--verbose"}) {
 		t.Errorf("no settings: got %q, %v", got, err)
 	}
@@ -209,13 +209,13 @@ func TestInlineSettingsRefusesReadRulesItCannotAdd(t *testing.T) {
 		`{"permissions": {"allow": {}}}`:    "set permissions.allow in the Claude Code settings %s to a JSON array: a run of a read workflow adds rules to it, so the run does not start",
 	} {
 		home, file := settingsHome(t, content)
-		_, err := inlineSettings("--settings", []string{"--settings", file}, nil, home, "/co")
+		_, err := inlineSettings("--settings", []string{"--settings", file}, nil, home, "/co", nil)
 		if err == nil || err.Error() != strings.Replace(want, "%s", file, 1) || ExitCode(err) != ExitInput {
 			t.Errorf("%s: %v (exit %d)", content, err, ExitCode(err))
 		}
 	}
 	home, _ := settingsHome(t, "{}")
-	_, err := inlineSettings("--settings", []string{"--settings", `{"a": 1} {}`}, nil, home, "/co")
+	_, err := inlineSettings("--settings", []string{"--settings", `{"a": 1} {}`}, nil, home, "/co", nil)
 	if want := "pass one JSON object to --settings in harness.launch: a run of a read workflow adds rules to it, and the value is not one JSON object, so the run does not start"; err == nil || err.Error() != want {
 		t.Errorf("JSON of the launch: %v, want %q", err, want)
 	}

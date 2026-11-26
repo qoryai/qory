@@ -99,7 +99,8 @@ func TestOpenSuitesReadsHEADWithNoGit(t *testing.T) {
 			if r == nil || r.fault != nil || len(spec.After) == 0 {
 				t.Fatalf("the suite does not run: %+v", r)
 			}
-			if got := spec.After[len(spec.After)-1]; got != want {
+			// The words of the script end with the start commit and the protocol name.
+			if got := spec.After[len(spec.After)-2]; got != want {
 				t.Errorf("the start commit is %q, want %q", got, want)
 			}
 			// Every caller reads HEAD through headCommit.

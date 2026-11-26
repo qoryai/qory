@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -140,6 +143,19 @@ func shells(t *testing.T) []string {
 // copyWith is [copyOf] with the script run by shell, "" for the session's command.
 func copyWith(t *testing.T, shell, source, commit, base string) (Folder, string, error) {
 	t.Helper()
+	return copyIn(t, shell, source, commit, base, nil)
+}
+
+// copyIn is [copyWith] with project as the paths of the runtime's project files, and env
+// added to the session's environment. The project base is base.
+func copyIn(t *testing.T, shell, source, commit, base string, project []string, env ...string) (Folder, string, error) {
+	t.Helper()
+	return copyFrom(t, shell, source, commit, base, base, project, env...)
+}
+
+// copyFrom is [copyIn] with pbase as the project base.
+func copyFrom(t *testing.T, shell, source, commit, base, pbase string, project []string, env ...string) (Folder, string, error) {
+	t.Helper()
 	f, err := New(filepath.Join(t.TempDir(), "review"))
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +163,7 @@ func copyWith(t *testing.T, shell, source, commit, base string) (Folder, string,
 	t.Cleanup(func() {
 		_ = filepath.WalkDir(f.Root(), func(p string, _ fs.DirEntry, _ error) error { return os.Chmod(p, 0o755) })
 	})
-	s, err := f.Session(source, commit, base)
+	s, err := f.Session(source, commit, base, pbase, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +173,7 @@ func copyWith(t *testing.T, shell, source, commit, base string) (Folder, string,
 		s.Command = shell
 	}
 	c := exec.CommandContext(ctx, s.Command, s.Args...)
-	c.Dir, c.Env = s.Dir, s.Env
+	c.Dir, c.Env = s.Dir, append(s.Env, env...)
 	var out bytes.Buffer
 	c.Stdout, c.Stderr = &out, &out
 	err = c.Run()
@@ -320,7 +336,7 @@ func withScript(t *testing.T, pairs ...string) {
 // read, and the source's configuration in place of the empty one.
 var (
 	noAttrSource = []string{"export GIT_ATTR_SOURCE=\"$empty\"\n", ""}
-	sourceConfig = []string{": > \"$G/config\"\n", "cp \"$S/config\" \"$G/config\"\n"}
+	sourceConfig = []string{": > \"$target/config\" || exit 1\n", "cp \"$S/config\" \"$target/config\" || exit 1\n"}
 )
 
 func TestTheCopyRunsNoFilterOfTheSourcesConfiguration(t *testing.T) {
@@ -383,8 +399,8 @@ func TestTheDiffShowsAFileThatAttributesMarkBinary(t *testing.T) {
 	// git before 2.40 reads attributes beside GIT_ATTR_SOURCE. The git folder of the copy
 	// then gets an attribute file that marks *.txt binary, as an attribute that reaches the
 	// diff would.
-	head := "printf 'ref: refs/heads/main\\n' > \"$G/HEAD\"\n"
-	withScript(t, append(noAttrSource, head, head+"printf '*.txt -diff\\n' > \"$G/info/attributes\"\n")...)
+	head := "printf 'ref: refs/heads/main\\n' > \"$target/HEAD\" || exit 1\n"
+	withScript(t, append(noAttrSource, head, head+"\tprintf '*.txt -diff\\n' > \"$target/info/attributes\"\n")...)
 	dir := t.TempDir()
 	testGit(t, dir, "init", "-q", "--object-format=sha1", "-b", "main")
 	write(t, dir, ".gitattributes", "*.txt -diff\n", 0o644)
@@ -412,6 +428,10 @@ func TestTheDiffShowsAFileThatAttributesMarkBinary(t *testing.T) {
 		t.Error("the diff of the script has no --text")
 	}
 }
+
+// copyFailed is the cause of a copy whose fresh git folder lacks an object under its id:
+// the source has an object whose bytes do not have its id.
+const copyFailed = "the objects of the commit, the base and the project base could not be copied by their ids"
 
 // plant writes the loose object id of the git folder dir again, with the object of the given
 // kind and bytes in its place, as an agent that can write the git folder could.
@@ -445,11 +465,11 @@ func TestTheCopyChecksTheBaseSideOfTheDiff(t *testing.T) {
 		"a base file with other bytes": {func(t *testing.T, c checkout) {
 			id := testGit(t, c.dir, "rev-parse", c.base+":README.md")
 			plant(t, filepath.Join(c.dir, ".git"), id, "blob", []byte("bad line\n"))
-		}, "the diff has a file whose bytes do not have its object id"},
+		}, copyFailed},
 		"a link of the commit with other bytes": {func(t *testing.T, c checkout) {
 			id := testGit(t, c.dir, "rev-parse", c.head+":latest")
 			plant(t, filepath.Join(c.dir, ".git"), id, "blob", []byte("/etc/passwd"))
-		}, "the diff has a file whose bytes do not have its object id"},
+		}, copyFailed},
 		"a base tree with other entries": {func(t *testing.T, c checkout) {
 			id := testGit(t, c.dir, "rev-parse", c.base+"^{tree}")
 			head := testGit(t, c.dir, "rev-parse", c.head+"^{tree}")
@@ -458,7 +478,7 @@ func TestTheCopyChecksTheBaseSideOfTheDiff(t *testing.T) {
 				t.Fatal(err)
 			}
 			plant(t, filepath.Join(c.dir, ".git"), id, "tree", data)
-		}, "the file list of the base commit does not build its tree"},
+		}, copyFailed},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := newCheckout(t, "sha1")
@@ -523,7 +543,7 @@ func TestTheCopyStopsOnACommitTheSourceLacks(t *testing.T) {
 				t.Fatal("the copy session ended with no error")
 			}
 			_, err = f.Result()
-			if err == nil || !strings.HasPrefix(err.Error(), "Escalate the round: the reviewer copy stopped at a check.\nthe source has no commit") {
+			if err == nil || !isStop(err, "A check of the commit's copy failed", "the source has no commit") {
 				t.Errorf("the result is %v", err)
 			}
 		})
@@ -546,19 +566,37 @@ func TestTheCopyStopsOnACommitTheSourceLacks(t *testing.T) {
 	}
 }
 
+// isStop reports whether err is a [*Stop] with the cause cause whose detail starts with
+// detail.
+func isStop(err error, cause, detail string) bool {
+	var s *Stop
+	return errors.As(err, &s) && s.Cause == cause && strings.HasPrefix(s.Detail, detail)
+}
+
 func TestSessionChecksItsArguments(t *testing.T) {
 	f, err := New(filepath.Join(t.TempDir(), "review"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	id := strings.Repeat("a", 40)
-	for name, args := range map[string][3]string{
-		"a short commit":      {"/src/.git", "abc123", ""},
-		"a base of other len": {"/src/.git", id, strings.Repeat("b", 64)},
-		"a relative source":   {"src/.git", id, ""},
-		"a source with a ..":  {"/src/../.git", id, ""},
+	for name, args := range map[string][4]string{
+		"a short commit":           {"/src/.git", "abc123", ""},
+		"a base of other len":      {"/src/.git", id, strings.Repeat("b", 64)},
+		"a relative source":        {"src/.git", id, ""},
+		"a source with a ..":       {"/src/../.git", id, ""},
+		"an absolute project path": {"/src/.git", id, "", "/.claude"},
+		"a project path with a ..": {"/src/.git", id, "", "../.claude"},
+		"a project path that is .": {"/src/.git", id, "", "."},
+		"an unclean project path":  {"/src/.git", id, "", ".claude/"},
+		"a project path with a *":  {"/src/.git", id, "", ".claude*"},
+		"a project path with a \\": {"/src/.git", id, "", "a\\b"},
 	} {
-		if _, err := f.Session(args[0], args[1], args[2]); err == nil || len(strings.SplitN(err.Error(), "\n", 2)[0]) > 100 {
+		var project []string
+		if args[3] != "" {
+			project = []string{args[3]}
+		}
+		var stop *Stop
+		if _, err := f.Session(args[0], args[1], args[2], "", project); !errors.As(err, &stop) || stop.Cause == "" || stop.Detail == "" || len(stop.Cause) > 90 {
 			t.Errorf("%s: the error is %v", name, err)
 		}
 	}
@@ -568,7 +606,7 @@ func TestSessionChecksItsArguments(t *testing.T) {
 	if _, err := New("review"); err == nil {
 		t.Error("New took a relative path")
 	}
-	if _, err := f.Result(); err == nil || !strings.HasPrefix(err.Error(), "Run the copy session again") {
+	if _, err := f.Result(); !isStop(err, "The session that copies the commit ended before the copy was complete", "") {
 		t.Errorf("a copy with no session: %v", err)
 	}
 }
@@ -653,5 +691,277 @@ func TestScriptProgramsFindsTheScriptsPrograms(t *testing.T) {
 		if !slices.Contains(got, want) {
 			t.Errorf("the scan finds %v, without %s", got, want)
 		}
+	}
+}
+
+// TestEachStopHasItsCauseAndDetail: each error that stops the review before it starts is a
+// [*Stop] with the cause and the detail of its text, and the cause has no "so the review
+// did not start", which the caller of the join adds.
+func TestEachStopHasItsCauseAndDetail(t *testing.T) {
+	id := strings.Repeat("a", 40)
+	newFolder := func() Folder {
+		f, err := New(filepath.Join(t.TempDir(), "review"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	state := func(f Folder, name, text string) {
+		t.Helper()
+		write(t, f.state(), name, text, 0o644)
+	}
+	exists := newFolder()
+	script := newFolder()
+	if _, err := script.Session("/src/.git", id, "", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name          string
+		err           func() error
+		cause, detail string
+	}{
+		{"51 a path with a line break", func() error { _, err := New("/a\nb"); return err },
+			"The path of the review's copy is not an absolute, clean path on one line", `The path is "/a\nb"`},
+		{"52 a folder that exists", func() error { _, err := New(exists.Root()); return err },
+			"The folder of the review's copy exists already", strconv.Quote(exists.Root()) + " exists"},
+		{"53 a short commit", func() error { _, err := newFolder().Session("/src/.git", "abc", "", "", nil); return err },
+			"The commit of the review's copy is not a full commit id", `The commit is "abc"`},
+		{"54 a base of another length", func() error { _, err := newFolder().Session("/src/.git", id, "bb", "", nil); return err },
+			"The base of the review's copy is not a full commit id of the commit's length", `The base is "bb"`},
+		{"55 a relative git folder", func() error { _, err := newFolder().Session("src/.git", id, "", "", nil); return err },
+			"The git folder of the review's copy is not an absolute, clean path", `The path is "src/.git"`},
+		{"56 a script that exists", func() error { _, err := script.Session("/src/.git", id, "", "", nil); return err },
+			"qory could not write the script that copies the commit", "file exists"},
+		{"57 a failed check", func() error {
+			f := newFolder()
+			state(f, "failed", "the source has no commit\n")
+			_, err := f.Result()
+			return err
+		}, "A check of the commit's copy failed", "the source has no commit"},
+		{"58 no end", func() error { _, err := newFolder().Result(); return err },
+			"The session that copies the commit ended before the copy was complete", ""},
+		{"59 no commit folder", func() error {
+			f := newFolder()
+			state(f, "done", "")
+			_, err := f.Result()
+			return err
+		}, "The copy of the commit has no folder " + commitName, ""},
+		{"60 no diff", func() error {
+			f := newFolder()
+			state(f, "done", "")
+			if err := os.Mkdir(f.Commit(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			_, err := f.Result()
+			return err
+		}, "The copy of the commit has no file " + diffName, ""},
+		{"61 no list", func() error {
+			f := newFolder()
+			state(f, "done", "")
+			write(t, f.root, diffName, "", 0o644)
+			if err := os.Mkdir(f.Commit(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			_, err := f.Result()
+			return err
+		}, "The list of paths that the copy left out could not be read", "is missing"},
+		{"62 a bad line", func() error {
+			f := newFolder()
+			state(f, "done", "")
+			state(f, "left-out", "120000 x\n")
+			write(t, f.root, diffName, "", 0o644)
+			if err := os.Mkdir(f.Commit(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			_, err := f.Result()
+			return err
+		}, "The list of paths that the copy left out has a line qory cannot read", `"120000 x"`},
+		{"63 a project path that is not relative", func() error {
+			_, err := newFolder().Session("/src/.git", id, "", "", []string{"/.claude"})
+			return err
+		}, "A path of the runtime's project files is not a clean, relative path", `The path is "/.claude"`},
+		{"64 no list of project files", func() error { _, err := newFolder().Changed(); return err },
+			"The list of the project files that the change touches could not be read", "is missing"},
+		{"65 a project base of another length", func() error { _, err := newFolder().Session("/src/.git", id, "", "bb", nil); return err },
+			"The project base of the review is not a full commit id of the commit's length", `The project base is "bb"`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var s *Stop
+			err := c.err()
+			if !errors.As(err, &s) || s.Cause != c.cause || !strings.Contains(s.Detail, c.detail) || (c.detail != "") != (s.Detail != "") {
+				t.Errorf("the error is %#v, want the cause %q and a detail with %q", err, c.cause, c.detail)
+			}
+		})
+	}
+}
+
+// TestTheCopyListsTheProjectFilesThatTheChangeTouches: the change from the base that adds
+// .claude/skills/x/SKILL.md, changes .mcp.json, removes .claude/agents/a.md, adds
+// .Claude/commands/c.md, or adds sub/.claude/skills/y/SKILL.md or sub/deep/.mcp.json,
+// below the root, or changes CLAUDE.md, adds sub/CLAUDE.md, CLAUDE.local.md or
+// sub/AGENTS.md, lists each path. The same files at the base list none, nor do
+// .claude-notes and sub/x.claude, whose names only start or end with .claude.
+func TestTheCopyListsTheProjectFilesThatTheChangeTouches(t *testing.T) {
+	sessionGit(t)
+	project := []string{".claude", ".mcp.json", "CLAUDE.md", "CLAUDE.local.md", "AGENTS.md"}
+	for name, c := range map[string]struct {
+		base, head map[string]string
+		want       []string
+	}{
+		"an added skill": {map[string]string{"README.md": "a\n"}, map[string]string{".claude/skills/x/SKILL.md": "s\n"},
+			[]string{".claude/skills/x/SKILL.md"}},
+		"a skill at the base": {map[string]string{".claude/skills/x/SKILL.md": "s\n"}, map[string]string{"README.md": "b\n"}, nil},
+		"a changed .mcp.json": {map[string]string{".mcp.json": "{}\n"}, map[string]string{".mcp.json": "{\"mcpServers\": {}}\n"},
+			[]string{".mcp.json"}},
+		"a removed agent": {map[string]string{".claude/agents/a.md": "a\n"}, map[string]string{".claude/agents/a.md": ""},
+			[]string{".claude/agents/a.md"}},
+		"another case":  {map[string]string{"README.md": "a\n"}, map[string]string{".Claude/commands/c.md": "c\n"}, []string{".Claude/commands/c.md"}},
+		"a longer name": {map[string]string{"README.md": "a\n"}, map[string]string{".claude-notes": "n\n", "sub/x.claude": "n\n"}, nil},
+		"a nested skill": {map[string]string{"README.md": "a\n"}, map[string]string{"sub/.claude/skills/y/SKILL.md": "s\n"},
+			[]string{"sub/.claude/skills/y/SKILL.md"}},
+		"a changed CLAUDE.md": {map[string]string{"CLAUDE.md": "a\n"}, map[string]string{"CLAUDE.md": "b\n"}, []string{"CLAUDE.md"}},
+		"a nested CLAUDE.md":  {map[string]string{"README.md": "a\n"}, map[string]string{"sub/CLAUDE.md": "c\n"}, []string{"sub/CLAUDE.md"}},
+		"a CLAUDE.local.md":   {map[string]string{"README.md": "a\n"}, map[string]string{"CLAUDE.local.md": "c\n"}, []string{"CLAUDE.local.md"}},
+		"a nested AGENTS.md":  {map[string]string{"README.md": "a\n"}, map[string]string{"sub/AGENTS.md": "c\n"}, []string{"sub/AGENTS.md"}},
+		"a nested .mcp.json": {map[string]string{"README.md": "a\n"}, map[string]string{"sub/deep/.mcp.json": "{}\n"},
+			[]string{"sub/deep/.mcp.json"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			testGit(t, dir, "init", "-q", "-b", "main")
+			commit := func(files map[string]string) string {
+				for rel, text := range files {
+					if text == "" {
+						testGit(t, dir, "rm", "-q", rel)
+						continue
+					}
+					write(t, dir, rel, text, 0o644)
+				}
+				testGit(t, dir, "add", "-A")
+				testGit(t, dir, "commit", "-q", "--allow-empty", "-m", "c")
+				return testGit(t, dir, "rev-parse", "HEAD")
+			}
+			base := commit(c.base)
+			head := commit(c.head)
+			f, out, err := copyIn(t, "", filepath.Join(dir, ".git"), head, base, project)
+			if err != nil {
+				t.Fatalf("the session: %v\n%s", err, out)
+			}
+			if _, err := f.Result(); err != nil {
+				t.Fatal(err)
+			}
+			got, err := f.Changed()
+			if err != nil || !slices.Equal(got, c.want) {
+				t.Errorf("Changed returned %q, %v; want %q", got, err, c.want)
+			}
+		})
+	}
+}
+
+// TestThePathspecVariablesDoNotChangeTheListOfProjectFiles: with GIT_LITERAL_PATHSPECS,
+// GIT_GLOB_PATHSPECS, GIT_NOGLOB_PATHSPECS or GIT_ICASE_PATHSPECS set to 1 in the
+// session's environment, as the run's image can set them, the copy still lists the added
+// skill. With GIT_LITERAL_PATHSPECS, git would read ** as text and list no path.
+func TestThePathspecVariablesDoNotChangeTheListOfProjectFiles(t *testing.T) {
+	sessionGit(t)
+	dir := t.TempDir()
+	testGit(t, dir, "init", "-q", "-b", "main")
+	write(t, dir, "README.md", "a\n", 0o644)
+	testGit(t, dir, "add", "-A")
+	testGit(t, dir, "commit", "-q", "-m", "base")
+	base := testGit(t, dir, "rev-parse", "HEAD")
+	write(t, dir, "sub/.claude/skills/x/SKILL.md", "s\n", 0o644)
+	testGit(t, dir, "add", "-A")
+	testGit(t, dir, "commit", "-q", "-m", "head")
+	head := testGit(t, dir, "rev-parse", "HEAD")
+	for _, name := range []string{"GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS"} {
+		t.Run(name, func(t *testing.T) {
+			f, out, err := copyIn(t, "", filepath.Join(dir, ".git"), head, base, []string{".claude"}, name+"=1")
+			if err != nil {
+				t.Fatalf("the session: %v\n%s", err, out)
+			}
+			if _, err := f.Result(); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := f.Changed(); err != nil || !slices.Equal(got, []string{"sub/.claude/skills/x/SKILL.md"}) {
+				t.Errorf("Changed returned %q, %v", got, err)
+			}
+		})
+	}
+}
+
+// TestTheCopyChecksTheTreesOfTheProjectBase is a rerun: the project base has no .claude,
+// the run's start added .claude/x, and the pushed commit keeps it. An agent that can write
+// the git folder puts the pushed commit's root tree in place of the project base's, so a
+// diff that read it would find .claude unchanged. The copy stops on the project base's
+// tree.
+func TestTheCopyChecksTheTreesOfTheProjectBase(t *testing.T) {
+	sessionGit(t)
+	dir := t.TempDir()
+	testGit(t, dir, "init", "-q", "-b", "main")
+	commit := func(rel, text string) string {
+		write(t, dir, rel, text, 0o644)
+		testGit(t, dir, "add", "-A")
+		testGit(t, dir, "commit", "-q", "-m", rel)
+		return testGit(t, dir, "rev-parse", "HEAD")
+	}
+	pbase := commit("README.md", "a\n")
+	start := commit(".claude/x", "x\n")
+	head := commit("README.md", "b\n")
+	headTree := testGit(t, dir, "rev-parse", head+"^{tree}")
+	data, err := gitCommand(t, dir, "cat-file", "tree", headTree).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plant(t, filepath.Join(dir, ".git"), testGit(t, dir, "rev-parse", pbase+"^{tree}"), "tree", data)
+	f, out, err := copyFrom(t, "", filepath.Join(dir, ".git"), head, start, pbase, []string{".claude"})
+	if err == nil {
+		got, _ := f.Changed()
+		t.Fatalf("the copy session ended with no error, and listed %q:\n%s", got, out)
+	}
+	if _, err := f.Result(); err == nil || !strings.Contains(err.Error(), copyFailed) {
+		t.Errorf("the result is %v, want %q\n%s", err, copyFailed, out)
+	}
+}
+
+// TestTheCopyChecksTheProjectBaseCommit is a project base that is no commit, the pushed
+// commit's tree, and a project base commit whose tree has its entries out of order: git
+// hashes such a tree, so it gets past the fresh copy, and git write-tree builds another
+// tree from its file list. Each stops the copy with its line.
+func TestTheCopyChecksTheProjectBaseCommit(t *testing.T) {
+	sessionGit(t)
+	dir := t.TempDir()
+	testGit(t, dir, "init", "-q", "-b", "main")
+	write(t, dir, "a.txt", "a\n", 0o644)
+	write(t, dir, "b.txt", "b\n", 0o644)
+	testGit(t, dir, "add", "-A")
+	testGit(t, dir, "commit", "-q", "-m", "c")
+	head := testGit(t, dir, "rev-parse", "HEAD")
+	headTree := testGit(t, dir, "rev-parse", "HEAD^{tree}")
+	blobA, blobB := testGit(t, dir, "rev-parse", "HEAD:a.txt"), testGit(t, dir, "rev-parse", "HEAD:b.txt")
+	raw := func(id string) string {
+		b, err := hex.DecodeString(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	c := gitCommand(t, dir, "hash-object", "-w", "-t", "tree", "--literally", "--stdin")
+	c.Stdin = strings.NewReader("100644 b.txt\x00" + raw(blobB) + "100644 a.txt\x00" + raw(blobA))
+	out, err := c.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	unsorted := testGit(t, dir, "commit-tree", strings.TrimSpace(string(out)), "-m", "unsorted")
+	for _, tc := range []struct{ name, pbase, want string }{
+		{"no commit", headTree, "the source has no project base commit " + headTree + " with the bytes of that id"},
+		{"a tree out of order", unsorted, "the file list of the project base commit does not build its tree"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, out, _ := copyFrom(t, "", filepath.Join(dir, ".git"), head, "", tc.pbase, []string{".claude"})
+			if _, err := f.Result(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("the result is %v, want %q\n%s", err, tc.want, out)
+			}
+		})
 	}
 }

@@ -158,8 +158,9 @@ func TestBuildNeedsARuntime(t *testing.T) {
 
 // TestClaudePluginCopiesItsAgents is the roster a launch from outside the checkout
 // delivers: Claude Code passes over a link in a plugin's agents directory, so the plugin
-// holds the agents as files, byte for byte the module's, while its skills and the
-// checkout's own agents stay links, and the launch line still names the plugin.
+// holds the agents as files, the module's file with the frontmatter name added when it
+// has none, as the checkout's agents are, while the plugin's skills stay links, and the
+// launch line still names the plugin.
 func TestClaudePluginCopiesItsAgents(t *testing.T) {
 	res, _, home := composeFixture(t, "claude")
 	if err := render.Build(res, home, lookup(t, "claude")); err != nil {
@@ -184,13 +185,15 @@ func TestClaudePluginCopiesItsAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := os.ReadFile(agent); string(got) != string(want) {
-		t.Errorf("the plugin's reviewer.md differs from %s", src)
-	}
-	for _, name := range []string{filepath.Join(plugin, "skills", "review"), filepath.Join(home, "claude", "agents", "reviewer.md")} {
-		if fi, err := os.Lstat(name); err != nil || fi.Mode()&os.ModeSymlink == 0 {
-			t.Errorf("%s: %v, want a link", name, err)
+	// The module's file has no frontmatter, so each copy gets a name.
+	named := "---\nname: reviewer\n---\n" + string(want)
+	for _, name := range []string{agent, filepath.Join(home, "claude", "agents", "reviewer.md")} {
+		if got, _ := os.ReadFile(name); string(got) != named {
+			t.Errorf("%s is\n%s\nwant\n%s", name, got, named)
 		}
+	}
+	if fi, err := os.Lstat(filepath.Join(plugin, "skills", "review")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("the plugin's skill review: %v, want a link", err)
 	}
 	// The manifest leaves agents to discovery: a manifest naming the directory, even
 	// as ./agents, keeps Claude Code from reading it.

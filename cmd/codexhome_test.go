@@ -306,7 +306,8 @@ func TestAWalledCodexWriteRunFromACodeWithTheCacheInItsCheckoutStops(t *testing.
 	if r.joined || cmd.ExitCode(r.err) != cmd.ExitInput {
 		t.Fatalf("%v (exit %d), want exit %d before the join\n%s", r.err, cmd.ExitCode(r.err), cmd.ExitInput, r.out)
 	}
-	wants(t, r.err.Error(), "start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder ", "contains the folder of the runs' copies ")
+	joined := strings.ReplaceAll(r.err.Error(), ",\n  so the run", ", so the run")
+	wants(t, joined, "The folder ", "contains the folder of the runs' copies ", ", so the run did not start\n  A write run from a run code binds the folder into the agent's container; the code is used")
 	runsLeft(t)
 }
 

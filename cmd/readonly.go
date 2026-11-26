@@ -12,22 +12,37 @@ import (
 	"github.com/qoryai/qory/internal/stack"
 )
 
-// The lines of a run from a run code that only reads the checkout, [readsOnly], and that
-// cannot see the checkout read-only, each with the workflow's name: one with no wall,
-// one whose setup runs inside the agent's container, and one whose image runs nested
-// Docker, which also takes the image's name or, with none, its reference. The last line
-// is that of a read run whose setup container was not removed, with the error of the
-// removal.
+// The stops of a run from a run code that only reads the checkout, [readsOnly], and that
+// cannot see the checkout read-only, each in the form of [reviewStop]: the cause, with
+// the workflow's name, and then the detail. One has no wall, one has a setup that runs
+// inside the agent's container, and one has an image that runs nested Docker, whose detail
+// has the image's name or, with none, its reference. The first three end with "so
+// <subject> did not start": the subject is [startedRun] for a read run and [startedReview]
+// for a review join. The last stop is that of a read run whose setup container was not
+// removed, with the error of the removal.
 const (
-	textReadNeedsWall           = "run this workflow with a wall: this run of workflow %s only reads the checkout, and a run with no wall mounts nothing read-only"
-	textReadNeedsSetupOutside   = "set wall.setup to outside in " + config.ForagerFileName + ", or remove it: this run of workflow %s only reads the checkout, and setup inside runs in the agent's container, which sees the checkout read-only"
-	textReadNeedsNoNestedDocker = "use an image without nested Docker: this run of workflow %s only reads the checkout, and image %s has nested Docker, so the checkout cannot be made read-only"
-	textReadNeedsSetupRemoved   = "start the run again from the work item in Qory Apiary: the setup container of this read run was not removed, so a process in the container can write the checkout: %s"
+	textReadNeedsWall                 = "The workflow %s only reads the checkout and the run has no wall, so %s did not start"
+	textReadNeedsWallDetail           = "A run with no wall mounts nothing read-only"
+	textReadNeedsSetupOutside         = "The workflow %s only reads the checkout and wall.setup is inside, so %s did not start"
+	textReadNeedsSetupOutsideDetail   = "A setup inside runs in the agent's container, which sees the checkout read-only"
+	textReadNeedsNoNestedDocker       = "The workflow %s only reads the checkout, so %s did not start"
+	textReadNeedsNoNestedDockerDetail = "The image %s runs nested Docker, and beside it the checkout cannot be made read-only"
+	textReadNeedsSetupRemoved         = "The setup container of this read run was not removed, so the session did not start"
+	textReadNeedsSetupRemovedDetail   = "A process in the container could write the checkout: %s"
 )
 
-// textWriteNeedsWall is the line of a run from a run code that does not only read the
-// checkout, [readsOnly], and that has no wall, with the workflow's name.
-const textWriteNeedsWall = "run this workflow with a wall: this run of workflow %s writes to the checkout, and a run with no wall runs the agent as this machine's user"
+// The subjects of the stops of [readOnlyCheckout]: a read run, and a review join.
+const (
+	startedRun    = "the run"
+	startedReview = "the review"
+)
+
+// The stop of a run from a run code that does not only read the checkout, [readsOnly],
+// and that has no wall, with the workflow's name.
+const (
+	textWriteNeedsWall       = "The workflow %s writes to the checkout and the run has no wall, so the run did not start"
+	textWriteNeedsWallDetail = "A run with no wall runs the agent as this machine's user"
+)
 
 // accessOf is the access level of the run from the run code r: the lower of the access in
 // its documents and the access of its workflow in workflows, the composed stack's, in
@@ -59,19 +74,20 @@ func readsOnly(r *codeRun, workflows map[string]stack.Workflow) bool {
 // one with wall.setup inside, read_needs_setup_outside; and one whose image sets
 // docker: true, read_needs_no_nested_docker. An image selected by its reference runs no
 // nested Docker. A walled run with no image fails at the open and never gets here. The
-// caller stops a run with any other writable mount, see [writableMount].
-func readOnlyCheckout(spec *runSpec, root, workflow string, img session.Image) error {
+// caller stops a run with any other writable mount, see [writableMount]. subject is
+// [startedRun] or [startedReview], as the three texts end.
+func readOnlyCheckout(spec *runSpec, root, workflow string, img session.Image, subject string) error {
 	switch {
 	case spec.Wall == nil:
-		return refusedBeforeJoin(event.ReasonReadNeedsWall, fmt.Sprintf(textReadNeedsWall, workflow))
+		return refusedBeforeJoin(event.ReasonReadNeedsWall, fmt.Sprintf(textReadNeedsWall, workflow, subject), textReadNeedsWallDetail)
 	case spec.setupWhere == config.SetupInside:
-		return refusedBeforeJoin(event.ReasonReadNeedsSetupOutside, fmt.Sprintf(textReadNeedsSetupOutside, workflow))
+		return refusedBeforeJoin(event.ReasonReadNeedsSetupOutside, fmt.Sprintf(textReadNeedsSetupOutside, workflow, subject), textReadNeedsSetupOutsideDetail)
 	case img.Docker:
 		shown := img.Name
 		if shown == "" {
 			shown = img.Ref
 		}
-		return refusedBeforeJoin(event.ReasonReadNeedsNoNestedDocker, fmt.Sprintf(textReadNeedsNoNestedDocker, workflow, accesskey.ShownName(shown, false)))
+		return refusedBeforeJoin(event.ReasonReadNeedsNoNestedDocker, fmt.Sprintf(textReadNeedsNoNestedDocker, workflow, subject), fmt.Sprintf(textReadNeedsNoNestedDockerDetail, accesskey.ShownName(shown, false)))
 	}
 	spec.WorkspaceReadOnly = true
 	for i := range spec.Mounts {
@@ -83,9 +99,10 @@ func readOnlyCheckout(spec *runSpec, root, workflow string, img session.Image) e
 }
 
 // refusedBeforeJoin is the error of a run from a run code that stops before the join,
-// with the reason code and the line text, which ends with the code and [codeUsed].
-func refusedBeforeJoin(code, text string) error {
-	return &reasonError{code: code, text: text + " (" + code + ")" + codeUsed}
+// with the reason code and the text that [reviewStop] makes of the cause and the detail.
+// The reason code is the run's close reason and is not in the text.
+func refusedBeforeJoin(code, cause, detail string) error {
+	return &reasonError{code: code, text: reviewStop(cause, detail).Error()}
 }
 
 // writeNeedsWall is the error of a run from a run code that does not only read the
@@ -93,7 +110,7 @@ func refusedBeforeJoin(code, text string) error {
 // user on the host. The run stops before the image's fetch, the setup and the join,
 // closed failed with [event.ReasonWriteNeedsWall].
 func writeNeedsWall(workflow string) error {
-	return refusedBeforeJoin(event.ReasonWriteNeedsWall, fmt.Sprintf(textWriteNeedsWall, workflow))
+	return refusedBeforeJoin(event.ReasonWriteNeedsWall, fmt.Sprintf(textWriteNeedsWall, workflow), textWriteNeedsWallDetail)
 }
 
 // removeSetup removes the setup container of a read run, after the setup and before the
@@ -103,7 +120,7 @@ func writeNeedsWall(workflow string) error {
 // container may still run, and no session can join the run.
 func removeSetup(ctx context.Context, run openedRun) error {
 	if err := run.RemoveSetup(ctx); err != nil {
-		return refusedBeforeJoin(event.ReasonReadNeedsSetupRemoved, fmt.Sprintf(textReadNeedsSetupRemoved, accesskey.ShownError(err)))
+		return refusedBeforeJoin(event.ReasonReadNeedsSetupRemoved, textReadNeedsSetupRemoved, fmt.Sprintf(textReadNeedsSetupRemovedDetail, accesskey.ShownError(err)))
 	}
 	return nil
 }

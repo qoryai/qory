@@ -858,7 +858,7 @@ func TestAWalledRunOfAHiddenHarnessFromTheCacheDirectoryStops(t *testing.T) {
 		}
 		return []string{"--home", home}
 	}}.run(t)
-	want := "run qory from a folder that does not contain " + cache + ": the working folder " + cwd + " is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under " + cache + "; the code is used"
+	want := stopText("The working folder "+cwd+" contains "+cache+", so the run did not start", "qory writes harness reports in "+cache)
 	if r.err == nil || r.err.Error() != want || cmd.ExitCode(r.err) != cmd.ExitInput {
 		t.Fatalf("%v (exit %d), want %q, exit %d\n%s", r.err, cmd.ExitCode(r.err), want, cmd.ExitInput, r.out)
 	}

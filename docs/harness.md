@@ -299,6 +299,118 @@ reviewer that reads only some files lists them in its frontmatter, `paths: ["**/
 The home's `roles.json` contains each member with its `paths`, and the agent files that
 qory writes for a runtime leave the key out.
 
+A group that the `review_group` of a workflow names is the reviewers of a review session,
+and on Claude Code their agent files have no Bash and no Agent. qory writes the
+frontmatter of each member itself, in this order: `name`, set to the entry's name, then
+`description`, then `color`, `effort`, `maxTurns` and `model`, then `tools` without any
+`Bash` entry (also one with a rule, such as `Bash(git)`), then `disallowedTools` with
+`Bash` and `Agent` first and then the entries of the file. It keeps the body byte for
+byte. The frontmatter must be a narrow form that every reader reads the same way, and
+qory escapes or rewrites nothing in it. The frontmatter takes only the keys `name`,
+`description`, `model`, `effort`, `maxTurns`, `color`, `tools` and `disallowedTools`. The
+source file may also set `paths`, which qory reads and does not pass on to the file it
+writes. Any other key, such as `permissionMode`, `hooks`, `mcpServers` or `skills`, stops
+the build with `Remove the key <key> from the reviewer agent <path>, then run again`. The
+build stops, with the fix on line 1, also when:
+
+- line 1 is `---` followed by spaces, tabs or any other character that JavaScript's `\s`
+  matches;
+- line 1 is not exactly `---` and a line break: a file with no frontmatter, a byte order
+  mark or a CRLF line end stops;
+- the frontmatter is not closed, or does not parse, such as a key written twice;
+- the frontmatter has a byte that is not printable ASCII or a line break, such as a tab;
+- the frontmatter has a `---` between its fences, which Claude Code reads as the end of
+  the frontmatter;
+- the frontmatter has a `...` line, or a `<<` anywhere, which a reader may read as a
+  merge key;
+- a line with the key `name`, bare or in quotes, at any indent, has a value other than
+  the entry's name once a comment, the spaces and one pair of quotes are removed;
+- the frontmatter has a `name` that is not on exactly one such line at the start of a
+  line;
+- the frontmatter is a flow mapping, `{name: x}`;
+- a key has a tag, or is not a word of letters, digits, `_` and `-`;
+- a key or a value has an anchor, or a value is an alias;
+- the frontmatter has a `name` other than the entry's name;
+- `tools` or `disallowedTools` has a `*`, or an entry that is not a word of letters,
+  digits and `_` that starts with a letter, or such a word with one `(...)` with no comma,
+  space or parenthesis in it: `Bash(git log *)` stops;
+- a value is not a string, a bool, an int or a list of them;
+- a string has a character outside printable ASCII other than `\n`, `\t` and `\r`;
+- an int or a bool is written in another form than `true`, `false` or the decimal number,
+  such as `007` or `True`, or a value is a plain `yes`, `no`, `on`, `off`, `y` or `n`;
+- `tools` has nothing left once Bash is removed;
+- the entry's name has a character outside printable ASCII, or a `---`.
+
+The stops for a `<<` and for the `name` lines apply to every agent on Claude Code, the
+reviewer or not. qory checks the text of the frontmatter, line by line, so that every YAML
+reader reads the entry's name. A line in the body stops nothing.
+
+The checks of a reviewer run before the stops of every agent. A reviewer whose line 1 is
+not exactly `---`, whose frontmatter or entry name has a `---`, or whose frontmatter has a
+merge key `<<` gets `Fix the frontmatter of the reviewer agent <path>, then run again` in
+place of `Write --- alone on line 1 of the agent <path>`, `Remove the --- from the
+frontmatter of the agent <path>` or `Rename the agent <path> to a name with no ---`. The
+stops for spaces after `---` on line 1, for a `<<` in a value and for the `name` lines
+keep their line, with `reviewer agent` in place of `agent`.
+
+In a stack with a `review_group`, the `permissionMode` of every agent on Claude Code is
+missing, `default`, `dontAsk` or `plan`, because a review session can start any agent. Any
+other value, also a null or a value that is no string, stops the build with `Set
+permissionMode to default, dontAsk or plan in the agent <path>, or remove it, then run
+again`. A line with the key `permissionMode` at any indent with another value, such as a
+line in a block of text, stops it with `Set line <n> to permissionMode: default, dontAsk or
+plan in the agent <path>, then run again`. A reviewer has no `permissionMode`. In the
+frontmatter of every agent of such a stack, a character other than a printable one, a tab,
+a line feed or a carriage return before a line feed stops the build with `Remove the
+character U+<hex> from line <n> of the agent <path>, then run again`, and a byte that is
+not UTF-8 stops it too. This covers a line break such as U+2028, where a YAML reader starts
+a new line, and a byte order mark inside the frontmatter, which makes yaml.v3 skip the
+first character of each line; qory checks the lines at line feeds alone. One byte order
+mark before the `---` of line 1 stays allowed.
+
+In a stack with a `review_group`, the frontmatter of every skill and command on Claude
+Code, notes included, sets only the keys `name`, `description`, `argument-hint`, `paths`,
+`notes_for` and `allowed-tools`. Claude Code adds the tools of `allowed-tools` to the
+allow rules of the session once the skill runs, so `allowed-tools` lists only `Read`,
+`Grep` and `Glob`. Any other key, such as `context`, `agent` or `hooks`, stops the build
+with `Remove the key <key> from the skill <path>, then run again`, or `command` in place of
+`skill`. Another tool in `allowed-tools` stops it with `Set allowed-tools to Read, Grep or
+Glob in the skill <path>, or remove it, then run again`. A line with `allowed-tools`,
+`context`, `agent` or `hooks` at any indent, such as a line in a block of text, stops it
+with `Remove the key <key> from line <n> of the skill <path>, then run again`; the one
+`allowed-tools` line at the start of a line that qory reads as the key is checked by its
+value and its text. Its text after the colon has only `Read`, `Grep` and `Glob`, commas
+and spaces, or is empty with lines of `- <tool>` after it, one tool on each line. A `#`, a
+quote, a bracket or any other character there stops the build with `Write allowed-tools
+on line <n> of the skill <path> as Read, Grep or Glob, then run again`. Spaces after `---`
+on line 1 stop the build with `Remove the spaces after --- on line 1 of the skill <path>,
+then run again`, and a `---` in the frontmatter, where Claude Code ends it, with `Remove
+the --- from the frontmatter of the skill <path>, then run again`. A line that starts
+with `? `, an explicit key, stops it with `Remove the ? from line <n> of the skill <path>,
+then run again`, and a frontmatter in `{ }` or `[ ]` with `Write the frontmatter of the
+skill <path> with one key on each line, not in { } or [ ], then run again`. A line that
+starts with `...`, which ends a YAML document, so that qory reads no key after it, stops
+it with `Remove the ... from line <n> of the skill <path>, then run again`. A character
+other than a printable one, a tab, a line feed or a carriage return before a line feed,
+such as U+2028 or a byte order mark, stops it with `Remove the character U+<hex> from line
+<n> of the skill <path>, then run again`, as for an agent. An
+`allowed-tools` that qory reads from no plain `allowed-tools:` line, such as a quoted key
+with an escape, stops it with `Write allowed-tools: once, plain, at the start of a line
+in the skill <path>, then run again`. `name` and `description` are strings, and
+`argument-hint`, `paths` and `notes_for` strings or lists of strings, so
+`argument-hint: [message]` builds. A value of another type, such as a map, stops the build
+with `Set <key> to a string in the skill <path>, then run again`, or `a string or a list
+of strings` for `argument-hint`, `paths` and `notes_for`.
+
+The step that writes the agent files of Claude Code stops with `Compose the reviewer agent
+<path> for a runtime that can deny it commands, then run again` when it writes a reviewer
+for a runtime that cannot deny the agent its commands.
+
+The frontmatter of an agent, the reviewer or not, and of a skill's `SKILL.md` has at most
+64 KiB on every runtime. The compose stops a larger one before qory parses it, with
+`Shorten the frontmatter of the agent <path> to 64 KiB or less, then run again`, or
+`skill` in place of `agent`.
+
 ### Notes
 
 A note is a skill that holds knowledge for the agents of some roles. Give the skill the

@@ -1,6 +1,7 @@
 package render
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -166,11 +167,13 @@ func sortedNames(m map[string]string) []string {
 // of each Markdown file that does, so the module's files stay live wherever nothing had
 // to change. An entry of a module the home holds a copy of, see [compose.Module.Copy], is
 // a copy instead, files and directories, with the references of each Markdown file that
-// holds one resolved. An agent with a tier or paths is written as [AgentFront] returns
-// it. Every kind directory in keep is created, with no entry of that kind as well,
-// so a checkout link to it resolves. Entries of any other kind are left out, and it is
-// the caller's job to pass every kind the runtime reads from the directory.
-func PlaceEntries(res *compose.Result, dir string, addr Address, keep ...string) error {
+// holds one resolved. An agent is written as [AgentFront] returns it for the runtime rt,
+// nil for a caller that places no agent, when that differs from the module's file, which
+// a tier, paths, a reviewer's tools and a missing name cause, and it is placed as any
+// other entry otherwise. Every kind directory in keep is created, with no entry of that
+// kind as well, so a checkout link to it resolves. Entries of any other kind are left
+// out, and it is the caller's job to pass every kind the runtime reads from the directory.
+func PlaceEntries(rt Runtime, res *compose.Result, dir string, addr Address, keep ...string) error {
 	wanted := map[string]bool{}
 	for _, k := range keep {
 		wanted[k] = true
@@ -191,7 +194,10 @@ func PlaceEntries(res *compose.Result, dir string, addr Address, keep ...string)
 			name += ".md"
 		}
 		dst := filepath.Join(dir, name)
-		if e.Kind == "agents" && (e.Tier != "" || e.Paths != nil) {
+		if err := checkEntry(rt, res, e); err != nil {
+			return err
+		}
+		if e.Kind == "agents" {
 			data, err := readSource(res, e)
 			if errors.Is(err, errLeftOut) {
 				continue
@@ -199,11 +205,17 @@ func PlaceEntries(res *compose.Result, dir string, addr Address, keep ...string)
 			if err != nil {
 				return err
 			}
-			data = AgentFront(res, e, []byte(res.Substitute(string(data), addr)))
-			if err := WriteFile(filepath.Dir(dst), filepath.Base(dst), data); err != nil {
+			written, err := AgentFront(rt, res, e, []byte(res.Substitute(string(data), addr)))
+			if err != nil {
 				return err
 			}
-			continue
+			// An agent that AgentFront leaves as the module has it stays a link or a copy.
+			if e.Tier != "" || e.Paths != nil || IsReviewAgent(res, e) || !bytes.Equal(written, data) {
+				if err := WriteFile(filepath.Dir(dst), filepath.Base(dst), written); err != nil {
+					return err
+				}
+				continue
+			}
 		}
 		if m, copied := moduleOf(res, e.Module); copied {
 			root, err := out.get()
@@ -238,14 +250,50 @@ func moduleOf(res *compose.Result, name string) (compose.Module, bool) {
 	return compose.Module{}, false
 }
 
+// checkEntry is the check of [CommandGuard.CheckEntry] of rt for e, a skill or a command
+// of a stack with a review session: the frontmatter of its SKILL.md or of its file, as the
+// module wrote it. It checks nothing for another kind, for a stack with no review session,
+// and for a runtime that is no CommandGuard, whose review session stops before it starts.
+func checkEntry(rt Runtime, res *compose.Result, e compose.Entry) error {
+	guard, ok := rt.(CommandGuard)
+	if !ok || !HasReviewSession(res) {
+		return nil
+	}
+	path, kind := e.Path, CommandFile
+	switch e.Kind {
+	case "skills":
+		path, kind = filepath.Join(e.Path, "SKILL.md"), SkillFile
+	case "commands":
+	default:
+		return nil
+	}
+	data, err := readFileOf(res, e, path)
+	if errors.Is(err, errLeftOut) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	src, err := SplitAgent(data, path, kind)
+	if err != nil {
+		return err
+	}
+	return guard.CheckEntry(EntryCheck{Data: data, Source: src, Path: path, Kind: kind})
+}
+
 // readSource reads the file of the entry e: through the module's directory, the way a copy
 // reads it, when the home holds a copy of the module, else at its path. It returns
 // [errLeftOut] for a file that the copy of a walled run's module leaves out, see [leftOut].
 func readSource(res *compose.Result, e compose.Entry) ([]byte, error) {
+	return readFileOf(res, e, e.Path)
+}
+
+// readFileOf is [readSource] for path, a file of the entry e.
+func readFileOf(res *compose.Result, e compose.Entry, path string) ([]byte, error) {
 	if m, copied := moduleOf(res, e.Module); copied {
-		return readEntry(m, e.Path, leftOut(res, m))
+		return readEntry(m, path, leftOut(res, m))
 	}
-	return os.ReadFile(e.Path)
+	return os.ReadFile(path)
 }
 
 // resolver is what a copy of the entry e passes each Markdown file through for the path

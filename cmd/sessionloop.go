@@ -8,8 +8,9 @@ const (
 	textLaterStarts = "session %d starts the workflow %s on %s"
 	textLaterEnd    = "Qory Apiary starts no session after session %d, so the run ends"
 	// textLaterAccess has the later session's workflow, its access, session 1's access and
-	// [codeUsed].
-	textLaterAccess = "Set one access for every workflow of the stage in Qory Apiary.\n  The workflow %s has %s, and session 1 has %s%s"
+	// [codeUsed]. Only a dispatched run reaches it, so it is the cause alone, with no full
+	// stop at the end of line 1.
+	textLaterAccess = "The workflow %s has access %s and session 1 has %s, so the session did not start\n  Only a read workflow with a review_group may have less access than session 1%s"
 	// textLaterCheckoutHarness is the line of a later session of a run whose harness is the
 	// checkout's file, which the branch may have changed since session 1's compose.
 	textLaterCheckoutHarness = "Set the workspace's harness in Qory Apiary.\n  A later session composes no harness file of the branch"

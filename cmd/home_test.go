@@ -810,7 +810,7 @@ func writeFullAppModule(t *testing.T, dir string) {
 	writeAppModule(t, dir)
 	writeFile(t, filepath.Join(dir, "skills", "release", "SKILL.md"), "---\nname: release\ndescription: Releases the app.\n---\n\nRun ${qory:commands/ship}.\n")
 	writeFile(t, filepath.Join(dir, "skills", "release", "notes.txt"), "No reference here.\n")
-	writeFile(t, filepath.Join(dir, "agents", "reviewer.md"), "# reviewer\n")
+	writeFile(t, filepath.Join(dir, "agents", "reviewer.md"), "---\nname: reviewer\n---\n# reviewer\n")
 	writeFile(t, filepath.Join(dir, "output-styles", "terse.md"), "# terse\n")
 	writeFile(t, filepath.Join(dir, "hooks", "guard.sh"), "#!/bin/sh\nexit 0\n")
 	if err := os.Chmod(filepath.Join(dir, "hooks", "guard.sh"), 0o755); err != nil {

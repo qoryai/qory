@@ -126,6 +126,9 @@ type pushAPI struct {
 	index         func(n int, w http.ResponseWriter) bool
 	// workItemFails has each GET of the work item end with a 500.
 	workItemFails bool
+	// round and rounds are the stage's round and number of rounds in the work item, left
+	// out when 0.
+	round, rounds int
 	// other, when set, responds to a request of no route above, and returns whether it did;
 	// a request it leaves gets 404.
 	other func(w http.ResponseWriter, r *http.Request) bool
@@ -160,7 +163,11 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		pushed := cmp.Or(a.pushedCommits, a.pushedRows())
 		outputs := cmp.Or(a.outputs, pullRequestOutputs)
-		fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"run":%s,"stage":{"id":"st_a"},"inputs":[],"outputs":%s,"verdict":%s,"pushed_commits":%s}`, workItem, run, outputs, verdict, pushed)
+		stage := `{"id":"st_a"}`
+		if a.round != 0 && a.rounds != 0 {
+			stage = fmt.Sprintf(`{"id":"st_a","round":%d,"rounds":%d}`, a.round, a.rounds)
+		}
+		fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"run":%s,"stage":%s,"inputs":[],"outputs":%s,"verdict":%s,"pushed_commits":%s}`, workItem, run, stage, outputs, verdict, pushed)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/r/artifacts":
 		a.reads++
 		if a.index == nil || !a.index(a.reads, w) {
@@ -182,6 +189,22 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// setRound sets the stage's round and number of rounds of the work item.
+func (a *pushAPI) setRound(round, rounds int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.round, a.rounds = round, rounds
+}
+
+// addVersion adds a version of the artifact typ, name main, with one file, as a run of the
+// stage st_a wrote it.
+func (a *pushAPI) addVersion(typ, filename string, content []byte) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.files = append(a.files, content)
+	a.kinds = append(a.kinds, storedKind{typ, "main", filename, a.runID})
 }
 
 // recordedRow is a row of the run's list of pushed commits.
@@ -2311,20 +2334,23 @@ func subcommand(args []string) string {
 
 // TestEveryGitOfThePushStepIsHardened records each git of the record after the setup and
 // of the push step of a walled run: each reads no system or global configuration file,
-// and each has [proxygit.Hardened].
+// each has [proxygit.Hardened], and only a git that reaches the forge has the password of
+// a proxy.
 func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
-	// GIT_CONFIG_NOSYSTEM=0 below lets Apple's git read its gitconfig with
-	// credential.helper=osxkeychain, which GIT_CONFIG_SYSTEM does not replace.
-	if runtime.GOOS == "darwin" {
-		if origin := gitCredentialHelperOrigin(t); origin != "" {
-			t.Skipf("git reads credential.helper from %s even with GIT_CONFIG_SYSTEM set, so a git of this test would open the macOS keychain; CI on Linux runs this test", origin)
-		}
-	}
+	// GIT_CONFIG_NOSYSTEM=0 lets Apple's git read its gitconfig with
+	// credential.helper=osxkeychain, which GIT_CONFIG_SYSTEM does not replace, so a git of
+	// the test would open the macOS keychain. There the test keeps GIT_CONFIG_NOSYSTEM=1
+	// and checks everything but the step's GIT_CONFIG_NOSYSTEM; CI on Linux checks that.
+	keychain := runtime.GOOS == "darwin" && gitCredentialHelperOrigin(t) != ""
 	p := newPushRepo(t, "write")
 	// The values of the test differ from the ones the step must set.
 	empty := filepath.Join(tempDir(t), "gitconfig")
 	writeFile(t, empty, "")
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
+	if keychain {
+		t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	} else {
+		t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
+	}
 	t.Setenv("GIT_CONFIG_SYSTEM", empty)
 	t.Setenv("GIT_CONFIG_GLOBAL", empty)
 	calls := recordGit(t, empty)
@@ -2358,7 +2384,7 @@ func TestEveryGitOfThePushStepIsHardened(t *testing.T) {
 		}
 		nosystem, global, proxy, ceiling, all := parts[0], parts[1], parts[2], parts[3], parts[4]
 		args := strings.Fields(all)
-		if nosystem != "1" || global != os.DevNull {
+		if (nosystem != "1" && !keychain) || global != os.DevNull {
 			t.Errorf("git %s has GIT_CONFIG_NOSYSTEM=%q and GIT_CONFIG_GLOBAL=%q", all, nosystem, global)
 		}
 		sub := subcommand(args)

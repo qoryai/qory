@@ -50,6 +50,10 @@ var flags = []string{
 	"-c", "core.commitGraph=false",
 }
 
+// Flags returns the -c flags that every git command gets, for a git that this package
+// does not start, such as each git of the suite's script.
+func Flags() []string { return slices.Clone(flags) }
+
 // noProtocol are the variables of every git but the ones of [Remote] and [LazyFetch]. A
 // read of an object that a repository with a promisor remote does not have starts git
 // fetch, which runs programs of the repository's configuration. GIT_NO_LAZY_FETCH stops
@@ -57,14 +61,21 @@ var flags = []string{
 // configuration file, and the one protocol it allows has a name made for this process:
 // with a name that is known before, such as none, a remote with vcs = none and the alias
 // remote-none pass the check and run the alias.
-var noProtocol = []string{"GIT_ALLOW_PROTOCOL=none-" + rand.Text(), noLazyFetch}
+var noProtocol = []string{"GIT_ALLOW_PROTOCOL=" + NoProtocolName(), NoLazyFetch}
 
-// noLazyFetch is the variable that stops the fetch of a missing object, which [Remote]'s git
-// has too.
-const noLazyFetch = "GIT_NO_LAZY_FETCH=1"
+// NoProtocolName returns a new name of a protocol that no git has, for GIT_ALLOW_PROTOCOL:
+// none- and 26 random letters and digits, see [noProtocol].
+func NoProtocolName() string { return "none-" + rand.Text() }
 
-// noFetch are the -c flags of every git with [noProtocol], for a git that does not read
-// GIT_NO_LAZY_FETCH: what git fetch runs before it checks the protocol.
+// NoLazyFetch is the variable that stops the fetch of a missing object, which [Remote]'s
+// git has too, and so does each git of the suite's script, which runs in a container.
+const NoLazyFetch = "GIT_NO_LAZY_FETCH=1"
+
+// NoFetch returns the -c flags of every git with [noProtocol], for a git that does not
+// read GIT_NO_LAZY_FETCH: what git fetch runs before it checks the protocol.
+func NoFetch() []string { return slices.Clone(noFetch) }
+
+// noFetch are the flags of [NoFetch].
 var noFetch = []string{
 	"-c", "fetch.bundleURI=",
 	"-c", "core.alternateRefsCommand=:",
@@ -241,7 +252,7 @@ func Remote(ctx context.Context, dir string, base []string, args ...string) (*ex
 	if err := ready(ctx, env); err != nil {
 		return nil, err
 	}
-	return commandOf(ctx, dir, slices.Concat(env, []string{noLazyFetch}), slices.Concat(flags, args)), nil
+	return commandOf(ctx, dir, slices.Concat(env, []string{NoLazyFetch}), slices.Concat(flags, args)), nil
 }
 
 // LazyFetch is [Unchecked] for a git of a person's qory worktree command that needs the

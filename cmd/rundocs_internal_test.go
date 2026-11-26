@@ -225,6 +225,20 @@ func TestAWalledRunFromARunCodeWithAMountOfItsReportStops(t *testing.T) {
 	}
 }
 
+// reportDetail is line 2 of the stop for a folder that contains the harness report.
+const reportDetail = "That file is the harness report of this run, which qory writes"
+
+// longStop is the text of a stop of [codeRun.readExposed] whose line 1 has the paths of
+// two folders, so that it has more than 100 characters after "qory run: ": lead is line 1
+// up to its comma, then line 2 is "so the run did not start", and detail is line 3.
+func longStop(t *testing.T, lead, detail string) string {
+	t.Helper()
+	if len("qory run: ")+len(lead)+len(" so the run did not start") <= 100 {
+		t.Fatalf("line 1 %q is not longer than 100 characters, so the stop does not wrap", lead)
+	}
+	return lead + "\n  so the run did not start\n  " + detail + "; the code is used"
+}
+
 // TestAWalledRunFromARunCodeInACheckoutThatExposesAReportStops is a walled run from a
 // run code, its harness hidden or shown, in a checkout that contains qory's cache
 // folder, such as ~ on Linux, lies inside it, or contains the harness report beside the
@@ -251,15 +265,15 @@ func TestAWalledRunFromARunCodeInACheckoutThatExposesAReportStops(t *testing.T) 
 	report := filepath.Join(t.TempDir(), "homes", "app-1a2b3c4d-report.json")
 	named, reference := codeRunHidden(t, true), codeRunHidden(t, false)
 	type checkoutCase struct{ root, want string }
-	inCache := func(root, where string) checkoutCase {
-		return checkoutCase{root, "start the run in a checkout " + where + " " + cache + ": the checkout " + root + " is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under " + cache + "; the code is used"}
+	inCache := func(root, how string) checkoutCase {
+		return checkoutCase{root, longStop(t, "The checkout "+root+" "+how+" "+cache+",", "qory writes harness reports in "+cache)}
 	}
 	cases := []checkoutCase{
-		inCache(home, "that does not contain"), inCache(linkHome, "that does not contain"),
-		inCache(cache, "outside"), inCache(inside, "outside"),
+		inCache(home, "contains"), inCache(linkHome, "contains"),
+		inCache(cache, "is"), inCache(inside, "lies inside"),
 	}
 	if upper := upperBase(home); upper != "" {
-		cases = append(cases, inCache(upper, "that does not contain"))
+		cases = append(cases, inCache(upper, "contains"))
 	}
 	work := t.TempDir()
 	withReport := filepath.Join(work, "homes", "app-1a2b3c4d-report.json")
@@ -271,7 +285,7 @@ func TestAWalledRunFromARunCodeInACheckoutThatExposesAReportStops(t *testing.T) 
 		t.Fatal(err)
 	}
 	ofReport := func(root string) checkoutCase {
-		return checkoutCase{root, "start the run in a checkout that does not contain " + withReport + ": the checkout " + root + " is mounted into the agent's container, and " + withReport + " is the harness report of this run; the code is used"}
+		return checkoutCase{root, longStop(t, "The checkout "+root+" contains "+withReport+",", reportDetail)}
 	}
 	reported := []checkoutCase{ofReport(work), ofReport(linkWork)}
 	if upper := upperBase(work); upper != "" {
@@ -348,15 +362,15 @@ func TestAWalledRunFromARunCodeFromAWorkingFolderThatExposesAReportStops(t *test
 	report := filepath.Join(t.TempDir(), "homes", "app-1a2b3c4d-report.json")
 	named, reference := codeRunHidden(t, true), codeRunHidden(t, false)
 	type cwdCase struct{ cwd, want string }
-	inCache := func(cwd, where string) cwdCase {
-		return cwdCase{cwd, "run qory from a folder " + where + " " + cache + ": the working folder " + cwd + " is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under " + cache + "; the code is used"}
+	inCache := func(cwd, how string) cwdCase {
+		return cwdCase{cwd, longStop(t, "The working folder "+cwd+" "+how+" "+cache+",", "qory writes harness reports in "+cache)}
 	}
 	cases := []cwdCase{
-		inCache(userHome, "that does not contain"), inCache(linkHome, "that does not contain"),
-		inCache(cache, "outside"), inCache(inside, "outside"),
+		inCache(userHome, "contains"), inCache(linkHome, "contains"),
+		inCache(cache, "is"), inCache(inside, "lies inside"),
 	}
 	if upper := upperBase(userHome); upper != "" {
-		cases = append(cases, inCache(upper, "that does not contain"))
+		cases = append(cases, inCache(upper, "contains"))
 	}
 	for _, c := range cases {
 		if err := named.readExposed(root, c.cwd, report); err == nil || err.Error() != c.want || ExitCode(err) != 2 {
@@ -380,7 +394,7 @@ func TestAWalledRunFromARunCodeFromAWorkingFolderThatExposesAReportStops(t *test
 		reported = append(reported, upper)
 	}
 	for _, cwd := range reported {
-		want := "run qory from a folder that does not contain " + withReport + ": the working folder " + cwd + " is mounted into the agent's container, and " + withReport + " is the harness report of this run; the code is used"
+		want := longStop(t, "The working folder "+cwd+" contains "+withReport+",", reportDetail)
 		if err := named.readExposed(root, cwd, withReport); err == nil || err.Error() != want || ExitCode(err) != 2 {
 			t.Errorf("the working folder %s: got %v (exit %d)\nwant %s", cwd, err, ExitCode(err), want)
 		}

@@ -41,6 +41,7 @@ const (
 	textComposeStep       = "compose the harness for %s"
 	textComposeStepAny    = "compose the harness"
 	textCopyStep          = "copy work out"
+	textReviewCopyStep    = "copy the pushed commit for the reviewers"
 )
 
 // fetchStepName is the name of the fetch step of a run whose list is l: the run's

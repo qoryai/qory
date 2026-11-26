@@ -541,6 +541,10 @@ type composeOptions struct {
 	// session takes its worktree section, so it runs no git that reads objects of the
 	// checkout, which a session before could write.
 	launched *report.Report
+	// launchedConf, when set, is the configuration of the run's first compose, every
+	// section of it: the compose of a later session reads no qory.yaml, which a session
+	// before could write in the checkout, such as harness.tiers.
+	launchedConf *config.Config
 	// alone is set for the compose of a later session of a qory run in the home that the
 	// run made for itself: the home holds the session's runtime alone, see
 	// [composeOptions.homeRuntimes].
@@ -709,6 +713,7 @@ type prepared struct {
 	rows     [][2]string // the rows every outcome prints after its own: skipped keys, unchecked ranges
 	warnings []string    // the warnings printed, one per git source whose remote could not be reached
 	u        *ui.UI
+	conf     config.Config // the configuration that the compose read
 }
 
 // runCompose is the compose verb's body, for the verb and for a worktree add, which
@@ -743,6 +748,8 @@ type composed struct {
 	submitProgram *compose.SubmitProgram
 	// codex is what a walled Codex run writes its Codex home from, see [codexParts].
 	codex codexParts
+	// conf is the configuration that the compose read, see [composeOptions.launchedConf].
+	conf config.Config
 }
 
 // codexParts are the parts of a compose that [codex.WriteWalledHome] reads besides the
@@ -824,7 +831,7 @@ func composeHome(out, errOut io.Writer, o composeOptions) (*composed, error) {
 		checkoutOnly[rt.Name()] = render.CheckoutOnly(rt, res)
 	}
 	parts := codexParts{skills: codex.AllowedSkills(res), readRules: res.CodexReadRules, sourceDirs: res.SourceDirs()}
-	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, runtimes: runtimes, pinFile: pinFile, checkoutOnly: checkoutOnly, submitProgram: res.SubmitProgramFor(at.home), codex: parts}, nil
+	return &composed{rep: rep, targets: targets, warnings: pr.warnings, harness: harnessSources(res, o.named()), workflows: workflows, runtimes: runtimes, pinFile: pinFile, checkoutOnly: checkoutOnly, submitProgram: res.SubmitProgramFor(at.home), codex: parts, conf: pr.conf}, nil
 }
 
 // pushChecksWritable stops a walled run before the home is written when a module
@@ -957,6 +964,11 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	// key and no machine harness setting, such as model or launch.
 	var conf config.Config
 	loadConf := func(extends bool) (err error) {
+		// A later session of a run takes the first compose's configuration whole.
+		if o.launchedConf != nil {
+			conf = *o.launchedConf
+			return nil
+		}
 		if conf, err = config.Load(root, !extends && !o.inCheckout); err != nil {
 			return input(err)
 		}
@@ -1282,7 +1294,7 @@ func prepare(out, errOut io.Writer, o composeOptions) (pr *prepared, err error) 
 	if cache == "" {
 		cache, _ = source.CacheDir()
 	}
-	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, launch: conf.Launch, force: force, cache: cache, rows: skippedConfig, warnings: warnings, u: u}, nil
+	return &prepared{at: at, res: res, rep: rep, previous: previous, targets: targets, launch: conf.Launch, force: force, cache: cache, rows: skippedConfig, warnings: warnings, u: u, conf: conf}, nil
 }
 
 // copies decides, for the compose, whether the home contains copies of a module's files.

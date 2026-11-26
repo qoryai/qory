@@ -3,8 +3,12 @@ package preparation
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
+	"time"
 )
 
 // fetchesIn is a git runner that runs every git through inner and counts the fetches.
@@ -104,5 +108,130 @@ func TestARecordOfAnotherRepositoryNeverListsTheHead(t *testing.T) {
 				t.Errorf("the branch moved to %s", got)
 			}
 		})
+	}
+}
+
+// TestTheProjectBaseIsTheMergeBaseWithTheDefaultBranch is a branch cut from main at the
+// version, with main moved on by one commit: a push sets the project base to the version,
+// the merge base of the pushed head with main, not to main's head. A rerun starts at the
+// pushed commit in a checkout fetched at depth one, which lacks the version: its push sets
+// the same project base and fetches it into the checkout. A repository with no default
+// branch has none.
+func TestTheProjectBaseIsTheMergeBaseWithTheDefaultBranch(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop")
+	bare := filepath.Join(base, "acme", "shop.git")
+	version := b.Repositories[0].Commit
+	bareCommit(t, bare, "main", version, "main moves on")
+	leave(t, dir)
+	if doc, _, err := pushOf(dir, b); err != nil || doc == nil {
+		t.Fatalf("first push: %v", err)
+	}
+	if got := b.Repositories[0].ProjectBase; got != "" {
+		t.Fatalf("the push set the project base %q, which ReadProjectBase sets", got)
+	}
+	ReadProjectBase(context.Background(), dir, os.Environ(), b, testProxy)
+	pushedHead := b.Repositories[0].Commit
+	if got := b.Repositories[0].ProjectBase; got != version {
+		t.Fatalf("the first push's project base is %q, want the version %s", got, version)
+	}
+
+	rerun := t.TempDir()
+	run(t, rerun, "init", "--quiet")
+	run(t, rerun, "fetch", "--quiet", "--depth", "1", bare, pushedHead)
+	run(t, rerun, "checkout", "--quiet", "-b", b.Ref, pushedHead)
+	write(t, filepath.Join(rerun, "rerun.txt"), "rerun\n")
+	head := commitHere(t, rerun)
+	run(t, rerun, "push", "--quiet", bare, head+":refs/heads/"+b.Ref)
+	if _, err := exec.Command("git", "-C", rerun, "cat-file", "-e", version+"^{commit}").CombinedOutput(); err == nil {
+		t.Fatal("the rerun's checkout has the version before the read")
+	}
+	r := WorkRepository{Path: "acme/shop", Dir: ".", Commit: head, Start: pushedHead, DefaultBranch: "main"}
+	if got := projectBase(context.Background(), stepGit(&testProxy, ""), rerun, "git.example.com", r, head); got != version {
+		t.Errorf("the rerun's project base is %q, want the version %s", got, version)
+	}
+	run(t, rerun, "cat-file", "-e", version+"^{commit}")
+	run(t, rerun, "rev-parse", version+"^{tree}")
+
+	r.DefaultBranch = ""
+	if got := projectBase(context.Background(), stepGit(&testProxy, ""), rerun, "git.example.com", r, head); got != "" {
+		t.Errorf("with no default branch the project base is %q, want none", got)
+	}
+}
+
+// TestAPushOfNoCommitReadsTheProjectBase is a session that leaves no change: the push
+// moves nothing and still sets the project base, the version, which main has moved past,
+// so a review after the session counts only what the branch changes. A default branch that
+// the forge lacks has none.
+func TestAPushOfNoCommitReadsTheProjectBase(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop")
+	bare := filepath.Join(base, "acme", "shop.git")
+	version := b.Repositories[0].Commit
+	bareCommit(t, bare, "main", version, "main moves on")
+	if doc, _, err := pushOf(dir, b); err != nil || doc != nil {
+		t.Fatalf("the push returned %v, %v, want nothing pushed", doc, err)
+	}
+	ReadProjectBase(context.Background(), dir, os.Environ(), b, testProxy)
+	if got := b.Repositories[0].ProjectBase; got != version {
+		t.Errorf("the project base is %q, want the version %s", got, version)
+	}
+	r := b.Repositories[0]
+	r.DefaultBranch = "gone"
+	if got := projectBase(context.Background(), stepGit(&testProxy, ""), dir, "git.example.com", r, r.Commit); got != "" {
+		t.Errorf("a default branch that the forge lacks has the project base %q", got)
+	}
+}
+
+// TestAFailedReadKeepsTheEarlierProjectBase is a run whose first push reads the project
+// base, the version, and whose second push moves the branch while the forge has lost the
+// default branch: the second read finds no base, and the first one stays.
+func TestAFailedReadKeepsTheEarlierProjectBase(t *testing.T) {
+	dir, b, base := onBranchIn(t, "acme/shop")
+	bare := filepath.Join(base, "acme", "shop.git")
+	version := b.Repositories[0].Commit
+	bareCommit(t, bare, "main", version, "main moves on")
+	leave(t, dir)
+	if doc, _, err := pushOf(dir, b); err != nil || doc == nil {
+		t.Fatalf("first push: %v", err)
+	}
+	ReadProjectBase(context.Background(), dir, os.Environ(), b, testProxy)
+	if got := b.Repositories[0].ProjectBase; got != version {
+		t.Fatalf("the first project base is %q, want the version %s", got, version)
+	}
+	run(t, bare, "update-ref", "-d", "refs/heads/main")
+	write(t, filepath.Join(dir, "second.txt"), "second\n")
+	if doc, _, err := pushOf(dir, b); err != nil || doc == nil {
+		t.Fatalf("second push: %v", err)
+	}
+	ReadProjectBase(context.Background(), dir, os.Environ(), b, testProxy)
+	if got := b.Repositories[0].ProjectBase; got != version {
+		t.Errorf("after a read that found no base, the project base is %q, want the version %s", got, version)
+	}
+}
+
+// TestASlowHistoryFetchLeavesNoProjectBase is a forge whose history fetch for the project
+// base does not end: the read ends at [projectBaseLimit] with no project base, and the
+// fetch of the history is the call that the limit cut.
+func TestASlowHistoryFetchLeavesNoProjectBase(t *testing.T) {
+	dir, b, _ := onBranchIn(t, "acme/shop")
+	was := projectBaseLimit
+	t.Cleanup(func() { projectBaseLimit = was })
+	projectBaseLimit = 300 * time.Millisecond
+	inner := stepGit(&testProxy, "")
+	cut := false
+	slow := func(ctx context.Context, dir string, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "fetch" && slices.Contains(args, "--filter=tree:0") {
+			<-ctx.Done()
+			cut = true
+			return "", ctx.Err()
+		}
+		return inner(ctx, dir, args...)
+	}
+	r := b.Repositories[0]
+	began := time.Now()
+	if got := projectBase(context.Background(), slow, dir, "git.example.com", r, r.Commit); got != "" {
+		t.Errorf("the project base is %q, want none", got)
+	}
+	if took := time.Since(began); !cut || took > 10*time.Second {
+		t.Errorf("the read took %v, and the limit cut the history fetch: %v", took, cut)
 	}
 }

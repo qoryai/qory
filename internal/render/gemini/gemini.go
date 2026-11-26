@@ -77,7 +77,7 @@ func (gemini) Reserved() []render.Reserved {
 // $ARGUMENTS rewritten to {{args}}. Gemini reads a project .gemini only in a folder the
 // user has marked trusted.
 func (gemini) Render(res *compose.Result, dir, home string) error {
-	if err := render.PlaceEntries(res, dir, render.Bare, "skills", "hooks"); err != nil {
+	if err := render.PlaceEntries(gemini{}, res, dir, render.Bare, "skills", "hooks"); err != nil {
 		return err
 	}
 	err := render.WriteSettings(res, Runtime, dir, home, []string{"settings.json"}, func(file string, m map[string]any) {

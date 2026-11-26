@@ -312,6 +312,28 @@ func TestABodyReadInTwoWaysGets422(t *testing.T) {
 	}
 }
 
+// TestAPushPathSpelledInAnotherWayGets422 is a path that spells /artifacts with a slash,
+// a percent-escape or a query: a checker with checks stops it with the fix for the path,
+// and runs no check. A verdict path and another path pass. Forager cuts the query and
+// decodes the escapes before it passes the path, so only the slash spellings reach the
+// check in a run; the other rows keep the check safe for a caller that does not.
+func TestAPushPathSpelledInAnotherWayGets422(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	body := pushBody(t, "spec", [2]string{"spec.md", "x"})
+	for _, path := range []string{"/artifacts/", "//artifacts", "/artifacts?x=1", "/%61rtifacts"} {
+		r, err := f.post(t, path, body)
+		wantRefusal(t, path, r, err, "Send the POST to the run's /verdict or /artifacts path.\n  The path of the POST is another spelling of it.")
+	}
+	for _, path := range []string{"/verdict", "/verdict/", "/Artifacts", "/pushed-commits"} {
+		if r, err := f.post(t, path, body); r != nil || err != nil {
+			t.Errorf("%s: got %+v, %v, want nil, nil", path, r, err)
+		}
+	}
+	if len(f.e.commands) != 0 {
+		t.Errorf("ran %v, want nothing", f.e.commands)
+	}
+}
+
 // TestATypeWithoutACheckPasses is a push of a type the home has no check for.
 func TestATypeWithoutACheckPasses(t *testing.T) {
 	f := newFixture(t, "#!/usr/bin/env node")

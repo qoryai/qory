@@ -68,7 +68,7 @@ func placeSkills(res *compose.Result, dir string) (err error) {
 			err = failed("skills", rerr)
 		}
 	}()
-	if err := render.PlaceEntries(res, scratch, render.Bare, "skills"); err != nil {
+	if err := render.PlaceEntries(codex{}, res, scratch, render.Bare, "skills"); err != nil {
 		return err
 	}
 	dst := filepath.Join(dir, "skills")

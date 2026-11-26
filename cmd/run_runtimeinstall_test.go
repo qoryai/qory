@@ -852,7 +852,8 @@ func TestADispatchedRunShowsOnlyTheCauseOfAFailedInstall(t *testing.T) {
 // installs that stop on a state folder qory cannot write, a host proxy's CA bundle with
 // no certificate, and a host proxy that does not open. Each error has a fix line and a
 // cause line, so qory run prints the cause alone, with no fix line. The error of the
-// state folder has the folder's path on its line, which is long in a test's folder.
+// state folder has the folder's path on its line, which is long in a test's folder, and
+// longer with a long TMPDIR.
 func TestADispatchedRunShowsTheCauseOfAOneLineInstallError(t *testing.T) {
 	state := func() string { return filepath.Join(os.Getenv("XDG_STATE_HOME"), "qory", "runtimes") }
 	bundle := filepath.Join(t.TempDir(), "ca.pem")
@@ -872,7 +873,15 @@ func TestADispatchedRunShowsTheCauseOfAOneLineInstallError(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { os.Chmod(state(), 0o755) })
-		}}, func() string { return "qory run: mkdir " + filepath.Join(state(), "claude") + ": permission denied\n" }, "Check that qory can write", false},
+		}}, func() string {
+			// qory cuts a line of more than 200 characters, and the test's folder is under
+			// TMPDIR, so the test looks for the start of a long line alone.
+			line := "qory run: mkdir " + filepath.Join(state(), "claude") + ": permission denied\n"
+			if len(line) > 200 {
+				return line[:100]
+			}
+			return line
+		}, "Check that qory can write", false},
 		{"a CA bundle with no certificate", installSetup{caBundle: bundle},
 			func() string { return "qory run: the run's CA bundle\n  " + bundle + "\n  has no certificate\n" }, "Run again", true},
 		{"a host proxy that does not open", installSetup{proxyErr: errors.New("the run's session is joining")},

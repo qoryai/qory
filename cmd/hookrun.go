@@ -181,14 +181,20 @@ type hookPin struct {
 	commit string
 }
 
-// hookCommits is the commit of the programs of a session's hooks at its end and the commit of
-// those at its start: the target repository's commit of the work branch, the session's start,
-// and the run's start. A run with no work branch takes HEAD of the checkout, read once before
-// its first join, before any agent ran, into *pinned. When that read failed, both are "" in
-// every session, and the hooks are red: a later read would see what an agent committed.
-func hookCommits(branch *preparation.WorkBranch, checkout string, pinned *hookPin) (commit, start string) {
+// hookCommits is the commit of the programs of a session's hooks at its end and the commit
+// of those at its start: the target repository's commit of the work branch, the session's
+// start, and the run's start. The hooks at the end of a review session take the run's
+// start too, as the hooks at the start do: the sessions before it may have changed a
+// program on the work branch. A run with no work branch takes HEAD of the checkout, read
+// once before its first join, before any agent ran, into *pinned. When that read failed,
+// both are "" in every session, and the hooks are red: a later read would see what an
+// agent committed.
+func hookCommits(branch *preparation.WorkBranch, checkout string, pinned *hookPin, review bool) (commit, start string) {
 	if branch != nil && len(branch.Repositories) > 0 {
 		r := branch.Repositories[0]
+		if review {
+			return r.Start, r.Start
+		}
 		return r.Commit, r.Start
 	}
 	if !pinned.read {

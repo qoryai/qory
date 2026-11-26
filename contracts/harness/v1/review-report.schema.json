@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://qory.dev/contracts/harness/v1/review-report.schema.json",
   "title": "The review report format, version 1",
-  "description": "The report.json of one reviewer of a review round: the reviewer's name and its findings. Each finding is blocking or non-blocking, and has the quote, the problem, the fix, the proof and a point: one line with at least one character that is not a space. A finding that repeats one of the round before may have its id. A blocking finding has a failing check or a failing input as its proof. qory decides the round from the reports and the full suite. No object has a member this schema does not define.",
+  "description": "The report.json of one reviewer of a review round: the reviewer's name and its findings. Each finding is blocking or non-blocking, and has the quote, the problem, the fix, the proof and a point: one line with at least one character that is not a space. A finding that repeats one of the round before may have its id. A blocking finding has a failing check or a failing input as its proof. No object has a member this schema does not define.",
   "type": "object",
   "required": [
     "reviewer",

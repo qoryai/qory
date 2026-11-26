@@ -464,11 +464,13 @@ type Workflow struct {
 	// dispatched run of the workflow works on: read, write-no-push, or write, "" when the
 	// workflow sets none. [Stack.AccessOf] reads "" as read.
 	Access string `yaml:"access,omitempty"`
-	// Judges is judges as written, true or false, nil when the workflow sets none.
+	// Judges is judges as written: false when a later workflow in the loop judges the
+	// work of a session of this workflow, true or nil otherwise. nil is the same as true.
 	Judges *bool `yaml:"judges,omitempty"`
-	// ReviewGroup is review_group as written: the name of a group role, such as
-	// reviewers, "" when the workflow sets none. The compose checks that the harness has
-	// the group and that it has a member.
+	// ReviewGroup is review_group as written: the name of the group role, such as
+	// reviewers, whose members' reports a review session of the workflow needs, "" when
+	// the workflow sets none. The compose checks that the harness has the group and that
+	// it has a member.
 	ReviewGroup string `yaml:"review_group,omitempty"`
 	// Tier is tier as written, the tier of [Tiers] that names the main session's model
 	// and effort for a dispatched run of the workflow, "" when the workflow sets none.

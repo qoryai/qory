@@ -23,6 +23,13 @@ import (
 	"github.com/qoryai/qory/internal/runcopy"
 )
 
+// The stop of a run from a run code with a writable mount other than the checkout, in the
+// form of [reviewStop]. A local run gets [textCopyMount], which has the fix first.
+const (
+	textCopyMountStop       = "The mount %s is writable, so the run did not start"
+	textCopyMountStopDetail = "A walled run reads the checkout or works in a copy of it, and a writable mount lets the agent write the machine's files"
+)
+
 // The lines of a walled write run, which works in a copy of the person's checkout. A line
 // with a path of the copy shows the person where the run's work stays. The texts of a cause go
 // after [textCopyRead], which has the fix. [textCopyBehind], [textCopyNotAdded] and [textCopyLarge]
@@ -114,11 +121,16 @@ func runCopiesDir() string {
 }
 
 // writableMount stops a run that may write when mounts has a read-write mount other than
-// the checkout at root: it works in a copy, which the mount would go around.
-func writableMount(root string, mounts []wall.Mount, suffix string) error {
+// the checkout at root: it works in a copy, which the mount would go around. A dispatched
+// run, one from a run code, gets the cause alone, [textCopyMountStop], and a local run
+// gets the fix first, [textCopyMount].
+func writableMount(root string, mounts []wall.Mount, dispatched bool) error {
 	for _, m := range mounts {
 		if !m.ReadOnly && m.Path != root {
-			return input(fmt.Errorf(textCopyMount+"%s", exports.Value(m.Path, false), suffix))
+			if dispatched {
+				return input(reviewStop(fmt.Sprintf(textCopyMountStop, exports.Value(m.Path, false)), textCopyMountStopDetail))
+			}
+			return input(fmt.Errorf(textCopyMount, exports.Value(m.Path, false)))
 		}
 	}
 	return nil

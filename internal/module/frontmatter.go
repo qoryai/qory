@@ -138,9 +138,28 @@ func SetFront(data []byte, key, value string) []byte {
 	return []byte(strings.Join(out, "\n"))
 }
 
-// frontText is the frontmatter of data as written, without its fences, "" when data has
-// none or its frontmatter is not closed. It splits data the way [ParseDocument] does.
-func frontText(data []byte) string {
+// MaxAgentFront is the largest frontmatter of an agent file or a SKILL.md that qory
+// parses: 64 KiB. The time that [ParseDocument] takes grows with the square of the number
+// of keys.
+const MaxAgentFront = 64 << 10
+
+// frontCap is the refusal of data, the agent file or the SKILL.md of the kind kind, agent
+// or skill, whose frontmatter has more than [MaxAgentFront] bytes, nil for one within it,
+// with [exports.FilePlace] and [exports.ModulePlace] for the caller to fill in.
+func frontCap(data []byte, kind string) error {
+	n := len(FrontText(data))
+	if n <= MaxAgentFront {
+		return nil
+	}
+	return exports.Refuse("Shorten the frontmatter of the "+kind+" "+exports.FilePlace+" to 64 KiB or less, then run again",
+		fmt.Sprintf("The frontmatter has %d bytes.", n), "The "+kind+" is in "+exports.ModulePlace+".")
+}
+
+// FrontText is the frontmatter of data as written, without its fences, "" when data has
+// none or its frontmatter is not closed. It splits data the way [ParseDocument] does, so
+// its length is the number of bytes that ParseDocument decodes, which [MaxAgentFront]
+// limits.
+func FrontText(data []byte) string {
 	const fence = "---"
 	data = bytes.TrimPrefix(data, []byte("\ufeff"))
 	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))

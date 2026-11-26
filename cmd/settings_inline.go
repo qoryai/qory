@@ -60,8 +60,18 @@ func setsSettings(flag string, args []string) bool {
 // value that is JSON already, from harness.launch, stays as it is. The file is a regular
 // file of at most 64 KiB that contains one JSON object. With readRoot, the checkout of a
 // run that only reads it, the settings get [readRules], and a launch with no settings
-// flag gets the flag with those rules alone.
-func inlineSettings(flag string, launch, extra []string, home, readRoot string) ([]string, error) {
+// flag gets the flag with those rules alone. With review, the folders of a review
+// session, the settings get [reviewRules] of home and review, which the runtime's review
+// guard writes, in place of [readRules], also with no readRoot, which the guard stops.
+func inlineSettings(flag string, launch, extra []string, home, readRoot string, review *reviewFolders) ([]string, error) {
+	// limited is whether the settings get rules: those of a read run or of a review session.
+	limited := readRoot != "" || review != nil
+	rules := func(object map[string]any, shown string) ([]byte, error) {
+		if review != nil {
+			return reviewRules(object, shown, readRoot, home, *review)
+		}
+		return readRules(object, shown, readRoot)
+	}
 	refuse := func(format string, a ...any) error {
 		return input(fmt.Errorf(format+", so the run does not start", a...))
 	}
@@ -74,8 +84,8 @@ func inlineSettings(flag string, launch, extra []string, home, readRoot string) 
 		if setsSettings(flag, args) {
 			return nil, refuse("the launch sets %s with no file after it", flag)
 		}
-		if readRoot != "" {
-			data, err := readRules(map[string]any{}, "", readRoot)
+		if limited {
+			data, err := rules(map[string]any{}, "")
 			if err != nil {
 				return nil, err
 			}
@@ -89,14 +99,14 @@ func inlineSettings(flag string, launch, extra []string, home, readRoot string) 
 		return nil, refuse("the launch sets %s more than once", flag)
 	}
 	if strings.HasPrefix(strings.TrimSpace(value), "{") {
-		if readRoot == "" {
+		if !limited {
 			return append(args, extra...), nil
 		}
 		object, ok := oneObject([]byte(value))
 		if !ok {
 			return nil, refuse("pass one JSON object to %s in harness.launch: a run of a read workflow adds rules to it, and the value is not one JSON object", flag)
 		}
-		data, err := readRules(object, "of the launch", readRoot)
+		data, err := rules(object, "of the launch")
 		if err != nil {
 			return nil, err
 		}
@@ -129,8 +139,8 @@ func inlineSettings(flag string, launch, extra []string, home, readRoot string) 
 	if !ok {
 		return nil, refuse("write one JSON object in the Claude Code settings %s: the file is not one JSON object", exports.Value(value, false))
 	}
-	if readRoot != "" {
-		if data, err = readRules(object, exports.Value(value, false), readRoot); err != nil {
+	if limited {
+		if data, err = rules(object, exports.Value(value, false)); err != nil {
 			return nil, err
 		}
 	}

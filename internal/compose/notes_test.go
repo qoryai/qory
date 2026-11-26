@@ -50,6 +50,20 @@ func TestANoteOfABaseModuleAndOneOfTheCheckoutAreListedWithTheirLayers(t *testin
 	}
 }
 
+// TestANoteWithAQuotedKeyIsANote: a notes_for key in quotes, or with an escape, is the
+// same key as YAML reads it, so the skill is a note.
+func TestANoteWithAQuotedKeyIsANote(t *testing.T) {
+	for _, key := range []string{`"notes_for"`, "'notes_for'", `"notes\x5ffor"`} {
+		res, err := composeExtending(t, notesTree(t, key+": developer\npaths: src/**\n"))
+		if err != nil {
+			t.Fatalf("%s: %v", key, err)
+		}
+		if got := res.RoleNotes(); len(got) != 2 || got[0].Name != "app-naming" {
+			t.Errorf("%s: RoleNotes = %+v, want app-naming first", key, got)
+		}
+	}
+}
+
 // TestANoteInAStackThatExtendsNothingIsLayer0 is a stack with no base and a note in its
 // module: the layer is 0.
 func TestANoteInAStackThatExtendsNothingIsLayer0(t *testing.T) {
