@@ -408,6 +408,11 @@ func TestAReviewSessionJoinsReadOnlyBetweenTwoWriteSessions(t *testing.T) {
 				checks++
 			}
 		}
+		if workflow, ok := j.qory["workflow"].(map[string]any); !ok {
+			t.Errorf("session %d has qory.workflow %v, want an object", i+1, j.qory["workflow"])
+		} else if want := []string{"hello", "review-changes", "hello"}[i]; workflow["name"] != want {
+			t.Errorf("session %d has qory.workflow.name %v, want %s", i+1, workflow["name"], want)
+		}
 		if _, outbox := j.qory["outbox"]; outbox == review {
 			t.Errorf("session %d has qory.outbox %v, want it for the sessions that write only", i+1, outbox)
 		}
