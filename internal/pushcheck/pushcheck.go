@@ -121,8 +121,6 @@ const (
 	// containerPrefix starts the name of a check's container and of its temporary
 	// folders.
 	containerPrefix = "qory-push-check-"
-	// artifactsPath is the path of a push, after the run's id.
-	artifactsPath = "/artifacts"
 	// stateFormat is the format of docker inspect that prints a container's end.
 	stateFormat = "{{json .State}}"
 	// The exits of a program that the container's init could not start: not
@@ -283,23 +281,26 @@ func (c *Checker) For(artifactType string) *compose.PushCheck {
 
 // RunAPICheck is the check of a POST to the run API, for [session.Run.SetRunAPICheck].
 // Only a POST of /artifacts of a checker with checks is checked. A body that is not a
-// push in the run API's form, or whose members [readPush] cannot read one way only, such
-// as one with a member twice, is a refusal: nothing is stored that was not checked. Of a
-// push, only one of a type with a check runs the check, and a file's name that is not
-// [runapi.LocalFilename] or is there twice is a refusal. A withdrawal, a push with
-// `withdraw` true and no files, runs no check: it has no file to check. With files, a push
-// with `withdraw` true takes the same path as any push. The check never changes the body.
+// push in the run API's form, or whose members [readRunAPIPost] cannot read one way only,
+// such as one with a member twice, is a refusal, and so is a path that spells /artifacts
+// in another way: nothing is stored that was not checked. Of a push, only one of a type
+// with a check runs the check, and a file's name that is not [runapi.LocalFilename] or is
+// there twice is a refusal. A withdrawal, a push with `withdraw` true and no files, runs
+// no check: it has no file to check. With files, a push with `withdraw` true takes the
+// same path as any push. The check never changes the body.
 func (c *Checker) RunAPICheck(ctx context.Context, req session.RunAPIRequest) (*session.RunAPIRefusal, error) {
-	if req.Path != artifactsPath || len(c.Checks) == 0 {
+	if len(c.Checks) == 0 {
 		return nil, nil
 	}
-	artifactType, files, withdraw, err := readPush(req.Body)
+	post, err := readRunAPIPost(req)
 	switch {
-	case errors.Is(err, errAmbiguous):
-		return failure(textMembers, "").Refusal(), nil
+	case post.kind != postPush:
+		return nil, nil
 	case err != nil:
-		return failure(textNoPush, fmt.Sprintf(textNoPushCause, cut(cleanLine(strings.TrimSuffix(err.Error(), "."))))).Refusal(), nil
-	case c.For(artifactType) == nil, withdraw && len(files) == 0:
+		return unreadPush(err).Refusal(), nil
+	}
+	artifactType, files := post.artifactType, post.files
+	if c.For(artifactType) == nil || post.withdraw && len(files) == 0 {
 		return nil, nil
 	}
 	for i, f := range files {

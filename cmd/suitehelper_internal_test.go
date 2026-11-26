@@ -1057,7 +1057,7 @@ func allFaults() []*suiteFault {
 func TestTheLinesOfQoryRunStartWithTheFixInAtMost100Characters(t *testing.T) {
 	lines := []string{
 		textSuiteSkipped, textSuiteGreen, textSuiteCut, fmt.Sprintf(textSuiteStands, "changes-requested"),
-		fmt.Sprintf(textSuitePosted, "changes-requested"), textSuiteNoRoom, fmt.Sprintf(textSuiteNoPost, "x"), fmt.Sprintf(textSuiteNoClear, "x"),
+		fmt.Sprintf(textSuitePosted, "changes-requested"), textSuiteNoRoom, fmt.Sprintf(textSuiteNoPost, "x"), fmt.Sprintf(textSuiteNoClear, "x"), fmt.Sprintf(textSuiteNoFile, "x"),
 		endedLine(suite.Outcome{State: suite.Timeout, Commit: suiteSHA, Counts: &suite.Counts{Tests: 100000, Failed: 100000}}),
 		endedLine(suite.Outcome{State: suite.Passed, Commit: suiteSHA, Counts: &suite.Counts{Tests: 100000}}),
 	}
@@ -1222,7 +1222,7 @@ func TestAWorkflowWithNoPlanGetsTheAfterStepThatChecksWhetherHeadMoved(t *testin
 		run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, fullSuite: true,
 		workflow: "fix", said: func(string) {},
 	})
-	if r == nil || r.fault != nil || r.noPlan == nil || len(spec.After) != 7 || spec.After[4] != noPlanCommand || spec.After[5] != "" {
+	if r == nil || r.fault != nil || r.noPlan == nil || len(spec.After) != 8 || spec.After[4] != noPlanCommand || spec.After[5] != "" {
 		t.Fatalf("suite %+v, After %q", r, spec.After)
 	}
 	if api.indexCalls != 0 {

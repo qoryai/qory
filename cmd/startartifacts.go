@@ -9,12 +9,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // The folders of a session's launch snapshot: startArtifactsDir in the run directory,
@@ -30,18 +32,20 @@ const (
 	textStartArtifactsCopy = "copying the session's start artifacts on this machine failed, so the agent did not start.\n  Cause: %s"
 )
 
-// startArtifacts makes the launch snapshot of a session whose workflow's plan type is
-// plan, "" for none: the run folder's copy at runDir/start-artifacts, which it returns,
-// and the copy at in/start-artifacts, each made new, so a later session gets a new one. The
-// snapshot is the newest version of plan that is neither cancelled nor a withdrawal, and
-// of each other artifact the version a gate approved, laid out as qory artifact pull
-// writes them, with an index.json that lists only those versions. A fetch through the run
-// API that fails is [textStartArtifacts], see [startArtifactsFailed], and a folder that
-// fails [textStartArtifactsCopy], see [startArtifactsCopyFailed]. A run with no run API, client
-// nil, and a server with the feature workflow_model off get a snapshot with no artifact.
+// startArtifacts makes the launch snapshot of a session whose plan types are plans, nil
+// for none, see [snapshotPlanTypes]: the run folder's copy at runDir/start-artifacts,
+// which it returns, and the copy at in/start-artifacts, each made new, so a later
+// session gets a new one. The snapshot is the newest version of each plan type that is
+// neither cancelled nor a withdrawal, and of each other artifact the version a gate
+// approved, laid out as qory artifact pull writes them, with an index.json that lists
+// only those versions. A
+// fetch through the run API that fails is [textStartArtifacts], see
+// [startArtifactsFailed], and a folder that fails [textStartArtifactsCopy], see
+// [startArtifactsCopyFailed]. A run with no run API, client nil, and a server with the
+// feature workflow_model off get a snapshot with no artifact.
 // shortcut: a run with no run API gets an empty snapshot; replace it when a run with no
 // control plane checks its scope.
-func startArtifacts(ctx context.Context, client *runapi.Client, runDir, in, plan string) (string, error) {
+func startArtifacts(ctx context.Context, client *runapi.Client, runDir, in string, plans []string) (string, error) {
 	snapshot := filepath.Join(runDir, startArtifactsDir)
 	copied := filepath.Join(in, startArtifactsDir)
 	for _, dir := range []string{snapshot, copied} {
@@ -52,7 +56,7 @@ func startArtifacts(ctx context.Context, client *runapi.Client, runDir, in, plan
 	if err := os.Mkdir(snapshot, 0o700); err != nil {
 		return "", startArtifactsCopyFailed("making the folder of the start artifacts", err)
 	}
-	if err := fetchStartArtifacts(ctx, client, snapshot, plan); err != nil {
+	if err := fetchStartArtifacts(ctx, client, snapshot, plans); err != nil {
 		return "", startArtifactsFailed(err)
 	}
 	if err := copyTree(snapshot, copied); err != nil {
@@ -77,7 +81,7 @@ func startArtifactsCopyFailed(step string, err error) error {
 // launchSnapshot is [startArtifacts] for a session of run, through its run API; with no
 // run API, the snapshot has no artifact. A run API whose client cannot be made is the
 // fetch's error. The error is a line of qory run.
-func launchSnapshot(ctx context.Context, run openedRun, in, plan string) (string, error) {
+func launchSnapshot(ctx context.Context, run openedRun, in string, plans []string) (string, error) {
 	var client *runapi.Client
 	if hasRunAPI(run) {
 		httpClient, base, err := run.RunAPI()
@@ -88,7 +92,7 @@ func launchSnapshot(ctx context.Context, run openedRun, in, plan string) (string
 			return "", &runLineError{startArtifactsFailed(err)}
 		}
 	}
-	snapshot, err := startArtifacts(ctx, client, run.Dir(), in, plan)
+	snapshot, err := startArtifacts(ctx, client, run.Dir(), in, plans)
 	if err != nil {
 		return "", &runLineError{err}
 	}
@@ -97,7 +101,7 @@ func launchSnapshot(ctx context.Context, run openedRun, in, plan string) (string
 
 // fetchStartArtifacts writes the launch snapshot of [startArtifacts] into dir, an empty
 // folder, through client; with client nil, an index.json with no artifact alone.
-func fetchStartArtifacts(ctx context.Context, client *runapi.Client, dir, plan string) error {
+func fetchStartArtifacts(ctx context.Context, client *runapi.Client, dir string, plans []string) error {
 	store := &artifactStore{root: filepath.Dir(dir), dir: dir, fresh: true}
 	empty := []byte(`{"artifacts":[]}` + "\n")
 	if client == nil {
@@ -112,7 +116,7 @@ func fetchStartArtifacts(ctx context.Context, client *runapi.Client, dir, plan s
 	}
 	chosen := make([]*runapi.Version, len(index.Artifacts))
 	for i, artifact := range index.Artifacts {
-		chosen[i] = snapshotVersion(artifact, plan)
+		chosen[i] = snapshotVersion(artifact, plans)
 		if chosen[i] == nil {
 			continue
 		}
@@ -127,12 +131,35 @@ func fetchStartArtifacts(ctx context.Context, client *runapi.Client, dir, plan s
 	return store.writeIndex(raw)
 }
 
-// snapshotVersion is the version of artifact in a launch snapshot whose plan type is plan:
-// for plan, the newest version that is neither cancelled nor a withdrawal; for any other
-// type, the version that a gate approved, by its id, when it is not a withdrawal; nil for
-// none.
-func snapshotVersion(artifact runapi.Artifact, plan string) *runapi.Version {
-	if artifact.Type == plan {
+// snapshotPlanTypes are the plan types of the launch snapshot of a session of the workflow
+// name, whose entry sets plan as its plan type, with workflows the composed stack's table.
+// A session whose entry has a review_group, see [startsReviewers], gets every plan type
+// that any workflow of the table declares in plan, sorted and with no duplicate: it
+// reviews what the other sessions pushed, not only what a gate approved. Any other
+// session gets plan alone, nil for "".
+func snapshotPlanTypes(workflows map[string]stack.Workflow, name, plan string) []string {
+	if !startsReviewers(workflows, name) {
+		if plan == "" {
+			return nil
+		}
+		return []string{plan}
+	}
+	var types []string
+	for _, w := range workflows {
+		if w.Plan != "" {
+			types = append(types, w.Plan)
+		}
+	}
+	slices.Sort(types)
+	return slices.Compact(types)
+}
+
+// snapshotVersion is the version of artifact in a launch snapshot whose plan types are
+// plans: for a type in plans, the newest version that is neither cancelled nor a
+// withdrawal; for any other type, the version that a gate approved, by its id, when it
+// is not a withdrawal; nil for none.
+func snapshotVersion(artifact runapi.Artifact, plans []string) *runapi.Version {
+	if slices.Contains(plans, artifact.Type) {
 		return newestBeforeWithdrawal(artifact)
 	}
 	if artifact.ApprovedVersion == nil {

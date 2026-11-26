@@ -265,6 +265,10 @@ func references(root string, e Entry) (documentRefs, error) {
 		// shown is the path as the errors print it.
 		shown := exports.HidePath(rel)
 		if e.Kind == "agents" {
+			// The cap comes before every parse of the agent's frontmatter.
+			if err := frontCap(data, "agent"); err != nil {
+				return out, exports.AtPath(shown, err)
+			}
 			if out.paths, err = agentPaths(data, rel); err != nil {
 				return out, exports.AtPath(shown, err)
 			}
@@ -273,6 +277,10 @@ func references(root string, e Entry) (documentRefs, error) {
 			}
 		}
 		if e.Kind == "skills" && filepath.Base(f) == "SKILL.md" && filepath.Dir(f) == e.Path {
+			// The cap comes before the parse of the note's frontmatter.
+			if err := frontCap(data, "skill"); err != nil {
+				return out, exports.AtPath(shown, err)
+			}
 			out.note = skillNote(data, rel, e.Name)
 			if out.note != nil && out.note.Err != nil {
 				out.note.Err = exports.AtPath(shown, out.note.Err)
@@ -291,7 +299,7 @@ func references(root string, e Entry) (documentRefs, error) {
 			}
 			seen[k] = true
 		}
-		if text := frontText(data); text != "" {
+		if text := FrontText(data); text != "" {
 			keys, _ := References(text)
 			for _, k := range keys {
 				if _, ok := out.front[k]; ok {
@@ -324,10 +332,8 @@ func sortedSet(set map[string]bool) []string {
 // agentPaths returns the globs an agent's frontmatter paths sets: one string, or a list
 // of strings, none empty. Nil for an agent without the key, and for a file whose
 // frontmatter does not parse, which the renderer refuses. Any other value is an error.
+// The key is read from the parsed frontmatter, so a quoted or an escaped key counts.
 func agentPaths(data []byte, name string) ([]string, error) {
-	if !bytes.Contains(data, []byte("paths:")) {
-		return nil, nil
-	}
 	doc, err := ParseDocument(data, name)
 	if err != nil {
 		return nil, nil
@@ -351,9 +357,6 @@ func agentPaths(data []byte, name string) ([]string, error) {
 // [Note.Err], a refusal with [exports.ModulePlace] and [exports.FilePlace] for the caller
 // to fill in.
 func skillNote(data []byte, name, skill string) *Note {
-	if !bytes.Contains(data, []byte("notes_for:")) {
-		return nil
-	}
 	doc, err := ParseDocument(data, name)
 	if err != nil {
 		return nil

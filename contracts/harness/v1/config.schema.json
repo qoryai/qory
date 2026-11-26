@@ -145,11 +145,11 @@
                 "enum": ["read", "write-no-push", "write"]
               },
               "judges": {
-                "description": "false when a later workflow in the loop judges the work of this workflow's session; true, or left out, otherwise. qory reads only true and false, and refuses any other value, a quoted \"no\" included. qory run does not read it.",
+                "description": "The boolean that says whether a session of the workflow judges the work. false: a later workflow in the loop judges it, and the session may record the verdict escalate or no verdict. true, or left out: the session may record any verdict. qory reads only true and false, and refuses any other value, a quoted \"no\" included.",
                 "type": "boolean"
               },
               "review_group": {
-                "description": "The name of the group role whose members review the work in a session of this workflow, such as reviewers. Left out, the workflow has no review group. The compose stops when no module of the harness declares the group role, or the group role has no member. qory run does not read it.",
+                "description": "The name of the group role whose members' reports a review session of the workflow needs, such as reviewers. Left out, the workflow has no review group. The compose stops when no module of the harness declares the group role, or the group role has no member.",
                 "type": "string",
                 "pattern": "^[^/\\\\@ .][^/\\\\@ ]*$"
               },

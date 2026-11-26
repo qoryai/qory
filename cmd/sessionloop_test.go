@@ -421,7 +421,7 @@ func TestARunOfSeveralSessionsEndsAsItsAnswersAndSessionsSay(t *testing.T) {
 			d["access"] = "write"
 			d["harness"].(map[string]any)["harness"].(map[string]any)["workflows"].(map[string]any)["edit"] = map[string]any{"access": "write"}
 		}}, joins: 1, requests: 1, state: event.StateFailed, exit: 1,
-			line: "qory run: Set one access for every workflow of the stage in Qory Apiary.\n  The workflow edit has write, and session 1 has read; the code is used\n"},
+			line: "qory run: The workflow edit has access write and session 1 has read, so the session did not start\n  Only a read workflow with a review_group may have less access than session 1; the code is used\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := runLoop(t, c.s)

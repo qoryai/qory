@@ -88,25 +88,27 @@ func reservedMounts(root string, mounts []wall.Mount) error {
 	return nil
 }
 
-// The lines of [bindsReserved], one per kind of run that binds the checkout into the agent's
-// container: the folder's path, then how it relates to the home folder or qory's state
-// directory, see [reserved].
+// The lines of [bindsReserved]. The cause is the folder's path, then how it relates to the
+// home folder or qory's state directory, see [reserved]. The detail is one per kind of run
+// that binds the checkout into the agent's container.
 const (
-	textReadBindsReserved      = "start the run from a folder that does not contain your home folder or qory's state directory: the folder %s %s, and a read run binds it into the agent's container" + codeUsed
-	textCodeWriteBindsReserved = "start the run from a folder that does not contain your home folder, qory's state directory or the folder of the runs' copies: the folder %s %s, and a write run from a run code binds it into the agent's container" + codeUsed
+	textBindsReserved                = "The folder %s %s, so the run did not start"
+	textReadBindsReservedDetail      = "A read run binds the folder into the agent's container"
+	textCodeWriteBindsReservedDetail = "A write run from a run code binds the folder into the agent's container"
 )
 
-// bindsReserved stops a walled run that binds the checkout at root and the working folder cwd
-// themselves, with an input error of the line text, when relation, [reserved] or [homeOrState],
-// relates one of them to a folder it is or contains: the agent could read every file of the
-// person there, and a write run could change them. Two kinds of run bind them: a read run with no
-// setup, with [textReadBindsReserved] and [homeOrState], as [codeRun.readExposed] checks qory's
-// cache folder with a line that has the harness report, and a write run from a run code, which
-// gets no copy, with [textCodeWriteBindsReserved] and [reserved].
-func bindsReserved(text, root, cwd string, relation func(string) string) error {
+// bindsReserved stops a walled run that binds the checkout at root and the working folder
+// cwd, with an input error of [textBindsReserved] and the line detail, as [reviewStop]
+// makes it, when relation, [reserved] or [homeOrState], relates one of them to a folder it
+// is or contains: the agent could read every file of the person there, and a write run
+// could change them. Two kinds of run bind them: a read run with no setup, with
+// [textReadBindsReservedDetail] and [homeOrState], as [codeRun.readExposed] checks qory's
+// cache folder with a line that has the harness report, and a write run from a run code,
+// which gets no copy, with [textCodeWriteBindsReservedDetail] and [reserved].
+func bindsReserved(detail, root, cwd string, relation func(string) string) error {
 	for _, p := range []string{root, cwd} {
 		if relation := relation(p); relation != "" {
-			return input(fmt.Errorf(text, hostgit.Shown(p), relation))
+			return input(reviewStop(fmt.Sprintf(textBindsReserved, hostgit.Shown(p), relation), detail))
 		}
 	}
 	return nil

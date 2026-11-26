@@ -225,7 +225,7 @@ func (p *sessionPush) after(ending *pushEnding, out session.Outcome) (session.Ou
 	ctx, cancel := pushContext(p.ctx, p.again, p.limit, pushTimes.limit, pushTimes.signal)
 	defer cancel()
 	var err error
-	ending.noStep, err = removeThenPush(ctx, p.run, p.stderr, p.branch, p.dir, p.runID, p.runNumber, out, p.agentStopped, p.checks, &p.ended, p.outputs)
+	ending.noStep, err = removeThenPush(ctx, p.ctx, p.run, p.stderr, p.branch, p.dir, p.runID, p.runNumber, out, p.agentStopped, p.checks, &p.ended, p.outputs)
 	ending.settle(p.stopNow())
 	ending.cut = ctx.Err() != nil
 	if p.ended != "" {
@@ -252,11 +252,11 @@ var pushAfterSession = func(p *sessionPush, ending *pushEnding, out session.Outc
 // working folder, so the check of the step is valid only once the container is gone. After a
 // failed removal [openedRun.PushProxy] fails and [openedRun.StartStep] still works, so this
 // check alone stops the push, and the run has no step.
-func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string, outputs *runOutputs) (noStep bool, err error) {
+func removeThenPush(ctx, signal context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string, outputs *runOutputs) (noStep bool, err error) {
 	if err := run.RemoveSetup(ctx); err != nil {
 		return true, fmt.Errorf(textSetupStays, shownError(err))
 	}
-	return false, pushWork(ctx, run, stderr, branch, dir, runID, runNumber, out, agentStopped, checks, ended, outputs)
+	return false, pushWork(ctx, signal, run, stderr, branch, dir, runID, runNumber, out, agentStopped, checks, ended, outputs)
 }
 
 // pushWork is the run's step of kind push: it pushes what the agent left, through the
@@ -274,8 +274,9 @@ func removeThenPush(ctx context.Context, run openedRun, stderr io.Writer, branch
 // error stays the step's. *ended is set to the line of [runEndedLine] when the report found
 // the run over, Qory Apiary's run_ended or the gateway's 410, also when the push failed.
 // The step then stores no version, and ends with no error unless the push failed. A
-// session that did not succeed stores no version.
-func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string, outputs *runOutputs) error {
+// session that did not succeed stores no version. signal is qory run's context, which a
+// first signal ends.
+func pushWork(ctx, signal context.Context, run openedRun, stderr io.Writer, branch *preparation.WorkBranch, dir, runID string, runNumber int, out session.Outcome, agentStopped bool, checks *runPushChecks, ended *string, outputs *runOutputs) error {
 	cut := func() bool { return ctx.Err() != nil }
 	return inStep(run, stderr, event.StepPush, pushStepName(branch, run.System()), cut, func(w io.Writer) error {
 		httpClient, base, err := run.RunAPI()
@@ -287,6 +288,15 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 			return &runLineError{fmt.Errorf(textPushNoRunAPI, shownError(err))}
 		}
 		end := failedEnd(out)
+		store := func() error {
+			if end != "" {
+				return nil
+			}
+			if err := outputs.store(ctx, w, client, runID, end, branch, checks); err != nil {
+				return &runLineError{err}
+			}
+			return nil
+		}
 		if branch != nil {
 			// Every push passes the scope check first. A session that did not succeed
 			// stores nothing, so its push checks no output.
@@ -296,26 +306,21 @@ func pushWork(ctx context.Context, run openedRun, stderr io.Writer, branch *prep
 				}
 				return outputsBeforePush(outputs, branch.Ref, version)
 			}
-			runEnded, err := pushWorkBranch(ctx, run, w, branch, dir, runNumber, end, agentStopped, check)
+			runEnded, err := pushWorkBranch(ctx, signal, run, w, branch, dir, runNumber, end, agentStopped, check, store)
 			*ended = runEnded
-			if err != nil || runEnded != "" {
-				return err
-			}
+			return err
 		}
-		if end != "" {
-			return nil
-		}
-		if err := outputs.store(ctx, w, client, runID, end, branch, checks); err != nil {
-			return &runLineError{err}
-		}
-		return nil
+		return store()
 	})
 }
 
 // pushWorkBranch pushes what the agent left on branch, as [pushWork] has it, and reports what
 // the push moved. check is the check of [preparation.Push] before the first push, nil for
-// none. runEnded is the line of [runEndedLine] when the report found the run over.
-func pushWorkBranch(ctx context.Context, run openedRun, w io.Writer, branch *preparation.WorkBranch, dir string, runNumber int, end string, agentStopped bool, check func([]preparation.Repository) error) (runEnded string, err error) {
+// none. runEnded is the line of [runEndedLine] when the report found the run over. After
+// the report, unless the push or the report failed or the run is over, it calls store,
+// then reads the project base, see [preparation.ReadProjectBase], on a context that also
+// ends at signal: the read is the step's last work, so a slow forge delays nothing.
+func pushWorkBranch(ctx, signal context.Context, run openedRun, w io.Writer, branch *preparation.WorkBranch, dir string, runNumber int, end string, agentStopped bool, check func([]preparation.Repository) error, store func() error) (runEnded string, err error) {
 	h, err := run.PushProxy()
 	if err != nil {
 		return "", &runLineError{pushProxyError(err)}
@@ -336,9 +341,8 @@ func pushWorkBranch(ctx context.Context, run openedRun, w io.Writer, branch *pre
 		message += "\n\n" + end
 	}
 	_, pushErr := preparation.Push(ctx, dir, os.Environ(), branch, message, read.proxy, h.proxy, agentStopped, check, w)
-	// The read proxy and the push proxy end with the push: the check and the store that
-	// follow reach no forge.
-	read.close()
+	// The push proxy ends with the push. The read proxy stays open for the project base
+	// alone: the store does not use it.
 	h.close()
 	runEnded, recordErr := recordPushed(ctx, run, branch)
 	switch {
@@ -348,9 +352,27 @@ func pushWorkBranch(ctx context.Context, run openedRun, w io.Writer, branch *pre
 		return runEnded, &runLineError{pushErr}
 	case recordErr != nil:
 		return runEnded, &runLineError{recordErr}
+	case runEnded != "":
+		return runEnded, nil
 	}
-	return runEnded, nil
+	if err := store(); err != nil {
+		return "", err
+	}
+	// The project base, which a review after the session reads, comes last, on a context
+	// that a signal ends too: after a signal no review follows, and the step's time after
+	// the signal stays with the record and the store.
+	readCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(signal, cancel)
+	defer stop()
+	if readCtx.Err() == nil && signal.Err() == nil {
+		readProjectBase(readCtx, dir, os.Environ(), branch, read.proxy)
+	}
+	return "", nil
 }
+
+// readProjectBase is [preparation.ReadProjectBase]; a test replaces it with a slow one.
+var readProjectBase = preparation.ReadProjectBase
 
 // noPushProxyWords is the part of Forager's error from [session.Run.PushProxy] for a run
 // with no push credential: "Add a push credential to the run configuration: this run has

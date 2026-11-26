@@ -122,7 +122,7 @@ func (copilot) Render(res *compose.Result, dir, home string) error {
 		}
 	}
 	github := filepath.Join(dir, "workspace", ".github")
-	if err := render.PlaceEntries(res, github, render.Bare, "skills"); err != nil {
+	if err := render.PlaceEntries(copilot{}, res, github, render.Bare, "skills"); err != nil {
 		return err
 	}
 	return render.WriteAgentsEffort(res, render.Bare, github, "agents", ".agent.md", effortKey, "name", "description", "tools", "model")

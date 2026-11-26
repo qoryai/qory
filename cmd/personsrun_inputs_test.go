@@ -159,7 +159,7 @@ func TestAPersonsWalledRunsPushChecksGetNoInputs(t *testing.T) {
 // personsWalledRunsPushCheck is [TestAPersonsWalledRunsPushChecksGetNoInputs] with a harness
 // that has a submit program, or none.
 func personsWalledRunsPushCheck(t *testing.T, program bool) {
-	root := checksCheckout(t, "")
+	root := checksCheckout(t, "    judges: false\n")
 	if program {
 		for name, content := range programModule() {
 			writeFile(t, filepath.Join(root, name), content)
@@ -191,7 +191,8 @@ func personsWalledRunsPushCheck(t *testing.T, program bool) {
 	var home string
 	var copied error
 	var refusal *session.RunAPIRefusal
-	var checkErr error
+	var checkErr, verdictErr error
+	var verdict *session.RunAPIRefusal
 	agentInCopy(t, func(s session.SessionSpec) {
 		home = s.HarnessHome
 		_, copied = os.Lstat(filepath.Join(s.HarnessHome, "inputs.json"))
@@ -200,12 +201,17 @@ func personsWalledRunsPushCheck(t *testing.T, program bool) {
 			return
 		}
 		refusal, checkErr = check(context.Background(), session.RunAPIRequest{Path: "/artifacts", Body: specPush(t)})
+		// A run with no run code has no verdict rule, whatever its workflow's judges.
+		verdict, verdictErr = check(context.Background(), session.RunAPIRequest{Path: "/verdict", Body: []byte(`{"verdict":"passed"}`)})
 	})
 	if out, err := run(t, "run", "claude", "--", "-p", "hi"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	if checkErr != nil || refusal != nil {
 		t.Fatalf("the push of spec got %+v, %v, want it to pass\n%s", refusal, checkErr, checkLog(t, log))
+	}
+	if verdict != nil || verdictErr != nil {
+		t.Errorf("the verdict got %+v, %v, want it to pass", verdict, verdictErr)
 	}
 	sameFolder(t, "the home's folder", filepath.Dir(home), runHomesFolder(t, root))
 	if program && copied != nil {

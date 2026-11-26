@@ -455,7 +455,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// read-write mount would go around. A run code's access is known once the
 				// harness is composed, see prepareLaunch.
 				if code == nil {
-					if err := writableMount(at.root, spec.Mounts, ""); err != nil {
+					if err := writableMount(at.root, spec.Mounts, false); err != nil {
 						return err
 					}
 				}
@@ -784,15 +784,33 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 			// freshHome is true for a walled run of a runtime that is a
 			// [render.AgentHomer], whose agent starts on a new, empty configuration
 			// directory.
-			// readOnly and level are set once the compose has the workflows: readOnly is whether
-			// the run only reads the checkout, see [readsOnly], and level is its [accessOf] level.
-			var readOnly bool
+			// readOnly and level are set once session 1's compose has the workflows: readOnly is
+			// whether the run only reads the checkout, see [readsOnly], and level is its [accessOf]
+			// level. A later session never changes them. reviewJoin is whether the session that
+			// joins next is a review join, see [joinsAsReview]: it reads a read-only copy of the
+			// pushed commit in place of the checkout and has no push step, and the session
+			// after it is back at the run's level.
+			var readOnly, reviewJoin bool
 			var level string
+			// lastSuite is the suite of the last session of the run that ran one, or that qory
+			// could not start: the suite result file's path, the commit the suite ran on and how it
+			// ended. A session that ran no suite, or left HEAD where it was, keeps the one before.
+			// The suite belongs to a commit: a later session that moved HEAD without a suite leaves
+			// it on an older commit than HEAD. Only the review join reads it
+			// (qory.review_session.suite_result).
+			var lastSuite *suiteRecord
+			// review is the plan of the review join that joins next, nil for any other session:
+			// the fresh copy of the pushed commit, the round's reports folder and the files of
+			// qory.review_session.
+			var review *reviewJoinPlan
 			// extensions is the composed harness report's extensions, which the suite's time limit reads.
 			var extensions map[string]any
 			// planWorkflow is the run's workflow, and planType the plan type set in workflows.<name>.plan
 			// for it, "" for none.
 			var planWorkflow, planType string
+			// sessionJudges is whether the session that prepareLaunch composed last judges the
+			// work, see [workflowJudges]; a run with no run code has no verdict rule.
+			sessionJudges := true
 			// startSnapshot is the session's launch snapshot in the run directory, see
 			// [startArtifacts], "" for a run with no inputs folder.
 			var startSnapshot string
@@ -888,7 +906,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// The report on disk can be another run's by now, so the run reads what it composed.
 				rep, harness, workflows := c.rep, c.harness, c.workflows
 				if !later {
-					composing.launched = &rep
+					composing.launched, composing.launchedConf = &rep, &c.conf
 				}
 				// types are the artifact types of the composed process.yaml, which inputs.json
 				// and the submit step read; the send of each comes from the documents' deliver.
@@ -906,11 +924,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// Each session reads the artifacts of its launch, never a version that its agent
 				// pushes later.
 				if dispatched && in != "" {
-					if startSnapshot, err = launchSnapshot(stepCtx, run, in, planType); err != nil {
+					if startSnapshot, err = launchSnapshot(stepCtx, run, in, snapshotPlanTypes(workflows, planWorkflow, planType)); err != nil {
 						return false, err
 					}
 				}
 				checks.setSession(planWorkflow, planType, startSnapshot)
+				sessionJudges = fromCode == nil || workflowJudges(workflows, fromCode.workflow)
 				var launch render.Launch
 				if name, launch, err = resolveLaunch(rep, conf, runtime, at.home); err != nil {
 					return false, err
@@ -929,6 +948,10 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					// done, so its start commits are final; a later session starts at the last
 					// pushed commits, so it writes it once its outbox is known.
 					inputsPending = qoryInputs{HarnessExtensions: rep.Extensions, Outputs: fromCode.outputs(types)}
+					if fromCode != nil {
+						inputs := newWorkflowInputs(workflows, fromCode.workflow)
+						inputsPending.Workflow = &inputs
+					}
 				}
 				if fromCode != nil {
 					if extra, err = fromCode.workflowArgs(name, rep, in, run.System()); err != nil {
@@ -973,7 +996,12 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					program = &submitProgram{command: c.submitProgram.Command, limit: submitLimit}
 					inputsPending = qoryInputs{HarnessExtensions: rep.Extensions}
 				}
-				if dispatched && later {
+				// A review join writes its inputs.json once its copy exists, see
+				// [reviewJoinPlan], after the setup container is removed.
+				reviewNext := later && fromCode != nil && joinsAsReview(workflows, fromCode.workflow, accessOf(fromCode, workflows), level)
+				// shortcut: Verify's review_session waits on the base of the delivered commit;
+				// a session that starts reviewers and is no review join has none.
+				if dispatched && later && !reviewNext {
 					if err := writeSessionInputs(); err != nil {
 						return false, err
 					}
@@ -982,30 +1010,61 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					fmt.Fprintln(w, "qory run:", line)
 				}
 				// A later session binds the checkout as session 1 did, so its workflow has
-				// session 1's access, or the session stops before it starts.
+				// the run's access, level, or the session stops before it starts. A review join is
+				// the one session that has less: read, in a run above read.
+				reviewJoin, review = false, nil
 				if later {
-					if got := accessOf(fromCode, workflows); got != level || readsOnly(fromCode, workflows) != readOnly {
+					got := accessOf(fromCode, workflows)
+					switch {
+					case got == level && readsOnly(fromCode, workflows) == readOnly:
+					case joinsAsReview(workflows, fromCode.workflow, got, level):
+						reviewJoin = true
+					default:
 						return false, &runLineError{fmt.Errorf(textLaterAccess, fromCode.workflow, got, level, codeUsed)}
 					}
+				} else {
+					// A run that only reads the checkout sees it read-only, or stops here, before
+					// the image's fetch and the setup.
+					level = accessOf(fromCode, workflows)
+					readOnly = readsOnly(fromCode, workflows)
 				}
-				// A run that only reads the checkout sees it read-only, or stops here, before
-				// the image's fetch and the setup.
-				level = accessOf(fromCode, workflows)
-				readOnly = readsOnly(fromCode, workflows)
 				switch {
+				case reviewJoin:
+					// Session 1 made the checkout's mounts for a run that writes, so the checks of a
+					// read run are made here. The setup's removal is in prepareLater, and the
+					// join's read-only mounts and tools are in the join, see [reviewJoinSpec].
+					if err := writableMount(at.root, spec.Mounts, true); err != nil {
+						return false, err
+					}
+					if err := fromCode.readExposed(at.root, cwd, at.report); err != nil {
+						return false, err
+					}
+					// The join reads a fresh copy of the pushed commit in place of the checkout,
+					// with a new reports folder: see [planReviewJoin]. The copy is made once the
+					// setup container is removed, in prepareLater.
+					plan, err := planReviewJoin(stepCtx, reviewJoinSetup{
+						run: run, spec: &spec, workflow: fromCode.workflow, root: at.root, cwd: cwd, home: at.home,
+						branch: branch, in: in, suite: lastSuite, copied: copied != nil,
+						number: n, runtime: name, img: run.Image(),
+					})
+					if err != nil {
+						return false, &runLineError{err}
+					}
+					review = plan
+					cleanups = append(cleanups, plan.remove)
 				case later:
 					// Session 1 made the checkout's mounts, and checked them.
 				case readOnly:
-					if err := readOnlyCheckout(&spec, at.root, fromCode.workflow, run.Image()); err != nil {
+					if err := readOnlyCheckout(&spec, at.root, fromCode.workflow, run.Image(), startedRun); err != nil {
 						return false, err
 					}
 					// The checkout's mount is read-only by now, so any other mount that writes stops.
-					if err := writableMount(at.root, spec.Mounts, codeUsed); err != nil {
+					if err := writableMount(at.root, spec.Mounts, true); err != nil {
 						return false, err
 					}
 					// A run with no setup binds the checkout itself, see hostWork.
 					if !fetches {
-						if err := bindsReserved(textReadBindsReserved, at.root, cwd, homeOrState); err != nil {
+						if err := bindsReserved(textReadBindsReservedDetail, at.root, cwd, homeOrState); err != nil {
 							return false, err
 						}
 					}
@@ -1018,7 +1077,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					return false, writeNeedsWall(fromCode.workflow)
 				case fromCode != nil:
 					// A write run from a run code gets no copy: it binds the checkout itself.
-					if err := bindsReserved(textCodeWriteBindsReserved, at.root, cwd, reserved); err != nil {
+					if err := bindsReserved(textCodeWriteBindsReservedDetail, at.root, cwd, reserved); err != nil {
 						return false, err
 					}
 				}
@@ -1028,12 +1087,25 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// A runtime's settings go to Forager as their JSON, which qory read from the
 				// home itself, after the home's check: Forager reads no file of the home.
 				launchArgs := append(append([]string{}, launch.Args...), extra...)
+				// The review join reads the copy, not the checkout, and writes its reports
+				// folder, with the settings of the runtime's review guard.
+				var folders *reviewFolders
+				if review != nil {
+					guard, ok := render.ReviewGuard(renderer)
+					if !ok {
+						return false, noReviewGuard(name)
+					}
+					folders = &reviewFolders{inputs: filepath.Join(in, reviewInputsDir), reports: review.reports, guard: guard}
+				}
 				if s, ok := renderer.(render.SettingsInliner); ok {
 					readRoot := ""
-					if readOnly {
+					if readOnly || reviewJoin {
 						readRoot = at.root
 					}
-					if launchArgs, err = inlineSettings(s.SettingsFlag(), launch.Args, extra, at.home, readRoot); err != nil {
+					if review != nil {
+						readRoot = review.copy.Commit()
+					}
+					if launchArgs, err = inlineSettings(s.SettingsFlag(), launch.Args, extra, at.home, readRoot, folders); err != nil {
 						return false, err
 					}
 				}
@@ -1308,7 +1380,14 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err != nil {
 						return &runLineError{input(err)}
 					}
-					if err := checks.set(run, fromCode != nil && fromCode.shared && hasRunAPI(run)); err != nil {
+					// A run from a run code with a session that does not judge limits the verdicts of
+					// each session, and so does a run of several sessions: a later session may not
+					// judge, see [runPushChecks.limitVerdicts].
+					limits := fromCode != nil && hasRunAPI(run) && (fromCode.shared || !sessionJudges)
+					if limits {
+						checks.limitVerdicts()
+					}
+					if err := checks.set(run, limits); err != nil {
 						return &runLineError{err}
 					}
 				}
@@ -1527,7 +1606,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if fromCode == nil {
 					return nil, nil
 				}
-				commit, start := hookCommits(branch, at.root, &hookHead)
+				commit, start := hookCommits(branch, at.root, &hookHead, reviewJoin)
 				// The hooks at session 1's start end at the setup's limit, as its other steps do.
 				return openHooks(setupCtx, hookSetup{
 					run: run, spec: &spec, runID: spec.RunID, walled: walled, home: at.home, checkout: at.root,
@@ -1639,6 +1718,15 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						return &runLineError{keyedError(fromCode, inputsNotWritten(err))}
 					}
 				}
+				// The files of a review join before are gone too, so a session never reads them,
+				// and so is its copy. Its reports folder stays until the run ends; qory
+				// reads no report from it.
+				if err := os.RemoveAll(filepath.Join(in, reviewInputsDir)); err != nil {
+					return &runLineError{keyedError(fromCode, inputsNotWritten(err))}
+				}
+				if review != nil {
+					review.removeCopy()
+				}
 				var freshHome bool
 				enter(stepCompose)
 				cut := func() bool { return ctx.Err() != nil || laterCtx.Err() != nil }
@@ -1669,6 +1757,31 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if err := installWork(laterCtx); err != nil {
 					return err
 				}
+				// A review join reaches no service or process that the setup started, see
+				// [removeSetup]. The push step of the session before removed the container
+				// of a run that pushes, so this call has nothing to remove for most runs.
+				if reviewJoin {
+					if err := removeSetupWork(); err != nil {
+						return err
+					}
+					// With no process of the run left that writes the checkout, the copy of
+					// the pushed commit is made, and inputs.json, which has its paths, is written.
+					enter(stepReviewCopy)
+					err := inStep(run, streams.errOut, event.StepCopy, textReviewCopyStep, cut, func(w io.Writer) error {
+						return review.makeCopy(laterCtx, run, &spec, w)
+					})
+					if err != nil {
+						return &runLineError{err}
+					}
+					r, err := review.inputs(laterCtx, in)
+					if err != nil {
+						return &runLineError{err}
+					}
+					inputsPending.ReviewSession = &r.ReviewSession
+					if err := writeSessionInputs(); err != nil {
+						return err
+					}
+				}
 				if walled {
 					enter(stepPushChecks)
 					done, err := checks.next(laterCtx, run, at.home, spec.RunID, &spec, controlPlane)
@@ -1676,7 +1789,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					if err != nil {
 						return &runLineError{input(err)}
 					}
-					done, err = checks.loadScope(laterCtx, run, at.home, spec.RunID, &spec, canPush(fromCode, level, branch))
+					done, err = checks.loadScope(laterCtx, run, at.home, spec.RunID, &spec, !reviewJoin && canPush(fromCode, level, branch))
 					cleanups = append(cleanups, done)
 					if err != nil {
 						return &runLineError{input(err)}
@@ -1694,6 +1807,11 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						checkout = copied.dir.Work()
 					}
 					spec.Written = writtenPlaces(checkout, spec.Mounts)
+				}
+				// A review join that cannot be made stops the run here, before the join.
+				if reviewJoin {
+					_, err := reviewJoinSpec(spec, at.root, fromCode.workflow, name, run.Image(), review.workspace())
+					return err
 				}
 				return nil
 			}
@@ -1758,11 +1876,28 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						break
 					}
 				}
-				suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly, fullSuite: fullSuiteOf(fromCode), workflow: planWorkflow, plan: planType, extensions: extensions, said: said})
+				suites := openSuites(ctx, suiteSetup{run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly || reviewJoin, fullSuite: fullSuiteOf(fromCode), workflow: planWorkflow, plan: planType, extensions: extensions, said: said, session: number})
 				closeRoute := route.open(number)
 				// The session's time limit counts from the agent's start, here, see [sessionDeadline].
 				deadline := sessionDeadline(time.Now(), timeout)
-				res, err = joinSession(run, ctx, spec.SessionSpec)
+				// A review join gets the read-only spec, and the session after it gets spec again.
+				joinSpec, joinErr := spec.SessionSpec, error(nil)
+				if reviewJoin {
+					joinSpec, joinErr = reviewJoinSpec(spec, at.root, fromCode.workflow, name, run.Image(), review.workspace())
+					// The last checks, on the final bind list and the places the join may write.
+					if joinErr == nil {
+						joinErr = review.check(joinSpec)
+					}
+				}
+				if joinErr == nil {
+					func() {
+						checks.joining(sessionJudges)
+						defer checks.joined()
+						res, err = joinSession(run, ctx, joinSpec)
+					}()
+				} else {
+					res, err = nil, joinErr
+				}
 				closeRoute()
 				out = sessionOutcome(res, err)
 				// asked is how the session ended, as the next-session request sends it.
@@ -1772,6 +1907,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 					suiteLimit = deadline
 				}
 				out, suiteErr = suites.after(ctx, again, suiteLimit, res, out)
+				lastSuite = suites.kept(ctx, lastSuite)
 				// The hooks at the session's end run once its suite's result is posted, before the
 				// push step, which follows only when the checkout is as before the hooks.
 				// The hooks run before any push of the session's work, also after an error of the
@@ -1782,7 +1918,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				if out.State == event.StateSucceeded {
 					keptOutputs = outputs
 				}
-				hookOut, hookErr := hooks.after(ctx, again, suiteLimit, out, keepsWork(fromCode, level, branch, keptOutputs, res, err))
+				hookOut, hookErr := hooks.after(ctx, again, suiteLimit, out, !reviewJoin && keepsWork(fromCode, level, branch, keptOutputs, res, err))
 				if suiteErr == nil {
 					out, suiteErr = hookOut, hookErr
 				}
@@ -1811,7 +1947,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// fails after the close changes only qory run's exit status: only the close proves
 				// that no container is left.
 				ending = pushEnding{session: out, limit: timeout}
-				pushes := keepsWork(fromCode, level, branch, outputs, res, err) && hooks.restored()
+				pushes := !reviewJoin && keepsWork(fromCode, level, branch, outputs, res, err) && hooks.restored()
 				returns = copied != nil && !copied.readOnly && (err == nil && res != nil || joined)
 				if copied != nil {
 					copied.cutBy = func() string { return ending.cutLine(stopNow(), returnAfterSignal) }

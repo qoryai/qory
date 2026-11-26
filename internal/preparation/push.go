@@ -115,6 +115,7 @@ func ceiling(dir string) string { return "GIT_CEILING_DIRECTORIES=" + filepath.D
 // [WorkBranch.Version] to the commit pushed, so a later Push of the same run, after a
 // later session, pushes only the commits past it, and pushes nothing when there are none.
 // [WorkBranch.PushedPaths] lists the repositories of the last Push alone.
+// [ReadProjectBase] sets [WorkRepository.ProjectBase] after Push.
 //
 // A further repository, a read target, [WorkRepository.ReadOnly], is skipped in each step:
 // it is not checked, committed or pushed, and the version has no entry of it. A target that
@@ -233,6 +234,29 @@ func Push(ctx context.Context, dir string, base []string, b *WorkBranch, message
 		return nil, nil
 	}
 	return b.withoutReads(b.Version), nil
+}
+
+// ReadProjectBase sets [WorkRepository.ProjectBase] of the run's target in dir, the
+// working folder, after a [Push] that returned no error: for a target that the Push moved,
+// and for one that has none. It reads the head of the default branch at the forge through
+// the read proxy, fetches the history of both commits into a scratch repository, and
+// fetches their merge base into the checkout by its id, see [projectBase]. A read that
+// finds no base keeps the earlier one: it is in the history of the commit too, so a review
+// from it lists the files of the change and maybe more. Every git runs as in Push.
+func ReadProjectBase(ctx context.Context, dir string, base []string, b *WorkBranch, read proxygit.Proxy) {
+	if len(b.Repositories) == 0 || b.Repositories[0].ReadOnly {
+		return
+	}
+	ctx = hostgit.WithBase(ctx, proxygit.Env(base, nil))
+	r := b.Repositories[0]
+	moved := slices.ContainsFunc(b.landed, func(l Landed) bool { return l.Path == r.Path })
+	if !moved && r.ProjectBase != "" {
+		return
+	}
+	folder := filepath.Join(dir, filepath.FromSlash(r.Dir))
+	if got := projectBase(ctx, stepGit(&read, ""), folder, b.system, r, r.Commit); got != "" {
+		b.Repositories[0].ProjectBase = got
+	}
 }
 
 // withoutReads is a copy of version with no entry of a repository of b that is a read

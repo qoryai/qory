@@ -11,12 +11,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/runapi"
+	"github.com/qoryai/qory/internal/stack"
 )
 
 // snapshotAPI is a run API whose index has build-plan with an approved v1, a newer v2
@@ -66,7 +68,7 @@ func snapshotAPI(t *testing.T) *runapi.Client {
 func TestALaunchSnapshotHoldsThePlanAndTheApprovedVersions(t *testing.T) {
 	client := snapshotAPI(t)
 	runDir, in := t.TempDir(), t.TempDir()
-	snapshot, err := startArtifacts(t.Context(), client, runDir, in, "build-plan")
+	snapshot, err := startArtifacts(t.Context(), client, runDir, in, []string{"build-plan"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +117,7 @@ func TestALaunchSnapshotHoldsThePlanAndTheApprovedVersions(t *testing.T) {
 	if err := os.WriteFile(stale, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := startArtifacts(t.Context(), client, runDir, in, ""); err != nil {
+	if _, err := startArtifacts(t.Context(), client, runDir, in, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
@@ -129,6 +131,44 @@ func TestALaunchSnapshotHoldsThePlanAndTheApprovedVersions(t *testing.T) {
 	}
 }
 
+// TestAReviewSessionsSnapshotHasTheNewestVersionOfEveryPlanType is the stack of the build
+// loop: three workflows declare build-plan, and review-changes has a review_group and no
+// plan. The review session's snapshot has the newest build plan, the version that
+// implement-changes pushed. A session of implement-changes keeps build-plan alone, and a
+// session of a workflow with no plan keeps no plan type.
+func TestAReviewSessionsSnapshotHasTheNewestVersionOfEveryPlanType(t *testing.T) {
+	workflows := map[string]stack.Workflow{
+		"plan-the-build":          {Access: stack.AccessWrite, Plan: "build-plan"},
+		"write-acceptance-checks": {Access: stack.AccessWrite, Plan: "build-plan"},
+		"implement-changes":       {Access: stack.AccessWrite, Plan: "build-plan"},
+		"propose-changes":         {Access: stack.AccessWrite, Plan: "proposal"},
+		"review-changes":          {Access: stack.AccessRead, ReviewGroup: "reviewers"},
+	}
+	review := snapshotPlanTypes(workflows, "review-changes", "")
+	if !slices.Equal(review, []string{"build-plan", "proposal"}) {
+		t.Errorf("review-changes plan types = %v, want [build-plan proposal]", review)
+	}
+	if own := snapshotPlanTypes(workflows, "implement-changes", "build-plan"); !slices.Equal(own, []string{"build-plan"}) {
+		t.Errorf("implement-changes plan types = %v, want [build-plan]", own)
+	}
+	if none := snapshotPlanTypes(workflows, "verify-a-ticket", ""); none != nil {
+		t.Errorf("a session with no plan type has %v, want none", none)
+	}
+	in := t.TempDir()
+	if _, err := startArtifacts(t.Context(), snapshotAPI(t), t.TempDir(), in, review); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(in, startArtifactsDir, "build-plan/main/v2/f.md")); err != nil || string(got) != "bp2" {
+		t.Errorf("the review session's snapshot lacks the newest build plan: %q, %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(in, startArtifactsDir, "proposal/main/v2/f.md")); err != nil || string(got) != "pr2" {
+		t.Errorf("the review session's snapshot lacks the newest proposal: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(in, startArtifactsDir, "spec")); err == nil {
+		t.Error("the review session's snapshot has the spec, which is no plan type and has no approved version")
+	}
+}
+
 // TestALaunchSnapshotThatFailsEndsRunAPIFailed is a run API that is not reachable: the
 // session does not start, and the run closes run_api_failed, with the cause on line 2.
 func TestALaunchSnapshotThatFailsEndsRunAPIFailed(t *testing.T) {
@@ -136,7 +176,7 @@ func TestALaunchSnapshotThatFailsEndsRunAPIFailed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = startArtifacts(t.Context(), client, t.TempDir(), t.TempDir(), "build-plan")
+	_, err = startArtifacts(t.Context(), client, t.TempDir(), t.TempDir(), []string{"build-plan"})
 	if endCodeOf(err) != contracts.EndCodeRunAPIFailed ||
 		!strings.HasPrefix(err.Error(), "The fetch of the session's start artifacts failed, so the agent did not start.\n  Cause: ") {
 		t.Errorf("got %v", err)
@@ -147,7 +187,7 @@ func TestALaunchSnapshotThatFailsEndsRunAPIFailed(t *testing.T) {
 // index.json with no artifact.
 func TestALaunchSnapshotWithNoRunAPIIsEmpty(t *testing.T) {
 	in := t.TempDir()
-	if _, err := startArtifacts(t.Context(), nil, t.TempDir(), in, "build-plan"); err != nil {
+	if _, err := startArtifacts(t.Context(), nil, t.TempDir(), in, []string{"build-plan"}); err != nil {
 		t.Fatal(err)
 	}
 	if data, err := os.ReadFile(filepath.Join(in, startArtifactsDir, "index.json")); err != nil || string(data) != "{\"artifacts\":[]}\n" {
@@ -162,7 +202,7 @@ func TestALaterSessionGetsANewLaunchSnapshot(t *testing.T) {
 	client := snapshotAPI(t)
 	runDir, in := t.TempDir(), t.TempDir()
 	for range 2 {
-		snapshot, err := startArtifacts(t.Context(), client, runDir, in, "build-plan")
+		snapshot, err := startArtifacts(t.Context(), client, runDir, in, []string{"build-plan"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -189,7 +229,7 @@ func TestALaunchSnapshotThatCannotBeCopiedEndsMachineSetupInvalid(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(in, 0o700) })
-	_, err := startArtifacts(t.Context(), nil, t.TempDir(), in, "build-plan")
+	_, err := startArtifacts(t.Context(), nil, t.TempDir(), in, []string{"build-plan"})
 	var ended *reasonError
 	if !errors.As(err, &ended) || ended.code != string(contracts.EndCodeMachineSetupInvalid) ||
 		!strings.HasPrefix(err.Error(), "copying the session's start artifacts on this machine failed, so the agent did not start.\n  Cause: copying the start artifacts to the inputs folder failed: ") {

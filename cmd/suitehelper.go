@@ -46,6 +46,7 @@ const (
 	textSuiteNoRoom  = "the verdict of the agent has 20 points already, so qory adds none for the full suite"
 	textSuiteNoPost  = "Take the work item in again in Qory Apiary: qory could not post the suite's verdict.\n  %s"
 	textSuiteNoClear = "Remove .git/qory-suite from the session's folder: qory could not remove it.\n  %s"
+	textSuiteNoFile  = "qory could not write the suite result file of the review.\n  %s"
 )
 
 // The lines of the point of the verdict that a red suite sets. Each is one sentence on one line
@@ -110,6 +111,8 @@ type suiteSetup struct {
 	// extensions is the harness extensions of the report that the run composed.
 	extensions map[string]any
 	said       func(string)
+	// session is the number of the session whose suite it is, from 1.
+	session int
 }
 
 // suiteRun is the full suite of one session: the after step that runs it, and the judgement of
@@ -121,6 +124,14 @@ type suiteRun struct {
 	dir     string
 	full    suite.Full
 	minutes int
+	// session is the number of the session, which the suite result file's name has.
+	session int
+	// record is the suite of this session that [suiteRun.kept] hands to the loop, set by
+	// [suiteRun.after]: nil for a suite that did not run and for a session whose HEAD did not
+	// move.
+	record *suiteRecord
+	// faulted is whether record is that of a fault, which has no after step.
+	faulted bool
 	// fault is why no suite runs for this session, nil when the after step is set.
 	fault *suiteFault
 	// noPlan is set for a session whose workflow has no plan type: the fault that a session
@@ -134,7 +145,7 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 	if !s.walled || s.readOnly || !s.fullSuite {
 		return nil
 	}
-	r := &suiteRun{run: s.run, runID: s.runID, said: s.said, dir: s.spec.Dir, minutes: suite.LimitMinutes(s.extensions)}
+	r := &suiteRun{run: s.run, runID: s.runID, said: s.said, dir: s.spec.Dir, minutes: suite.LimitMinutes(s.extensions), session: s.session}
 	if s.plan == "" {
 		// No version of a plan type sets a command, so the after step only checks whether HEAD
 		// moved.
@@ -293,6 +304,78 @@ func readPlan(ctx context.Context, client *runapi.Client, plan string) (string, 
 	return "", errNoPlan
 }
 
+// suiteRecord is a full suite that ran or that qory could not start: where its suite
+// result file is, how it ended, and the commit it ran on. The loop of qory run keeps the
+// last one for the review session, which reads the suite of the commit that it reviews.
+type suiteRecord struct {
+	// path is the suite result file, "" when the suite had no after step to read output from
+	// or qory could not write the file.
+	path string
+	// outcome is how the suite ended. Its Commit is the commit that the status file of the
+	// workspace has, which the suite's code can write, "" for a suite that did not start.
+	outcome suite.Outcome
+	// head is the commit of the [suite.HeadMarker] line that is the first line of the after
+	// step's standard output, which the script prints before the suite's code runs: the
+	// commit the suite ran on, "" for a suite with no marker in the run's events. The review
+	// session compares this one.
+	head string
+}
+
+// kept returns the record that the loop keeps after the session: this session's, or before
+// when the session ran no suite or left HEAD where it was, since the suite of an earlier
+// commit still describes that HEAD. A nil r returns before. A session with no suite
+// because of a fault, which has no after step to show whether HEAD moved, keeps before as
+// well when HEAD of the session's folder is still the commit that before has a marker
+// for: the fault does not replace a suite that describes HEAD.
+func (r *suiteRun) kept(ctx context.Context, before *suiteRecord) *suiteRecord {
+	if r == nil || r.record == nil {
+		return before
+	}
+	if r.faulted && before != nil && before.head != "" && headCommit(ctx, r.dir) == before.head {
+		return before
+	}
+	return r.record
+}
+
+// reviewDir is the folder of the run's folder that has the suite result files. No session
+// can write it: Forager shows an agent's container only sessions/<n> of the run's folder,
+// read-only, and qory adds no mount of it. It is not the reports folder of a review
+// session, see [newReviewReports].
+const reviewDir = "review"
+
+// keep sets r.record for the suite that ended as got, and writes its
+// suite result file for the review session: the counts of the result file and the last
+// lines of the after step's output from the run's events. A session whose HEAD did not
+// move has no record. A fault has a record and no file, since the after step did not run.
+// A file that cannot be written leaves the record with no path and prints the line.
+func (r *suiteRun) keep(res *session.Result, fault *suiteFault, got suite.Outcome) {
+	switch {
+	case fault != nil:
+		r.record, r.faulted = &suiteRecord{outcome: suite.Outcome{State: suite.Failed}}, true
+		return
+	case got.State == suite.Skipped:
+		return
+	}
+	events := filepath.Join(r.run.Dir(), sink.EventsFile)
+	r.record = &suiteRecord{outcome: got, head: suite.ReadHead(events, res.After.Step)}
+	var counts suite.Counts
+	if got.Counts != nil {
+		counts = *got.Counts
+	}
+	output := suite.ReadOutput(events, res.After.Step)
+	dir := filepath.Join(r.run.Dir(), reviewDir)
+	path := filepath.Join(dir, fmt.Sprintf("suite-%d.json", r.session))
+	err := os.MkdirAll(dir, 0o700)
+	if err == nil {
+		err = suite.WriteResult(path, suite.NewResult(counts, output))
+	}
+	if err != nil {
+		r.said(fmt.Sprintf(textSuiteNoFile, shownError(err)))
+		return
+	}
+	r.record.path = path
+}
+
 // after judges the suite, writes its result, and posts the verdict of a suite that did not pass
 // when no result file is named, before the push step. A red suite leaves the run's outcome. A
 // post that fails closes the run failed, with the end code of its error, see [endCodeOf], and
@@ -344,6 +427,7 @@ func (r *suiteRun) after(ctx, again context.Context, limit time.Time, res *sessi
 			kind = kindUnfixable
 		}
 	}
+	r.keep(res, fault, got)
 	if out.State != event.StateSucceeded {
 		return out, nil
 	}

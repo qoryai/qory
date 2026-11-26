@@ -109,6 +109,54 @@ type runPushChecks struct {
 	inputsData []byte
 	// scope is the push step's scope check, see [runPushChecks.scopeCheck].
 	scope runScope
+	// verdicts is whether the check limits the verdicts of each session, see
+	// [runPushChecks.limitVerdicts]. running is whether a session is joining the run, and
+	// judges whether that session judges the work, see [runPushChecks.joining]. They are
+	// separate from scope, which follows the session that pushes. mu guards all three.
+	verdicts, running, judges bool
+}
+
+// limitVerdicts makes [runPushChecks.runAPICheck] apply [pushcheck.SessionVerdict] to
+// each POST, with the judges of the session that is running, and
+// [pushcheck.NoSessionVerdict] while no session runs. Call it before [runPushChecks.set],
+// and set the check with always, since the verdict rule needs no checker.
+func (p *runPushChecks) limitVerdicts() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.verdicts = true
+}
+
+// joining records that a session joins the run, whose workflow judges the work when
+// judges is true, see [workflowJudges]; call it right before the join, and
+// [runPushChecks.joined] as soon as the join returns, with any result.
+func (p *runPushChecks) joining(judges bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.running, p.judges = true, judges
+}
+
+// joined records that no session runs.
+func (p *runPushChecks) joined() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.running, p.judges = false, false
+}
+
+// verdictRefusal is the refusal of a POST by the verdict rule, nil for a POST that passes
+// or a run that has no such rule.
+func (p *runPushChecks) verdictRefusal(req session.RunAPIRequest) *session.RunAPIRefusal {
+	p.mu.Lock()
+	verdicts, running, judges := p.verdicts, p.running, p.judges
+	p.mu.Unlock()
+	switch {
+	case !verdicts:
+		return nil
+	case !running:
+		return pushcheck.NoSessionVerdict(req)
+	}
+	// shortcut: qory does not compare the verdict that a review session records with the
+	// reviewers' reports; replace it when qory reads the reports.
+	return pushcheck.SessionVerdict(judges, req)
 }
 
 // current is the checker, nil before the load or for a home with no push check.
@@ -135,10 +183,14 @@ func (p *runPushChecks) set(run openedRun, always bool) error {
 	return nil
 }
 
-// runAPICheck is [pushcheck.Checker.RunAPICheck] of the run's checker, for
-// [session.Run.SetRunAPICheck]. Forager writes no line for its error, so qory run
-// writes it as a status line.
+// runAPICheck is the check of each POST for [session.Run.SetRunAPICheck]: the verdict
+// rule, see [runPushChecks.limitVerdicts], then [pushcheck.Checker.RunAPICheck] of
+// the run's checker, which a run with no checker lacks. Forager writes no line for the
+// checker's error, so qory run writes it as a status line.
 func (p *runPushChecks) runAPICheck(ctx context.Context, req session.RunAPIRequest) (*session.RunAPIRefusal, error) {
+	if refusal := p.verdictRefusal(req); refusal != nil {
+		return refusal, nil
+	}
 	c := p.current()
 	if c == nil {
 		return nil, nil

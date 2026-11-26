@@ -2,6 +2,7 @@ package cmd_test
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -178,6 +179,14 @@ func afterLine(typ string, seq int, kind string) string {
 // runAfter runs spec.After in the workspace as Forager's after step does, and returns its end.
 func runAfter(t *testing.T, spec session.SessionSpec, e suiteEnd) *session.AfterResult {
 	t.Helper()
+	res, _ := runAfterStep(t, spec, e, 2)
+	return res
+}
+
+// runAfterStep is runAfter for the after step number step, and returns the step's output
+// too.
+func runAfterStep(t *testing.T, spec session.SessionSpec, e suiteEnd, step int) (*session.AfterResult, []byte) {
+	t.Helper()
 	home := filepath.Join(t.TempDir(), "home")
 	if err := os.Mkdir(home, 0o500); err != nil {
 		t.Fatal(err)
@@ -202,7 +211,29 @@ func runAfter(t *testing.T, spec session.SessionSpec, e suiteEnd) *session.After
 	if code != 0 {
 		state = event.StateFailed
 	}
-	return &session.AfterResult{Step: 2, State: state, ExitCode: code}
+	return &session.AfterResult{Step: step, State: state, ExitCode: code}, out
+}
+
+// appendAfterEvents adds to the events file of runDir the events that Forager writes for
+// the after step number step: its start, its output and its exit.
+func appendAfterEvents(t *testing.T, runDir string, step int, output []byte) {
+	t.Helper()
+	line := func(typ string, seq int, data string) string {
+		return fmt.Sprintf(`{"type":"dev.qory.run.%s","sequence":"%010d","data":%s}`, typ, seq, data)
+	}
+	lines := []string{
+		line("step_started", step*10+1, fmt.Sprintf(`{"step":%d,"name":"after","kind":"after"}`, step)),
+		line("log", step*10+2, fmt.Sprintf(`{"stream":"stdout","bytes":%q,"step":%d}`, base64.StdEncoding.EncodeToString(output), step)),
+		line("step_exited", step*10+3, fmt.Sprintf(`{"step":%d,"state":"failed","exit_code":1}`, step)),
+	}
+	f, err := os.OpenFile(filepath.Join(runDir, "events.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 const (

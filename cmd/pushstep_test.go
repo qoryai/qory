@@ -126,6 +126,9 @@ type pushAPI struct {
 	index         func(n int, w http.ResponseWriter) bool
 	// workItemFails has each GET of the work item end with a 500.
 	workItemFails bool
+	// round and rounds are the stage's round and number of rounds in the work item, left
+	// out when 0.
+	round, rounds int
 	// other, when set, responds to a request of no route above, and returns whether it did;
 	// a request it leaves gets 404.
 	other func(w http.ResponseWriter, r *http.Request) bool
@@ -160,7 +163,11 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		pushed := cmp.Or(a.pushedCommits, a.pushedRows())
 		outputs := cmp.Or(a.outputs, pullRequestOutputs)
-		fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"run":%s,"stage":{"id":"st_a"},"inputs":[],"outputs":%s,"verdict":%s,"pushed_commits":%s}`, workItem, run, outputs, verdict, pushed)
+		stage := `{"id":"st_a"}`
+		if a.round != 0 && a.rounds != 0 {
+			stage = fmt.Sprintf(`{"id":"st_a","round":%d,"rounds":%d}`, a.round, a.rounds)
+		}
+		fmt.Fprintf(w, `{"version":1,"work_item":{"id":%q,"number":1},"run":%s,"stage":%s,"inputs":[],"outputs":%s,"verdict":%s,"pushed_commits":%s}`, workItem, run, stage, outputs, verdict, pushed)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/r/artifacts":
 		a.reads++
 		if a.index == nil || !a.index(a.reads, w) {
@@ -182,6 +189,22 @@ func (a *pushAPI) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// setRound sets the stage's round and number of rounds of the work item.
+func (a *pushAPI) setRound(round, rounds int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.round, a.rounds = round, rounds
+}
+
+// addVersion adds a version of the artifact typ, name main, with one file, as a run of the
+// stage st_a wrote it.
+func (a *pushAPI) addVersion(typ, filename string, content []byte) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.files = append(a.files, content)
+	a.kinds = append(a.kinds, storedKind{typ, "main", filename, a.runID})
 }
 
 // recordedRow is a row of the run's list of pushed commits.

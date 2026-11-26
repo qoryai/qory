@@ -548,6 +548,18 @@ func (r *codeRun) inputsMounted(in string, given []givenMount) error {
 	return nil
 }
 
+// The stops of [codeRun.readExposed], in the form of [reviewStop], each with the folder's
+// kind, "checkout" or "working folder", and its path. The cache stop has how the folder
+// overlaps the cache folder, which [session.Overlap] returns: "is", "contains" or "lies
+// inside", and line 2 shows the cache folder. The report stop has the harness report that
+// the folder contains, and its line 2 is the same for every folder.
+const (
+	textReadExposedCache        = "The %s %s %s %s, so the run did not start"
+	textReadExposedCacheDetail  = "qory writes harness reports in %s"
+	textReadExposedReport       = "The %s %s contains %s, so the run did not start"
+	textReadExposedReportDetail = "That file is the harness report of this run, which qory writes"
+)
+
 // readExposed stops a run from the run code r that only reads the checkout, when the
 // checkout at root or the working folder cwd, which the agent's container binds read-only,
 // overlaps qory's cache folder or the harness report of the run. A run that may write works
@@ -565,24 +577,16 @@ func (r *codeRun) readExposed(root, cwd, report string) error {
 		return session.Overlap(mount, path)
 	}
 	if how := overlap(root, cache); how != "" {
-		where := "outside"
-		if how == "contains" {
-			where = "that does not contain"
-		}
-		return input(fmt.Errorf("start the run in a checkout %s %s: the checkout %s is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under %s%s", where, shown(cache), shown(root), shown(cache), codeUsed))
+		return input(reviewStop(fmt.Sprintf(textReadExposedCache, "checkout", shown(root), how, shown(cache)), fmt.Sprintf(textReadExposedCacheDetail, shown(cache))))
 	}
 	if how := overlap(root, report); how == "is" || how == "contains" {
-		return input(fmt.Errorf("start the run in a checkout that does not contain %s: the checkout %s is mounted into the agent's container, and %s is the harness report of this run%s", shown(report), shown(root), shown(report), codeUsed))
+		return input(reviewStop(fmt.Sprintf(textReadExposedReport, "checkout", shown(root), shown(report)), textReadExposedReportDetail))
 	}
 	if how := overlap(cwd, cache); how != "" {
-		where := "outside"
-		if how == "contains" {
-			where = "that does not contain"
-		}
-		return input(fmt.Errorf("run qory from a folder %s %s: the working folder %s is mounted into the agent's container, and qory writes the harness report of each run with a run key or a run code that has no --home or harness.home under %s%s", where, shown(cache), shown(cwd), shown(cache), codeUsed))
+		return input(reviewStop(fmt.Sprintf(textReadExposedCache, "working folder", shown(cwd), how, shown(cache)), fmt.Sprintf(textReadExposedCacheDetail, shown(cache))))
 	}
 	if how := overlap(cwd, report); how == "is" || how == "contains" {
-		return input(fmt.Errorf("run qory from a folder that does not contain %s: the working folder %s is mounted into the agent's container, and %s is the harness report of this run%s", shown(report), shown(cwd), shown(report), codeUsed))
+		return input(reviewStop(fmt.Sprintf(textReadExposedReport, "working folder", shown(cwd), shown(report)), textReadExposedReportDetail))
 	}
 	return nil
 }
@@ -730,7 +734,7 @@ const inputsMember = "qory"
 // qoryInputs is the value of [inputsMember]: what qory adds to the inputs of a run from
 // a run code, and all that inputs.json has for a run with a run key and no run code, or
 // for a person's run whose harness has a submit program. Each field is one member, always
-// written, but Outbox.
+// written, except Workflow, ReviewSession and Outbox.
 type qoryInputs struct {
 	// HarnessExtensions is the harness report's extensions, {} for none.
 	HarnessExtensions map[string]any `json:"harness_extensions"`
@@ -745,6 +749,13 @@ type qoryInputs struct {
 	// snapshot, see [startArtifacts]. The push step's scope check reads the same values.
 	StartCommits   []inputCommit `json:"start_commits"`
 	StartArtifacts string        `json:"start_artifacts"`
+	// Workflow is the values of the session's workflow that the harness reads, see
+	// [workflowInputs]; nil, and no member, for a run with no run code, which has no
+	// workflow.
+	Workflow *workflowInputs `json:"workflow,omitempty"`
+	// ReviewSession is the files and folders of a review-changes session, see
+	// [reviewSession]; nil, and no member, for any other session.
+	ReviewSession *reviewSession `json:"review_session,omitempty"`
 }
 
 // inputCommit is one entry of [qoryInputs.StartCommits]: the repository's folder, as an

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -34,16 +35,28 @@ import (
 // requests counts the requests.
 func sharedPushRepo(t *testing.T, answers ...string) (p *pushRepo, requests func() int) {
 	t.Helper()
-	p = newPushRepoWith(t, "write", map[string]string{
+	return sharedPushRepoWith(t, nil, nil, answers...)
+}
+
+// sharedPushRepoWith is [sharedPushRepo] with the files extra in the repository, which
+// replace a file of the module hello of the same path, and the workflows more in the
+// harness document, besides hello.
+func sharedPushRepoWith(t *testing.T, extra map[string]string, more map[string]any, answers ...string) (p *pushRepo, requests func() int) {
+	t.Helper()
+	files := map[string]string{
 		"modules/hello/skills/workflow-hello/SKILL.md": "---\nname: workflow-hello\ndescription: Say hello.\n---\n\nSay hello.\n",
-	})
+	}
+	maps.Copy(files, extra)
+	p = newPushRepoWith(t, "write", files)
 	url := p.h.server.URL("acme/site")
 	p.stackProxy = true
 	p.change = func(d map[string]any) {
 		d["shared_run"] = true
+		workflows := map[string]any{"hello": map[string]any{"access": "write", "plan": "build-plan"}}
+		maps.Copy(workflows, more)
 		d["harness"] = map[string]any{"harness": map[string]any{
 			"modules":   []map[string]any{{"name": "hello", "source": map[string]any{"git": url, "ref": "main", "path": "modules/hello"}}},
-			"workflows": map[string]any{"hello": map[string]any{"access": "write", "plan": "build-plan"}},
+			"workflows": workflows,
 		}}
 	}
 	var mu sync.Mutex
@@ -382,6 +395,12 @@ func TestAFailureBeforeSession2KeepsThePushOfSession1(t *testing.T) {
 // "verdict", and each next-session request, "next", in the order they arrived.
 func suiteServed(t *testing.T, p *pushRepo, hang func(n int) bool) (order func() []string) {
 	t.Helper()
+	return suiteServedPlan(t, p, hang, suitePlan)
+}
+
+// suiteServedPlan is [suiteServed] with the build plan plan in place of suitePlan.
+func suiteServedPlan(t *testing.T, p *pushRepo, hang func(n int) bool, plan string) (order func() []string) {
+	t.Helper()
 	var mu sync.Mutex
 	var got []string
 	note := func(s string) {
@@ -389,10 +408,10 @@ func suiteServed(t *testing.T, p *pushRepo, hang func(n int) bool) (order func()
 		defer mu.Unlock()
 		got = append(got, s)
 	}
-	sum := sha256.Sum256([]byte(suitePlan))
-	plan := map[string]any{"type": "build-plan", "name": "main", "newest_version": 1, "versions": []any{map[string]any{
+	sum := sha256.Sum256([]byte(plan))
+	artifact := map[string]any{"type": "build-plan", "name": "main", "newest_version": 1, "versions": []any{map[string]any{
 		"id": "bp1", "number": 1, "writer": map[string]any{"kind": "run", "run_id": "earlier"},
-		"files": []any{map[string]any{"filename": "build-plan.md", "size": len(suitePlan), "sha256": hex.EncodeToString(sum[:])}},
+		"files": []any{map[string]any{"filename": "build-plan.md", "size": len(plan), "sha256": hex.EncodeToString(sum[:])}},
 	}}}
 	p.api.index = func(_ int, w http.ResponseWriter) bool {
 		rec := httptest.NewRecorder()
@@ -402,7 +421,7 @@ func suiteServed(t *testing.T, p *pushRepo, hang func(n int) bool) (order func()
 			t.Error(err)
 			return false
 		}
-		index["artifacts"] = append(index["artifacts"].([]any), plan)
+		index["artifacts"] = append(index["artifacts"].([]any), artifact)
 		json.NewEncoder(w).Encode(index)
 		return true
 	}
@@ -410,7 +429,7 @@ func suiteServed(t *testing.T, p *pushRepo, hang func(n int) bool) (order func()
 	p.api.other = func(w http.ResponseWriter, r *http.Request) bool {
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/files/build-plan.md"):
-			io.WriteString(w, suitePlan)
+			io.WriteString(w, plan)
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/verdict"):
 			note("verdict")
 			verdicts++
@@ -447,11 +466,24 @@ func suiteServed(t *testing.T, p *pushRepo, hang func(n int) bool) (order func()
 // session that has an after step runs it with a red suite, as Forager's after step does.
 // spec is the spec of the session that joins, which [pushRepo.mountsOf] sets.
 func suiteResults(t *testing.T, spec *session.SessionSpec) func() (*session.Result, error) {
+	return suiteResultsIn(t, spec, nil)
+}
+
+// suiteResultsIn is suiteResults for a run whose events file is in the folder runDir
+// returns, which the loop reads the output of each after step from: each after step gets
+// a step number that no other has, and its output is appended to the events.
+func suiteResultsIn(t *testing.T, spec *session.SessionSpec, runDir func() string) func() (*session.Result, error) {
 	n := numbered()
+	step := 1
 	return func() (*session.Result, error) {
 		res, err := n()
 		if len(spec.After) > 0 {
-			res.After = runAfter(t, *spec, suiteEnd{result: suiteRed, exit: 1})
+			step++
+			var out []byte
+			res.After, out = runAfterStep(t, *spec, suiteEnd{result: suiteRed, exit: 1}, step)
+			if runDir != nil {
+				appendAfterEvents(t, runDir(), step, out)
+			}
 		}
 		return res, err
 	}

@@ -171,7 +171,7 @@ func (claude) Reserved() []render.Reserved {
 // on every start. Then it writes the plugin, see [Plugin], and the launch instructions,
 // see [Launch].
 func (claude) Render(res *compose.Result, dir, home string) error {
-	if err := render.PlaceEntries(res, dir, render.Bare, "skills", "agents", "commands", "output-styles", "hooks"); err != nil {
+	if err := render.PlaceEntries(claude{}, res, dir, render.Bare, "skills", "agents", "commands", "output-styles", "hooks"); err != nil {
 		return err
 	}
 	ensure := []string{"settings.json"}
@@ -245,11 +245,11 @@ func renderPlugin(res *compose.Result, dir string) error {
 		}
 	}
 	if extra["outputStyles"] != nil {
-		if err := render.PlaceEntries(res, dir, render.PluginAddress, "output-styles"); err != nil {
+		if err := render.PlaceEntries(claude{}, res, dir, render.PluginAddress, "output-styles"); err != nil {
 			return err
 		}
 	}
-	if err := render.WritePlugin(res, dir, ".claude-plugin", extra); err != nil {
+	if err := render.WritePlugin(claude{}, res, dir, ".claude-plugin", extra); err != nil {
 		return err
 	}
 	if render.Copies(res) {

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/integration"
@@ -121,6 +122,46 @@ func (h *history) descends(ctx context.Context, ancestor, descendant string) (bo
 	}
 	return err == nil, err
 }
+
+// projectBase is the merge base of head with the head of r's default branch at the forge,
+// fetched by its id at depth one into the checkout dir, so that a review of head can diff
+// from it; "" when r has no default branch, the branch has no head, or a read, the merge
+// base or the fetch fails. The history is fetched into a scratch repository, never into
+// dir, whose .git the agent could change. The fetch takes the URL that qory builds, not
+// dir's origin.
+//
+// The reads end after [projectBaseLimit], since every push of every run makes them and the
+// history fetch grows with the count of commits: a slow forge or a long history then
+// leaves no project base and does not hold up the run.
+func projectBase(ctx context.Context, read gitRunner, dir, system string, r WorkRepository, head string) string {
+	if r.DefaultBranch == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, projectBaseLimit)
+	defer cancel()
+	tip, err := remoteHead(ctx, read, dir, system, r.Path, r.DefaultBranch)
+	if err != nil || tip == "" {
+		return ""
+	}
+	h, remove, err := openHistory(ctx, read, system, r.Path, head, tip)
+	defer remove()
+	if err != nil {
+		return ""
+	}
+	out, err := h.read(ctx, h.dir, "merge-base", head, tip)
+	base := strings.TrimSpace(out)
+	if err != nil || !CommitID(base) {
+		return ""
+	}
+	if _, err := read(ctx, dir, "fetch", "--quiet", "--no-tags", "--depth", "1", "--", h.url, base); err != nil {
+		return ""
+	}
+	return base
+}
+
+// projectBaseLimit bounds all the reads of [projectBase] together. It is a variable so
+// that a test can shorten it.
+var projectBaseLimit = 60 * time.Second
 
 // headCheck is the verdict of the head check of one repository.
 type headCheck struct {

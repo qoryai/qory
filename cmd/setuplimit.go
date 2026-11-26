@@ -38,6 +38,7 @@ const (
 	stepSetupCommands
 	stepSetupRemoval
 	stepSetupRecord
+	stepReviewCopy
 )
 
 // setupSteps has each step's name in the line of a setup past its limit, and the fix that
@@ -58,6 +59,7 @@ var setupSteps = map[prepStep]struct{ name, fix string }{
 	stepSetupCommands: {"the setup commands", "move slow work of the lifecycle commands in devcontainer.json into the run's image"},
 	stepSetupRemoval:  {"the removal of the setup container", "check that this machine's container engine responds, then start the run again"},
 	stepSetupRecord:   {"the record of what the setup changed", "make the setup commands change fewer files in the checkout, then start the run again"},
+	stepReviewCopy:    {"the copy of the pushed commit for the reviewers", "make the pushed commit smaller, with fewer or smaller files"},
 }
 
 // installs reports whether the run's install step installs runtime, see [installRuntime].

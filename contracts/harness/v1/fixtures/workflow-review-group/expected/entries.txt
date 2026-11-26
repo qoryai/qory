@@ -1,4 +1,5 @@
 agents/code-reviewer core
+agents/explorer core
 agents/test-reviewer core
 agents/verify-reviewer core
 skills/workflow-review-changes core

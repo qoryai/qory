@@ -1,6 +1,7 @@
 package cmd_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -123,6 +124,89 @@ func TestASessionThatPushedNothingMakesNoReport(t *testing.T) {
 		r.wantsClose(t, event.StateSucceeded, 0)
 		if calls, rows := p.api.reports(); calls != 1 || len(rows) != 1 {
 			t.Errorf("%d reports and %d rows, want 1 and 1", calls, len(rows))
+		}
+	})
+}
+
+// TestASlowProjectBaseReadNeverStopsThePushRecord is a read of the project base that lasts
+// until the push step ends, after a signal: the read comes after the report of pushed
+// commits, so Qory Apiary has the push. The read comes after the store of the outputs too,
+// and a signal ends it at once. A read that finds no base leaves the step's result as it
+// is. A signal during the report leaves no read.
+func TestASlowProjectBaseReadNeverStopsThePushRecord(t *testing.T) {
+	t.Run("a read until the step ends", func(t *testing.T) {
+		p := newPushRepo(t, "write")
+		defer cmd.SetPushTimes(time.Minute, 400*time.Millisecond)()
+		reportsAtRead, cut := -1, false
+		defer cmd.SetProjectBaseRead(func(ctx context.Context) {
+			reportsAtRead, _ = p.api.reports()
+			term(t)
+			select {
+			case <-ctx.Done():
+				cut = true
+			case <-time.After(30 * time.Second):
+			}
+		})()
+		r := p.run(t, commitFirst(t), nil)
+		if reportsAtRead != 1 || !cut {
+			t.Errorf("the read began after %d reports and the step's end cut it: %v, want 1 and true\n%s", reportsAtRead, cut, r.out)
+		}
+		if calls, rows := p.api.reports(); calls != 1 || len(rows) != 1 {
+			t.Errorf("%d reports and %d rows, want 1 and 1\n%s", calls, len(rows), r.out)
+		}
+		lacks(t, r.out, "did not record")
+	})
+	t.Run("a signal during a slow read", func(t *testing.T) {
+		p := newPushRepo(t, "write")
+		defer cmd.SetPushTimes(time.Minute, 5*time.Second)()
+		storedAtRead := -1
+		var waited time.Duration
+		defer cmd.SetProjectBaseRead(func(ctx context.Context) {
+			_, _, storedAtRead = p.api.counts()
+			term(t)
+			began := time.Now()
+			select {
+			case <-ctx.Done():
+			case <-time.After(30 * time.Second):
+			}
+			waited = time.Since(began)
+		})()
+		r := p.run(t, writesAndCommits(t), nil)
+		if _, _, stored := p.api.counts(); storedAtRead != 1 || stored != 1 {
+			t.Errorf("%d versions stored when the read began and %d at the end, want 1 and 1\n%s", storedAtRead, stored, r.out)
+		}
+		if waited > 2*time.Second {
+			t.Errorf("the read went on %v after the signal, want it to end at the signal", waited)
+		}
+	})
+	t.Run("a read that finds no base", func(t *testing.T) {
+		p := newPushRepo(t, "write")
+		read := false
+		defer cmd.SetProjectBaseRead(func(context.Context) { read = true })()
+		r := p.run(t, commitFirst(t), nil)
+		r.wantsClose(t, event.StateSucceeded, 0)
+		if _, state := r.step(); !read || state != event.StateSucceeded {
+			t.Errorf("the base was read: %v, and the step ended %q, want true and succeeded\n%s", read, state, r.out)
+		}
+		if calls, rows := p.api.reports(); calls != 1 || len(rows) != 1 {
+			t.Errorf("%d reports and %d rows, want 1 and 1\n%s", calls, len(rows), r.out)
+		}
+	})
+	t.Run("a signal during the report", func(t *testing.T) {
+		p := newPushRepo(t, "write")
+		defer cmd.SetPushTimes(time.Minute, 400*time.Millisecond)()
+		read := false
+		defer cmd.SetProjectBaseRead(func(context.Context) { read = true })()
+		p.api.record = func(int, http.ResponseWriter) bool {
+			term(t)
+			return false
+		}
+		r := p.run(t, commitFirst(t), nil)
+		if read {
+			t.Errorf("the step read the project base after a signal\n%s", r.out)
+		}
+		if calls, rows := p.api.reports(); calls != 1 || len(rows) != 1 {
+			t.Errorf("%d reports and %d rows, want 1 and 1\n%s", calls, len(rows), r.out)
 		}
 	})
 }
