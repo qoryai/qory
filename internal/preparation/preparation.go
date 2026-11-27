@@ -407,6 +407,7 @@ func fetchRepositories(ctx context.Context, dir string, base []string, getenv fu
 			if err := fetchBranchCommit(ctx, g, dir, system, paths[0], branch); err != nil {
 				return false, err
 			}
+			branch.setBase(ctx, g, report, dir, system, paths[0], strings.TrimSpace(head))
 		}
 		// The line shows the commit HEAD is at, which is commit when it is set.
 		shown = shortCommit(strings.TrimSpace(head))

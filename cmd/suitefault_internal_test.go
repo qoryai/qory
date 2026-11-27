@@ -16,6 +16,7 @@ import (
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/qory/internal/stack"
+	"github.com/qoryai/qory/internal/suite"
 	"github.com/qoryai/qory/internal/ui"
 )
 
@@ -35,7 +36,7 @@ func launchFaultRun(t *testing.T, h helperRun, plan string, noGit bool) {
 	spec := &runSpec{}
 	spec.Dir = dir
 	r := openSuites(context.Background(), suiteSetup{
-		workflow: "fix", plan: "build-plan",
+		workflow: "fix", plan: "build-plan", written: true,
 		run: apiRun{api: h.api, dir: h.runDir}, spec: spec, runID: "r1", walled: true, fullSuite: true,
 		said: func(string) {},
 	})
@@ -62,7 +63,7 @@ func TestACauseInThePlanPostsChangesRequestedWithTheFix(t *testing.T) {
 		name, plan, text, fix string
 	}{
 		{"no full row", planNoFull, noFullText, noFullFix},
-		{"no table", "# Plan\n", noFullText, textFixNoTable},
+		{"no table", "# Plan\n", fmt.Sprintf(textFaultNoTable, "build-plan"), textFixNoTable},
 		{"no command", "## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| full | none | none | s |\n", fmt.Sprintf(textFaultNoCmd, "build-plan"), textFixNoCmd},
 		{"no plan", "", fmt.Sprintf(textFaultNoPlan, "build-plan"), fmt.Sprintf(textFixNoPlan, "build-plan")},
 		{"a plan over 1 MiB", "## Commands\n" + strings.Repeat("x", maxPlan), fmt.Sprintf(textFaultTooBig, "build-plan"), fmt.Sprintf(textFixTooBig, "build-plan")},
@@ -100,7 +101,7 @@ func TestACauseOutsideTheAgentsReachPostsEscalate(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHelper(t)
-			h.fault = faultOf(err, "build-plan")
+			h.fault = faultOf(err, "build-plan", true)
 			if h.fault.fixable {
 				t.Fatalf("the fault %+v is fixable", h.fault)
 			}
@@ -151,7 +152,7 @@ func TestACauseOverAChangesRequestedOfTheAgent(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHelper(t)
 			h.api.add(fakeVersion{artifact: "verdict", name: "main", number: 1, runID: "r1", file: "verdict.json", content: c.agent})
-			h.fault = faultOf(errNoPlan, "build-plan")
+			h.fault = faultOf(errNoPlan, "build-plan", true)
 			h.fault.point.Text, h.fault.point.Fix = noFullText, noFullFix
 			if c.unfixable {
 				h.fault = noGitFault()
@@ -255,7 +256,7 @@ func TestARunAPIThatFailsAtTheLaunchIsACauseOutsideTheAgentsReach(t *testing.T) 
 			spec := &runSpec{}
 			spec.Dir = workspaceRepo(t)
 			r := openSuites(context.Background(), suiteSetup{
-				workflow: "fix", plan: "build-plan",
+				workflow: "fix", plan: "build-plan", written: true,
 				run: flakyRun{apiRun{api: h.api, dir: h.runDir}, &down}, spec: spec, runID: "r1", walled: true, fullSuite: true,
 				said: func(l string) { said = append(said, l) },
 			})
@@ -374,5 +375,34 @@ func TestTheFullSuiteRefusalIsCauseFirstAsPrinted(t *testing.T) {
 				t.Errorf("line 2 as printed is %q, want %q", line2, want)
 			}
 		}
+	}
+}
+
+// TestACauseInThePlanOfATypeTheStageDoesNotWriteEscalates is a plan with a cause that
+// stops the suite, of a type that the stage does not write: a push does not change the
+// approved version, so the fault is not fixable, its fix points to the stage that writes
+// the type, and the verdict that qory posts is escalate.
+func TestACauseInThePlanOfATypeTheStageDoesNotWriteEscalates(t *testing.T) {
+	for name, err := range map[string]error{
+		"no plan":       errNoPlan,
+		"a big plan":    errPlanTooBig,
+		"no full row":   suite.ErrNoFull,
+		"a bad command": suite.ErrBadCommand,
+	} {
+		t.Run(name, func(t *testing.T) {
+			fault := faultOf(err, "build-plan", false)
+			wantFix := fmt.Sprintf(textFixWriter, "build-plan")
+			if fault.fixable || fault.point.Fix != wantFix || len(fault.line()) > 200 {
+				t.Fatalf("the fault is %+v, want one that is not fixable with the fix %q", fault, wantFix)
+			}
+			h := newHelper(t)
+			h.fault = fault
+			if _, err := h.after(nil, succeeded); err != nil {
+				t.Fatal(err)
+			}
+			if posted := h.api.verdicts(); len(posted) != 1 || !strings.HasPrefix(posted[0], `{"verdict":"escalate","points":[{"text":"The full suite did not start:`) {
+				t.Errorf("posted %q", posted)
+			}
+		})
 	}
 }

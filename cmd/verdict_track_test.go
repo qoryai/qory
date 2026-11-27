@@ -249,7 +249,7 @@ func TestRunVerdictMasksAKeyInAWrongTrackID(t *testing.T) {
 // exit 4, with line 1 of at most 98 characters that has the fix, then Qory Apiary's text
 // on an indented line. Every other error keeps its status.
 func TestRunVerdictExitsWith4ForARefusedVerdict(t *testing.T) {
-	notOffered := "Set track.id to a track that the gate of Explore offers (fast, standard), " +
+	notOffered := "Set track.id to a track that the gate of Explore offers (fast-track, standard), " +
 		"or leave track out of the verdict. The track small-chnge is not offered."
 	notOpen := "Push the questions first, or point at an open question in verdict.json: " +
 		"point 2 is about question q9, which is not open."

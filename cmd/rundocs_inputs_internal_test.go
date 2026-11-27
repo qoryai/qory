@@ -10,6 +10,9 @@ import (
 
 	"github.com/qoryai/forager/link"
 	"github.com/qoryai/forager/wall"
+
+	"github.com/qoryai/qory/internal/preparation"
+	"github.com/qoryai/qory/internal/pushcheck"
 )
 
 // recordSocketDirs is the pattern of the folders of Forager's record sockets, which no
@@ -80,6 +83,41 @@ func TestTheInputsGetTheMemberQory(t *testing.T) {
 			t.Errorf("%q: %q, want an error", inputs, got)
 		}
 	}
+}
+
+// TestInputsHaveNoBranchBaseForARunWithNoBranch is the member branch_base of qory: a run with no
+// branch, and a branch with no base, have none; a branch with a base has it as {"commit", "tree"}.
+func TestInputsHaveNoBranchBaseForARunWithNoBranch(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		branch *preparation.WorkBranch
+		want   string
+	}{
+		{"no branch", nil, ``},
+		{"no base", &preparation.WorkBranch{}, ``},
+		{"a base", &preparation.WorkBranch{Base: &preparation.BranchBase{Commit: "c1", Tree: "t1"}}, `,"branch_base":{"commit":"c1","tree":"t1"}`},
+	} {
+		got, err := withQoryMember([]byte(`{}`), qoryInputs{StartArtifacts: "a", BranchBase: branchBase(c.branch)})
+		if err != nil || !strings.HasSuffix(string(got), `"start_artifacts":"a"`+c.want+"}}\n") {
+			t.Errorf("%s: %q, %v", c.name, got, err)
+		}
+	}
+}
+
+// TestTheScopeChecksCheckerGetsTheSessionsInputs is the inputs.json that a session writes after its
+// scope checker loaded: the push checks' checker and the scope check's checker both get its path
+// and bytes.
+func TestTheScopeChecksCheckerGetsTheSessionsInputs(t *testing.T) {
+	p := &runPushChecks{checker: &pushcheck.Checker{}}
+	p.scope.checker = &pushcheck.Checker{}
+	p.setInputs("/in/inputs.json", []byte("{}"))
+	for name, c := range map[string]*pushcheck.Checker{"push": p.checker, "scope": p.scope.checker} {
+		if c.Inputs != "/in/inputs.json" || string(c.InputsData) != "{}" {
+			t.Errorf("the %s checker has %q and %q", name, c.Inputs, c.InputsData)
+		}
+	}
+	none := &runPushChecks{}
+	none.setInputs("/in/inputs.json", []byte("{}"))
 }
 
 // TestTheInputsAreCheckedBeforeTheRunOpens is the check of a run code's inputs: a member

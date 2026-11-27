@@ -68,7 +68,7 @@ func snapshotAPI(t *testing.T) *runapi.Client {
 func TestALaunchSnapshotHoldsThePlanAndTheApprovedVersions(t *testing.T) {
 	client := snapshotAPI(t)
 	runDir, in := t.TempDir(), t.TempDir()
-	snapshot, err := startArtifacts(t.Context(), client, runDir, in, []string{"build-plan"})
+	snapshot, err := startArtifacts(t.Context(), client, runDir, in, []string{"build-plan"}, []string{"build-plan"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestALaunchSnapshotHoldsThePlanAndTheApprovedVersions(t *testing.T) {
 	if err := os.WriteFile(stale, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := startArtifacts(t.Context(), client, runDir, in, nil); err != nil {
+	if _, err := startArtifacts(t.Context(), client, runDir, in, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
@@ -131,12 +131,13 @@ func TestALaunchSnapshotHoldsThePlanAndTheApprovedVersions(t *testing.T) {
 	}
 }
 
-// TestAReviewSessionsSnapshotHasTheNewestVersionOfEveryPlanType is the stack of the build
-// loop: three workflows declare build-plan, and review-changes has a review_group and no
-// plan. The review session's snapshot has the newest build plan, the version that
-// implement-changes pushed. A session of implement-changes keeps build-plan alone, and a
-// session of a workflow with no plan keeps no plan type.
-func TestAReviewSessionsSnapshotHasTheNewestVersionOfEveryPlanType(t *testing.T) {
+// TestAReviewSessionsSnapshotHasTheNewestVersionOfEveryPlanTypeTheStageWrites is the stack of
+// the build loop: three workflows declare build-plan, and review-changes has a review_group
+// and no plan. A review session whose stage writes both plan types has the newest build plan,
+// the version that implement-changes pushed, and the newest proposal. One whose stage writes
+// build-plan alone has the approved proposal. A session of implement-changes keeps build-plan
+// alone, and a session of a workflow with no plan keeps no plan type.
+func TestAReviewSessionsSnapshotHasTheNewestVersionOfEveryPlanTypeTheStageWrites(t *testing.T) {
 	workflows := map[string]stack.Workflow{
 		"plan-the-build":          {Access: stack.AccessWrite, Plan: "build-plan"},
 		"write-acceptance-checks": {Access: stack.AccessWrite, Plan: "build-plan"},
@@ -155,7 +156,7 @@ func TestAReviewSessionsSnapshotHasTheNewestVersionOfEveryPlanType(t *testing.T)
 		t.Errorf("a session with no plan type has %v, want none", none)
 	}
 	in := t.TempDir()
-	if _, err := startArtifacts(t.Context(), snapshotAPI(t), t.TempDir(), in, review); err != nil {
+	if _, err := startArtifacts(t.Context(), snapshotAPI(t), t.TempDir(), in, review, review); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := os.ReadFile(filepath.Join(in, startArtifactsDir, "build-plan/main/v2/f.md")); err != nil || string(got) != "bp2" {
@@ -167,6 +168,70 @@ func TestAReviewSessionsSnapshotHasTheNewestVersionOfEveryPlanType(t *testing.T)
 	if _, err := os.Stat(filepath.Join(in, startArtifactsDir, "spec")); err == nil {
 		t.Error("the review session's snapshot has the spec, which is no plan type and has no approved version")
 	}
+
+	in = t.TempDir()
+	if _, err := startArtifacts(t.Context(), snapshotAPI(t), t.TempDir(), in, review, []string{"build-plan"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(in, startArtifactsDir, "proposal/main/v1/f.md")); err != nil || string(got) != "pr1" {
+		t.Errorf("a stage that does not write proposal lacks the approved proposal: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(in, startArtifactsDir, "proposal/main/v2")); err == nil {
+		t.Error("a stage that does not write proposal has the newest proposal")
+	}
+}
+
+// snapshotFile is the content of path in the snapshot of a session whose plan types are
+// plans and whose stage writes the types written, "" for no file.
+func snapshotFile(t *testing.T, path string, plans, written []string) string {
+	t.Helper()
+	in := t.TempDir()
+	if _, err := startArtifacts(t.Context(), snapshotAPI(t), t.TempDir(), in, plans, written); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(in, startArtifactsDir, path))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	return string(got)
+}
+
+// TestASnapshotTakesTheApprovedVersionOfAPlanTypeTheStageDoesNotWrite is a plan type in the
+// session's plan types that its stage writes no output of: the snapshot has the approved
+// build plan, v1, not the newer v2 that another session pushed.
+func TestASnapshotTakesTheApprovedVersionOfAPlanTypeTheStageDoesNotWrite(t *testing.T) {
+	plans := []string{"build-plan"}
+	if got := snapshotFile(t, "build-plan/main/v1/f.md", plans, []string{"verdict"}); got != "bp1" {
+		t.Errorf("the approved build plan is %q, want bp1", got)
+	}
+	if got := snapshotFile(t, "build-plan/main/v2/f.md", plans, nil); got != "" {
+		t.Errorf("the newest build plan is in the snapshot: %q", got)
+	}
+}
+
+// TestASnapshotTakesTheNewestVersionOfAPlanTypeTheStageWrites is a stage whose outputs have
+// build-plan: the snapshot has v2, the newest that is not cancelled.
+func TestASnapshotTakesTheNewestVersionOfAPlanTypeTheStageWrites(t *testing.T) {
+	plans := []string{"build-plan"}
+	if got := snapshotFile(t, "build-plan/main/v2/f.md", plans, []string{"build-plan"}); got != "bp2" {
+		t.Errorf("the newest build plan is %q, want bp2", got)
+	}
+	// A written type that is no plan type of the session is read as any other artifact is.
+	if got := snapshotFile(t, "build-plan/main/v1/f.md", nil, []string{"build-plan"}); got != "bp1" {
+		t.Errorf("the approved build plan is %q, want bp1", got)
+	}
+}
+
+// TestAnUnwrittenPlanTypeWithNoApprovedVersionHasNoSnapshotVersion is the spec artifact, which
+// no gate approved: the snapshot has no version of it unless the stage writes it.
+func TestAnUnwrittenPlanTypeWithNoApprovedVersionHasNoSnapshotVersion(t *testing.T) {
+	spec := runapi.Artifact{Type: "spec", Versions: []runapi.Version{{ID: "sp1"}}}
+	if v := snapshotVersion(spec, []string{"spec"}, nil); v != nil {
+		t.Errorf("version %+v of an unwritten type with no approved version", v)
+	}
+	if v := snapshotVersion(spec, []string{"spec"}, []string{"spec"}); v == nil || v.ID != "sp1" {
+		t.Errorf("version %+v of a written type, want sp1", v)
+	}
 }
 
 // TestALaunchSnapshotThatFailsEndsRunAPIFailed is a run API that is not reachable: the
@@ -176,7 +241,7 @@ func TestALaunchSnapshotThatFailsEndsRunAPIFailed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = startArtifacts(t.Context(), client, t.TempDir(), t.TempDir(), []string{"build-plan"})
+	_, err = startArtifacts(t.Context(), client, t.TempDir(), t.TempDir(), []string{"build-plan"}, []string{"build-plan"})
 	if endCodeOf(err) != contracts.EndCodeRunAPIFailed ||
 		!strings.HasPrefix(err.Error(), "The fetch of the session's start artifacts failed, so the agent did not start.\n  Cause: ") {
 		t.Errorf("got %v", err)
@@ -187,7 +252,7 @@ func TestALaunchSnapshotThatFailsEndsRunAPIFailed(t *testing.T) {
 // index.json with no artifact.
 func TestALaunchSnapshotWithNoRunAPIIsEmpty(t *testing.T) {
 	in := t.TempDir()
-	if _, err := startArtifacts(t.Context(), nil, t.TempDir(), in, []string{"build-plan"}); err != nil {
+	if _, err := startArtifacts(t.Context(), nil, t.TempDir(), in, []string{"build-plan"}, []string{"build-plan"}); err != nil {
 		t.Fatal(err)
 	}
 	if data, err := os.ReadFile(filepath.Join(in, startArtifactsDir, "index.json")); err != nil || string(data) != "{\"artifacts\":[]}\n" {
@@ -202,7 +267,7 @@ func TestALaterSessionGetsANewLaunchSnapshot(t *testing.T) {
 	client := snapshotAPI(t)
 	runDir, in := t.TempDir(), t.TempDir()
 	for range 2 {
-		snapshot, err := startArtifacts(t.Context(), client, runDir, in, []string{"build-plan"})
+		snapshot, err := startArtifacts(t.Context(), client, runDir, in, []string{"build-plan"}, []string{"build-plan"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -229,10 +294,35 @@ func TestALaunchSnapshotThatCannotBeCopiedEndsMachineSetupInvalid(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(in, 0o700) })
-	_, err := startArtifacts(t.Context(), nil, t.TempDir(), in, []string{"build-plan"})
+	_, err := startArtifacts(t.Context(), nil, t.TempDir(), in, []string{"build-plan"}, []string{"build-plan"})
 	var ended *reasonError
 	if !errors.As(err, &ended) || ended.code != string(contracts.EndCodeMachineSetupInvalid) ||
 		!strings.HasPrefix(err.Error(), "copying the session's start artifacts on this machine failed, so the agent did not start.\n  Cause: copying the start artifacts to the inputs folder failed: ") {
 		t.Errorf("got %v", err)
+	}
+}
+
+// TestPlanVersionOfATypeTheStageDoesNotWriteIsTheApprovedOneAlone is an artifact with
+// versions v1 to v3: the stage that does not write the type gets the approved version, and
+// none when the artifact has no approved version, when the approved one was withdrawn, and
+// when the index has an approved version id that the artifact does not list.
+func TestPlanVersionOfATypeTheStageDoesNotWriteIsTheApprovedOneAlone(t *testing.T) {
+	id := func(s string) *string { return &s }
+	versions := []runapi.Version{{ID: "v1", Number: 1}, {ID: "v2", Number: 2, Withdrawn: true}, {ID: "v3", Number: 3}}
+	for name, c := range map[string]struct {
+		approved *string
+		want     string
+	}{
+		"an approved version":  {id("v1"), "v1"},
+		"none approved":        {nil, ""},
+		"a withdrawn one":      {id("v2"), ""},
+		"a version not listed": {id("v9"), ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := planVersion(runapi.Artifact{Type: "build-plan", ApprovedVersion: c.approved, Versions: versions}, false)
+			if c.want == "" && got != nil || c.want != "" && (got == nil || got.ID != c.want) {
+				t.Errorf("planVersion = %+v, want %q", got, c.want)
+			}
+		})
 	}
 }

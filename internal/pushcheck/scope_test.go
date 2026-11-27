@@ -54,6 +54,97 @@ func TestAScopeCheckRunsOnTheCloneAsTheGivenUser(t *testing.T) {
 	}
 }
 
+// TestAScopeCheckGetsTheInputsQoryWroteReadOnlyBeforeBase is a checker with Inputs: the
+// program gets --inputs and the path before --base, and the container mounts a copy of the
+// bytes qory wrote read-only at that path, whose content is the host's, while the run's file
+// stays as it was.
+func TestAScopeCheckGetsTheInputsQoryWroteReadOnlyBeforeBase(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	inputs := filepath.Join(t.TempDir(), "in", "inputs.json")
+	if err := os.MkdirAll(filepath.Dir(inputs), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const data = `{"qory":{"start_commits":[{"path":"/w","commit":"c1"}]}}`
+	if err := os.WriteFile(inputs, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.c.Inputs, f.c.InputsData = inputs, []byte(data)
+	var mounted string
+	f.e.create = func(io.Writer) error {
+		for _, m := range f.e.mounts {
+			if strings.HasSuffix(m, ",dst="+inputs+",readonly") {
+				got, err := os.ReadFile(strings.TrimPrefix(strings.Split(m, ",")[1], "src="))
+				if err != nil {
+					return err
+				}
+				mounted = string(got)
+			}
+		}
+		return nil
+	}
+	clone, snapshot := scopeFolders(t)
+	base := strings.Repeat("a", 40)
+	end, err := f.c.Scope(context.Background(), []string{f.program, "scope", "--plan"}, clone, snapshot, base, "1234:5678")
+	if err != nil || end.ExitCode != 0 || end.NotStarted != "" {
+		t.Fatalf("got %+v, %v", end, err)
+	}
+	created := f.e.created(t)
+	if got, want := strings.Join(created[len(created)-10:], " "), f.program+" "+f.c.Image+" scope --plan --inputs "+inputs+" --base "+base+" --artifacts /qory-push-check/files"; got != want {
+		t.Errorf("the command: %s, want %s", got, want)
+	}
+	if mounted != data {
+		t.Errorf("the mounted copy has %q, want %q", mounted, data)
+	}
+	if len(f.e.mounts) != 4 {
+		t.Errorf("the mounts are %q, want 4", f.e.mounts)
+	}
+	if got, err := os.ReadFile(inputs); err != nil || string(got) != data {
+		t.Errorf("the run's file has %q, %v", got, err)
+	}
+}
+
+// TestAScopeCheckMountsTheBytesQoryWroteNotAnotherFile is a checker whose file at Inputs on this
+// machine has other bytes than InputsData: the container mounts the bytes qory wrote.
+func TestAScopeCheckMountsTheBytesQoryWroteNotAnotherFile(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	inputs := filepath.Join(t.TempDir(), "inputs.json")
+	if err := os.WriteFile(inputs, []byte(`{"changed":"on disk"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const data = `{"qory":{}}`
+	f.c.Inputs, f.c.InputsData = inputs, []byte(data)
+	mounted := ""
+	f.e.create = func(io.Writer) error {
+		for _, m := range f.e.mounts {
+			if strings.HasSuffix(m, ",dst="+inputs+",readonly") {
+				got, _ := os.ReadFile(strings.TrimPrefix(strings.Split(m, ",")[1], "src="))
+				mounted = string(got)
+			}
+		}
+		return nil
+	}
+	clone, snapshot := scopeFolders(t)
+	if _, err := f.c.Scope(context.Background(), []string{f.program, "scope"}, clone, snapshot, strings.Repeat("a", 40), "1:1"); err != nil {
+		t.Fatal(err)
+	}
+	if mounted != data {
+		t.Errorf("the mounted file has %q, want the bytes qory wrote, %q", mounted, data)
+	}
+}
+
+// TestAScopeCheckOfARunWithNoInputsGetsNoInputsArgument is a checker with no Inputs: the
+// program gets no --inputs, and the container has the three mounts of a scope check.
+func TestAScopeCheckOfARunWithNoInputsGetsNoInputsArgument(t *testing.T) {
+	f := newFixture(t, "#!/usr/bin/env node")
+	clone, snapshot := scopeFolders(t)
+	if _, err := f.c.Scope(context.Background(), []string{f.program, "scope"}, clone, snapshot, strings.Repeat("a", 40), "1:1"); err != nil {
+		t.Fatal(err)
+	}
+	if line := strings.Join(f.e.created(t), " "); strings.Contains(line, "--inputs") || len(f.e.mounts) != 3 {
+		t.Errorf("the create has --inputs or %d mounts: %s", len(f.e.mounts), line)
+	}
+}
+
 // TestAScopeCheckEndsByItsExit is a check that prints findings and exits 1, one that exits
 // 3 with no output, one past its limit, and one whose program does not start; and an
 // engine that fails, which is an error. The lines are at most 50.

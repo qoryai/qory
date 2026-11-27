@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/qoryai/qory/internal/checkout"
 	"github.com/qoryai/qory/internal/exports"
@@ -21,8 +22,29 @@ const (
 	textBranchNoCommit  = "qory run: The version that the run starts from has commit %[1]s, which is not a commit on %[2]s on %[3]s, so the run did not start; the code is used\n  The fetch through the run's gateway failed: %[4]s"
 	textBranchNotCommit = "qory run: The version that the run starts from has %[1]s for %[2]s, which is not a commit, so the run did not start; the code is used"
 	textQoryInBranch    = "qory run: Commit %[2]s of %[1]s has a .qory folder that differs from the one at target version %[3]s, so the run did not start; the code is used\n  qory keeps the files of the run in .qory."
+	textBaseFetch       = "qory could not read the commit where the work branch was cut: %s"
+	textBaseLimit       = "the read of the history of the work branch took longer than %g seconds"
+	textNoBase          = "qory run: inputs.json has no qory.branch_base; the run goes on.\n  Cause: %s"
 	textNoCheckout      = "qory run: git cannot check out commit %[2]s of %[1]s, where the run starts, so the run did not start; the code is used\n  The checkout in %[3]s failed: %[4]s"
 )
+
+// errBaseLimit is the cause of a context that ran past [projectBaseLimit] in
+// [WorkBranch.findBase].
+var errBaseLimit = errors.New("the limit of the read of the branch base")
+
+// limitError is the error of a read of the history that ran past limit.
+type limitError struct{ limit time.Duration }
+
+func (e limitError) Error() string { return fmt.Sprintf(textBaseLimit, e.limit.Seconds()) }
+
+// limited is err, or a [limitError] when err ended a read that the context limited cut at
+// its limit while ctx, the context that limited came from, was still running.
+func limited(ctx, limitedCtx context.Context, err error) error {
+	if err != nil && errors.Is(context.Cause(limitedCtx), errBaseLimit) && ctx.Err() == nil {
+		return limitError{projectBaseLimit}
+	}
+	return err
+}
 
 // TargetRef is the ref that [Switch] leaves at the target version: [fromSeed] reads which
 // files a branch removed from it.
@@ -53,6 +75,10 @@ type WorkBranch struct {
 	// Repositories is every repository of the run, the target first, set by [RunAt] and
 	// [Switch]. Each further one is a read target, [WorkRepository.ReadOnly].
 	Repositories []WorkRepository
+	// Base is the commit where the branch was cut from the target's history, with its tree
+	// id, set once by [RunAt]: nil for a branch with no merge base or several, and when the
+	// fetch of the commit failed. [Push] never changes it.
+	Base *BranchBase
 
 	// system is the host of the run's repositories.
 	system string
@@ -66,6 +92,11 @@ type WorkBranch struct {
 	readsShown map[string]bool
 	// landed is each repository the last [Push] pushed, with the commit its branch is at.
 	landed []Landed
+}
+
+// BranchBase is a commit of the target's history, in full, and the id of its tree.
+type BranchBase struct {
+	Commit, Tree string
 }
 
 // Landed is a repository that a push moved: the commit its branch is at now, in full.
@@ -141,9 +172,10 @@ func (b *WorkBranch) fresh(system, path string) bool {
 }
 
 // fetchBranchCommit fetches the commit of the repository path in b, if its version has
-// one, into dest, by its id at depth one, and leaves dest where it is: the commit is at
-// FETCH_HEAD alone until [Switch]. It runs under the hold of the fetch, because the check
-// before a fetch stops on the remote's key that the fetch writes.
+// one, into dest, by its id at depth one, and leaves dest where it is: [Switch] checks the
+// commit out by its id. A later fetch of [WorkBranch.findBase] replaces FETCH_HEAD. It
+// runs under the hold of the fetch, because the check before a fetch stops on the remote's
+// key that the fetch writes.
 func fetchBranchCommit(ctx context.Context, git gitRunner, dest, system, path string, b *WorkBranch) error {
 	commit, err := b.startOf(ctx, git, dest, system, path)
 	if err != nil {
@@ -207,6 +239,66 @@ func (b *WorkBranch) startOf(ctx context.Context, git gitRunner, dest, system, p
 	}
 	b.Version = withStart(b.Version, system, path, pushed)
 	return pushed, nil
+}
+
+// findBase is the [BranchBase] of the branch b in the target repository path on system,
+// whose clone at dest is at the commit target, the target version, and has the branch's
+// start commit, after [WorkBranch.startOf]: the one commit from which the branch was cut
+// from the target's history. It is the target for a branch with no start commit or one at
+// the target. For any other start commit it is the single merge base of the start commit
+// and the target: nil, with no error, for none and for several, which a merge of the
+// target into the branch makes. A base other than the target is fetched into dest at depth
+// one, for the id of its tree, which replaces FETCH_HEAD. The reads of the history end at
+// [projectBaseLimit] with a [limitError]; the fetch into dest does not, so a git that the
+// limit cut cannot leave a lock in dest.
+// shortcut: a target that was rewound, or read late, makes the base an older commit;
+// replace it when a run can keep an old target version.
+// shortcut: findBase opens a second history even when [WorkBranch.startOf] opened one;
+// replace it when the second fetch shows in the run's time.
+func (b *WorkBranch) findBase(ctx context.Context, git gitRunner, dest, system, path, target string) (*BranchBase, error) {
+	commit := target
+	if start := b.CommitOf(system, path); start != "" && start != target {
+		// Only the reads of the history get [projectBaseLimit]: a git that the limit cut in
+		// the checkout could leave a lock there.
+		reads, cancel := context.WithTimeoutCause(ctx, projectBaseLimit, errBaseLimit)
+		defer cancel()
+		h, remove, err := openHistory(reads, git, system, path, start, target)
+		defer remove()
+		if err != nil {
+			return nil, limited(ctx, reads, err)
+		}
+		bases, err := h.mergeBases(reads, start, target)
+		if err != nil || len(bases) != 1 {
+			return nil, limited(ctx, reads, err)
+		}
+		commit = bases[0]
+	}
+	if commit != target && commit != b.CommitOf(system, path) {
+		if _, err := git(ctx, dest, "fetch", "--quiet", "--depth", "1", "origin", "--", commit); err != nil {
+			return nil, err
+		}
+	}
+	tree, err := git(ctx, dest, "rev-parse", "--verify", commit+"^{tree}")
+	if err != nil {
+		return nil, err
+	}
+	return &BranchBase{Commit: commit, Tree: strings.TrimSpace(tree)}, nil
+}
+
+// setBase sets [WorkBranch.Base] by [WorkBranch.findBase]. A git error, or a read of the
+// history that ends at [projectBaseLimit], leaves it nil and prints [textNoBase] on
+// report; the run goes on.
+func (b *WorkBranch) setBase(ctx context.Context, git gitRunner, report io.Writer, dest, system, path, target string) {
+	base, err := b.findBase(ctx, git, dest, system, path, target)
+	if err != nil {
+		cause := err.Error()
+		if !errors.As(err, &limitError{}) {
+			cause = fmt.Sprintf(textBaseFetch, integration.Printable(exports.HideURLError(err).Error()))
+		}
+		fmt.Fprintf(report, textNoBase+"\n", cause)
+		return
+	}
+	b.Base = base
 }
 
 // withStart is version with the commit of the repository path on system set to commit,

@@ -57,7 +57,9 @@ type fakeVersion struct {
 	runID          string
 	cancelled      bool
 	withdrawn      bool
-	file, content  string
+	// approved is whether a gate approved this version of its artifact.
+	approved      bool
+	file, content string
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
@@ -106,6 +108,7 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 			Type     string    `json:"type"`
 			Name     string    `json:"name"`
 			Newest   int       `json:"newest_version"`
+			Approved *string   `json:"approved_version"`
 			Versions []version `json:"versions"`
 		}
 		var order []string
@@ -119,8 +122,12 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 				order = append(order, key)
 			}
 			sum := sha256.Sum256([]byte(v.content))
+			id := fmt.Sprintf("%s-%s-%d", v.artifact, v.name, v.number)
+			if v.approved {
+				a.Approved = &id
+			}
 			a.Versions = append(a.Versions, version{
-				ID: fmt.Sprintf("%s-%s-%d", v.artifact, v.name, v.number), Number: v.number,
+				ID: id, Number: v.number,
 				Writer:    runapi.Writer{Kind: "run", RunID: v.runID},
 				Cancelled: v.cancelled, Withdrawn: v.withdrawn,
 				Files: []file{{v.file, len(v.content), hex.EncodeToString(sum[:])}},
@@ -931,7 +938,7 @@ func TestTheSuiteCapIsTheTimeLimitOfTheAfterStep(t *testing.T) {
 			spec.Dir = dir
 			var said []string
 			r := openSuites(context.Background(), suiteSetup{
-				workflow: "fix", plan: "build-plan",
+				workflow: "fix", plan: "build-plan", written: true,
 				run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, fullSuite: true,
 				extensions: c.extensions, said: func(l string) { said = append(said, l) },
 			})
@@ -996,7 +1003,7 @@ func TestOpenSuitesSetsTheAfterStepOnlyWhereTheSessionRunsTheSuite(t *testing.T)
 			spec.Dir = dir
 			var said []string
 			r := openSuites(context.Background(), suiteSetup{
-				workflow: "fix", plan: "build-plan",
+				workflow: "fix", plan: "build-plan", written: true,
 				run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: c.walled, readOnly: c.readOnly, fullSuite: c.fullSuite,
 				said: func(l string) { said = append(said, l) },
 			})
@@ -1038,7 +1045,7 @@ func TestTheTestedCommitIsTheMarkerCommitOfALastSuiteWithAResultFile(t *testing.
 			spec := &runSpec{}
 			spec.Dir = workspaceRepo(t)
 			r := openSuites(context.Background(), suiteSetup{
-				workflow: "fix", plan: "build-plan", last: c.last,
+				workflow: "fix", plan: "build-plan", written: true, last: c.last,
 				run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, fullSuite: true, said: func(string) {},
 			})
 			if r == nil || len(spec.After) != 9 || spec.After[7] != c.want || len(spec.After[6]) != 40 {
@@ -1056,7 +1063,7 @@ func TestTheAfterCommandHasTheLaunchPlansCommandNotAPushedOne(t *testing.T) {
 	spec := &runSpec{}
 	spec.Dir = workspaceRepo(t)
 	r := openSuites(context.Background(), suiteSetup{
-		workflow: "fix", plan: "build-plan",
+		workflow: "fix", plan: "build-plan", written: true,
 		run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, fullSuite: true, said: func(string) {},
 	})
 	if r == nil {
@@ -1105,7 +1112,7 @@ func TestLaunchFullReadsTheNewestUsableVersionOfTheBuildPlan(t *testing.T) {
 			for _, v := range c.versions {
 				api.add(v)
 			}
-			full, err := launchFull(context.Background(), apiRun{api: api, dir: t.TempDir()}, "build-plan")
+			full, err := launchFull(context.Background(), apiRun{api: api, dir: t.TempDir()}, "build-plan", true)
 			if c.none != (err != nil) || full.Command != c.want && !c.none {
 				t.Errorf("launchFull = %+v, %v, want command %q, none %v", full, err, c.want, c.none)
 			}
@@ -1113,6 +1120,131 @@ func TestLaunchFullReadsTheNewestUsableVersionOfTheBuildPlan(t *testing.T) {
 				t.Errorf("error %v is no errNoPlan", err)
 			}
 		})
+	}
+}
+
+// TestTheSuiteCommandComesFromTheApprovedPlanWhenTheStageDoesNotWriteIt is a plan type with an
+// approved version 1 and a newer version 2 with another command: a run whose stage does not
+// write the type gets the command of version 1, and a run whose stage writes it gets version 2's.
+func TestTheSuiteCommandComesFromTheApprovedPlanWhenTheStageDoesNotWriteIt(t *testing.T) {
+	api := newFakeAPI(t)
+	api.add(fakeVersion{artifact: "build-plan", name: "main", number: 1, runID: "r0", approved: true, file: "build-plan.md", content: buildPlanText})
+	api.add(fakeVersion{artifact: "build-plan", name: "main", number: 2, runID: "r1", file: "build-plan.md", content: strings.Replace(buildPlanText, "make test", "make newer", 1)})
+	for written, want := range map[bool]string{false: "make test", true: "make newer"} {
+		full, err := launchFull(context.Background(), apiRun{api: api, dir: t.TempDir()}, "build-plan", written)
+		if err != nil || full.Command != want {
+			t.Errorf("written %v: launchFull = %+v, %v, want command %q", written, full, err, want)
+		}
+	}
+}
+
+// TestAnUnwrittenPlanTypeIsReadFromTheArtifactThatAGateApproved is a plan type that the stage
+// does not write, approved under the name other, and a newer artifact of the type named main that a
+// session pushed with no approval: the command is the approved artifact's. Two approved artifacts
+// with none named main give [errNoPlan], and not [errPlanNotApproved], which is for no approved one.
+func TestAnUnwrittenPlanTypeIsReadFromTheArtifactThatAGateApproved(t *testing.T) {
+	plan := func(name string, approved bool, command string) fakeVersion {
+		return fakeVersion{artifact: "proposal", name: name, number: 1, runID: "r0", approved: approved, file: "proposal.md", content: strings.Replace(buildPlanText, "make test", command, 1)}
+	}
+	for _, c := range []struct {
+		name     string
+		versions []fakeVersion
+		want     string
+		err      error
+	}{
+		{"the approved one is not main", []fakeVersion{plan("main", false, "true"), plan("other", true, "make approved")}, "make approved", nil},
+		{"main is approved too", []fakeVersion{plan("main", true, "make main"), plan("other", true, "make approved")}, "make main", nil},
+		{"two approved and no main", []fakeVersion{plan("a", true, "make a"), plan("b", true, "make b")}, "", errNoPlan},
+		{"none approved", []fakeVersion{plan("main", false, "true"), plan("other", false, "true")}, "", errPlanNotApproved},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			api := newFakeAPI(t)
+			for _, v := range c.versions {
+				api.add(v)
+			}
+			full, err := launchFull(context.Background(), apiRun{api: api, dir: t.TempDir()}, "proposal", false)
+			if !errors.Is(err, c.err) || (c.err == errNoPlan && errors.Is(err, errPlanNotApproved)) || full.Command != c.want {
+				t.Errorf("launchFull = %+v, %v, want command %q, error %v", full, err, c.want, c.err)
+			}
+		})
+	}
+}
+
+// TestAPushedProposalChangesNoSuiteCommandOfALaterSession is the plan type proposal, approved
+// with the command make test: a session whose stage does not write it pushes version 2 with the
+// command true, and the suite of the next session still has make test.
+func TestAPushedProposalChangesNoSuiteCommandOfALaterSession(t *testing.T) {
+	api := newFakeAPI(t)
+	api.add(fakeVersion{artifact: "proposal", name: "main", number: 1, runID: "r0", approved: true, file: "proposal.md", content: buildPlanText})
+	// One workspace for both calls: two repositories made in different seconds have
+	// different head commits, which the command has as its start.
+	dir := workspaceRepo(t)
+	after := func() []string {
+		spec := &runSpec{}
+		spec.Dir = dir
+		r := openSuites(context.Background(), suiteSetup{
+			workflow: "fix", plan: "proposal",
+			run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, fullSuite: true, said: func(string) {},
+		})
+		if r == nil || r.fault != nil {
+			t.Fatalf("suite %+v", r)
+		}
+		return spec.After
+	}
+	before := after()
+	api.add(fakeVersion{artifact: "proposal", name: "main", number: 2, runID: "r1", file: "proposal.md", content: strings.Replace(buildPlanText, "make test", "true", 1)})
+	// The last argument is the script's random protocol name, new for each call.
+	last := len(before) - 1
+	if got := after(); before[4] != "make test" || len(got) != len(before) || !slices.Equal(got[:last], before[:last]) {
+		t.Errorf("After = %q, want %q", got, before)
+	}
+}
+
+// TestAnUnwrittenPlanTypeWithNoApprovedVersionIsAnUnfixableFault is a build plan that no gate
+// approved, for a stage that does not write it: the suite does not start, the fault is not
+// fixable, has the text and the fix of [textFaultNotApproved], and posts escalate.
+func TestAnUnwrittenPlanTypeWithNoApprovedVersionIsAnUnfixableFault(t *testing.T) {
+	h := newHelper(t)
+	h.api.withPlan(buildPlanText)
+	spec := &runSpec{}
+	spec.Dir = workspaceRepo(t)
+	r := openSuites(context.Background(), suiteSetup{
+		workflow: "fix", plan: "build-plan",
+		run: apiRun{api: h.api, dir: h.runDir}, spec: spec, runID: "r1", walled: true, fullSuite: true, said: func(string) {},
+	})
+	if r == nil || r.fault == nil || len(spec.After) != 0 {
+		t.Fatalf("suite %v, After %q, want a fault and no After", r != nil, spec.After)
+	}
+	const text, fix = "The full suite did not start: no gate approved a build-plan.", "Approve a build-plan at its gate, then run again."
+	if r.fault.fixable || r.fault.kind() != kindUnfixable || r.fault.point.Text != text || r.fault.point.Fix != fix {
+		t.Errorf("fault %+v, want an unfixable one with the text %q and the fix %q", r.fault, text, fix)
+	}
+	if want := fix + "\n  " + text; r.fault.line() != want {
+		t.Errorf("line %q, want %q", r.fault.line(), want)
+	}
+	h.fault = r.fault
+	if _, err := h.after(nil, succeeded); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"verdict":"escalate","points":[{"text":"` + text + `","action":"run_again","fix":"` + fix + `"}]}`
+	if posted := h.api.verdicts(); len(posted) != 1 || posted[0] != want {
+		t.Errorf("posted %q, want %s", posted, want)
+	}
+}
+
+// TestARunWithNoCodeGetsNoWrittenTypes is a run with no run code, and one with no work item
+// snapshot: neither writes a type, so its sessions read the approved version. A stage's types
+// come in the order of its outputs.
+func TestARunWithNoCodeGetsNoWrittenTypes(t *testing.T) {
+	var none *codeRun
+	if got := none.writtenTypes(); got != nil {
+		t.Errorf("a nil run writes %v", got)
+	}
+	if got := (&codeRun{}).writtenTypes(); got != nil {
+		t.Errorf("a run with no snapshot writes %v", got)
+	}
+	if got := stageRun(runapi.Output{Type: "build-plan"}, runapi.Output{Type: "verdict"}).writtenTypes(); !slices.Equal(got, []string{"build-plan", "verdict"}) {
+		t.Errorf("the stage writes %v", got)
 	}
 }
 
@@ -1132,9 +1264,9 @@ func TestThePointTextsHaveAtMost100Characters(t *testing.T) {
 	// A plan type and a workflow name of 20 characters, a normal length for both.
 	const planType, workflow = "change-request-plan", "implement-the-fix-wf"
 	for _, text := range []string{
-		fmt.Sprintf(textFaultNoFull, planType), fmt.Sprintf(textFixNoFull, planType),
+		fmt.Sprintf(textFaultNoTable, planType), fmt.Sprintf(textFaultNoFull, planType), fmt.Sprintf(textFixNoFull, planType),
 		fmt.Sprintf(textFaultNoPlanIn, workflow),
-		fmt.Sprintf(textFaultNoPlan, planType), fmt.Sprintf(textFixNoPlan, planType), fmt.Sprintf(textFaultTooBig, planType),
+		fmt.Sprintf(textFaultNoPlan, planType), fmt.Sprintf(textFixNoPlan, planType), fmt.Sprintf(textFaultNotApproved, planType), fmt.Sprintf(textFixNotApproved, planType), fmt.Sprintf(textFixWriter, planType), fmt.Sprintf(textFaultTooBig, planType),
 		fmt.Sprintf(textFixTooBig, planType), fmt.Sprintf(textFaultNoCmd, planType), fmt.Sprintf(textFaultPlanRead, planType),
 	} {
 		if len(text) > 100 || !validPoint(runapi.Point{Text: text, Action: "run_again"}) {
@@ -1142,7 +1274,7 @@ func TestThePointTextsHaveAtMost100Characters(t *testing.T) {
 		}
 	}
 	for _, f := range allFaults() {
-		if len(f.point.Text) > 100 || !validPoint(f.point) || f.fixable != (f.point.Fix != "") {
+		if len(f.point.Text) > 100 || !validPoint(f.point) || f.fixable && f.point.Fix == "" {
 			t.Errorf("fault %+v: text of %d characters, valid %v", f, len(f.point.Text), validPoint(f.point))
 		}
 	}
@@ -1150,8 +1282,8 @@ func TestThePointTextsHaveAtMost100Characters(t *testing.T) {
 
 func allFaults() []*suiteFault {
 	return []*suiteFault{
-		faultOf(suite.ErrNoCommands, "build-plan"), faultOf(suite.ErrNoFull, "build-plan"), faultOf(suite.ErrNoCommand, "build-plan"), faultOf(suite.ErrBadCommand, "build-plan"),
-		faultOf(suite.ErrBadResultFile, "build-plan"), faultOf(errNoPlan, "build-plan"), faultOf(errPlanTooBig, "build-plan"), faultOf(suite.ErrBadStart, "build-plan"), faultOf(errors.New("x"), "build-plan"),
+		faultOf(suite.ErrNoCommands, "build-plan", true), faultOf(suite.ErrNoFull, "build-plan", true), faultOf(suite.ErrNoCommand, "build-plan", true), faultOf(suite.ErrBadCommand, "build-plan", true),
+		faultOf(suite.ErrBadResultFile, "build-plan", true), faultOf(errNoPlan, "build-plan", true), faultOf(errPlanNotApproved, "build-plan", true), faultOf(errNoPlan, "acceptance-lock", false), faultOf(errPlanTooBig, "build-plan", true), faultOf(suite.ErrBadStart, "build-plan", true), faultOf(errors.New("x"), "build-plan", true),
 		noGitFault(), noAfterFault(), noRunAPIFault(), noPlanFault("fix"),
 	}
 }
@@ -1168,7 +1300,7 @@ func TestTheLinesOfQoryRunStartWithTheFixInAtMost100Characters(t *testing.T) {
 	}
 	for _, f := range allFaults() {
 		lines = append(lines, f.line(), shownLine(f.point.Text))
-		if f.fixable && !strings.HasPrefix(f.line(), f.point.Fix+"\n") {
+		if f.point.Fix != "" && !strings.HasPrefix(f.line(), f.point.Fix+"\n") {
 			t.Errorf("the line of the fault %q does not start with its fix: %q", f.point.Text, f.line())
 		}
 	}
@@ -1305,7 +1437,7 @@ func TestLaunchFullReadsTheFileOfThePlanTypeAndNoOther(t *testing.T) {
 			for _, v := range c.versions {
 				api.add(v)
 			}
-			full, err := launchFull(context.Background(), apiRun{api: api, dir: t.TempDir()}, "change-plan")
+			full, err := launchFull(context.Background(), apiRun{api: api, dir: t.TempDir()}, "change-plan", true)
 			if c.none != (err != nil) || !c.none && full.Command != c.want {
 				t.Errorf("launchFull = %+v, %v, want command %q, none %v", full, err, c.want, c.none)
 			}
@@ -1358,5 +1490,19 @@ func TestPlanOfReadsThePlanTypeOfTheRunsWorkflow(t *testing.T) {
 		if w, p := planOf(c.code, workflows); w != c.workflow || p != c.pl {
 			t.Errorf("%s: planOf = %q, %q, want %q, %q", c.name, w, p, c.workflow, c.pl)
 		}
+	}
+}
+
+// TestAnApprovedVersionThatWasWithdrawnIsNotApproved is a build plan whose approved
+// version v1 was withdrawn, with a newer v2 that no gate approved, for a stage that does
+// not write the type: the suite does not start for want of an approved version, and v2 is
+// not read.
+func TestAnApprovedVersionThatWasWithdrawnIsNotApproved(t *testing.T) {
+	api := newFakeAPI(t)
+	api.add(fakeVersion{artifact: "build-plan", name: "main", number: 1, runID: "r0", approved: true, withdrawn: true, file: "build-plan.md", content: buildPlanText})
+	api.add(fakeVersion{artifact: "build-plan", name: "main", number: 2, runID: "r0", file: "build-plan.md", content: buildPlanText})
+	_, err := launchFull(context.Background(), apiRun{api: api, dir: t.TempDir()}, "build-plan", false)
+	if !errors.Is(err, errPlanNotApproved) {
+		t.Errorf("launchFull error = %v, want %v", err, errPlanNotApproved)
 	}
 }

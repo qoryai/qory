@@ -93,7 +93,7 @@ func TestOpenSuitesReadsHEADWithNoGit(t *testing.T) {
 			}
 			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 			r := openSuites(context.Background(), suiteSetup{
-				workflow: "fix", plan: "build-plan",
+				workflow: "fix", plan: "build-plan", written: true,
 				run: apiRun{api: api, dir: t.TempDir()}, spec: spec, runID: "r1", walled: true, fullSuite: true, said: func(string) {},
 			})
 			if r == nil || r.fault != nil || len(spec.After) == 0 {
