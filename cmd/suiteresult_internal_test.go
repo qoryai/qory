@@ -181,7 +181,7 @@ func TestTheHeadIsTheMarkerOfTheScriptAndNotTheStatusFile(t *testing.T) {
 // head.
 func TestACauseInThePlanLeavesARecordWithNoFile(t *testing.T) {
 	for name, fault := range map[string]*suiteFault{
-		"a fixable cause":   faultOf(suite.ErrNoFull, "build-plan"),
+		"a fixable cause":   faultOf(suite.ErrNoFull, "build-plan", true),
 		"an unfixable one":  noGitFault(),
 		"a missing run API": noRunAPIFault(),
 	} {

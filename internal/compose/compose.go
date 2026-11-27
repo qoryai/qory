@@ -788,7 +788,8 @@ func excludedProgram(res *Result, dir, name, program string) (Exclude, bool) {
 
 // ScopeCheck is the scope check the composed harness declares for the plan of one
 // artifact type: one command, written to take --base <start commit> and --artifacts
-// <folder> as its last arguments and to exit 0 when the plan holds.
+// <folder> as its last arguments, and --inputs <inputs.json> before --base, and to exit 0 when
+// the plan holds.
 type ScopeCheck struct {
 	// Module is the module of the base stack that declares the check.
 	Module string `json:"module"`

@@ -1304,12 +1304,19 @@ See docs/run.md, §The submit program.
 set in `workflows.<name>.plan`. It is a map from the type to one command, a list:
 the program, a file in the module as for `push_checks`, then its arguments. The command is
 written to take `--base <start commit>` and `--artifacts <folder>` as its last arguments,
-and it exits 0 when the plan holds. The compose checks them and writes them to `scope-checks.json` in the
+and `--inputs <inputs.json>` before `--base`, and it exits 0 when the plan holds. The compose checks them and writes them to `scope-checks.json` in the
 home, by type, with the program's absolute path in the home. Before the first push after a session,
 `qory run`'s push step runs the check of the workflow's plan type on a fresh clone of the session's
-commits, in the push checks' container, with `--base <session start> --artifacts
-/qory-push-check/files`: the clone is the writable working folder, which qory removes after the
-check, and the session's launch snapshot is read-only at `/qory-push-check/files`. Exit 1 stops the push with the end code
+commits, in the push checks' container, with `--inputs <inputs.json> --base <session start>
+--artifacts /qory-push-check/files`: the clone is the writable working folder, which qory removes
+after the check, the session's launch snapshot is read-only at `/qory-push-check/files`, and
+`inputs.json` is read-only, a copy of the bytes qory wrote for the session. In that copy,
+`qory.start_artifacts` is `/qory-push-check/files`, and the entry of `qory.start_commits` for the checked
+repository has the path `/qory-push-check/artifacts`; every other member and entry is as written. qory
+mounts the file read-only at the path after `--inputs`; the session's home has another copy that qory
+does not mount for the check. A member `track` beside `qory`, when the run's inputs have one, is in the file as
+written. A run with no `inputs.json` gets no
+`--inputs`. Exit 1 stops the push with the end code
 `push_scope_refused`; exit 2 or 3 with `harness_invalid` (docs/run.md, §The scope check before the
 push). Only a module of the run's base stack
 counts: a module that the checkout's `qory.yaml` adds to the base declares none that counts, so the
@@ -1387,7 +1394,10 @@ command's arguments, before the pushed files' paths, such as `checks.js push spe
 the report's `extensions` (docs/run.md, §The run key from a run code). `qory.start_commits` has
 the folder and the start commit of each repository that the session may push,
 `qory.start_artifacts` the folder of the session's launch snapshot, read-only, and
-`qory.outbox` the session's outbox (§Outputs). The file of a run
+`qory.outbox` the session's outbox (§Outputs). `qory.branch_base` is `{"commit": <id>, "tree": <id>}`:
+the commit where the work branch was cut from the target's history, and its tree id. qory computes
+it once, before any session. It is absent for a run with no branch and with no or several merge
+bases. The file of a run
 key has only the member `qory`, since that run has no run documents. The home of such a
 run also contains `inputs.json` with the same bytes, mode 0644, which a hook reads as
 `$QORY_HARNESS_HOME/inputs.json`. A person's run whose harness has a submit program has

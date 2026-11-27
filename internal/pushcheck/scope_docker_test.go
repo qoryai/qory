@@ -112,3 +112,70 @@ func TestARealScopeCheckWritesOnlyTheClone(t *testing.T) {
 		t.Errorf("containers of checks are left: %q, %v", out, err)
 	}
 }
+
+// TestARealScopeCheckCannotWriteItsInputsFile runs a scope check in a container of this
+// machine's engine, from the image QORY_TEST_GIT_IMAGE names, with Inputs set: the program gets
+// --inputs and the path, reads the bytes qory wrote, and cannot write the file, and the run's
+// file on this machine is unchanged. It runs only with QORY_TEST_DOCKER=1, docker on the PATH and
+// the image present.
+func TestARealScopeCheckCannotWriteItsInputsFile(t *testing.T) {
+	image := os.Getenv("QORY_TEST_GIT_IMAGE")
+	switch {
+	case os.Getenv("QORY_TEST_DOCKER") != "1":
+		t.Skip("QORY_TEST_DOCKER=1 runs it")
+	case image == "":
+		t.Skip("QORY_TEST_GIT_IMAGE names no image with git")
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("no docker command")
+	}
+	if err := exec.Command("docker", "image", "inspect", image).Run(); err != nil {
+		t.Skipf("the engine does not hold %s", image)
+	}
+	top, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(path, content string, mode os.FileMode) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const data = `{"qory":{"start_commits":[]}}`
+	inputs := filepath.Join(top, "in", "inputs.json")
+	write(inputs, data, 0o600)
+	clone, snapshot := filepath.Join(top, "clone"), filepath.Join(top, "snapshot")
+	write(filepath.Join(clone, "app.go"), "package app\n", 0o644)
+	write(filepath.Join(snapshot, "index.json"), `{"artifacts":[]}`, 0o644)
+	home := filepath.Join(top, "home")
+	program := filepath.Join(home, "modules", "core", "scope")
+	script := "#!/bin/sh\nset -e\ntest \"$1 $2 $3\" = \"--inputs " + inputs + " --base\"\n" +
+		"test \"$(cat \"$2\")\" = '" + data + "'\n" +
+		"if sh -c ': >> \"$0\"' \"$2\" 2>/dev/null; then exit 9; fi\n" +
+		"if sh -c 'echo x > \"$0\"' \"$2\" 2>/dev/null; then exit 9; fi\n"
+	write(program, script, 0o755)
+	c := &pushcheck.Checker{
+		Home: home, Image: image, Label: "dev.qory.run=run-scope-inputs-test",
+		Limits: wall.Limits{CPUs: "1", Memory: "256m"},
+		Inputs: inputs, InputsData: []byte(data),
+	}
+	user := pushcheck.ScopeUser()
+	end, err := c.Scope(context.Background(), []string{program}, clone, snapshot, strings.Repeat("a", 40), user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if end.TimedOut || end.NotStarted != "" || end.ExitCode != 0 {
+		t.Errorf("as %s: %+v", user, end)
+	}
+	if got, err := os.ReadFile(inputs); err != nil || string(got) != data {
+		t.Errorf("the run's file has %q, %v", got, err)
+	}
+	out, err := exec.Command("docker", "ps", "--all", "--quiet", "--filter", "label=dev.qory.run=run-scope-inputs-test").Output()
+	if err != nil || len(bytes.TrimSpace(out)) != 0 {
+		t.Errorf("containers of checks are left: %q, %v", out, err)
+	}
+}

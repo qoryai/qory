@@ -75,8 +75,13 @@ func (p *runPushChecks) loadScope(ctx context.Context, run openedRun, home, runI
 	if !pushes || len(s.checks) == 0 {
 		return func() {}, nil
 	}
-	if s.checker != nil {
+	p.mu.Lock()
+	loaded := s.checker != nil
+	if loaded {
 		s.checker.Home = home
+	}
+	p.mu.Unlock()
+	if loaded {
 		return func() {}, nil
 	}
 	checker, err := newChecker(ctx, run, home, runID, spec, p.fromCode, nil, filepath.Join(run.Dir(), scopeChecksDir))
@@ -84,7 +89,10 @@ func (p *runPushChecks) loadScope(ctx context.Context, run openedRun, home, runI
 		return func() {}, err
 	}
 	checker.Limit = scopeCheckLimit
+	p.mu.Lock()
+	checker.Inputs, checker.InputsData = p.inputs, p.inputsData
 	s.checker = checker
+	p.mu.Unlock()
 	return func() { os.RemoveAll(checker.Dir) }, nil
 }
 
@@ -102,12 +110,21 @@ func (p *runPushChecks) setSession(workflow, plan, snapshot string) {
 // runs with --base at the session's start. The first failure is the error, a [*scopeStop].
 // A read target has no entry in version, see [preparation.Push], so it is never checked.
 func (p *runPushChecks) scopeCheck(ctx context.Context, branch *preparation.WorkBranch, dir string, version []preparation.Repository) error {
+	// setInputs changes the checker's inputs under mu, so the check reads a copy made under
+	// it.
+	var checker *pushcheck.Checker
+	p.mu.Lock()
+	if p.scope.checker != nil {
+		c := *p.scope.checker
+		checker = &c
+	}
+	p.mu.Unlock()
 	for _, r := range branch.Repositories {
 		head := headOf(version, r.Path)
 		if head == "" || head == r.Commit {
 			continue
 		}
-		if err := p.scope.check(ctx, filepath.Join(dir, filepath.FromSlash(r.Dir)), r, head); err != nil {
+		if err := p.scope.check(ctx, checker, filepath.Join(dir, filepath.FromSlash(r.Dir)), r, head); err != nil {
 			return err
 		}
 	}
@@ -125,8 +142,8 @@ func headOf(version []preparation.Repository, path string) string {
 }
 
 // check is the scope check of r, the repository in folder, at head, in a new folder that
-// it removes after.
-func (s *runScope) check(ctx context.Context, folder string, r preparation.WorkRepository, head string) error {
+// it removes after, with checker, a copy of the run's checker, nil for none.
+func (s *runScope) check(ctx context.Context, checker *pushcheck.Checker, folder string, r preparation.WorkRepository, head string) error {
 	repo := preparation.ShownPath(r.Path)
 	stop := func(code contracts.EndCode, text string, args ...any) error {
 		return &scopeStop{code: code, text: fmt.Sprintf(text, args...)}
@@ -135,8 +152,8 @@ func (s *runScope) check(ctx context.Context, folder string, r preparation.WorkR
 		return stop(code, textScopeNotRun, repo, cause)
 	}
 	parent := s.runDir
-	if s.checker != nil {
-		parent = s.checker.Dir
+	if checker != nil {
+		parent = checker.Dir
 	}
 	if parent == "" {
 		return notRun(contracts.EndCodeMachineSetupInvalid, "the run has no folder for the clone of the commits.")
@@ -164,14 +181,18 @@ func (s *runScope) check(ctx context.Context, folder string, r preparation.WorkR
 	if err != nil {
 		return notRun(contracts.EndCodeHarnessInvalid, err.Error())
 	}
-	if s.checker == nil || s.snapshot == "" {
+	if checker == nil || s.snapshot == "" {
 		return notRun(contracts.EndCodeMachineSetupInvalid, "the run has no container or launch snapshot for the check.")
 	}
 	snapshot := filepath.Join(work, "artifacts")
 	if err := copyTree(s.snapshot, snapshot); err != nil {
 		return notRun(contracts.EndCodeMachineSetupInvalid, sentence("copying the launch snapshot failed: "+shownError(exports.HideError(err))))
 	}
-	end, err := s.checker.Scope(ctx, command, clone, snapshot, r.Commit, pushcheck.ScopeUser())
+	// The check gets a copy of the inputs with the paths of its container. The harness's
+	// scope verb compares them with the folder it runs in and with --artifacts.
+	scoped := *checker
+	scoped.InputsData = pushcheck.ScopeInputs(scoped.InputsData, folder, pushcheck.WorkDir, pushcheck.FilesDir)
+	end, err := scoped.Scope(ctx, command, clone, snapshot, r.Commit, pushcheck.ScopeUser())
 	switch {
 	case err != nil:
 		return notRun(contracts.EndCodeMachineSetupInvalid, sentence(shownError(err)))

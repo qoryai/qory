@@ -18,6 +18,14 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Added
 
+- A scope check gets a read-only copy of the session's `inputs.json`, as `--inputs <path>`
+  before `--base`. In the copy, `qory.start_artifacts` is `/qory-push-check/files` and the
+  entry of `qory.start_commits` for the checked repository has the path
+  `/qory-push-check/artifacts`, so the harness's scope verb finds its snapshot and its checkout.
+- `qory.branch_base` in `inputs.json` is the commit where the work branch was cut and its
+  tree id. qory computes it once at the start of the run. After a failed read of the
+  commit, or a read of the history that takes longer than 60 seconds, `branch_base` is
+  absent, qory prints a line with the cause, and the run goes on.
 - Session 1 of a run at `write-no-push` whose workflow, in a stack from the run's
   documents, declares `access: write-no-push` and a `review_group` is a Verify session. It
   gets `qory.review_session` with `commit`, `commit_folder`, `diff` and `reports`, a new
@@ -1207,6 +1215,17 @@ release may change what an existing document does, and states it under Upgrading
 
 ### Changed
 
+- A session reads the version that a gate approved, not the newest, for a plan type that
+  the work item's stage does not write. A run can no longer change the commands that a
+  later session is judged by. A plan type that the stage does not write and that no gate
+  approved gives the full suite fault `The full suite did not start: no gate approved a
+  <type>.` and the fix `Approve a <type> at its gate, then run again.`, with the verdict
+  `escalate`. Any other cause in the plan of such a type, such as a missing `full` row, has
+  the fix `Move the work item back to the stage that writes the <type>, and run that stage.`
+  and the verdict `escalate`, since a push does not change the version that a gate
+  approved. A plan with no `Commands` table has
+  the cause `<type> has no Commands table.`; a plan with a table and no `full` row keeps
+  `<type> has no full command.`
 - A session may not set a member that qory fills at the push, the members that a type's
   schema marks with `x-qory-fill`, such as `base` of a `pull-request` version. In a walled
   run through a gateway that sends the run API address, a `qory artifact push` of such a

@@ -861,6 +861,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				}
 				q := inputsPending
 				q.StartCommits = startCommits(branch, cwd)
+				q.BranchBase = branchBase(branch)
 				if startSnapshot != "" {
 					q.StartArtifacts = filepath.Join(in, startArtifactsDir)
 				}
@@ -939,7 +940,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 				// Each session reads the artifacts of its launch, never a version that its agent
 				// pushes later.
 				if dispatched && in != "" {
-					if startSnapshot, err = launchSnapshot(stepCtx, run, in, snapshotPlanTypes(workflows, planWorkflow, planType)); err != nil {
+					if startSnapshot, err = launchSnapshot(stepCtx, run, in, snapshotPlanTypes(workflows, planWorkflow, planType), fromCode.writtenTypes()); err != nil {
 						return false, err
 					}
 				}
@@ -1997,7 +1998,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md`,
 						break
 					}
 				}
-				suites := openSuites(ctx, suiteSetup{findings: findings, run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly || reviewJoin, fullSuite: fullSuiteOf(fromCode), workflow: planWorkflow, plan: planType, extensions: extensions, said: said, last: lastSuite, session: number})
+				suites := openSuites(ctx, suiteSetup{findings: findings, run: run, spec: &spec, runID: spec.RunID, walled: walled, readOnly: readOnly || reviewJoin, fullSuite: fullSuiteOf(fromCode), workflow: planWorkflow, plan: planType, written: writtenOf(fromCode, planType), extensions: extensions, said: said, last: lastSuite, session: number})
 				closeRoute := route.open(number)
 				// The session's time limit counts from the agent's start, here, see [sessionDeadline].
 				deadline := sessionDeadline(time.Now(), timeout)

@@ -123,6 +123,26 @@ func (h *history) descends(ctx context.Context, ancestor, descendant string) (bo
 	return err == nil, err
 }
 
+// mergeBases returns the merge bases of the commits a and b, each a full commit id: none for
+// commits with no common ancestor, one for most, two or more for a history that two
+// merges crossed.
+func (h *history) mergeBases(ctx context.Context, a, b string) ([]string, error) {
+	out, err := h.read(ctx, h.dir, "merge-base", "--all", "--", a, b)
+	if ge := (*gitError)(nil); errors.As(err, &ge) && ge.exit == 1 {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var bases []string
+	for line := range strings.Lines(out) {
+		if commit := strings.TrimSpace(line); commit != "" {
+			bases = append(bases, commit)
+		}
+	}
+	return bases, nil
+}
+
 // projectBase is the merge base of head with the head of r's default branch at the forge,
 // fetched by its id at depth one into the checkout dir, so that a review of head can diff
 // from it; "" when r has no default branch, the branch has no head, or a read, the merge
@@ -159,8 +179,9 @@ func projectBase(ctx context.Context, read gitRunner, dir, system string, r Work
 	return base
 }
 
-// projectBaseLimit bounds all the reads of [projectBase] together. It is a variable so
-// that a test can shorten it.
+// projectBaseLimit bounds all the reads of [projectBase] together, and all the reads of
+// the history in [WorkBranch.findBase] together. It is a variable so that a test can
+// shorten it.
 var projectBaseLimit = 60 * time.Second
 
 // headCheck is the verdict of the head check of one repository.

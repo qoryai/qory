@@ -11,8 +11,8 @@ import (
 // eventLog is the event type of one chunk of output, with the number of its step as step.
 const eventLog = "dev.qory.run.log"
 
-// logData is the members of the data of a [eventLog] event that [ReadOutput] and [ReadHead]
-// read.
+// logData is the members of the data of a [eventLog] event that [ReadOutput] and
+// [ReadHead] read.
 type logData struct {
 	Step   int    `json:"step"`
 	Stream string `json:"stream"`
@@ -44,22 +44,24 @@ func ReadOutput(eventsFile string, step int) []byte {
 }
 
 // maxHeadScan is the most bytes that the first line of the step's standard output may have
-// for [ReadHead] to read it as the marker line. The line is [HeadMarker] and a commit id, at
-// most 80 bytes.
+// for [ReadHead] to read it as the marker line. The line is [HeadMarker] and a commit id,
+// at most 80 bytes.
 const maxHeadScan = 16 << 10
 
-// streamStdout is the stream of the [eventLog] events that carry the step's standard output.
-// Its other streams, such as stderr, carry what the script's git and the suite's code write
-// to standard error, which the suite's code and the files of the commit can fill.
+// streamStdout is the stream of the [eventLog] events that carry the step's standard
+// output. Its other streams, such as stderr, carry what the script's git and the suite's
+// code write to standard error, which the suite's code and the files of the commit can
+// fill.
 const streamStdout = "stdout"
 
-// ReadHead is the commit of the marker line of the after step number step: the first line of
-// the step's standard output, the events with the stream stdout, when it is [HeadMarker] and
-// a full commit id. It is "" for no such line: a first line that is anything else, a marker
-// on a later line or on stderr, a marker whose commit is not a full commit id, and a first
-// line that has no line end within [maxHeadScan] bytes. The script prints the marker before
-// anything else to standard output, so the line is the script's, see [Command]. The missing,
-// unreadable and empty cases are those of [ReadOutput].
+// ReadHead is the commit of the marker line of the after step number step: the first line
+// of the step's standard output, the events with the stream stdout, when it is
+// [HeadMarker] and a full commit id. It is "" for no such line: a first line that is
+// anything else, a marker on a later line or on stderr, a marker whose commit is not a
+// full commit id, and a first line that has no line end within [maxHeadScan] bytes. The
+// script prints the marker before anything else to standard output, so the line is the
+// script's, see [Command]. The missing, unreadable and empty cases are those of
+// [ReadOutput].
 func ReadHead(eventsFile string, step int) string {
 	var first []byte
 	ended := false
@@ -83,8 +85,9 @@ func ReadHead(eventsFile string, step int) string {
 	return ""
 }
 
-// eachChunk calls each with the stream and the decoded bytes of each dev.qory.run.log event
-// of the step in the events file, in the order of the file, until each returns false.
+// eachChunk calls each with the stream and the decoded bytes of each dev.qory.run.log
+// event of the step in the events file, in the order of the file, until each returns
+// false.
 func eachChunk(eventsFile string, step int, each func(stream string, chunk []byte) bool) {
 	if step < 1 {
 		return

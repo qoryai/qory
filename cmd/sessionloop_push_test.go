@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -215,6 +216,103 @@ func TestEachSessionsInputsHaveItsStartCommit(t *testing.T) {
 	}
 }
 
+// TestALaunchSnapshotOfARunWhoseStageDoesNotWriteThePlanTypeHasTheApprovedVersion is a run whose
+// stage writes pull-request alone, with a workflow of the plan type build-plan, and an index with
+// a build plan that a gate approved, v1, and a newer one that a session pushed, v2: the agent's
+// start-artifacts has v1 and not v2.
+func TestALaunchSnapshotOfARunWhoseStageDoesNotWriteThePlanTypeHasTheApprovedVersion(t *testing.T) {
+	p, _ := sharedPushRepo(t)
+	p.noOutput = true
+	file := func(id string) string {
+		sum := sha256.Sum256([]byte(id))
+		return fmt.Sprintf(`{"filename":"f.md","content_type":"text/markdown","size":%d,"sha256":"%s"}`, len(id), hex.EncodeToString(sum[:]))
+	}
+	version := func(id string, n int) string {
+		return fmt.Sprintf(`{"id":"%s","number":%d,"writer":{"kind":"run","run_id":"r"},"cancelled":false,"withdrawn":false,"stage_id":null,"note":null,"at":"2026-11-22T10:00:0%dZ","files":[%s],"approvals":[]}`, id, n, n, file(id))
+	}
+	p.api.index = func(_ int, w http.ResponseWriter) bool {
+		fmt.Fprint(w, `{"version":1,"artifacts":[{"type":"build-plan","name":"main","stage_id":null,"approved_version":"bp1","newest_version":2,"changed_after_approval":true,"versions":[`+version("bp1", 1)+`,`+version("bp2", 2)+`]}]}`)
+		return true
+	}
+	p.api.other = func(w http.ResponseWriter, r *http.Request) bool {
+		id, ok := strings.CutPrefix(r.URL.Path, "/v1/runs/r/artifacts/")
+		id, _, _ = strings.Cut(id, "/")
+		if r.Method != http.MethodGet || !ok || (id != "bp1" && id != "bp2") {
+			return false
+		}
+		io.WriteString(w, id)
+		return true
+	}
+	var v1, v2 string
+	var v1Err error
+	p.mountsOf = func(spec session.SessionSpec) {
+		for _, m := range spec.Mounts {
+			if filepath.Base(m.Path) == "in" {
+				dir := filepath.Join(m.Path, "start-artifacts", "build-plan", "main")
+				got, err := os.ReadFile(filepath.Join(dir, "v1", "f.md"))
+				v1, v1Err = string(got), err
+				if _, err := os.Stat(filepath.Join(dir, "v2")); err == nil {
+					v2 = "present"
+				}
+			}
+		}
+	}
+	r := p.run(t, func(string) {}, numbered())
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if v1Err != nil || v1 != "bp1" {
+		t.Errorf("the snapshot has %q for the approved build plan, %v\n%s", v1, v1Err, r.out)
+	}
+	if v2 != "" {
+		t.Error("the snapshot has the newest build plan, which the stage does not write")
+	}
+}
+
+// TestInputsHaveTheSameBranchBaseInEverySession is a write run of two sessions: each session's
+// inputs.json has the same branch_base, the target's commit that the run starts from, with the
+// id of its tree, although session 2 starts at the commit that session 1 pushed.
+func TestInputsHaveTheSameBranchBaseInEverySession(t *testing.T) {
+	p, _ := sharedPushRepo(t, laterAnswer(2, "claude", "example-provider-2", 30))
+	p.noOutput = true
+	type member struct {
+		BranchBase *struct {
+			Commit string `json:"commit"`
+			Tree   string `json:"tree"`
+		} `json:"branch_base"`
+	}
+	var bases []member
+	p.mountsOf = func(spec session.SessionSpec) {
+		for _, m := range spec.Mounts {
+			data, err := os.ReadFile(filepath.Join(m.Path, "inputs.json"))
+			if !m.ReadOnly || filepath.Base(m.Path) != "in" || err != nil {
+				continue
+			}
+			var inputs struct{ Qory member }
+			if err := json.Unmarshal(data, &inputs); err != nil {
+				t.Fatal(err)
+			}
+			bases = append(bases, inputs.Qory)
+		}
+	}
+	done := false
+	r := p.run(t, func(d string) {
+		if !done {
+			done = true
+			writeFile(t, filepath.Join(d, "first.txt"), "first\n")
+			commitAll(t, d, "Add a first file")
+		}
+	}, numbered())
+	r.wantsClose(t, event.StateSucceeded, 0)
+	if len(bases) != 2 {
+		t.Fatalf("%d sessions read inputs.json, want 2\n%s", len(bases), r.out)
+	}
+	if bases[0].BranchBase == nil || bases[0].BranchBase.Commit != p.first || len(bases[0].BranchBase.Tree) != 40 {
+		t.Fatalf("session 1 has branch_base %+v, want the commit %s and a tree", bases[0].BranchBase, p.first)
+	}
+	if bases[1].BranchBase == nil || *bases[1].BranchBase != *bases[0].BranchBase {
+		t.Errorf("session 2 has branch_base %+v, session 1 has %+v", bases[1].BranchBase, bases[0].BranchBase)
+	}
+}
+
 // TestALaterSessionTurnsOnPushChecksThatSession1DidNotHave is a walled write run of two
 // sessions whose home has no push check for session 1 and a check of pull-request for session
 // 2. As Forager does, the run takes the check only before a join: the run sets it once,
@@ -409,7 +507,7 @@ func suiteServedPlan(t *testing.T, p *pushRepo, hang func(n int) bool, plan stri
 		got = append(got, s)
 	}
 	sum := sha256.Sum256([]byte(plan))
-	artifact := map[string]any{"type": "build-plan", "name": "main", "newest_version": 1, "versions": []any{map[string]any{
+	artifact := map[string]any{"type": "build-plan", "name": "main", "approved_version": "bp1", "newest_version": 1, "versions": []any{map[string]any{
 		"id": "bp1", "number": 1, "writer": map[string]any{"kind": "run", "run_id": "earlier"},
 		"files": []any{map[string]any{"filename": "build-plan.md", "size": len(plan), "sha256": hex.EncodeToString(sum[:])}},
 	}}}

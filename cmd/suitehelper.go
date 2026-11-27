@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -93,6 +94,10 @@ var errNoVerdictFile = errors.New("the run's verdict has no file")
 // type, or qory could not read it.
 var errNoPlan = errors.New("the run started with no version of its plan type")
 
+// errPlanNotApproved is why a run has no suite command: the stage does not write the plan type,
+// and no gate approved a version of it, so no push can give the run one.
+var errPlanNotApproved = errors.New("no gate approved a version of the plan type")
+
 // errPlanTooBig is the error of a plan whose file is over [maxPlan] bytes.
 var errPlanTooBig = errors.New("the plan is too large")
 
@@ -110,6 +115,8 @@ type suiteSetup struct {
 	// workflow is the workflow of the run, and plan the plan type set in
 	// workflows.<name>.plan for it, "" for a workflow that sets none.
 	workflow, plan string
+	// written is whether the stage writes the plan type, see [planVersion].
+	written bool
 	// extensions is the harness extensions of the report that the run composed.
 	extensions map[string]any
 	said       func(string)
@@ -169,10 +176,10 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 		}
 		planCtx, cancelPlan := context.WithTimeout(ctx, suitePlanWait)
 		var err error
-		r.full, err = launchFull(planCtx, s.run, s.plan)
+		r.full, err = launchFull(planCtx, s.run, s.plan, s.written)
 		cancelPlan()
 		if err != nil {
-			r.fault = faultOf(err, s.plan)
+			r.fault = faultOf(err, s.plan, s.written)
 			s.said(r.fault.line())
 			return r
 		}
@@ -189,7 +196,7 @@ func openSuites(ctx context.Context, s suiteSetup) *suiteRun {
 	}
 	after, err := suite.Command(start, tested, r.full)
 	if err != nil {
-		r.fault = faultOf(err, s.plan)
+		r.fault = faultOf(err, s.plan, s.written)
 		s.said(r.fault.line())
 		return r
 	}
@@ -210,6 +217,10 @@ func testedCommit(last *suiteRecord) string {
 // afterLimit is the time limit of the after step: the suite's cap alone. The session's time
 // limit covers the agent's runtime only.
 func afterLimit(minutes int) time.Duration { return time.Duration(minutes) * suiteMinutes }
+
+// writtenOf is whether the stage of a run from Qory Apiary writes the plan type plan,
+// false for a run with no run code.
+var writtenOf = func(c *codeRun, plan string) bool { return slices.Contains(c.writtenTypes(), plan) }
 
 // fullSuiteOf is whether the session of a run from Qory Apiary runs the full suite: full_suite
 // of the run documents' type_settings, false for a run with no run code.
@@ -268,9 +279,9 @@ func headCommit(_ context.Context, dir string) string {
 }
 
 // launchFull is the full row of the plan type plan, in the version that the run's work item has at
-// the run's launch, read through the run API, from the work item's artifacts. An error is
-// [errNoPlan] or an error of [suite.FullRow].
-func launchFull(ctx context.Context, run openedRun, plan string) (suite.Full, error) {
+// the run's launch, read through the run API, from the work item's artifacts: see [readPlan] for
+// written. An error is [errNoPlan], [errPlanNotApproved] or an error of [suite.FullRow].
+func launchFull(ctx context.Context, run openedRun, plan string, written bool) (suite.Full, error) {
 	httpClient, base, err := run.RunAPI()
 	if err != nil {
 		return suite.Full{}, fmt.Errorf("%w: %s", errNoPlan, shownError(err))
@@ -279,16 +290,19 @@ func launchFull(ctx context.Context, run openedRun, plan string) (suite.Full, er
 	if err != nil {
 		return suite.Full{}, fmt.Errorf("%w: %s", errNoPlan, shownError(err))
 	}
-	text, err := readPlan(ctx, client, plan)
+	text, err := readPlan(ctx, client, plan, written)
 	if err != nil {
 		return suite.Full{}, err
 	}
 	return suite.FullRow(text)
 }
 
-// readPlan is the text of the newest version of the artifact of type plan, as the index lists it:
-// the name main, or the one name; a withdrawn name has none. The file is [planFile].
-func readPlan(ctx context.Context, client *runapi.Client, plan string) (string, error) {
+// readPlan is the text of the version [planVersion] gives of the artifact of type plan, as the
+// index lists it, with written whether the run's stage writes the type: the name main, or the one
+// name, among the names with an approved version when the stage does not write the type; a
+// withdrawn name has none. The file is [planFile]. A type that the stage does not write
+// and that no gate approved is [errPlanNotApproved].
+func readPlan(ctx context.Context, client *runapi.Client, plan string, written bool) (string, error) {
 	index, err := client.Artifacts(ctx)
 	if err != nil {
 		return "", fmt.Errorf("%w: %s", errNoPlan, shownError(err))
@@ -297,6 +311,16 @@ func readPlan(ctx context.Context, client *runapi.Client, plan string) (string, 
 	for _, a := range index.Artifacts {
 		if a.Type == plan && !withdrawn(a) {
 			plans = append(plans, a)
+		}
+	}
+	notFound := errNoPlan
+	if !written {
+		// A type that the stage does not write is read from an artifact that a gate approved: an
+		// artifact that a session pushed under another name changes nothing.
+		notFound = errPlanNotApproved
+		plans = slices.DeleteFunc(plans, func(a runapi.Artifact) bool { return a.ApprovedVersion == nil })
+		if len(plans) == 0 {
+			return "", notFound
 		}
 	}
 	chosen := -1
@@ -309,9 +333,9 @@ func readPlan(ctx context.Context, client *runapi.Client, plan string) (string, 
 	if chosen < 0 {
 		return "", errNoPlan
 	}
-	version := newestBeforeWithdrawal(plans[chosen])
+	version := planVersion(plans[chosen], written)
 	if version == nil {
-		return "", errNoPlan
+		return "", notFound
 	}
 	for _, file := range version.Files {
 		if file.Filename != planFile(plan) {

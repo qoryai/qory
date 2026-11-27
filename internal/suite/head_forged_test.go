@@ -16,8 +16,9 @@ import (
 // forgedHead is a commit id that a forged marker line names.
 const forgedHead = "89abcdef0123456789abcdef0123456789abcdef"
 
-// recorder writes what one stream of a process prints as dev.qory.run.log events of step 2,
-// in the order of the writes of both streams, as Forager records the output of an after step.
+// recorder writes what one stream of a process prints as dev.qory.run.log events of step
+// 2, in the order of the writes of both streams, as Forager records the output of an after
+// step.
 type recorder struct {
 	mu     *sync.Mutex
 	lines  *[]string
@@ -34,8 +35,8 @@ func (r *recorder) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// runScriptEvents runs the after command like [runScriptWith] and returns the exit status, the
-// standard output and the standard error, and the events file of the run.
+// runScriptEvents runs the after command like [runScriptWith] and returns the exit status,
+// the standard output and the standard error, and the events file of the run.
 func runScriptEvents(t *testing.T, dir, start string, full suite.Full, extra ...string) (exit int, stdout, stderr, events string) {
 	t.Helper()
 	cmd := scriptCommand(t, dir, start, "", full, true, extra...)
@@ -59,10 +60,10 @@ func runScriptEvents(t *testing.T, dir, start string, full suite.Full, extra ...
 
 // TestAFileNameThatHoldsAMarkerLineDoesNotReachTheStepsOutput is a commit with a tracked
 // file whose name has line breaks and the line "qory-suite-head <other commit>", and a
-// .gitattributes line with a working-tree encoding that the file's bytes break, so that git
-// prints the name on standard error while it checks the commit out and goes on. The step's
-// output has no such line, its first line of standard output is the marker of the commit that
-// ran, and ReadHead has that commit.
+// .gitattributes line with a working-tree encoding that the file's bytes break, so that
+// git prints the name on standard error while it checks the commit out and goes on. The
+// step's output has no such line, its first line of standard output is the marker of the
+// commit that ran, and ReadHead has that commit.
 func TestAFileNameThatHoldsAMarkerLineDoesNotReachTheStepsOutput(t *testing.T) {
 	dir, first := workspace(t)
 	// The file goes in before the attribute: git add would stop on the encoding too.
@@ -85,11 +86,11 @@ func TestAFileNameThatHoldsAMarkerLineDoesNotReachTheStepsOutput(t *testing.T) {
 }
 
 // TestAFilterOfTheHomeThatPrintsAMarkerDoesNotRun is a commit whose .gitattributes line
-// names a smudge filter, and a global git configuration, in a home that the agent can write,
-// that defines the filter as a program that prints the line "qory-suite-head <other commit>"
-// to standard error and standard output and leaves a file. The script reads no global
-// configuration: the filter does not run, the first line of the step's standard output is the
-// marker of the commit that ran, and ReadHead has that commit.
+// names a smudge filter, and a global git configuration, in a home that the agent can
+// write, that defines the filter as a program that prints the line "qory-suite-head <other
+// commit>" to standard error and standard output and leaves a file. The script reads no
+// global configuration: the filter does not run, the first line of the step's standard
+// output is the marker of the commit that ran, and ReadHead has that commit.
 func TestAFilterOfTheHomeThatPrintsAMarkerDoesNotRun(t *testing.T) {
 	dir, first := workspace(t)
 	ran := filepath.Join(t.TempDir(), "filter-ran")

@@ -123,7 +123,7 @@
       }
     },
     "scope_checks": {
-      "description": "The scope checks of the plans of an artifact type: for each type, one command, written to take --base <start commit> and --artifacts <folder> as its last arguments and to exit 0 when the plan holds. The compose declares and checks them, and qory run's push step runs the check of the workflow's plan type on a fresh clone of the session's commits, before the first push. Optional: a module without the key adds none. Only a module of a run's base stack counts: a scope_checks in a module that a checkout adds has no effect. One module declares a type.",
+      "description": "The scope checks of the plans of an artifact type: for each type, one command, written to take --base <start commit> and --artifacts <folder> as its last arguments, and --inputs <inputs.json> before --base, and to exit 0 when the plan holds. The compose declares and checks them, and qory run's push step runs the check of the workflow's plan type on a fresh clone of the session's commits, before the first push. Optional: a module without the key adds none. Only a module of a run's base stack counts: a scope_checks in a module that a checkout adds has no effect. One module declares a type.",
       "type": "object",
       "propertyNames": {"maxLength": 64, "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"},
       "additionalProperties": {

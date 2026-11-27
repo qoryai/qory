@@ -21,7 +21,8 @@ import (
 )
 
 // scopeDocker is the fake docker of [fakeDocker] whose scope check's container, the one
-// whose create has --base, copies index.json of its snapshot beside the log, and runs as start: "exit N" prints out and exits N, "sleep" runs past
+// whose create has --base, copies index.json of its snapshot and its read-only inputs.json
+// beside the log, and runs as start: "exit N" prints out and exits N, "sleep" runs past
 // any limit, and "engine" fails the create as an engine that is not reachable. The create
 // of each scope check goes to the log it returns.
 func scopeDocker(t *testing.T, start, out string) (string, string) {
@@ -41,6 +42,8 @@ case "$1 $*" in
 	echo "$*" >> `+log+`
 	files=$(echo "$*" | sed -n 's/.*src=\([^,]*\),dst=\/qory-push-check\/files,.*/\1/p')
 	cp "$files/index.json" `+dir+`/index.json
+	inputs=$(echo "$*" | sed -n 's/.*src=\([^,]*\),dst=[^ ,]*inputs.json,readonly.*/\1/p')
+	test -z "$inputs" || cp "$inputs" `+dir+`/inputs.json
 	: > `+dir+`/scope-$3
 	if [ "`+start+`" = engine ]; then echo "Cannot connect to the Docker daemon" >&2; exit 1; fi
 	echo c0ffee; exit 0 ;;
@@ -93,8 +96,8 @@ func (p *pushRepo) wantsNoPush(t *testing.T, r pushed, code contracts.EndCode, w
 // TestCommitsOutsideThePlanStopTheirPush is a session whose scope check exits 1 with its
 // findings: nothing is pushed, the run ends push_scope_refused, and the line has the
 // repository, the plan type, the commits and the findings. The check ran on the clone with
-// --base at the session's start and --artifacts at the snapshot, read-only, and the clone
-// writable.
+// --inputs at the session's inputs.json, read-only, --base at the session's start and --artifacts
+// at the snapshot, read-only, and the clone writable.
 func TestCommitsOutsideThePlanStopTheirPush(t *testing.T) {
 	docker, log := scopeDocker(t, "exit 1", "src/app.go: outside the plan\n")
 	p := scopedRepo(t, docker)
@@ -102,10 +105,28 @@ func TestCommitsOutsideThePlanStopTheirPush(t *testing.T) {
 	p.wantsNoPush(t, r, contracts.EndCodePushScopeRefused, "qory run: The commits do not pass the scope check of the session's plan, so qory pushed nothing.\n  Repository acme/site, plan type change-plan, commits "+p.first[:12]+" to ")
 	wants(t, r.out, ".\n  src/app.go: outside the plan\n")
 	created := checkLog(t, log)
-	for _, want := range []string{"/modules/hello/checks/scope.sh example.com/agent:1 --base " + p.first + " --artifacts /qory-push-check/files\n", "/clone,dst=/qory-push-check/artifacts ", "/artifacts,dst=/qory-push-check/files,readonly", " --network none "} {
+	for _, want := range []string{"/modules/hello/checks/scope.sh example.com/agent:1 --inputs ", "/in/inputs.json --base " + p.first + " --artifacts /qory-push-check/files\n", "/in/inputs.json,readonly", "/clone,dst=/qory-push-check/artifacts ", "/artifacts,dst=/qory-push-check/files,readonly", " --network none "} {
 		if !strings.Contains(created, want) {
 			t.Errorf("the scope check's create lacks %q:\n%s", want, created)
 		}
+	}
+	// The check's copy of inputs.json has the paths of its container, so the harness's scope
+	// verb finds its checkout and its snapshot.
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(log), "inputs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inputs struct {
+		Qory struct {
+			StartCommits   []struct{ Path, Commit string } `json:"start_commits"`
+			StartArtifacts string                          `json:"start_artifacts"`
+		}
+	}
+	if err := json.Unmarshal(data, &inputs); err != nil {
+		t.Fatal(err)
+	}
+	if got := inputs.Qory.StartCommits; len(got) != 1 || got[0].Path != "/qory-push-check/artifacts" || got[0].Commit != p.first || inputs.Qory.StartArtifacts != "/qory-push-check/files" {
+		t.Errorf("the check's inputs.json has %s, want start_commits with /qory-push-check/artifacts at %s and start_artifacts /qory-push-check/files", data, p.first)
 	}
 }
 
@@ -257,6 +278,29 @@ func TestEachSessionsScopeCheckStartsAtItsStart(t *testing.T) {
 	}
 	if len(heads) != 2 || len(bases) != 2 || bases[0] != p.first || bases[1] != heads[0] {
 		t.Errorf("the scope checks' bases are %v, want %s and the head of session 1, %v\n%s", bases, p.first, heads, r.out)
+	}
+}
+
+// TestAScopeCheckerMadeInSession2GetsTheSessionsInputs is a shared run whose home declares no scope
+// check for session 1 and one for session 2, and whose session 1 commits nothing: the scope checker
+// is made in session 2, and the check of session 2's push gets --inputs and a read-only inputs.json.
+func TestAScopeCheckerMadeInSession2GetsTheSessionsInputs(t *testing.T) {
+	p, _ := sharedPushRepo(t, laterAnswer(2, "claude", "example-provider-2", 30))
+	p.noOutput = true
+	docker, log := scopeDocker(t, "exit 0", "")
+	walledBy(t, docker)
+	t.Cleanup(cmd.SetScopeChecksFromSession2())
+	n := 0
+	r := p.run(t, func(d string) {
+		if n++; n == 2 {
+			writeFile(t, filepath.Join(d, "n.txt"), "n\n")
+			commitAll(t, d, "Add a file")
+		}
+	}, numbered())
+	r.wantsClose(t, event.StateSucceeded, 0)
+	lines := strings.Split(strings.TrimSpace(checkLog(t, log)), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], " --inputs ") || !strings.Contains(lines[0], "/in/inputs.json,readonly") {
+		t.Errorf("the scope checks' creates are %q, want one with --inputs and a read-only inputs.json\n%s", lines, r.out)
 	}
 }
 

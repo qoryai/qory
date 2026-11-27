@@ -1428,6 +1428,15 @@ func SetPlan(workflow, plan string) func() {
 	return func() { planOf = before }
 }
 
+// SetWritten makes qory take written for whether the stage of the run writes the plan
+// type, as a run with a run code and a stage that writes it, and returns what restores the
+// default.
+func SetWritten(written bool) func() {
+	before := writtenOf
+	writtenOf = func(*codeRun, string) bool { return written }
+	return func() { writtenOf = before }
+}
+
 // SetGOOS makes qory take goos for the operating system that it runs on, as the point for a suite
 // whose container did not start reads it, and returns what restores the default.
 func SetGOOS(name string) func() {
@@ -1457,5 +1466,24 @@ func SetScopeClone(err error) func() {
 func SetNoScopeChecks() func() {
 	before := loadScopeChecks
 	loadScopeChecks = func(string) (map[string]compose.ScopeCheck, error) { return nil, nil }
+	return func() { loadScopeChecks = before }
+}
+
+// SetScopeChecksFromSession2 has the homes of session 1 read as ones with no scope-checks.json,
+// and each later home read as it is, and returns what restores the read.
+func SetScopeChecksFromSession2() func() {
+	before := loadScopeChecks
+	var mu sync.Mutex
+	reads := 0
+	loadScopeChecks = func(home string) (map[string]compose.ScopeCheck, error) {
+		mu.Lock()
+		reads++
+		first := reads == 1
+		mu.Unlock()
+		if first {
+			return nil, nil
+		}
+		return before(home)
+	}
 	return func() { loadScopeChecks = before }
 }

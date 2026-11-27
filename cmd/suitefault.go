@@ -35,45 +35,61 @@ func (f *suiteFault) kind() suiteKind {
 	return kindUnfixable
 }
 
-// The points of a suite that did not start before the after step was set. The text is line 1,
-// the fix, when the agent can fix the cause, is the point's fix. A text that has a plan type or a
-// workflow name has at most 100 characters for a type of up to 34 characters. [textFaultNoPlanIn]
-// has the workflow name once, and with the mark that qory run prints it has at most 100
-// characters for a workflow of up to 39. The stack allows names of up to 64 bytes, so a longer
-// name makes the line longer than 100 characters, and the verdict format allows 500. These lines are printed in full: a 64-byte type
-// makes [textFaultNoCmd] 130 characters.
+// The points of a suite that did not start before the after step was set. The text is line
+// 1. The fix is the point's fix: what the agent changes when it can fix the cause, and for
+// a plan type that the stage does not write, what a person does to put the work item back
+// in the stage that writes the type, see [textFixWriter]. A text that has a plan type or a
+// workflow name has at most 100 characters for a type of up to 34 characters, except
+// [textFixWriter], which has 74 characters besides the type: as a point's fix it has at
+// most 100 characters for a type of up to 26 characters, and qory run prints it after
+// "qory run: " (10 characters), so that line has at most 100 for a type of up to 16.
+// [textFaultNoPlanIn] has the workflow name once, and with the mark that qory run prints
+// it has at most 100 characters for a workflow of up to 39. The stack allows names of up
+// to 64 bytes, so a longer name makes the line longer than 100 characters, and the verdict
+// format allows 500. These lines are printed in full: a 64-byte type makes
+// [textFaultNoCmd] 130 characters.
 const (
-	textFaultNoPlan   = "The full suite did not start: the work item has no usable %s."
-	textFixNoPlan     = "Write a %s with a full row in Commands, then push it."
-	textFaultTooBig   = "The full suite did not start: the %s is larger than 1 MiB."
-	textFixTooBig     = "Cut the %s below 1 MiB, then push it."
-	textFaultNoFull   = "The full suite did not start: %s has no full command."
-	textFixNoTable    = "Add the table Commands with the columns Kind, Command, Result file and Source."
-	textFixNoFull     = "Add a row of kind full to Commands in %s."
-	textFaultNoCmd    = "The full suite did not start: the full row of the %s has no command."
-	textFixNoCmd      = "Write the command that runs the whole test suite in the full row."
-	textFaultBadCmd   = "The full suite did not start: the command of the full row is too long or has a NUL."
-	textFixBadCmd     = "Shorten the command, or move it into a script of the repository."
-	textFaultBadFile  = "The full suite did not start: the result file of the full row is no path below the repository."
-	textFixBadFile    = "Write a relative path below the repository as the Result file, or none."
-	textFaultPlanRead = "The full suite did not start: qory could not read the %s."
-	textShownBadFile  = "The full suite did not start: the result file is no path below the repository."
-	textFaultNoPlanIn = "Set workflows.%s.plan in the stack: the workflow has no plan."
-	textFaultNoRunAPI = "The full suite did not start: qory cannot reach the run API."
-	textFaultNoGit    = "The full suite did not start: the session's folder has no .git folder."
-	textFaultBadStart = "The full suite did not start: qory could not read the commit the session started at."
-	textPointNoAfter  = "The full suite did not run: the run closed before the after step."
+	textFaultNoPlan      = "The full suite did not start: the work item has no usable %s."
+	textFixNoPlan        = "Write a %s with a full row in Commands, then push it."
+	textFaultNotApproved = "The full suite did not start: no gate approved a %s."
+	textFixNotApproved   = "Approve a %s at its gate, then run again."
+	textFixWriter        = "Move the work item back to the stage that writes the %s, and run that stage."
+	textFaultTooBig      = "The full suite did not start: the %s is larger than 1 MiB."
+	textFixTooBig        = "Cut the %s below 1 MiB, then push it."
+	textFaultNoTable     = "The full suite did not start: %s has no Commands table."
+	textFaultNoFull      = "The full suite did not start: %s has no full command."
+	textFixNoTable       = "Add the table Commands with the columns Kind, Command, Result file and Source."
+	textFixNoFull        = "Add a row of kind full to Commands in %s."
+	textFaultNoCmd       = "The full suite did not start: the full row of the %s has no command."
+	textFixNoCmd         = "Write the command that runs the whole test suite in the full row."
+	textFaultBadCmd      = "The full suite did not start: the command of the full row is too long or has a NUL."
+	textFixBadCmd        = "Shorten the command, or move it into a script of the repository."
+	textFaultBadFile     = "The full suite did not start: the result file of the full row is no path below the repository."
+	textFixBadFile       = "Write a relative path below the repository as the Result file, or none."
+	textFaultPlanRead    = "The full suite did not start: qory could not read the %s."
+	textShownBadFile     = "The full suite did not start: the result file is no path below the repository."
+	textFaultNoPlanIn    = "Set workflows.%s.plan in the stack: the workflow has no plan."
+	textFaultNoRunAPI    = "The full suite did not start: qory cannot reach the run API."
+	textFaultNoGit       = "The full suite did not start: the session's folder has no .git folder."
+	textFaultBadStart    = "The full suite did not start: qory could not read the commit the session started at."
+	textPointNoAfter     = "The full suite did not run: the run closed before the after step."
 )
 
-// faultOf is the fault for err, an error of [launchFull] or of [suite.Command], for a workflow
-// whose plan type is plan.
-func faultOf(err error, plan string) *suiteFault {
+// faultOf is the fault for err, an error of [launchFull] or of [suite.Command], for a
+// workflow whose plan type is plan, with written whether the run's stage writes the type.
+// A push does not change the version that a gate approved, which is the version qory reads
+// for a type that the stage does not write, so the session cannot fix a cause in that
+// plan: the fault has the fix of [textFixWriter] and is not fixable.
+func faultOf(err error, plan string, written bool) *suiteFault {
 	fixable := func(text, fix string) *suiteFault {
-		return &suiteFault{point: runapi.Point{Text: text, Action: "run_again", Fix: fix}, fixable: true}
+		if !written {
+			fix = fmt.Sprintf(textFixWriter, plan)
+		}
+		return &suiteFault{point: runapi.Point{Text: text, Action: "run_again", Fix: fix}, fixable: written}
 	}
 	switch {
 	case errors.Is(err, suite.ErrNoCommands):
-		return fixable(fmt.Sprintf(textFaultNoFull, plan), textFixNoTable)
+		return fixable(fmt.Sprintf(textFaultNoTable, plan), textFixNoTable)
 	case errors.Is(err, suite.ErrNoFull):
 		return fixable(fmt.Sprintf(textFaultNoFull, plan), fmt.Sprintf(textFixNoFull, plan))
 	case errors.Is(err, suite.ErrNoCommand):
@@ -86,6 +102,8 @@ func faultOf(err error, plan string) *suiteFault {
 		return fixable(fmt.Sprintf(textFaultTooBig, plan), fmt.Sprintf(textFixTooBig, plan))
 	case err == errNoPlan:
 		return fixable(fmt.Sprintf(textFaultNoPlan, plan), fmt.Sprintf(textFixNoPlan, plan))
+	case errors.Is(err, errPlanNotApproved):
+		return &suiteFault{point: runapi.Point{Text: fmt.Sprintf(textFaultNotApproved, plan), Action: "run_again", Fix: fmt.Sprintf(textFixNotApproved, plan)}}
 	case errors.Is(err, suite.ErrBadStart):
 		return &suiteFault{point: runapi.Point{Text: textFaultBadStart, Action: "run_again"}}
 	}

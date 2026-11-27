@@ -734,7 +734,7 @@ const inputsMember = "qory"
 // qoryInputs is the value of [inputsMember]: what qory adds to the inputs of a run from
 // a run code, and all that inputs.json has for a run with a run key and no run code, or
 // for a person's run whose harness has a submit program. Each field is one member, always
-// written, except Workflow, ReviewSession and Outbox.
+// written, except BranchBase, Workflow, ReviewSession and Outbox.
 type qoryInputs struct {
 	// HarnessExtensions is the harness report's extensions, {} for none.
 	HarnessExtensions map[string]any `json:"harness_extensions"`
@@ -749,6 +749,10 @@ type qoryInputs struct {
 	// snapshot, see [startArtifacts]. The push step's scope check reads the same values.
 	StartCommits   []inputCommit `json:"start_commits"`
 	StartArtifacts string        `json:"start_artifacts"`
+	// BranchBase is the commit where the run's work branch was cut from the target's history,
+	// with its tree id, the same in every session; nil, and no member, for a run with no
+	// branch and for one with no or several merge bases, see [preparation.WorkBranch.Base].
+	BranchBase *inputBase `json:"branch_base,omitempty"`
 	// Workflow is the values of the session's workflow that the harness reads, see
 	// [workflowInputs]; nil, and no member, for a run with no run code, which has no
 	// workflow.
@@ -763,6 +767,21 @@ type qoryInputs struct {
 type inputCommit struct {
 	Path   string `json:"path"`
 	Commit string `json:"commit"`
+}
+
+// inputBase is [qoryInputs.BranchBase]: a commit and the id of its tree.
+type inputBase struct {
+	Commit string `json:"commit"`
+	Tree   string `json:"tree"`
+}
+
+// branchBase is the [qoryInputs.BranchBase] of branch; nil for no branch and for a branch with
+// no base.
+func branchBase(branch *preparation.WorkBranch) *inputBase {
+	if branch == nil || branch.Base == nil {
+		return nil
+	}
+	return &inputBase{Commit: branch.Base.Commit, Tree: branch.Base.Tree}
 }
 
 // startCommits is the [qoryInputs.StartCommits] of branch, whose repositories are in the
@@ -811,6 +830,19 @@ func (r *codeRun) outputs(types []exports.ProcessType) []inputOutput {
 		out = append(out, entry)
 	}
 	return out
+}
+
+// writtenTypes is the types of the outputs of the stage of r's work item: the types that
+// its sessions write, nil for a run with no snapshot, which writes none.
+func (r *codeRun) writtenTypes() []string {
+	if r == nil || r.snapshot == nil {
+		return nil
+	}
+	var types []string
+	for _, o := range r.snapshot.Outputs {
+		types = append(types, o.Type)
+	}
+	return types
 }
 
 // checkOutputTypes stops the run of r on a type of types, the artifact types of the

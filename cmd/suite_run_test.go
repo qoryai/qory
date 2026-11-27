@@ -46,7 +46,7 @@ func newSuiteAPIOf(t *testing.T, status int, typ, text string) *suiteAPI {
 	t.Helper()
 	a := &suiteAPI{status: status}
 	sum := sha256.Sum256([]byte(text))
-	index := fmt.Sprintf(`{"version":1,"artifacts":[{"type":%q,"name":"main","newest_version":1,"versions":[{"id":"bp1","number":1,"writer":{"kind":"run","run_id":"earlier"},"files":[{"filename":%q,"size":%d,"sha256":%q}]}]}]}`, typ, typ+".md", len(text), hex.EncodeToString(sum[:]))
+	index := fmt.Sprintf(`{"version":1,"artifacts":[{"type":%q,"name":"main","approved_version":"bp1","newest_version":1,"versions":[{"id":"bp1","number":1,"writer":{"kind":"run","run_id":"earlier"},"files":[{"filename":%q,"size":%d,"sha256":%q}]}]}]}`, typ, typ+".md", len(text), hex.EncodeToString(sum[:]))
 	a.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/artifacts"):
@@ -95,6 +95,8 @@ type suiteEnd struct {
 	// "". noPlan is whether the workflow sets none.
 	plan   string
 	noPlan bool
+	// written is whether the run's stage writes the plan type.
+	written bool
 	// after, when not nil, is the end of the after step in place of the script's.
 	after *session.AfterResult
 	// cutAfterStart runs the script, so the command starts, and then ends the step as this result
@@ -137,6 +139,7 @@ func suiteRun(t *testing.T, api *suiteAPI, e suiteEnd) (string, error, session.O
 		plan = "build-plan"
 	}
 	t.Cleanup(cmd.SetPlan("fix", plan))
+	t.Cleanup(cmd.SetWritten(e.written))
 	t.Cleanup(cmd.SetJoinResult(func(spec session.SessionSpec) (*session.Result, error) {
 		if spec.OnVariables != nil {
 			spec.OnVariables(session.Applied{})
@@ -487,36 +490,48 @@ func TestACustomPlanTypesFullRowRunsAsTheSuite(t *testing.T) {
 	}
 }
 
-// TestAPlanTypeWithNoFullCommandStartsNoSuite: a version of the plan type with no Commands table, or
-// with no full row, ends the launch of the suite with the not-started result, the point "<type> has no
-// full command", and no suite runs.
+// TestAPlanTypeWithNoFullCommandStartsNoSuite is a version of the plan type with no
+// Commands table, or with no full row: the launch of the suite ends with the not-started
+// result, the point "<type> has no Commands table" or "<type> has no full command", and no
+// suite runs. A plan type that the stage writes gets changes-requested with the fix for
+// the agent. For a type that the stage does not write, a push does not change the
+// approved version, so the verdict is escalate and the fix points to the stage that writes
+// the type.
 func TestAPlanTypeWithNoFullCommandStartsNoSuite(t *testing.T) {
-	for name, c := range map[string]struct{ text, fix string }{
-		"no table":    {"# Plan\n", "Add the table Commands with the columns Kind, Command, Result file and Source."},
-		"no full row": {"## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n", "Add a row of kind full to Commands in change-plan."},
+	const noTable, noFull = "# Plan\n", "## Commands\n\n| Kind | Command | Result file | Source |\n|---|---|---|---|\n| fast | `a` | none | s |\n"
+	const gate = "Move the work item back to the stage that writes the change-plan, and run that stage."
+	for name, c := range map[string]struct {
+		text, cause, fix, verdict string
+		written                   bool
+	}{
+		"no table":                    {noTable, "change-plan has no Commands table.", gate, "escalate", false},
+		"no full row":                 {noFull, "change-plan has no full command.", gate, "escalate", false},
+		"no table, a written type":    {noTable, "change-plan has no Commands table.", "Add the table Commands with the columns Kind, Command, Result file and Source.", "changes-requested", true},
+		"no full row, a written type": {noFull, "change-plan has no full command.", "Add a row of kind full to Commands in change-plan.", "changes-requested", true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			api := newSuiteAPIOf(t, http.StatusCreated, "change-plan", c.text)
 			var seen session.SessionSpec
-			out, err, closed := suiteRun(t, api, suiteEnd{plan: "change-plan", result: suiteGreen, seen: &seen})
+			out, err, closed := suiteRun(t, api, suiteEnd{plan: "change-plan", written: c.written, result: suiteGreen, seen: &seen})
 			if err != nil || closed.State != event.StateSucceeded {
 				t.Fatalf("%v, closed %+v\n%s", err, closed, out)
 			}
-			want := `{"verdict":"changes-requested","points":[{"text":"The full suite did not start: change-plan has no full command.","action":"run_again","fix":"` + c.fix + `"}]}`
+			text := "The full suite did not start: " + c.cause
+			want := `{"verdict":"` + c.verdict + `","points":[{"text":"` + text + `","action":"run_again","fix":"` + c.fix + `"}]}`
 			if posted := api.posted(); len(posted) != 1 || posted[0] != want {
 				t.Errorf("posted %q, want %s", posted, want)
 			}
 			if len(seen.After) != 0 {
 				t.Errorf("After = %q, want none", seen.After)
 			}
-			wants(t, out, "The full suite did not start: change-plan has no full command.")
+			wants(t, out, text)
 		})
 	}
 }
 
 // TestTheSuiteDoesNotFallBackToTheBuildPlan: the plan type set in workflows.<name>.plan is change-plan, and the work item has a
-// build-plan with a full row and no change-plan: no suite runs, and the point is the one for a plan
-// type with no version.
+// build-plan with a full row and no change-plan, and the stage does not write change-plan: no suite
+// runs, and the point is the one for a plan type that no gate approved.
 func TestTheSuiteDoesNotFallBackToTheBuildPlan(t *testing.T) {
 	api := newSuiteAPI(t, http.StatusCreated)
 	var seen session.SessionSpec
@@ -524,7 +539,7 @@ func TestTheSuiteDoesNotFallBackToTheBuildPlan(t *testing.T) {
 	if err != nil || closed.State != event.StateSucceeded {
 		t.Fatalf("%v, closed %+v\n%s", err, closed, out)
 	}
-	if posted := api.posted(); len(posted) != 1 || !strings.Contains(posted[0], "The full suite did not start: the work item has no usable change-plan.") || strings.Contains(posted[0], "tests failed") {
+	if posted := api.posted(); len(posted) != 1 || !strings.Contains(posted[0], "The full suite did not start: no gate approved a change-plan.") || strings.Contains(posted[0], "tests failed") {
 		t.Errorf("posted %q", posted)
 	}
 	if len(seen.After) != 0 {

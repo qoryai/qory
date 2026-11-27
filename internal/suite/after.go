@@ -25,9 +25,10 @@ const (
 
 // HeadMarker is the start of the first line that the script prints to standard output once
 // it has cloned HEAD, before the suite's command runs and before anything else reaches
-// standard output: HeadMarker and the commit that the suite runs on. The status file has the
-// same commit, but the suite's code can write that file, so the marker line is the commit
-// that qory trusts, and qory reads only the first line of standard output, see [ReadHead].
+// standard output: HeadMarker and the commit that the suite runs on. The status file has
+// the same commit, but the suite's code can write that file, so the marker line is the
+// commit that qory trusts, and qory reads only the first line of standard output, see
+// [ReadHead].
 const HeadMarker = "qory-suite-head "
 
 // MaxCommandBytes is the longest command that [Command] takes: Linux limits one argument
@@ -41,7 +42,8 @@ const (
 	ExitNoState = 70
 	// ExitNoClone is the exit status of a script whose clone of the commit failed.
 	ExitNoClone = 71
-	// ExitNoHead is the exit status of a script whose git could not read HEAD of the workspace.
+	// ExitNoHead is the exit status of a script whose git could not read HEAD of the
+	// workspace.
 	ExitNoHead = 72
 )
 
@@ -51,18 +53,18 @@ const (
 // [scriptGit]. The command and the result file are arguments, never part of the script's
 // text.
 //
-// The script clears [StateFolder]. When git cannot read HEAD, or HEAD has no commit but the
-// session started at one, it exits 72. When HEAD is the tested commit, or has no commit
-// and the session started at none, it writes "skipped" to the status file and exits 0.
-// Otherwise it clones HEAD into a new folder of the container with git, hooks off and no
-// hard link, so no file that the agent left untracked or ignored reaches the suite. Each
-// git of the script starts with [scriptGit]. The read of HEAD keeps its standard output,
-// the commit, and sends its standard error to /dev/null. The clone and the checkout send
-// both to /dev/null. So no filter, attribute or file name of the commit reaches the step's
-// output before the marker. In the clone the script deletes the result file, prints the
-// line "qory-suite-head <commit>" to its standard output, writes "ran <commit>" to the
-// status file and runs the command with a home folder that the command can write. It
-// copies the result file to the folder, and exits with the command's status.
+// The script clears [StateFolder]. When git cannot read HEAD, or HEAD has no commit but
+// the session started at one, it exits 72. When HEAD is the tested commit, or has no
+// commit and the session started at none, it writes "skipped" to the status file and exits
+// 0. Otherwise it clones HEAD into a new folder of the container with git, hooks off and
+// no hard link, so no file that the agent left untracked or ignored reaches the suite.
+// Each git of the script starts with [scriptGit]. The read of HEAD keeps its standard
+// output, the commit, and sends its standard error to /dev/null. The clone and the
+// checkout send both to /dev/null. So no filter, attribute or file name of the commit
+// reaches the step's output before the marker. In the clone the script deletes the result
+// file, prints the line "qory-suite-head <commit>" to its standard output, writes "ran
+// <commit>" to the status file and runs the command with a home folder that the command
+// can write. It copies the result file to the folder, and exits with the command's status.
 var script = `cmd=$1; file=$2; start=$3; tested=$4; proto=$5
 d=` + StateFolder + `
 if ! rm -rf "$d" || ! mkdir -m 700 "$d"; then
@@ -139,7 +141,8 @@ var commitID = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
 // The errors of [Command].
 var (
-	// ErrBadCommand is the error of a command that is longer than [MaxCommandBytes] or has a NUL.
+	// ErrBadCommand is the error of a command that is longer than [MaxCommandBytes] or has a
+	// NUL.
 	ErrBadCommand = errors.New("the full row's command is too long or has a NUL")
 	// ErrBadResultFile is the error of a result file that is no path below the repository.
 	ErrBadResultFile = errors.New("the full row's result file is no path below the repository")
@@ -147,11 +150,11 @@ var (
 	ErrBadStart = errors.New("the start commit is not a full commit id")
 )
 
-// Command is the command of the session's after step, SessionSpec.After, that runs the full
-// suite of full on the commit that HEAD has in the workspace when the session ends, unless
-// HEAD is tested, the commit that the run has a suite result for, or "" for none. start is
-// the commit the session started at, or "" for none. The script is described at [script];
-// each call makes a new protocol name for it.
+// Command is the command of the session's after step, SessionSpec.After, that runs the
+// full suite of full on the commit that HEAD has in the workspace when the session ends,
+// unless HEAD is tested, the commit that the run has a suite result for, or "" for none.
+// start is the commit the session started at, or "" for none. The script is described at
+// [script]; each call makes a new protocol name for it.
 // shortcut: tested is not checked for its form, since a value that is no commit id never
 // equals HEAD and the suite runs; replace it when a caller passes a value that is not
 // from a marker line.
@@ -208,17 +211,18 @@ type Outcome struct {
 	Mismatch bool
 }
 
-// NotStarted reports whether the suite ended before its command ran: the script failed, the step
-// failed, or the cap cut the step before the script wrote "ran". No change to the repository's
-// code mends it.
+// NotStarted reports whether the suite ended before its command ran: the script failed,
+// the step failed, or the cap cut the step before the script wrote "ran". No change to the
+// repository's code mends it.
 func (o Outcome) NotStarted() bool { return (o.State == Failed || o.State == Timeout) && !o.Started }
 
 // Judge reads the files of the script below workspace, the folder the after step ran in,
 // and judges the suite that end describes, with the full row's result file. A suite is
-// Skipped when the status file is "skipped" and the script exited 0; Timeout at the cap, and
-// Stopped when a stop from outside cut the step; Failed when the script did not get to the
-// command, when the command exited other than 0, when a test failed, or when it ran 0
-// tests. With exit status 0 and no readable result file the suite is Passed, with no counts.
+// Skipped when the status file is "skipped" and the script exited 0; Timeout at the cap,
+// and Stopped when a stop from outside cut the step; Failed when the script did not get to
+// the command, when the command exited other than 0, when a test failed, or when it ran 0
+// tests. With exit status 0 and no readable result file the suite is Passed, with no
+// counts.
 func Judge(workspace string, full Full, end End) Outcome {
 	kind, commit := readStatus(workspace)
 	out := Outcome{Commit: commit, Started: kind == "ran", ExitCode: end.ExitCode}
@@ -253,8 +257,8 @@ func Judge(workspace string, full Full, end End) Outcome {
 	return out
 }
 
-// readStatus is the first word of the status file, "ran" or "skipped", and the commit after
-// "ran"; "" for a file that is missing or has another form.
+// readStatus is the first word of the status file, "ran" or "skipped", and the commit
+// after "ran"; "" for a file that is missing or has another form.
 func readStatus(workspace string) (kind, commit string) {
 	line, _, _ := bytes.Cut(ReadBelow(workspace, statusFile, maxStatus), []byte("\n"))
 	word, rest, _ := strings.Cut(string(line), " ")
