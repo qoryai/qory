@@ -432,6 +432,8 @@ func suiteServedPlan(t *testing.T, p *pushRepo, hang func(n int) bool, plan stri
 			io.WriteString(w, plan)
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/verdict"):
 			note("verdict")
+			body, _ := io.ReadAll(r.Body)
+			p.api.verdicts = append(p.api.verdicts, string(body))
 			verdicts++
 			if hang != nil && hang(verdicts) {
 				conn, _, err := w.(http.Hijacker).Hijack()
@@ -441,6 +443,12 @@ func suiteServedPlan(t *testing.T, p *pushRepo, hang func(n int) bool, plan stri
 				}
 				t.Cleanup(func() { conn.Close() })
 				return true
+			}
+			if p.api.refuse != nil {
+				if code := p.api.refuse(string(body)); code != "" {
+					failing(w, http.StatusConflict, code, "")
+					return true
+				}
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
@@ -473,6 +481,11 @@ func suiteResults(t *testing.T, spec *session.SessionSpec) func() (*session.Resu
 // returns, which the loop reads the output of each after step from: each after step gets
 // a step number that no other has, and its output is appended to the events.
 func suiteResultsIn(t *testing.T, spec *session.SessionSpec, runDir func() string) func() (*session.Result, error) {
+	return suiteResultsEnding(t, spec, runDir, suiteEnd{result: suiteRed, exit: 1})
+}
+
+// suiteResultsEnding is suiteResultsIn for a suite that ends as end.
+func suiteResultsEnding(t *testing.T, spec *session.SessionSpec, runDir func() string, end suiteEnd) func() (*session.Result, error) {
 	n := numbered()
 	step := 1
 	return func() (*session.Result, error) {
@@ -480,7 +493,7 @@ func suiteResultsIn(t *testing.T, spec *session.SessionSpec, runDir func() strin
 		if len(spec.After) > 0 {
 			step++
 			var out []byte
-			res.After, out = runAfterStep(t, *spec, suiteEnd{result: suiteRed, exit: 1}, step)
+			res.After, out = runAfterStep(t, *spec, end, step)
 			if runDir != nil {
 				appendAfterEvents(t, runDir(), step, out)
 			}

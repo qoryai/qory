@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"unicode/utf8"
 )
 
 func lines(n int) string {
@@ -52,11 +51,48 @@ func TestNewResultKeepsTheLast200Lines(t *testing.T) {
 func TestNewResultLooksAtTheLastBytesOnly(t *testing.T) {
 	output := []byte("first line\n" + strings.Repeat("x", MaxOutputBytes) + "\nlast line\n")
 	r := NewResult(Counts{}, output)
-	if strings.Contains(r.OutputTail, "first") || !strings.HasSuffix(r.OutputTail, "\nlast line") {
-		t.Errorf("OutputTail starts %q and ends %q, want the end of the output only", r.OutputTail[:10], r.OutputTail[len(r.OutputTail)-12:])
+	// The cap cuts inside the line of x, which is dropped whole.
+	if r.OutputTail != "last line" {
+		t.Errorf("OutputTail = %q, want the line after the cut only", r.OutputTail)
 	}
 	if len(r.OutputTail) > MaxOutputBytes {
 		t.Errorf("OutputTail has %d bytes, want at most %d", len(r.OutputTail), MaxOutputBytes)
+	}
+}
+
+func TestNewResultOfOutputWithNoTextLineInTheCapHasTheLine(t *testing.T) {
+	const line = "No line with text starts in the last 256 KiB of the suite's output, so qory shows none of those bytes."
+	for name, output := range map[string]string{
+		"one long line":            strings.Repeat("x", 2*MaxOutputBytes),
+		"a break before the cap":   "first\n" + strings.Repeat("x", MaxOutputBytes+1),
+		"one long line and \\n":    strings.Repeat("x", 2*MaxOutputBytes) + "\n",
+		"one long line and \\r\\n": strings.Repeat("x", 2*MaxOutputBytes) + "\r\n",
+		"one long line and \\n\\n": strings.Repeat("x", 2*MaxOutputBytes) + "\n\n",
+		"one long line and \\n\\r": strings.Repeat("x", 2*MaxOutputBytes) + "\n\r",
+		"\\n alone":                strings.Repeat("\n", 2*MaxOutputBytes),
+		"\\r\\n alone":             strings.Repeat("\r\n", 2*MaxOutputBytes),
+	} {
+		if got := NewResult(Counts{}, []byte(output)).OutputTail; got != line {
+			t.Errorf("%s: OutputTail = %q, want %q", name, got, line)
+		}
+	}
+	// Output of the cap or less is never cut, and no output has no tail.
+	if got := NewResult(Counts{}, []byte(strings.Repeat("x", MaxOutputBytes))).OutputTail; len(got) != MaxOutputBytes {
+		t.Errorf("OutputTail of output at the cap has %d bytes, want %d", len(got), MaxOutputBytes)
+	}
+	if got := NewResult(Counts{}, nil).OutputTail; got != "" {
+		t.Errorf("OutputTail of no output = %q, want none", got)
+	}
+}
+
+// TestNoTextLineHasTheCap: the text of NoTextLine contains 256 KiB, the value of
+// MaxOutputBytes.
+func TestNoTextLineHasTheCap(t *testing.T) {
+	if MaxOutputBytes != 256<<10 {
+		t.Errorf("MaxOutputBytes = %d, want %d", MaxOutputBytes, 256<<10)
+	}
+	if !strings.Contains(NoTextLine, "256 KiB") {
+		t.Errorf("NoTextLine = %q, want it to contain 256 KiB", NoTextLine)
 	}
 }
 
@@ -99,18 +135,33 @@ func TestNewResultEscapesHiddenCharacters(t *testing.T) {
 	}
 }
 
-func TestLastBytesStartsAtAWholeCharacter(t *testing.T) {
-	text := []byte("aé€\U0001F600z")
-	for n := 1; n <= len(text); n++ {
-		got := lastBytes(text, n)
-		if !utf8.Valid(got) && utf8.Valid(text) {
-			t.Errorf("lastBytes(%d) = %q, want valid UTF-8", n, got)
-		}
-		if len(got) > n || !strings.HasSuffix(string(text), string(got)) {
-			t.Errorf("lastBytes(%d) = %q, want at most %d bytes from the end", n, got, n)
+func TestLastBytesStartsAtALine(t *testing.T) {
+	text := []byte("one\ntwo €\nthree\n")
+	for _, c := range []struct {
+		n    int
+		want string
+	}{
+		{len(text), string(text)},
+		{len(text) + 5, string(text)},
+		// A cut inside a line drops that line's part, and a cut inside a character too.
+		{len(text) - 1, "two €\nthree\n"},
+		{len("two €\nthree\n") + 2, "two €\nthree\n"},
+		{len("three\n") + 1, "three\n"},
+		// A cut right after a line break keeps the line.
+		{len("two €\nthree\n"), "two €\nthree\n"},
+		{len("three\n"), "three\n"},
+		// The last n bytes have no line break.
+		{len("three"), ""},
+		{0, ""},
+	} {
+		if got := string(lastBytes(text, c.n)); got != c.want {
+			t.Errorf("lastBytes(%d) = %q, want %q", c.n, got, c.want)
 		}
 	}
-	if got := string(lastBytes([]byte("x€"), 2)); got != "" {
-		t.Errorf("a cut inside a 3-byte character = %q, want it moved past the character", got)
+	// The last line may have no break after it.
+	for n, want := range map[int]string{3: "bc", 2: "bc", 1: ""} {
+		if got := string(lastBytes([]byte("a\nbc"), n)); got != want {
+			t.Errorf("lastBytes(%d) of a text with an unfinished last line = %q, want %q", n, got, want)
+		}
 	}
 }

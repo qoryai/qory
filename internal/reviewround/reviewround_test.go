@@ -7,436 +7,321 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
-	"slices"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"unicode"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
-
-	"github.com/qoryai/qory/internal/runapi"
 )
 
-// The fixture reports and the previous round's open findings in testdata.
+// The fixture reports in testdata.
 const (
 	codeReport     = "testdata/code-reviewer.json"
 	securityReport = "testdata/security-reviewer.json"
-	previousFile   = "testdata/previous.json"
 )
 
-// fixture is the absolute path of a file in testdata.
-func fixture(t *testing.T, name string) string {
+// finding is a finding of a report with the given members; the others are valid.
+func finding(t *testing.T, over map[string]any) string {
 	t.Helper()
-	path, err := filepath.Abs(name)
+	f := map[string]any{"severity": "non-blocking", "quote": "q", "problem": "p", "fix": "f",
+		"proof": "broken rule: r", "point": "p"}
+	for k, v := range over {
+		if v == nil {
+			delete(f, k)
+		} else {
+			f[k] = v
+		}
+	}
+	data, err := json.Marshal(f)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return path
+	return string(data)
 }
 
-// roots is the folder of each test's reports, by the test.
-var roots sync.Map
-
-// reportsRoot is the folder of t's reports, as qory makes one for a round.
-func reportsRoot(t *testing.T) string {
-	t.Helper()
-	if dir, ok := roots.Load(t); ok {
-		return dir.(string)
+// report is the report of the reviewer code-reviewer with the findings and closes, which
+// are JSON objects.
+func report(findings []string, closes ...string) string {
+	text := `{"reviewer":"code-reviewer","findings":[` + strings.Join(findings, ",") + `]`
+	if closes != nil {
+		text += `,"closes":[` + strings.Join(closes, ",") + `]`
 	}
+	return text + `}`
+}
+
+func TestParseReadsFindingsRepeatsAndCloses(t *testing.T) {
+	data, err := os.ReadFile(securityReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := Parse("security-reviewer", data, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Findings) != 1 || r.Findings[0].ID != "f2" || r.Findings[0].Severity != NonBlocking ||
+		r.Findings[0].Point != "The token is read on each call." {
+		t.Errorf("the findings are %+v", r.Findings)
+	}
+	want := []Close{
+		{ID: "f3", State: Fixed, Reason: "The check of the token now runs before the first read."},
+		{ID: "f4", State: Dismissed, Reason: "The builder showed that the file is a test fixture."},
+	}
+	if fmt.Sprint(r.Closes) != fmt.Sprint(want) {
+		t.Errorf("the closes are %+v, want %+v", r.Closes, want)
+	}
+	data, err = os.ReadFile(codeReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err = Parse("code-reviewer", data, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Findings) != 2 || r.Findings[0].ID != "" || r.Findings[0].File != "internal/batch/batch.go" ||
+		r.Findings[0].Line != 12 || len(r.Closes) != 0 {
+		t.Errorf("the report is %+v", r)
+	}
+}
+
+func TestAReportWithNoClosesIsValid(t *testing.T) {
+	r, err := Parse("code-reviewer", []byte(`{"reviewer":"code-reviewer","findings":[]}`), nil)
+	if err != nil || len(r.Findings) != 0 || len(r.Closes) != 0 {
+		t.Errorf("the report is %+v, the error %v", r, err)
+	}
+}
+
+func TestAnIdHasUpToNineDigitsAndNoLeadingZero(t *testing.T) {
+	for id, valid := range map[string]bool{"f1": true, "f123456789": true, "f1234567890": false, "f0": false,
+		"f01": false, "F1": false, "1": false, "f": false} {
+		for where, text := range map[string]string{
+			"a repeat": report([]string{finding(t, map[string]any{"id": id})}),
+			"a close":  report(nil, `{"id":"`+id+`","state":"fixed","reason":"r"}`),
+		} {
+			_, err := Parse("code-reviewer", []byte(text), nil)
+			if (err == nil) != valid {
+				t.Errorf("%s with the id %q: the error is %v, valid is %v", where, id, err, valid)
+			}
+		}
+	}
+}
+
+func TestAReportThatBreaksTheFormatIsRefusedWithItsCause(t *testing.T) {
+	const format = "Reviewer code-reviewer wrote a report that does not match the report format: "
+	long := func(n int) string { return strings.Repeat("a", n) }
+	cases := []struct{ name, text, want string }{
+		{"not JSON", `{"reviewer":`, "Reviewer code-reviewer wrote a report that is not one JSON object: unexpected EOF."},
+		{"two values", `{"reviewer":"code-reviewer","findings":[]} {}`, "Reviewer code-reviewer wrote a report that is not one JSON object: the file continues after the JSON value."},
+		{"not UTF-8", "{\"reviewer\":\"\xff\"}", "Reviewer code-reviewer wrote a report that is not UTF-8 text."},
+		{"a member twice", `{"reviewer":"code-reviewer","findings":[],"findings":[]}`, "Reviewer code-reviewer wrote a report with a member twice in one object"},
+		{"a member twice in a close", report(nil, `{"id":"f1","state":"fixed","state":"dismissed","reason":"r"}`), "Reviewer code-reviewer wrote a report with a member twice in one object"},
+		{"result word", `{"reviewer":"code-reviewer","findings":[],"result":"clean"}`, format},
+		{"bad severity", report([]string{finding(t, map[string]any{"severity": "minor"})}), format + "at '/findings/0/severity'"},
+		{"blocking on a broken rule", report([]string{finding(t, map[string]any{"severity": "blocking"})}), format},
+		{"a member of a finding that the format has not", report([]string{finding(t, map[string]any{"result": "x"})}), format},
+		{"a file of 301 characters", report([]string{finding(t, map[string]any{"file": long(301)})}), format + "at '/findings/0/file'"},
+		{"a file of two lines", report([]string{finding(t, map[string]any{"file": "a\nb"})}), format + "at '/findings/0/file'"},
+		{"a NUL in the quote", report([]string{finding(t, map[string]any{"quote": "a\x00b"})}), format + "at '/findings/0/quote'"},
+		{"a NUL as the first character of the proof", report([]string{finding(t, map[string]any{"proof": "broken rule: \x00a"})}), format + "at '/findings/0/proof'"},
+		{"a NUL in the proof", report([]string{finding(t, map[string]any{"proof": "broken rule: a\x00b"})}), format + "at '/findings/0/proof'"},
+		{"closes that is no list", `{"reviewer":"code-reviewer","findings":[],"closes":{}}`, format + "at '/closes'"},
+		{"a close with no reason", report(nil, `{"id":"f1","state":"fixed"}`), format + "at '/closes/0'"},
+		{"a close with an empty reason", report(nil, `{"id":"f1","state":"fixed","reason":""}`), format + "at '/closes/0/reason'"},
+		{"a close with a reason of 1001 characters", report(nil, `{"id":"f1","state":"fixed","reason":"`+long(1001)+`"}`), format + "at '/closes/0/reason'"},
+		{"a close with a NUL in the reason", report(nil, `{"id":"f1","state":"fixed","reason":"a\u0000b"}`), format + "at '/closes/0/reason'"},
+		{"a close with the state accepted", report(nil, `{"id":"f1","state":"accepted","reason":"r"}`), format + "at '/closes/0/state'"},
+		{"a close with another member", report(nil, `{"id":"f1","state":"fixed","reason":"r","by":"x"}`), format + "at '/closes/0'"},
+		{"101 findings", report(many(101, finding(t, nil))), format + "at '/findings'"},
+		{"101 closes", report(nil, many(101, `{"id":"f1","state":"fixed","reason":"r"}`)...), format + "at '/closes'"},
+		{"other reviewer", `{"reviewer":"security-reviewer","findings":[]}`, "Reviewer code-reviewer wrote a report for the reviewer security-reviewer."},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := Parse("code-reviewer", []byte(c.text), nil)
+			if err == nil || !strings.HasPrefix(err.Error(), c.want) {
+				t.Fatalf("the error is %v, want a text that starts %q", err, c.want)
+			}
+			if strings.ContainsAny(err.Error(), "\n\r") {
+				t.Errorf("the error has more than one line: %q", err.Error())
+			}
+		})
+	}
+}
+
+func TestTheErrorOfAProofThatBreaksTheFormatHasNoPartOfTheProof(t *testing.T) {
+	// The key stands across the 300th character of the text that qory posts, so that a cut
+	// of the text would leave a part of it that no mask of a whole key matches.
+	const key = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz"
+	for _, proof := range []string{
+		"nothing: " + key,
+		"nothing: " + strings.Repeat("x", 200) + key + strings.Repeat("y", 100),
+		"broken rule:" + key,
+	} {
+		_, err := Parse("code-reviewer", []byte(report([]string{finding(t, map[string]any{"proof": proof})})), nil)
+		if err == nil {
+			t.Fatalf("the proof %q is valid", proof)
+		}
+		for _, part := range []string{"sk-ant", "abcdefghij", "xxxxxxxxxx", "yyyyyyyyyy"} {
+			if strings.Contains(err.Error(), part) {
+				t.Errorf("the error for the proof %q has %q: %s", proof, part, err)
+			}
+		}
+		if !strings.Contains(err.Error(), "at '/findings/0/proof': ") || !strings.Contains(err.Error(), "does not match pattern") ||
+			!strings.Contains(err.Error(), "<value>") {
+			t.Errorf("the error is %q, want the place, the pattern and <value> for the value", err)
+		}
+	}
+}
+
+// TestTheErrorOfAMemberNameThatCarriesASecretHasNoPartOfTheSecret is a report whose root
+// has a member of 250 "a" and then a secret of 37 characters. The error quotes the name,
+// and its cut of 300 characters falls inside the secret: the mask runs before the cut.
+func TestTheErrorOfAMemberNameThatCarriesASecretHasNoPartOfTheSecret(t *testing.T) {
+	const secret = "Zq7mK2vXr9TnB4wLp8Yc3HdJ6sFg1UeAo5Nit"
+	if len(secret) != 37 {
+		t.Fatalf("the secret has %d characters, want 37", len(secret))
+	}
+	data := `{"reviewer":"code-reviewer","findings":[],"` + strings.Repeat("a", 250) + secret + `":1}`
+	mask := strings.NewReplacer(secret, "***").Replace
+	_, err := Parse("code-reviewer", []byte(data), mask)
+	if err == nil || !strings.Contains(err.Error(), "additional properties") {
+		t.Fatalf("the error is %v, want one for an additional property", err)
+	}
+	for n := 4; n <= len(secret); n++ {
+		if strings.Contains(err.Error(), secret[:n]) {
+			t.Errorf("the error has the first %d characters of the secret: %s", n, err)
+			break
+		}
+	}
+	// Without the mask the cut leaves the start of the secret: the test would fail.
+	_, bare := Parse("code-reviewer", []byte(data), nil)
+	if bare == nil || !strings.Contains(bare.Error(), secret[:8]) {
+		t.Errorf("the error with no mask is %v, want one with the start of the secret", bare)
+	}
+}
+
+// many is n copies of text.
+func many(n int, text string) []string {
+	list := make([]string, n)
+	for i := range list {
+		list[i] = text
+	}
+	return list
+}
+
+func TestTheLimitsOfAReportIncludeTheirLastCharacter(t *testing.T) {
+	long := func(n int) string { return strings.Repeat("a", n) }
+	full := report(many(100, finding(t, nil)), many(100, `{"id":"f1","state":"fixed","reason":"r"}`)...)
+	if _, err := Parse("code-reviewer", []byte(full), nil); err != nil {
+		t.Errorf("100 findings and 100 closes: %v", err)
+	}
+	text := report([]string{finding(t, map[string]any{"file": long(300), "quote": long(2000)})},
+		`{"id":"f1","state":"dismissed","reason":"`+long(1000)+`"}`)
+	if _, err := Parse("code-reviewer", []byte(text), nil); err != nil {
+		t.Errorf("a file of 300 characters, a quote of 2000 and a reason of 1000: %v", err)
+	}
+}
+
+func TestReadReadsTheFileBelowItsRootAndNothingElse(t *testing.T) {
 	dir := t.TempDir()
-	roots.Store(t, dir)
-	t.Cleanup(func() { roots.Delete(t) })
-	return dir
-}
-
-// reportCount numbers the report files of the tests.
-var reportCount atomic.Int64
-
-// reportAt writes text as a report file below t's [reportsRoot] and returns its path
-// relative to that folder.
-func reportAt(t *testing.T, text string) string {
-	t.Helper()
-	rel := fmt.Sprintf("report-%d.json", reportCount.Add(1))
-	if err := os.WriteFile(filepath.Join(reportsRoot(t), rel), []byte(text), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return rel
-}
-
-// fixtureReport is the report of testdata that name has, copied below t's [reportsRoot].
-func fixtureReport(t *testing.T, name string) string {
-	t.Helper()
-	data, err := os.ReadFile(name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return reportAt(t, string(data))
-}
-
-// previous is the open findings of testdata/previous.json.
-func previous(t *testing.T) *OpenFindings {
-	t.Helper()
-	data, err := os.ReadFile(previousFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	o, err := ReadOpenFindings(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &o
-}
-
-var green = &Suite{State: SuitePassed}
-
-// decide decides r and checks the decision: the verdict and its points against
-// contracts/harness/v1/verdict.schema.json, and open-findings.json as ReadOpenFindings reads it.
-func decide(t *testing.T, r Round) Decision {
-	t.Helper()
-	d, err := Decide(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, err := runapi.VerdictBody(d.Verdict, d.Points, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc any
-	if err := json.Unmarshal(body, &doc); err != nil {
-		t.Fatal(err)
-	}
-	if err := verdictSchema(t).Validate(doc); err != nil {
-		t.Errorf("the verdict %s does not match the verdict schema: %v", body, err)
-	}
-	data, err := d.Open.JSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(data) > MaxOpenBytes {
-		t.Errorf("open-findings.json has %d bytes, more than %d", len(data), MaxOpenBytes)
-	}
-	back, err := ReadOpenFindings(data)
-	if err != nil {
-		t.Errorf("open-findings.json does not read back: %v\n%s", err, data)
-	}
-	if fmt.Sprint(back) != fmt.Sprint(d.Open) {
-		t.Errorf("open-findings.json reads back as %v, not %v", back, d.Open)
-	}
-	return d
-}
-
-var (
-	verdictOnce     sync.Once
-	verdictCompiled *jsonschema.Schema
-	verdictErr      error
-)
-
-// verdictSchema is qory's contract of the verdict, read from the repository.
-func verdictSchema(t *testing.T) *jsonschema.Schema {
-	t.Helper()
-	verdictOnce.Do(func() {
-		const url = "https://qory.dev/contracts/harness/v1/verdict.schema.json"
-		data, err := os.ReadFile("../../contracts/harness/v1/verdict.schema.json")
-		if err != nil {
-			verdictErr = err
-			return
-		}
-		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
-		if err != nil {
-			verdictErr = err
-			return
-		}
-		c := jsonschema.NewCompiler()
-		if err := c.AddResource(url, doc); err != nil {
-			verdictErr = err
-			return
-		}
-		verdictCompiled, verdictErr = c.Compile(url)
-	})
-	if verdictErr != nil {
-		t.Fatal(verdictErr)
-	}
-	return verdictCompiled
-}
-
-// ids is each finding's id and severity of open, as "f1 blocking", entry by entry.
-func ids(open OpenFindings) map[string][]string {
-	got := map[string][]string{}
-	for _, entry := range open.Reviewers {
-		got[entry.Reviewer] = []string{}
-		for _, f := range entry.Findings {
-			got[entry.Reviewer] = append(got[entry.Reviewer], f.ID+" "+f.Severity)
+	write := func(name, text string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
 		}
 	}
-	return got
-}
-
-func TestABlockingFindingRequestsChangesWithEveryOpenFinding(t *testing.T) {
-	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{
-		{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: fixtureReport(t, codeReport)},
-		{Name: "security-reviewer", Ended: Finished, Root: reportsRoot(t), Report: fixtureReport(t, securityReport)},
-	}})
-	if d.Verdict != ChangesRequested {
-		t.Fatalf("the verdict is %s", d.Verdict)
-	}
-	want := map[string][]string{
-		"code-reviewer":     {"f1 blocking", "f2 non-blocking"},
-		"security-reviewer": {"f3 non-blocking"},
-	}
-	if got := ids(d.Open); fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Errorf("the open findings are %v, want %v", got, want)
-	}
-	texts := []string{}
-	for _, p := range d.Points {
-		texts = append(texts, p.Text)
-		if p.Action != runapi.ActionRunAgain {
-			t.Errorf("the point %q has the action %s", p.Text, p.Action)
-		}
-	}
-	wantTexts := []string{"A batch of exactly the limit loses its last item.",
-		"The comment of Batch restates its name.", "The token is read on each call."}
-	if !slices.Equal(texts, wantTexts) {
-		t.Errorf("the points are %q, want %q", texts, wantTexts)
-	}
-	if d.Open.Round != 1 || d.NextID != 4 {
-		t.Errorf("round %d, next id %d", d.Open.Round, d.NextID)
-	}
-	if data, _ := d.Open.JSON(); !bytes.Contains(data, []byte(`"quote": "if count >= limit {"`)) {
-		t.Errorf("open-findings.json escapes the quote:\n%s", data)
-	}
-	kept := d.Open.Reviewers[0].Findings[0]
-	if kept.Quote != "if count >= limit {" || kept.File != "internal/batch/batch.go" || kept.Line != 12 ||
-		!strings.HasPrefix(kept.Proof, "failing check:") {
-		t.Errorf("the finding lost the reviewer's members: %+v", kept)
-	}
-}
-
-func TestOnlyNonBlockingFindingsPass(t *testing.T) {
-	d := decide(t, Round{Number: 2, Suite: green, Reviewers: []Reviewer{
-		{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]}`)},
-		{Name: "security-reviewer", Ended: Finished, Root: reportsRoot(t), Report: fixtureReport(t, securityReport)},
-	}})
-	if d.Verdict != Passed || d.Points != nil {
-		t.Fatalf("the verdict is %s with points %v", d.Verdict, d.Points)
-	}
-	// The non-blocking finding stays in the round's open findings, and is not fixed.
-	if got := ids(d.Open); fmt.Sprint(got) != fmt.Sprint(map[string][]string{
-		"code-reviewer": {}, "security-reviewer": {"f1 non-blocking"},
-	}) {
-		t.Errorf("the open findings are %v", got)
-	}
-}
-
-func TestAReviewerWithNoValidReportIsABlockingFinding(t *testing.T) {
-	dir := reportsRoot(t)
-	if err := os.Symlink(fixture(t, codeReport), filepath.Join(dir, "link.json")); err != nil {
+	write("good.json", report([]string{finding(t, nil)}))
+	write("big.json", `{"reviewer":"code-reviewer","findings":[],"x":"`+strings.Repeat("a", 1<<20)+`"}`)
+	if err := os.Symlink(filepath.Join(dir, "good.json"), filepath.Join(dir, "link.json")); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir(filepath.Join(dir, "folder"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	finding := `{"severity":"blocking","quote":"q","problem":"p","fix":"f","proof":"failing input: x","point":"p"}`
-	cases := []struct {
-		name  string
-		r     Reviewer
-		point string
-	}{
-		{"failed", Reviewer{Ended: Failed, Root: reportsRoot(t), Report: fixtureReport(t, codeReport)}, "Reviewer code-reviewer wrote no report: its session failed."},
-		{"timed out", Reviewer{Ended: TimedOut}, "Reviewer code-reviewer wrote no report: its session reached its time limit."},
-		{"missing", Reviewer{Root: reportsRoot(t), Report: "none.json"}, "Reviewer code-reviewer wrote no report."},
-		{"link", Reviewer{Root: reportsRoot(t), Report: "link.json"}, "Reviewer code-reviewer wrote no valid report: the report file is a link, or is below a folder that is a link."},
-		{"folder", Reviewer{Root: reportsRoot(t), Report: "folder"}, "Reviewer code-reviewer wrote no valid report: the report file is no regular file."},
-		{"not JSON", Reviewer{Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":`)}, "Reviewer code-reviewer wrote a report that is not one JSON object: unexpected EOF."},
-		{"two values", Reviewer{Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]} {}`)}, "Reviewer code-reviewer wrote a report that is not one JSON object: the file continues after the JSON value."},
-		{"not UTF-8", Reviewer{Root: reportsRoot(t), Report: reportAt(t, "{\"reviewer\":\"\xff\"}")}, "Reviewer code-reviewer wrote a report that is not UTF-8 text."},
-		{"result word", Reviewer{Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[],"result":"clean"}`)}, "Reviewer code-reviewer wrote a report that does not match the report format: "},
-		{"bad severity", Reviewer{Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[`+strings.Replace(finding, `"blocking"`, `"minor"`, 1)+`]}`)}, "Reviewer code-reviewer wrote a report that does not match the report format: at '/findings/0/severity'"},
-		{"blocking on a broken rule", Reviewer{Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[`+strings.Replace(finding, "failing input", "broken rule", 1)+`]}`)}, "Reviewer code-reviewer wrote a report that does not match the report format: "},
-		{"other reviewer", Reviewer{Root: reportsRoot(t), Report: fixtureReport(t, securityReport)}, "Reviewer code-reviewer wrote a report for the reviewer security-reviewer."},
+	r, err := Read(dir, "good.json", "code-reviewer", nil)
+	if err != nil || len(r.Findings) != 1 {
+		t.Fatalf("the report is %+v, the error %v", r, err)
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			c.r.Name = "code-reviewer"
-			if c.r.Ended == 0 {
-				c.r.Ended = Finished
-			}
-			d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{c.r}})
-			if d.Verdict != ChangesRequested {
-				t.Fatalf("the verdict is %s", d.Verdict)
-			}
-			got := d.Open.Reviewers[0].Findings
-			if len(got) != 1 || got[0].Severity != Blocking || got[0].ID != "f1" {
-				t.Fatalf("the findings are %+v", got)
-			}
-			if !strings.HasPrefix(got[0].Point, c.point) || got[0].Fix != "" {
-				t.Errorf("the finding is %+v, want a point that starts %q", got[0], c.point)
-			}
-			if len(d.Points) != 1 || d.Points[0].Text != got[0].Point {
-				t.Errorf("the points are %+v", d.Points)
-			}
-		})
-	}
-}
-
-func TestTheSuiteDecidesBesideTheReports(t *testing.T) {
-	clean := func(t *testing.T) []Reviewer {
-		return []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]}`)}}
-	}
-	cases := []struct {
-		name    string
-		suite   *Suite
-		verdict string
-		point   string
-	}{
-		{"red", &Suite{State: SuiteFailed, Point: "The full suite failed: 2 of 140 tests failed."}, ChangesRequested, "The full suite failed: 2 of 140 tests failed."},
-		{"red with no point", &Suite{State: SuiteFailed}, ChangesRequested, "The full suite failed."},
-		{"not run, the agent can fix", &Suite{State: SuiteNotRun, Point: "The full suite did not start: the build plan has no full row."}, ChangesRequested, "The full suite did not start: the build plan has no full row."},
-		{"not run, the agent cannot fix", &Suite{State: SuiteNotRun, Point: "The full suite did not start: git could not read HEAD of the workspace.", AgentCannotFix: true}, Escalate, "The full suite did not start: git could not read HEAD of the workspace."},
-		{"red, the agent cannot fix", &Suite{State: SuiteFailed, AgentCannotFix: true}, Escalate, "The full suite failed."},
-		{"no result", nil, Escalate, "The full suite has no result for the reviewed commit."},
-		{"an unknown state", &Suite{State: "running"}, Escalate, "The full suite did not run."},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			d := decide(t, Round{Number: 1, Suite: c.suite, Reviewers: clean(t)})
-			if d.Verdict != c.verdict {
-				t.Fatalf("the verdict is %s, want %s", d.Verdict, c.verdict)
-			}
-			first := d.Open.Reviewers[0]
-			if first.Reviewer != SuiteEntry || len(first.Findings) != 1 || first.Findings[0].Severity != Blocking ||
-				first.Findings[0].Point != c.point {
-				t.Errorf("the first entry is %+v", first)
-			}
-			if len(d.Points) != 1 || d.Points[0].Text != c.point {
-				t.Errorf("the points are %+v", d.Points)
-			}
-		})
-	}
-	// A cause the agent cannot fix escalates over a reviewer's blocking finding too, with
-	// the suite's point first.
-	d := decide(t, Round{Number: 1, Suite: &Suite{State: SuiteNotRun, AgentCannotFix: true},
-		Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: fixtureReport(t, codeReport)}}})
-	if d.Verdict != Escalate || len(d.Points) != 3 || d.Points[0].Text != "The full suite did not run." {
-		t.Errorf("the verdict is %s with %+v", d.Verdict, d.Points)
-	}
-}
-
-func TestIDsCountAcrossTheRun(t *testing.T) {
-	again := func(id string) string {
-		return `{"id":"` + id + `","severity":"non-blocking","quote":"q","problem":"p","fix":"f","proof":"broken rule: r","point":"` + id + `"}`
-	}
-	code := reportAt(t, `{"reviewer":"code-reviewer","findings":[`+again("f1")+`,`+again("f9")+`,`+again("f1")+`]}`)
-	security := reportAt(t, `{"reviewer":"security-reviewer","findings":[`+again("f2")+`,`+again("f1")+`]}`)
-	d := decide(t, Round{Number: 2, NextID: 5, Suite: green, Previous: previous(t), Reviewers: []Reviewer{
-		{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: code},
-		{Name: "security-reviewer", Ended: Finished, Root: reportsRoot(t), Report: security},
-	}})
-	// f1 and f2 repeat; f9 is no id of the round before, and the second f1 repeats one this
-	// round has, so each gets a new id from NextID on.
-	want := map[string][]string{
-		"code-reviewer":     {"f1 non-blocking", "f5 non-blocking", "f6 non-blocking"},
-		"security-reviewer": {"f2 non-blocking", "f7 non-blocking"},
-	}
-	if got := ids(d.Open); fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Errorf("the ids are %v, want %v", got, want)
-	}
-	if d.NextID != 8 || d.Verdict != Passed {
-		t.Errorf("next id %d, verdict %s", d.NextID, d.Verdict)
-	}
-	// With no NextID, the ids start after the highest of the round before.
-	d = decide(t, Round{Number: 2, Suite: green, Previous: previous(t), Reviewers: []Reviewer{
-		{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: fixtureReport(t, codeReport)},
-	}})
-	if got := ids(d.Open)["code-reviewer"]; !slices.Equal(got, []string{"f3 blocking", "f4 non-blocking"}) {
-		t.Errorf("the ids are %v", got)
-	}
-}
-
-func TestMoreThanTwentyFindingsKeepTheVerdictValid(t *testing.T) {
-	var findings []string
-	for i := range 25 {
-		severity := "non-blocking"
-		if i%5 == 0 {
-			severity = "blocking"
-		}
-		findings = append(findings, fmt.Sprintf(`{"severity":%q,"quote":"q","problem":"p","fix":"f","proof":"failing input: x","point":"point %d with a space"}`, severity, i+1))
-	}
-	report := reportAt(t, `{"reviewer":"code-reviewer","findings":[`+strings.Join(findings, ",")+`]}`)
-	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: report}}})
-	if len(d.Points) != 20 {
-		t.Fatalf("the verdict has %d points", len(d.Points))
-	}
-	// The 5 blocking findings come first, and the last point states the 6 that no point lists.
-	if d.Points[0].Text != "point 1 with a space" || d.Points[4].Text != "point 21 with a space" {
-		t.Errorf("the first points are %+v", d.Points[:5])
-	}
-	if d.Points[19].Text != "The review has 6 more open findings than these points list." {
-		t.Errorf("the last point is %q", d.Points[19].Text)
-	}
-	if got := len(d.Open.Reviewers[0].Findings); got != 25 {
-		t.Errorf("open-findings.json has %d findings", got)
-	}
-}
-
-func TestDecideStopsOnARoundMadeWrong(t *testing.T) {
-	// A name of 64 characters, the most, so that line 1 of each error stays within 100.
-	long := strings.Repeat("r", 64)
-	good := Reviewer{Name: long, Ended: Finished, Root: "/r", Report: "report.json"}
-	for name, r := range map[string]Round{
-		"round 0":       {Number: 0, Suite: green},
-		"no reviewer":   {Number: 1, Suite: green},
-		"a bad name":    {Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "Code Reviewer", Ended: Finished}}},
-		"the suite's":   {Number: 1, Suite: green, Reviewers: []Reviewer{{Name: SuiteEntry, Ended: Finished}}},
-		"a name twice":  {Number: 1, Suite: green, Reviewers: []Reviewer{good, good}},
-		"no ending set": {Number: 1, Suite: green, Reviewers: []Reviewer{{Name: long}}},
+	for name, c := range map[string]struct{ rel, want string }{
+		"missing":                  {"none.json", "Reviewer code-reviewer wrote no report."},
+		"link":                     {"link.json", "Reviewer code-reviewer wrote no valid report: the report file is a link, or is below a folder that is a link."},
+		"folder":                   {"folder", "Reviewer code-reviewer wrote no valid report: the report file is no regular file."},
+		"big":                      {"big.json", "Reviewer code-reviewer wrote no valid report: the report file has more than 1048576 bytes."},
+		"a path out of the folder": {"../good.json", "Reviewer code-reviewer wrote no valid report: the report file is no clean path below an absolute, clean folder."},
 	} {
-		_, err := Decide(r)
-		if err == nil {
-			t.Errorf("%s: no error", name)
-			continue
-		}
-		if first := strings.SplitN(err.Error(), "\n", 2)[0]; len(first) > 100 {
-			t.Errorf("%s: line 1 has %d characters: %q", name, len(first), first)
-		}
+		t.Run(name, func(t *testing.T) {
+			_, err := Read(dir, c.rel, "code-reviewer", nil)
+			if err == nil || err.Error() != c.want {
+				t.Errorf("the error is %v, want %q", err, c.want)
+			}
+		})
+	}
+}
+
+func TestCheckRefusesWhatIsNoFindingOfTheReviewer(t *testing.T) {
+	owned := map[string]bool{"f1": true, "f2": true, "f3": true}
+	repeat := func(id string) string { return finding(t, map[string]any{"id": id}) }
+	closeOf := func(id string) string { return `{"id":"` + id + `","state":"fixed","reason":"r"}` }
+	for name, c := range map[string]struct {
+		text string
+		want string
+	}{
+		"new findings only":             {report([]string{repeat("f1"), finding(t, nil)}), ""},
+		"a repeat and a close":          {report([]string{repeat("f1")}, closeOf("f2"), closeOf("f3")), ""},
+		"no finding at all":             {report(nil), ""},
+		"a repeat of another's":         {report([]string{repeat("f9")}), "Reviewer code-reviewer's report repeats f9, which is no finding of that reviewer."},
+		"a close of another's":          {report(nil, closeOf("f9")), "Reviewer code-reviewer's report closes f9, which is no finding of that reviewer."},
+		"the same id repeated, closed":  {report([]string{repeat("f3")}, closeOf("f3")), "Reviewer code-reviewer's report both repeats and closes f3."},
+		"an id repeated twice":          {report([]string{repeat("f1"), repeat("f1")}), "Reviewer code-reviewer's report repeats f1 more than once."},
+		"an id closed twice":            {report(nil, closeOf("f2"), closeOf("f2")), "Reviewer code-reviewer's report closes f2 more than once."},
+		"a close of a missing id first": {report([]string{repeat("f1")}, closeOf("f9"), closeOf("f1")), "Reviewer code-reviewer's report closes f9, which is no finding of that reviewer."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, err := Parse("code-reviewer", []byte(c.text), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := ""
+			if err := r.Check(owned); err != nil {
+				got = err.Error()
+			}
+			if got != c.want {
+				t.Errorf("the error is %q, want %q", got, c.want)
+			}
+		})
+	}
+	// A report with an id and an empty set of owned ids is invalid.
+	r, err := Parse("code-reviewer", []byte(report([]string{repeat("f1")})), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Check(nil) == nil {
+		t.Error("a repeat of f1 with no owned id is valid")
 	}
 }
 
 func TestAPointOfSpacesIsNoValidReport(t *testing.T) {
 	// The format stops a point of ASCII spaces and a point with a character that a line
-	// has no room for, such as a tab or U+200B. Decide stops one of Unicode spaces or of
+	// has no room for, such as a tab or U+200B. Parse stops one of Unicode spaces or of
 	// characters that the harness's plain() removes and the format passes.
 	const format, trimmed = "does not match pattern", "the point has no character that shows"
 	for name, c := range map[string]struct{ point, cause string }{
-		"a space": {" ", format}, "a tab": {"\t", format}, "U+00A0": {"\u00a0", trimmed}, "U+00A0 and a space": {"\u00a0 ", trimmed},
-		"U+200B": {"\u200b", format}, "U+3164": {"\u3164", trimmed}, "U+034F": {"\u034f", trimmed},
-		"U+FEFF": {"\ufeff", format}, "U+200B, U+3164, U+034F and U+FEFF": {"\u200b \u3164\u034f\ufeff", format},
-		"U+3164 and U+034F": {"\u3164\u034f", trimmed},
+		"a space": {" ", format}, "a tab": {"\t", format}, "U+00A0": {"\u00A0", trimmed}, "U+00A0 and a space": {"\u00A0 ", trimmed},
+		"U+200B": {"\u200B", format}, "U+3164": {"\u3164", trimmed}, "U+034F": {"\u034F", trimmed},
+		"U+FEFF": {"\uFEFF", format}, "U+200B, U+3164, U+034F and U+FEFF": {"\u200B \u3164\u034F\uFEFF", format},
+		"U+3164 and U+034F": {"\u3164\u034F", trimmed},
 	} {
-		point := c.point
 		t.Run(name, func(t *testing.T) {
-			finding, err := json.Marshal(map[string]string{"severity": "non-blocking", "quote": "q", "problem": "p",
-				"fix": "f", "proof": "broken rule: r", "point": point})
-			if err != nil {
-				t.Fatal(err)
-			}
-			report := reportAt(t, `{"reviewer":"code-reviewer","findings":[`+string(finding)+`]}`)
-			d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: report}}})
-			got := d.Open.Reviewers[0].Findings
+			_, err := Parse("code-reviewer", []byte(report([]string{finding(t, map[string]any{"point": c.point})})), nil)
 			want := "Reviewer code-reviewer wrote a report that does not match the report format: at '/findings/0/point'"
-			if d.Verdict != ChangesRequested || len(got) != 1 || got[0].Severity != Blocking ||
-				!strings.HasPrefix(got[0].Point, want) || !strings.Contains(got[0].Point, c.cause) {
-				t.Errorf("the verdict is %s with %+v", d.Verdict, got)
+			if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.Contains(err.Error(), c.cause) {
+				t.Errorf("the error is %v", err)
 			}
 		})
 	}
 	// The spaces around a point's text go.
-	finding := `{"severity":"non-blocking","quote":"q","problem":"p","fix":"f","proof":"broken rule: r","point":"\u00a0 one point \u00a0"}`
-	report := reportAt(t, `{"reviewer":"code-reviewer","findings":[`+finding+`]}`)
-	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: report}}})
-	if got := d.Open.Reviewers[0].Findings; len(got) != 1 || got[0].Point != "one point" {
-		t.Errorf("the findings are %+v", got)
+	r, err := Parse("code-reviewer", []byte(report([]string{finding(t, map[string]any{"point": "\u00A0 one point \u00A0"})})), nil)
+	if err != nil || len(r.Findings) != 1 || r.Findings[0].Point != "one point" {
+		t.Errorf("the report is %+v, the error %v", r, err)
 	}
 }
 
@@ -444,7 +329,6 @@ func TestAPointOfSpacesIsNoValidReport(t *testing.T) {
 // an emoji sequence pass, and that one with U+200B and one with the tag character U+E0041
 // fail the report format, as any text that is not one line of text does.
 func TestAPointHasTheCharacterRuleOfALine(t *testing.T) {
-	const format = "Reviewer code-reviewer wrote a report that does not match the report format: at '/findings/0/point'"
 	for _, c := range []struct {
 		name, point string
 		valid       bool
@@ -455,153 +339,20 @@ func TestAPointHasTheCharacterRuleOfALine(t *testing.T) {
 		{"U+E0041", "Fix\U000E0041it", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			finding, err := json.Marshal(map[string]string{"severity": "non-blocking", "quote": "q", "problem": "p",
-				"fix": "f", "proof": "broken rule: r", "point": c.point})
-			if err != nil {
-				t.Fatal(err)
+			r, err := Parse("code-reviewer", []byte(report([]string{finding(t, map[string]any{"point": c.point})})), nil)
+			if c.valid && (err != nil || r.Findings[0].Point != c.point) {
+				t.Errorf("the report is %+v, the error %v", r, err)
 			}
-			report := reportAt(t, `{"reviewer":"code-reviewer","findings":[`+string(finding)+`]}`)
-			d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: report}}})
-			got := d.Open.Reviewers[0].Findings
-			if len(got) != 1 {
-				t.Fatalf("the findings are %+v", got)
-			}
-			if c.valid && (got[0].Severity != NonBlocking || got[0].Point != c.point) {
-				t.Errorf("the finding is %+v, want the point %q", got[0], c.point)
-			}
-			if !c.valid && (got[0].Severity != Blocking || !strings.HasPrefix(got[0].Point, format)) {
-				t.Errorf("the finding is %+v, want a report that does not match the format", got[0])
+			if !c.valid && (err == nil || !strings.Contains(err.Error(), "at '/findings/0/point'")) {
+				t.Errorf("the error is %v, want a point that breaks the format", err)
 			}
 		})
 	}
 }
 
-// bigFinding is a finding of a report with each text at its most characters, each of two
-// bytes in UTF-8.
-func bigFinding(t *testing.T, severity string, number int) string {
-	t.Helper()
-	long := func(n int) string { return strings.Repeat("ü", n) }
-	proof := "failing input: " + long(985)
-	data, err := json.Marshal(map[string]string{"severity": severity, "quote": long(2000), "problem": long(2000),
-		"fix": long(2000), "proof": proof, "point": fmt.Sprintf("point %d %s", number, long(480))})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(data)
-}
-
-func TestOpenFindingsFitTheHarnessRead(t *testing.T) {
-	// code-reviewer has 2 blocking findings and 58 non-blocking ones, and security-reviewer
-	// 40 blocking ones: about 1.5 MB of findings, for a file of at most 256 KiB.
-	var code, security []string
-	for i := range 60 {
-		severity := NonBlocking
-		if i == 0 || i == 35 {
-			severity = Blocking
-		}
-		code = append(code, bigFinding(t, severity, i+1))
-	}
-	for i := range 40 {
-		security = append(security, bigFinding(t, Blocking, 61+i))
-	}
-	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{
-		{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[`+strings.Join(code, ",")+`]}`)},
-		{Name: "security-reviewer", Ended: Finished, Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"security-reviewer","findings":[`+strings.Join(security, ",")+`]}`)},
-	}})
-	// The verdict's points count every finding: 42 blocking, then 58 non-blocking.
-	if d.Verdict != ChangesRequested || len(d.Points) != 20 ||
-		d.Points[19].Text != "The review has 81 more open findings than these points list." {
-		t.Fatalf("the verdict is %s with %d points", d.Verdict, len(d.Points))
-	}
-	data, err := d.Open.JSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(data) < MaxOpenBytes/2 {
-		t.Errorf("open-findings.json has %d bytes, far below %d", len(data), MaxOpenBytes)
-	}
-	// The blocking findings stay first: code-reviewer's 2, then security-reviewer's. Each
-	// entry ends with the finding of qory's that states how many of its findings are out,
-	// blocking where a blocking finding is out.
-	codeKept, securityKept := d.Open.Reviewers[0].Findings, d.Open.Reviewers[1].Findings
-	if len(codeKept) != 3 || codeKept[0].ID != "f1" || codeKept[1].ID != "f36" {
-		t.Fatalf("code-reviewer's findings are %v", ids(d.Open)["code-reviewer"])
-	}
-	kept := len(securityKept) - 1
-	if kept < 5 {
-		t.Fatalf("security-reviewer has %d findings in the file", kept)
-	}
-	for _, c := range []struct {
-		last     Finding
-		severity string
-		point    string
-	}{
-		{codeKept[2], NonBlocking, "The review has 58 more open findings of code-reviewer than this file lists."},
-		{securityKept[kept], Blocking, fmt.Sprintf("The review has %d more open findings of security-reviewer than this file lists.", 40-kept)},
-	} {
-		if c.last.Severity != c.severity || c.last.Point != c.point || c.last.Quote != "" {
-			t.Errorf("the last finding is %+v, want %s %q", c.last, c.severity, c.point)
-		}
-	}
-	// The findings out keep their ids, so the findings of qory's come after them.
-	if codeKept[2].ID != "f101" || securityKept[kept].ID != "f102" || d.NextID != 103 {
-		t.Errorf("the ids of qory's findings are %s and %s, next id %d", codeKept[2].ID, securityKept[kept].ID, d.NextID)
-	}
-}
-
-// TestTheCutKeepsAFileOfTheLimit is the edge of the cut: the harness's findings open reads
-// a file of at most MaxOpenBytes, so a file of exactly that size stays whole, and one byte
-// more cuts it.
-func TestTheCutKeepsAFileOfTheLimit(t *testing.T) {
-	sized := func(size int) OpenFindings {
-		o := OpenFindings{Round: 1, Reviewers: []ReviewerFindings{{Reviewer: "code-reviewer", Findings: []Finding{
-			{ID: "f1", Severity: NonBlocking, Point: "p", Problem: "a"},
-		}}}}
-		data, err := o.JSON()
-		if err != nil {
-			t.Fatal(err)
-		}
-		o.Reviewers[0].Findings[0].Problem = strings.Repeat("a", 1+size-len(data))
-		if data, _ := o.JSON(); len(data) != size {
-			t.Fatalf("the file has %d bytes, not %d", len(data), size)
-		}
-		return o
-	}
-	whole := sized(MaxOpenBytes)
-	got, err := cutToFit(whole, newNumbering(2, nil))
-	if err != nil || fmt.Sprint(got) != fmt.Sprint(whole) {
-		t.Errorf("a file of %d bytes is cut: %v", MaxOpenBytes, err)
-	}
-	got, err = cutToFit(sized(MaxOpenBytes+1), newNumbering(2, nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f := got.Reviewers[0].Findings; len(f) != 1 || f[0].ID != "f2" ||
-		f[0].Point != "The review has 1 more open finding of code-reviewer than this file lists." {
-		t.Errorf("a file of %d bytes is cut to %+v", MaxOpenBytes+1, f)
-	}
-}
-
-func TestAHiddenPointHasQorysTextInTheVerdict(t *testing.T) {
-	for _, point := range []string{"\u200b", "\u3164", "\u034f", "\ufeff"} {
-		got := points(OpenFindings{Round: 1, Reviewers: []ReviewerFindings{{Reviewer: "code-reviewer", Findings: []Finding{
-			{ID: "f1", Severity: Blocking, Point: point},
-		}}}})
-		if len(got) != 1 || got[0].Text != "A finding of code-reviewer has a point with no readable text." {
-			t.Errorf("%U: the points are %+v", []rune(point)[0], got)
-		}
-	}
-	// A suite's point of hidden characters alone gets qory's text.
-	d := decide(t, Round{Number: 1, Suite: &Suite{State: SuiteFailed, Point: "\u200b\u3164"},
-		Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished, Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[]}`)}}})
-	if p := d.Open.Reviewers[0].Findings[0].Point; p != "The full suite failed." {
-		t.Errorf("the suite's point is %q", p)
-	}
-}
-
 // TestPlainLineLeavesNoStoppedCharacter: for every code point that is not a surrogate, the
-// line that plainLine makes of a text with it has no character that the verdict's $defs line
-// stops, so the point passes the verdict schema.
+// line that plainLine makes of a text with it has no character that the verdict's $defs
+// line stops, so the text passes the verdict schema.
 func TestPlainLineLeavesNoStoppedCharacter(t *testing.T) {
 	data, err := os.ReadFile("../../contracts/harness/v1/verdict.schema.json")
 	if err != nil {
@@ -624,7 +375,7 @@ func TestPlainLineLeavesNoStoppedCharacter(t *testing.T) {
 		if r >= 0xd800 && r <= 0xdfff {
 			continue
 		}
-		if got := plainLine("a"+string(r)+"b", 500); line.Validate(got) != nil {
+		if got := plainLine("a"+string(r)+"b", 500, nil); line.Validate(got) != nil {
 			t.Errorf("%U: plainLine leaves %q, which the verdict line stops", r, got)
 		}
 	}
@@ -632,8 +383,8 @@ func TestPlainLineLeavesNoStoppedCharacter(t *testing.T) {
 
 func TestHarnessPlainRemovesWhatTheHarnessRemoves(t *testing.T) {
 	for in, want := range map[string]string{
-		" a\u200bb\u3164c\u034fd\ufeff ": "abcd", "\u2028x\u2029": "x", "a\tb": "a b",
-		"\ufe0f\U000e0041\u00ad\u202e\ufffc": "", "\u00a0point\u00a0": "point",
+		" a\u200Bb\u3164c\u034Fd\uFEFF ": "abcd", "\u2028x\u2029": "x", "a\tb": "a b",
+		"\uFE0F\U000e0041\u00AD\u202E\uFFFC": "", "\u00A0point\u00A0": "point",
 	} {
 		if got := harnessPlain(in); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)
@@ -663,47 +414,11 @@ func TestHarnessPlainRemovesEachRefusedCharacterInsideText(t *testing.T) {
 		}
 	}
 	// A point of refused characters alone is empty. U+2028 and U+2029 are also spaces to
-	// strings.TrimSpace, and the others are Cf, so here refused() is not alone in emptying it.
-	finding := `{"severity":"non-blocking","quote":"q","problem":"p","fix":"f","proof":"broken rule: r","point":"\u2028\u202e\u2029"}`
-	d := decide(t, Round{Number: 1, Suite: green, Reviewers: []Reviewer{{Name: "code-reviewer", Ended: Finished,
-		Root: reportsRoot(t), Report: reportAt(t, `{"reviewer":"code-reviewer","findings":[`+finding+`]}`)}}})
-	if got := d.Open.Reviewers[0].Findings; len(got) != 1 || got[0].Severity != Blocking {
-		t.Errorf("a point of refused characters: %+v", got)
-	}
-}
-
-func TestMoreFindingsIsSingularForOne(t *testing.T) {
-	for n, want := range map[int]string{1: "1 more open finding", 2: "2 more open findings", 81: "81 more open findings"} {
-		if got := moreFindings(n); got != want {
-			t.Errorf("%d: %q, want %q", n, got, want)
-		}
-	}
-}
-
-func TestReadOpenFindingsChecksTheFile(t *testing.T) {
-	for _, c := range []struct{ text, want string }{
-		{`{"round":0,"reviewers":[]}`, "has no round"},
-		{`{"round":1}`, "has no list reviewers"},
-		{`{"round":1,"reviewers":[{"reviewer":"Bad","findings":[]}]}`, "no reviewer name"},
-		{`{"round":1,"reviewers":[{"reviewer":"r"}]}`, "no list findings"},
-		{`{"round":1,"reviewers":[{"reviewer":"r","findings":[{"id":"x","severity":"blocking","point":"p"}]}]}`, "no id of the form"},
-		{`{"round":1,"reviewers":[{"reviewer":"r","findings":[{"id":"f1","severity":"minor","point":"p"}]}]}`, "a severity"},
-		{`{"round":1,"reviewers":[{"reviewer":"r","findings":[{"id":"f1","severity":"blocking","point":" "}]}]}`, "an empty point"},
-		{`{"round":1,"reviewers":[{"reviewer":"r","findings":[{"id":"f1","severity":"blocking","point":"\u200b"}]}]}`, "an empty point"},
-		{`{"round":1,"reviewers":[{"reviewer":"r","findings":[{"id":"f1","severity":"blocking","point":"\u3164"}]}]}`, "an empty point"},
-		{`{"round":1,"reviewers":[{"reviewer":"r","findings":[{"id":"f1","severity":"blocking","point":"\u034f"}]}]}`, "an empty point"},
-		{`{"round":1,"reviewers":[{"reviewer":"r","findings":[{"id":"f1","severity":"blocking","point":"\ufeff"}]}]}`, "an empty point"},
-		{`{"round":1,"reviewers":[],"more":1}`, "is not one JSON object"},
-		{`{"round":1,"reviewers":[]} []`, "continues after"},
-	} {
-		_, err := ReadOpenFindings([]byte(c.text))
-		if err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s: the error is %v, want %q", c.text, err, c.want)
-			continue
-		}
-		if !strings.HasPrefix(err.Error(), "Give the open-findings.json that qory wrote for the round before.\n") {
-			t.Errorf("%s: the error does not start with its fix: %v", c.text, err)
-		}
+	// strings.TrimSpace, and the others are Cf, so here refused() is not alone in emptying
+	// it.
+	_, err := Parse("code-reviewer", []byte(report([]string{finding(t, map[string]any{"point": "\u2028\u202E\u2029"})})), nil)
+	if err == nil {
+		t.Error("a point of refused characters is valid")
 	}
 }
 
@@ -727,10 +442,10 @@ func TestEmbeddedSchemaIsTheContract(t *testing.T) {
 	}
 }
 
-// TestTheDecisionLinksNothingOfForager holds the package apart from Forager, so a program
-// that runs no Forager session can run the decision: the test binary, which links the
-// package and its tests, has no module of Forager.
-func TestTheDecisionLinksNothingOfForager(t *testing.T) {
+// TestTheReaderLinksNothingOfForager holds the package apart from Forager, so a program
+// that runs no Forager session can read a report: the test binary, which links the package
+// and its tests, has no module of Forager.
+func TestTheReaderLinksNothingOfForager(t *testing.T) {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		t.Skip("the test binary has no build information")

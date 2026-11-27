@@ -1695,6 +1695,78 @@ func TestRunVerdictOutsideARunKeepsTheVerdict(t *testing.T) {
 	wantFile(t, filepath.Join(root, ".qory", "artifacts", "verdict", "main", "v2", "verdict.json"), verdictPointsBody)
 }
 
+// changesRequestedPoints is a file of --points for changes-requested: two points to run
+// again, the second with a fix, and changesRequestedBody is the verdict as qory sends and
+// keeps it.
+const (
+	changesRequestedPoints = `[
+  {"text": "The checks script failed on the spec's rule a < b & c.", "action": "run_again"},
+  {"text": "The spec links to a page that does not exist.", "action": "run_again", "fix": "Fix the link to /docs/start in the spec."}
+]
+`
+	changesRequestedBody = `{"verdict":"changes-requested","points":[` +
+		`{"text":"The checks script failed on the spec's rule a < b & c.","action":"run_again"},` +
+		`{"text":"The spec links to a page that does not exist.","action":"run_again","fix":"Fix the link to /docs/start in the spec."}]}`
+)
+
+func TestRunVerdictChangesRequestedStoresItsPointsInARun(t *testing.T) {
+	root := inCheckout(t)
+	server := startRunAPI(t)
+	server.response = `{"version":1,"artifact":{"type":"verdict","name":"main","version":{"id":"av_4","number":4}}}`
+
+	out, err := run(t, "run", "verdict", "changes-requested", "--points", writePoints(t, root, changesRequestedPoints))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if out != "Stored the verdict changes-requested as version 4.\n" {
+		t.Errorf("out = %q", out)
+	}
+
+	if want := []string{changesRequestedBody}; !slices.Equal(server.verdicts, want) {
+		t.Errorf("bodies = %q, want %q", server.verdicts, want)
+	}
+}
+
+func TestRunVerdictChangesRequestedKeepsItsPointsOutsideARun(t *testing.T) {
+	root := inCheckout(t)
+	t.Setenv("QORY_RUN_API", "")
+
+	out, err := run(t, "run", "verdict", "changes-requested", "--points", writePoints(t, root, changesRequestedPoints))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if out != "Verdict changes-requested, kept in .qory/artifacts/verdict/main/v1/; nothing acts on it outside a run.\n" {
+		t.Errorf("out = %q", out)
+	}
+
+	wantFile(t, filepath.Join(root, ".qory", "artifacts", "verdict", "main", "v1", "verdict.json"), changesRequestedBody)
+}
+
+// TestRunVerdictChangesRequestedRefusesAnAnswerPoint shows line 2 of the error for a point
+// whose action is not run_again: the point's number and its action.
+func TestRunVerdictChangesRequestedRefusesAnAnswerPoint(t *testing.T) {
+	root := inCheckout(t)
+	file := writePoints(t, root, verdictPoints)
+
+	for _, inRun := range []bool{true, false} {
+		var server *runAPIServer
+		if inRun {
+			server = startRunAPI(t)
+		} else {
+			t.Setenv("QORY_RUN_API", "")
+		}
+
+		_, err := run(t, "run", "verdict", "changes-requested", "--points", file)
+		wantExit(t, err, cmd.ExitInput, "Set the action of each point of --points to run_again: changes-requested runs the round again.\n  Point 1 has the action \"answer\".")
+
+		if server != nil && len(server.verdicts) != 0 {
+			t.Errorf("sent %q", server.verdicts)
+		}
+	}
+}
+
 // TestRunVerdictChecksItsArguments stops each wrong command line or file of --points with
 // exit 2 and the error, whose line starts with the fix, before anything is sent: in a
 // run, no verdict reaches the run API, and outside a run, the store keeps none.
@@ -1726,8 +1798,13 @@ func TestRunVerdictChecksItsArguments(t *testing.T) {
 		{[]string{"run", "verdict", "approve-spend"}, `Pass passed, changes-requested or escalate. The verdict is "approve-spend".`},
 		{[]string{"run", "verdict"}, "accepts 1 arg(s), received 0"},
 		{[]string{"run", "verdict", "escalate"}, "Pass --points <file> with escalate: a JSON array of the points a person acts on."},
-		{[]string{"run", "verdict", "passed", "--points", points(verdictPoints)}, "Leave out --points with passed: only escalate has points."},
-		{[]string{"run", "verdict", "changes-requested", "--points", points(verdictPoints)}, "Leave out --points with changes-requested: only escalate has points."},
+		{[]string{"run", "verdict", "passed", "--points", points(verdictPoints)}, "Leave out --points with passed: a passed verdict has no points."},
+		{[]string{"run", "verdict", "changes-requested", "--points", points(verdictPoints)},
+			"Set the action of each point of --points to run_again: changes-requested runs the round again."},
+		{[]string{"run", "verdict", "changes-requested", "--points", points("[" + strings.TrimSuffix(strings.Repeat(`{"text": "The checks failed.", "action": "run_again"},`, 21), ",") + "]")},
+			"Write at most 20 points. The array has 21."},
+		{[]string{"run", "verdict", "changes-requested", "--points", points(`[{"text": "The checks failed.", "action": "run_again"}, {"text": "The checks failed."}]`)},
+			"Write each point as {text, action}: point 2 has no action."},
 		{[]string{"run", "verdict", "escalate", "--points", absent}, "Pass a file that exists to --points. open " + absent + ": no such file or directory"},
 		{[]string{"run", "verdict", "escalate", "--points", long}, "Shorten " + long + " to at most 65536 bytes. The file is larger."},
 		{[]string{"run", "verdict", "escalate", "--points", points(`[{"text": "The checks failed.", "action": "run_again"}, {"text": "The checks failed."}]`)},

@@ -38,10 +38,14 @@ github.com/qoryai/forager v0.7.1-0.20261119174911-57a8deb5138a h1:gXmL5ybQBNVWi5
 github.com/qoryai/forager v0.7.1-0.20261119174911-57a8deb5138a/go.mod h1:LQJoODbJS+dQDjDmpqU0oeTmnGU5qlT4jU0e/N9hHKQ=
 github.com/qoryai/forager v0.7.1-0.20261120100355-3a8876d85c0d h1:tyCYNMtyvGgdLw8J+x/fUWtligeZIJ7/T1AmcmbLNRg=
 github.com/qoryai/forager v0.7.1-0.20261120100355-3a8876d85c0d/go.mod h1:LQJoODbJS+dQDjDmpqU0oeTmnGU5qlT4jU0e/N9hHKQ=
+github.com/qoryai/forager v0.7.1-0.20261125194023-1a363ec2485b h1:m+YEHa7oUKUwrPpU+P8SS1TCtG/B5GMBzWpky3Rgx9k=
+github.com/qoryai/forager v0.7.1-0.20261125194023-1a363ec2485b/go.mod h1:LQJoODbJS+dQDjDmpqU0oeTmnGU5qlT4jU0e/N9hHKQ=
 github.com/qoryai/integrations v0.3.1-0.20261120034257-4bfe638c9576 h1:NtXLomAXSJTcszECLNZJXOb4afP7fEDGe/5pRcIoSuQ=
 github.com/qoryai/integrations v0.3.1-0.20261120034257-4bfe638c9576/go.mod h1:Y2SmnIl02amrTOK/k8lfr6wnRiuIlSsj3GTUo3yop0Q=
 github.com/qoryai/integrations v0.3.1-0.20261122160437-2a6a8996e0a3 h1:mTVd3Do0bkEKpdVngR1tJ7dSwv0R30b0/JAXQPfG0MM=
 github.com/qoryai/integrations v0.3.1-0.20261122160437-2a6a8996e0a3/go.mod h1:TVgn3zXZW3OIjcrRZBMIDzyiRpaUbNF6/ZvZkYX0kyM=
+github.com/qoryai/integrations v0.3.1-0.20261125005846-699a22cf96ee h1:cWjDjp+TaKu0uzFBBMc3WecBg7GkEI21Q57lvv8m65I=
+github.com/qoryai/integrations v0.3.1-0.20261125005846-699a22cf96ee/go.mod h1:TVgn3zXZW3OIjcrRZBMIDzyiRpaUbNF6/ZvZkYX0kyM=
 github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
 github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=

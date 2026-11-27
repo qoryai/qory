@@ -11,7 +11,14 @@ import (
 
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
+
+	"github.com/qoryai/qory/internal/stack"
 )
+
+// reviewReportsDir is the path of the reports folder of session number, in under.
+func reviewReportsDir(under string, number int) string {
+	return filepath.Join(under, "review-reports-"+strconv.Itoa(number))
+}
 
 // newReviewReports makes the reports folder of the review session with the number number
 // in the run: <under>/review-reports-<number>, new and empty, mode 0700. It returns the
@@ -31,7 +38,7 @@ func newReviewReports(under string, number int) (string, wall.Mount, error) {
 		return "", wall.Mount{}, reviewStop("The review's reports folder is not an absolute, clean path, so the review did not start",
 			fmt.Sprintf("The folder is %s", strconv.Quote(under)))
 	}
-	dir := filepath.Join(under, "review-reports-"+strconv.Itoa(number))
+	dir := reviewReportsDir(under, number)
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return "", wall.Mount{}, reviewStop("The review's reports folder exists already, so the review did not start",
@@ -56,9 +63,15 @@ func newReviewReports(under string, number int) (string, wall.Mount, error) {
 // relative or unclean one, is an error, as is a reports path that is not a folder or is
 // a link. Run before the session starts, it also checks that reports is empty, belongs
 // to owner, the uid of qory's user, which is the wall's user, has no group or other
-// write bit, and that mounts reach it only through one writable mount at its path. Each
-// error is a [reviewStop].
-func checkReviewReports(reports, checkout, artifacts, home string, mounts []wall.Mount, owner int) error {
+// write bit, and that mounts reach it only through one writable mount at its path.
+//
+// The reports folder's mount is the only writable mount. One more is allowed, the mount of
+// checkout, when access is [stack.AccessWriteNoPush], the access that the composed stack
+// declares for the session's workflow: a Verify session writes its checkout. A session of
+// any other access, and any further writable mount, stops. checkout is then the folder
+// that the session writes, so the reports folder lies outside it and does not contain it.
+// Each error is a [reviewStop].
+func checkReviewReports(reports, checkout, artifacts, home string, mounts []wall.Mount, owner int, access string) error {
 	if !cleanAbs(reports) {
 		return reviewStop("The review's reports folder is not an absolute, clean path, so the review did not start",
 			fmt.Sprintf("The folder is %s", strconv.Quote(reports)))
@@ -122,6 +135,21 @@ func checkReviewReports(reports, checkout, artifacts, home string, mounts []wall
 	}
 	if writable != 1 {
 		return reviewStop(fmt.Sprintf("The review's reports folder has %d writable mounts, not one, so the review did not start", writable), "")
+	}
+	checkoutBound := false
+	for _, m := range mounts {
+		if m.ReadOnly || m.Target == "" && session.Overlap(m.Path, reports) == "is" {
+			continue
+		}
+		if access == stack.AccessWriteNoPush && !checkoutBound && m.Target == "" && session.Overlap(m.Path, checkout) == "is" {
+			checkoutBound = true
+			continue
+		}
+		cause := "A mount other than the reports folder is writable, so the review did not start"
+		if access == stack.AccessWriteNoPush {
+			cause = "A mount other than the reports folder and the checkout is writable, so the review did not start"
+		}
+		return reviewStop(cause, fmt.Sprintf("The mount %s is writable", strconv.Quote(m.Path)))
 	}
 	return nil
 }

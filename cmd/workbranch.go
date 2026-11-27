@@ -290,6 +290,10 @@ func sameRunVersions(index *runapi.Index, target *contracts.Target, chosen *runa
 	return out
 }
 
+// noStart is the error of [startCommit] for a version that confirms no commit. A failed
+// read of a version's file is another error, see [references].
+type noStart struct{ error }
+
 // startCommit is the commit a run starts at in the target's repository: of the commits of
 // pushed, the work item's pushed commits, that the run which wrote version pushed to the
 // target's address, the newest that a version of that run confirms. A version confirms a
@@ -298,7 +302,7 @@ func sameRunVersions(index *runapi.Index, target *contracts.Target, chosen *runa
 // order. skipped is the index in pushed of each entry of that run for the target's address
 // that is newer than the start: a session of the run pushed it and stored no version that
 // confirms it. typ is the version's artifact type. With no confirmed commit the error
-// is about the newest one.
+// is a [noStart] about the newest one.
 func startCommit(ctx context.Context, client *runapi.Client, version *runapi.Version, typ string, others []startVersionOf, pushed []runapi.PushedEntry, target *contracts.Target) (commit string, skipped []int, err error) {
 	shown := shownText(typ)
 	repository := shownText(target.Address.System + "/" + target.Address.Path)
@@ -309,7 +313,7 @@ func startCommit(ctx context.Context, client *runapi.Client, version *runapi.Ver
 		}
 	}
 	if len(entries) == 0 || version.Writer.Kind != "run" {
-		return "", nil, fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartEntry, version.Number, shown, shownText(version.Writer.RunID), repository))
+		return "", nil, noStart{fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartEntry, version.Number, shown, shownText(version.Writer.RunID), repository))}
 	}
 	counts, err := references(ctx, client, version, target)
 	if err != nil {
@@ -343,9 +347,9 @@ func startCommit(ctx context.Context, client *runapi.Client, version *runapi.Ver
 	}
 	newest := pushed[entries[len(entries)-1]].Commit
 	if counts == nil {
-		return "", nil, fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartFile, version.Number, shown, maxStartFile))
+		return "", nil, noStart{fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartFile, version.Number, shown, maxStartFile))}
 	}
-	return "", nil, fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartReference, version.Number, shown, counts.count(newest), shownCommitID(newest), repository))
+	return "", nil, noStart{fmt.Errorf(textNoStart, fmt.Sprintf(textNoStartReference, version.Number, shown, counts.count(newest), shownCommitID(newest), repository))}
 }
 
 // referenceCount is the number of top-level references in a version's file to each address

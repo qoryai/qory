@@ -10,5 +10,9 @@
       "proof": "broken rule: the package reads its settings at the start.",
       "point": "The token is read on each call."
     }
+  ],
+  "closes": [
+    {"id": "f3", "state": "fixed", "reason": "The check of the token now runs before the first read."},
+    {"id": "f4", "state": "dismissed", "reason": "The builder showed that the file is a test fixture."}
   ]
 }

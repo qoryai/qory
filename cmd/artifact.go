@@ -526,8 +526,8 @@ qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with that refusal. Outside 
 template from the factory modules that the checkout exports, and has no approvals to read.
 
 --decision sends the id of the person's note that asked for this version, such as
-gd_01jc4t9…, from the notes that qory work-item show prints: a request for changes, a move
-or an escalation. Later runs read this version in place of the approved one, and the next
+gd_01jc4t9…, from the notes that qory work-item show prints: a request for changes, a move,
+an escalation or an answer. Later runs read this version in place of the approved one, and the next
 approval by a person lists it. A withdrawal takes --decision too. qory exits ` + strconv.Itoa(ExitArtifactRefused) + ` with a
 fix line when the id is not the id of a person's note on the run's work item.
 
@@ -836,6 +836,10 @@ run_again may have fix, one line of 1 to 500 characters on how a person fixes th
 point. qory checks the file against contracts/harness/v1/verdict.schema.json before it
 sends or keeps anything.
 
+changes-requested takes --points too, a file in the same form with 1 to 20 points, each
+with the action run_again: what is wrong or missing for the next round. passed takes no
+--points.
+
 Any verdict may propose a track for the work item. Pass --track with the id of a track that
 the gate of the run's stage offers, such as small-change, and --track-reason with the
 reason, one sentence on one line of 1 to 300 characters. Pass both or neither.
@@ -852,6 +856,7 @@ acts on it.
 More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-item`,
 		Example: `  qory run verdict passed
   qory run verdict passed --track small-change --track-reason "The change touches one file."
+  qory run verdict changes-requested --points points.json
   qory run verdict escalate --points points.json`,
 		Args: func(c *cobra.Command, args []string) error {
 			if err := cobra.ExactArgs(1)(c, args); err != nil {
@@ -895,7 +900,7 @@ More: https://github.com/qoryai/qory/blob/main/docs/run.md#commands-of-a-work-it
 			return err
 		},
 	}
-	c.Flags().StringVar(&pointsFile, "points", "", "read the points of escalate, a JSON array, from this file")
+	c.Flags().StringVar(&pointsFile, "points", "", "read the points of escalate or changes-requested, a JSON array, from this file")
 	c.Flags().String("track", "", "propose the track with this id, one that the gate of the run's stage offers; pass it with --track-reason")
 	c.Flags().String("track-reason", "", "give the reason for --track, one sentence on one line of 1 to 300 characters; pass it with --track")
 
@@ -1038,14 +1043,18 @@ func shownOrShort(value string) string {
 func commandVerdict(verdict string) bool { return verdictformat.Known(verdict) }
 
 // readPoints returns the points of verdict from path, the file of --points; given is true
-// when the command line has --points. escalate needs the file, and the other verdicts
-// take none.
+// when the command line has --points. escalate needs the file, changes-requested takes it
+// with run_again points alone, and passed takes none.
 func readPoints(verdict, path string, given bool) ([]runapi.Point, error) {
-	if verdict != runapi.VerdictEscalate {
+	if verdict != runapi.VerdictEscalate && verdict != runapi.VerdictChangesRequested {
 		if given {
-			return nil, input(fmt.Errorf("Leave out --points with %s: only escalate has points.", verdict))
+			return nil, input(fmt.Errorf("Leave out --points with %s: a %s verdict has no points.", verdict, verdict))
 		}
 
+		return nil, nil
+	}
+
+	if !given && verdict == runapi.VerdictChangesRequested {
 		return nil, nil
 	}
 
@@ -1080,7 +1089,32 @@ func readPoints(verdict, path string, given bool) ([]runapi.Point, error) {
 		return nil, input(err)
 	}
 
+	if verdict == runapi.VerdictChangesRequested {
+		if err := checkRunAgain(points); err != nil {
+			return nil, input(err)
+		}
+	}
+
 	return points, nil
+}
+
+// checkRunAgain returns the error of the first point of changes-requested whose action is
+// not run_again, and then checks the verdict against the verdict format; nil when every
+// point passes.
+func checkRunAgain(points []runapi.Point) error {
+	for i, point := range points {
+		if point.Action != runapi.ActionRunAgain {
+			return fmt.Errorf("Set the action of each point of --points to run_again: changes-requested runs the round again.\n  Point %d has the action %s.",
+				i+1, shownOrShort(point.Action))
+		}
+	}
+
+	body, err := runapi.VerdictBody(runapi.VerdictChangesRequested, points, nil)
+	if err != nil {
+		return err
+	}
+
+	return verdictformat.Check(body)
 }
 
 // keepVerdict keeps the verdict in the store as the run API stores it, outside a run.

@@ -1044,7 +1044,8 @@ A `changes-requested` verdict may list what the next round fixes:
  "points": [{"text": "The checks script failed on the spec's links.", "action": "run_again"}]}
 ```
 
-`qory run verdict` sends points only with `escalate`. It takes only the kinds `passed`,
+`qory run verdict` sends points with `escalate`, and with `changes-requested` when you
+pass `--points`; `passed` takes none. It takes only the kinds `passed`,
 `changes-requested` and `escalate`, and only the actions `answer` and `run_again`.
 
 A verdict of any kind may propose a track:
@@ -1085,10 +1086,9 @@ documents fails the schema:
 ## The review report format
 
 A review report records the findings of one reviewer of a review round on the reviewed
-commit. The reviewer writes it as `report.json`. No qory command reads it. The package
-`internal/reviewround` reads a report as this section describes, and no command calls
-that package. This is version 1 of the format
-([review-report.schema.json](review-report.schema.json)):
+commit, and the findings of that reviewer that it closes. The reviewer writes it as
+`report.json`, and qory reads it and posts its findings to the work item's findings. This
+is version 1 of the format ([review-report.schema.json](review-report.schema.json)):
 
 ```json
 {"reviewer": "code-reviewer",
@@ -1097,28 +1097,37 @@ that package. This is version 1 of the format
                "fix": "Cut only a batch of more than the limit, and test a batch of the limit.",
                "proof": "failing check: TestBatchAtLimit fails with 99 of 100 items.",
                "point": "A batch of exactly the limit loses its last item.",
-               "file": "internal/batch/batch.go", "line": 12}]}
+               "file": "internal/batch/batch.go", "line": 12}],
+ "closes": [{"id": "f3", "state": "fixed", "reason": "The check at the start of the file now runs."}]}
 ```
 
 | Member | Meaning |
 |---|---|
 | `reviewer` | the reviewer's agent name: lower-case letters, digits and hyphens, from a letter or a digit, at most 64 characters. Required |
-| `findings` | the reviewer's findings, a list that may be empty. Required |
-| `id` | the id of a finding of the round before that this finding repeats, `f` and a number from 1 of at most 6 digits. Optional |
+| `findings` | the reviewer's findings, a list of at most 100 that may be empty. Required |
+| `closes` | the findings of this reviewer that the report closes, a list of at most 100. Each entry has `id`, `state` and `reason`. Optional |
+| `id` | in a finding: the id of a finding of this reviewer from an earlier round that this finding repeats, with its proof done again, `f` and a number from 1 of at most 9 digits. A finding with no `id` is new. In a close: the id of the finding that the report closes, in the same form. Optional in a finding, required in a close |
+| `state` | in a close: `fixed`, the problem is gone, or `dismissed`, the reviewer drops the finding. Required |
+| `reason` | in a close: why, 1 to 1000 characters, with no NUL character. Required |
 | `severity` | `blocking`: the round is not clean while the finding is open; `non-blocking`: the finding is open, and the round can still pass. Required |
 | `quote` | the text of the reviewed commit that the finding is about, 1 to 2000 characters. Required |
 | `problem` | what is wrong, 1 to 2000 characters. Required |
 | `fix` | what the next session changes, 1 to 2000 characters. Required |
 | `proof` | `failing check: `, `failing input: ` or `broken rule: `, then the evidence, at most 1000 characters. A blocking finding has a failing check or a failing input. Required |
 | `point` | the finding in one line, 1 to 500 characters, a `line` of the primitives (no control character, so no tab, line feed or carriage return, no U+2028 or U+2029, and no Cf character such as U+200B or U+E0041, except U+200C and U+200D), with at least one character that is not a space. qory trims the spaces at its ends, and reads a point of spaces and characters that show nothing, such as U+00A0 or U+3164, as a report that does not match the format. Required |
-| `file` | the path of the file that the finding is about, 1 to 500 characters. Optional |
+| `file` | the path of the file that the finding is about, 1 to 300 characters on one line, by the character rule of `point`. Optional |
 | `line` | the line of `file`, a whole number from 1. Optional |
 
-A report has no member other than `reviewer` and `findings`, and a finding has no member
-other than those of the table. qory reads at most 1 MiB of the file and follows no link.
-A report that is missing, is not one JSON object, does not match the schema, or has
-another reviewer's name is a blocking finding that qory writes for the reviewer. Each of
-these documents fails the schema:
+A finding of this reviewer that the report neither repeats nor closes stays open. `quote`,
+`problem`, `fix`, `proof` and `reason` have no NUL character, which the findings cannot
+keep. A report has no member other than `reviewer`, `findings` and `closes`, and a finding
+and a close have no member other than those of the table. No object has a member twice.
+qory reads at most 1 MiB of the file and follows no link. A report that is missing, is not
+one JSON object, does not match the schema, has another reviewer's name, repeats or closes
+an id that is not a finding of this reviewer, repeats one id twice, closes one id twice,
+repeats and closes one id, or has more than 100 findings or more than 100 closes is a
+blocking finding that qory writes for the reviewer. Each of these documents fails the
+schema:
 
 ```json
 {"reviewer": "code-reviewer"}
@@ -1126,6 +1135,9 @@ these documents fails the schema:
 {"reviewer": "code-reviewer", "findings": [{"severity": "minor", "quote": "q", "problem": "p", "fix": "f", "proof": "failing input: x", "point": "p"}]}
 {"reviewer": "code-reviewer", "findings": [{"severity": "blocking", "quote": "q", "problem": "p", "fix": "f", "proof": "broken rule: r", "point": "p"}]}
 {"reviewer": "code-reviewer", "findings": [{"severity": "non-blocking", "quote": "q", "problem": "p", "fix": "f", "proof": "broken rule: r", "point": " "}]}
+{"reviewer": "code-reviewer", "findings": [], "closes": [{"id": "f3", "state": "accepted", "reason": "r"}]}
+{"reviewer": "code-reviewer", "findings": [], "closes": [{"id": "f3", "state": "fixed"}]}
+{"reviewer": "code-reviewer", "findings": [], "closes": [{"id": "f1234567890", "state": "fixed", "reason": "r"}]}
 ```
 
 ## The module manifest

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
 	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/pushcheck"
 )
 
@@ -116,7 +118,7 @@ func TestTheLoadOfPushChecksStopsWithItsLine(t *testing.T) {
 	folderCause := "mkdir " + folder + ": no such file or directory"
 	unsetenv(t, "DOCKER_HOST")
 	unsetenv(t, "DOCKER_CONTEXT")
-	// The wall recorded the context a at the open, and the next selection reads the context b.
+	// The wall recorded context a at the open, and the next selection reads context b.
 	otherEngine := &wall.Docker{Command: engineScript(t, "a", "b")}
 	otherEngine.Engine(context.Background())
 	// The same, with the next selection on an engine whose id cannot be read.
@@ -472,9 +474,10 @@ func TestARuntimeNameOfNoShimStopsWithTheInstallLine(t *testing.T) {
 	}
 }
 
-// TestARuntimeLineStartsWithAFixOf100Characters is the first line of the stop for a missing
-// runtime, with "qory run: " in front, as it reaches the terminal: at most 100 characters,
-// for a run with a run code and one with none, and whatever the runtime's name is.
+// TestARuntimeLineStartsWithAFixOf100Characters is the first line of the stop for a
+// missing runtime, with "qory run: " in front, as it reaches the terminal: at most 100
+// characters, for a run with a run code and one with none, and whatever the runtime's name
+// is.
 func TestARuntimeLineStartsWithAFixOf100Characters(t *testing.T) {
 	stubChecks(t)
 	for _, c := range []struct {
@@ -699,8 +702,8 @@ func (r checkNotSet) SetRunAPICheck(func(context.Context, session.RunAPIRequest)
 	return r.err
 }
 
-// TestACheckThatIsNotSetStopsWithItsLine is the line of a check that could not be turned on,
-// in a run with no run code and in a run from a run code, each with exit 1.
+// TestACheckThatIsNotSetStopsWithItsLine is the line of a check that could not be turned
+// on, in a run with no run code and in a run from a run code, each with exit 1.
 func TestACheckThatIsNotSetStopsWithItsLine(t *testing.T) {
 	run := checkNotSet{err: errors.New("Call SetRunAPICheck before Setup: the setup started.")}
 	for fromCode, want := range map[bool]string{
@@ -790,11 +793,11 @@ func TestThePushChecksGetTheRunsInputs(t *testing.T) {
 	}
 }
 
-// TestALaterSessionsPushChecksReplaceTheChecksOfTheSessionBefore is the checker of session 1
-// and a home composed again for session 2, with other push checks and other inputs: next
-// keeps the checker, with session 2's checks and inputs. A run from a run code whose home has
-// a push check qory cannot read gets the line of that run, and the checker stays. A run with
-// no checker, whose home has no push check, loads none.
+// TestALaterSessionsPushChecksReplaceTheChecksOfTheSessionBefore is the checker of session
+// 1 and a home composed again for session 2, with other push checks and other inputs: next
+// keeps the checker, with session 2's checks and inputs. A run from a run code whose home
+// has a push check qory cannot read gets the line of that run, and the checker stays. A
+// run with no checker, whose home has no push check, loads none.
 func TestALaterSessionsPushChecksReplaceTheChecksOfTheSessionBefore(t *testing.T) {
 	old := []compose.PushCheck{{Type: "build-plan", Module: "first"}}
 	later := []compose.PushCheck{{Type: "build-plan", Module: "second"}}
@@ -851,14 +854,153 @@ func TestTheVerdictRuleOfARunFollowsTheSession(t *testing.T) {
 	refused("no session, passed", p, verdict("passed"), true)
 	refused("no session, escalate", p, verdict("escalate"), true)
 	refused("no session, another POST", p, other, false)
-	p.joining(false)
+	p.joining(joinNone)
 	refused("judges false, passed", p, verdict("passed"), true)
 	refused("judges false, escalate", p, verdict("escalate"), false)
 	refused("judges false, another POST", p, other, false)
 	p.joined()
 	refused("after the join, escalate", p, verdict("escalate"), true)
-	p.joining(true)
+	p.joining(joinJudges)
 	refused("judges true, passed", p, verdict("passed"), false)
 	p.joined()
 	refused("after the join of a session that judges", p, verdict("passed"), true)
+	p.joining(joinReviews)
+	refused("review join, passed", p, verdict("passed"), true)
+	refused("review join, changes-requested", p, verdict("changes-requested"), false)
+	refused("review join, escalate", p, verdict("escalate"), false)
+	refused("review join, another POST", p, other, false)
+	p.joined()
+	refused("after the join of a review session", p, verdict("changes-requested"), true)
+}
+
+// TestTheCheckOfARunWithARoundStopsAPostThatIsNotReadInOneWay is the check of a Verify
+// run, which has a round to post and no checker and marks no member that qory fills: a
+// POST of /verdict or /artifacts that cannot be read in one way gets 422 before the
+// round, a verdict and a push of the type verdict that read in one way post the round
+// once each, and any other POST posts none. The 422 for a POST of /verdict has the texts
+// of a verdict body that cannot be read, the 422 for a push has the texts of a push, and
+// the round gets whether the POST records passed.
+func TestTheCheckOfARunWithARoundStopsAPostThatIsNotReadInOneWay(t *testing.T) {
+	file := `[{"filename":"v.json","content_base64":"eyJ2ZXJkaWN0IjoicGFzc2VkIn0="}]`
+	for _, c := range []struct {
+		name, path, body string
+		refused, rounds  bool
+		// first and cause are the first line of the refusal and the line after it.
+		first, cause string
+		// passed is what the round gets, with rounds true.
+		passed bool
+	}{
+		{"a verdict twice", "/verdict", `{"verdict":"passed","verdict":"passed"}`, true, false,
+			"Post the verdict as one JSON object with each member once.", "  The verdict has a member twice, or one that differs only in case.", false},
+		{"a verdict in another case", "/verdict", `{"Verdict":"passed"}`, true, false,
+			"Post the verdict as one JSON object with each member once.", "  The verdict has a member twice, or one that differs only in case.", false},
+		{"a verdict that is no object", "/verdict", `["passed"]`, true, false,
+			"Post the verdict as one JSON object with each member once.", "  The body is no verdict: it is not a JSON object.", false},
+		{"a verdict at another spelling of the path", "/verdict/", `{"verdict":"passed"}`, true, false,
+			"Send the POST to the run's /verdict or /artifacts path.", "  The path of the POST is another spelling of it.", false},
+		{"a push with its type twice", "/artifacts", `{"type":"note","type":"verdict","files":` + file + `}`, true, false,
+			"Send each member of the push once, in lower case, and push again.", "", false},
+		{"a push with its type twice, the other order", "/artifacts", `{"type":"verdict","type":"note","files":` + file + `}`, true, false,
+			"Send each member of the push once, in lower case, and push again.", "", false},
+		{"a verdict", "/verdict", `{"verdict":"passed"}`, false, true, "", "", true},
+		{"a verdict of changes-requested", "/verdict", `{"verdict":"changes-requested"}`, false, true, "", "", false},
+		{"a verdict with no value", "/verdict", `{"points":[]}`, false, true, "", "", true},
+		{"a push of the type verdict", "/artifacts", `{"type":"verdict","files":` + file + `}`, false, true, "", "", true},
+		{"a push of another type", "/artifacts", `{"type":"note","files":` + file + `}`, false, false, "", "", false},
+		{"another path", "/pushed-commits", `{"verdict":"passed","verdict":"passed"}`, false, false, "", "", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rounds, passed := 0, false
+			p := &runPushChecks{}
+			p.setRound(func(_ context.Context, isPassed bool) error { rounds++; passed = isPassed; return nil })
+			r, err := p.runAPICheck(context.Background(), session.RunAPIRequest{Path: c.path, Body: []byte(c.body)})
+			if err != nil || (r != nil) != c.refused {
+				t.Errorf("got %+v, %v, want refusal %t", r, err, c.refused)
+			}
+			if r != nil {
+				if r.Status != http.StatusUnprocessableEntity || r.Code != "push_check_failed" {
+					t.Errorf("the refusal is %d %s", r.Status, r.Code)
+				}
+				want := c.first
+				if c.cause != "" {
+					want += "\n" + c.cause
+				}
+				if r.Message != want {
+					t.Errorf("the refusal text is %q, want %q", r.Message, want)
+				}
+			}
+			if want := map[bool]int{true: 1, false: 0}[c.rounds]; rounds != want {
+				t.Errorf("the round was posted %d times, want %d", rounds, want)
+			}
+			if c.rounds && passed != c.passed {
+				t.Errorf("the round got passed %t, want %t", passed, c.passed)
+			}
+		})
+	}
+}
+
+// TestJoinModeOf is the mode of each pair of judges and review join: a workflow with
+// judges false limits the verdicts of its session to escalate, a review join or not, and
+// a review join of a workflow that judges may not record passed.
+func TestJoinModeOf(t *testing.T) {
+	for _, c := range []struct {
+		judges, review bool
+		want           joinMode
+	}{
+		{true, false, joinJudges},
+		{true, true, joinReviews},
+		{false, false, joinNone},
+		{false, true, joinNone},
+	} {
+		if got := joinModeOf(c.judges, c.review); got != c.want {
+			t.Errorf("joinModeOf(%t, %t) = %d, want %d", c.judges, c.review, got, c.want)
+		}
+	}
+	if joinMode(0) != joinNone {
+		t.Errorf("the zero mode is %d, want joinNone", joinMode(0))
+	}
+}
+
+// TestTheRuleOfTheMembersThatQoryFillsNeedsNeitherVerdictsNorAChecker is a run whose
+// check has no checker and no verdict rule: with the types of a composed process.yaml
+// that mark members, a push of such a type that sets one gets the line of the outbox, and
+// a push that sets none, a verdict and a push of another type pass. A run whose types
+// mark nothing stops no push.
+func TestTheRuleOfTheMembersThatQoryFillsNeedsNeitherVerdictsNorAChecker(t *testing.T) {
+	push := func(typ, content string) session.RunAPIRequest {
+		return session.RunAPIRequest{Path: "/artifacts", Body: []byte(`{"type":"` + typ + `","name":"main","files":[{"filename":"a.json","content_base64":"` +
+			base64.StdEncoding.EncodeToString([]byte(content)) + `"}]}`)}
+	}
+	check := func(what string, p *runPushChecks, req session.RunAPIRequest, want string) {
+		t.Helper()
+		r, err := p.runAPICheck(context.Background(), req)
+		switch {
+		case err != nil:
+			t.Errorf("%s: error %v", what, err)
+		case want == "" && r != nil:
+			t.Errorf("%s: refusal %q, want none", what, r.Message)
+		case want != "" && (r == nil || r.Message != want):
+			t.Errorf("%s: got %+v, want the refusal %q", what, r, want)
+		}
+	}
+	const line = "Remove base from the pull-request output: qory fills it at the push."
+	p := &runPushChecks{}
+	check("no types", p, push("pull-request", `{"base":1}`), "")
+	if p.marksFill() {
+		t.Error("a run with no types marks a member that qory fills")
+	}
+	p.setTypes([]exports.ProcessType{pullRequestSchemaType(t), {Name: "notes"}})
+	if !p.marksFill() {
+		t.Error("a run with a type that marks members marks none")
+	}
+	check("a marked member", p, push("pull-request", `{"title":"A","base":{}}`), line)
+	check("another marked member", p, push("pull-request", `{"title":"A","branch":"x"}`), "Remove branch from the pull-request output: qory fills it at the push.")
+	check("no marked member", p, push("pull-request", `{"title":"A"}`), "")
+	check("a type that marks none", p, push("notes", `{"base":1}`), "")
+	check("a verdict", p, session.RunAPIRequest{Path: "/verdict", Body: []byte(`{"verdict":"passed"}`)}, "")
+	p.setTypes([]exports.ProcessType{{Name: "pull-request"}})
+	if p.marksFill() {
+		t.Error("a run whose types mark nothing marks a member that qory fills")
+	}
+	check("types that mark nothing", p, push("pull-request", `{"base":1}`), "")
 }

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,12 +11,18 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/forager/wall"
+	"github.com/qoryai/integrations/contracts"
 
 	"github.com/qoryai/qory/internal/checkout"
+	"github.com/qoryai/qory/internal/compose"
+	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/hostgit"
 	"github.com/qoryai/qory/internal/integration"
 	"github.com/qoryai/qory/internal/preparation"
@@ -23,6 +30,7 @@ import (
 	"github.com/qoryai/qory/internal/reviewcopy"
 	"github.com/qoryai/qory/internal/runapi"
 	"github.com/qoryai/qory/internal/runcopy"
+	"github.com/qoryai/qory/internal/secretmask"
 )
 
 // reviewInputsDir is the folder of the inputs folder, in/, that has the files of the
@@ -71,6 +79,22 @@ type reviewJoinSetup struct {
 	number  int
 	runtime string
 	img     session.Image
+	// findings is the run's findings, nil for a run that reads none: the diff then starts at
+	// the run's start and the session has no previous_findings. res is the composed harness
+	// of the session, which lists the reviewers of its group.
+	findings *findingsRun
+	res      *compose.Result
+	// For the first session of a Verify run, see [verifiesAsReview], which [planVerify]
+	// plans: the session keeps its checkout, so no suite, no working folder and no
+	// read-only join. access is the access that the composed stack declares for the
+	// workflow, target the run's target, snapshot the work item as the run read it at its
+	// start, and types the artifact types of the composed process.
+	access   string
+	target   *contracts.Target
+	snapshot *runapi.Snapshot
+	types    []exports.ProcessType
+	// targetVersion is the target version of the run's documents, a commit of the target.
+	targetVersion string
 }
 
 // reviewJoinPlan is what one review join reads and writes, made before the join: the fresh
@@ -79,8 +103,10 @@ type reviewJoinSetup struct {
 // qory.review_session.
 type reviewJoinPlan struct {
 	// commit is the pushed head of the target repository, which the session reviews, and
-	// base the commit that the diff starts at.
+	// base the commit that the diff starts at: the base that Qory Apiary stores for the
+	// target when fromLedger is true, else the run's start.
 	commit, base string
+	fromLedger   bool
 	// source is the git folder that has the commit.
 	source string
 	// project are the paths of the runtime's project files, see
@@ -91,8 +117,9 @@ type reviewJoinPlan struct {
 	projectBase string
 	// round is the stage's round of the review, from the run API's work item.
 	round int
-	// stage is the id of the stage of the round, which a build report is pushed in.
-	stage string
+	// stage is the id of the stage of the round, which a build report is pushed in, and
+	// stageSlug its name in a finding, see [stageName].
+	stage, stageSlug string
 	// suiteFile is the suite result file of the commit, in the run's folder.
 	suiteFile string
 	client    *runapi.Client
@@ -106,7 +133,63 @@ type reviewJoinPlan struct {
 	// artifacts and home are the places the reports folder stays outside of, see
 	// [checkReviewReports].
 	artifacts, home string
+	// findings is the run's findings, nil for none, found the findings that the work item
+	// had when the plan was made, and roles the reviewers of the session's group.
+	findings *findingsRun
+	found    contracts.Findings
+	roles    []string
+	// cwd is the checkout's folder, and system and path the repository that it holds, which
+	// the fetch of a base reads.
+	cwd, system, path string
+	// res and workflow are the composed harness of the session and its workflow, which
+	// list the reviewers of the group.
+	res      *compose.Result
+	workflow string
+	// changed is the paths that the diff of the review changes, read once the copy is made,
+	// and changedErr why the list is not read, nil when it is.
+	changed    []string
+	changedErr error
+	// verdictBefore is the id of the newest verdict of the run before the session joins.
+	verdictBefore string
+	// verify is true for the plan of a Verify session, see [planVerify]. root is its
+	// checkout, the one writable mount beside the reports folder, access the access that
+	// the composed stack declares for its workflow, pushedBase whether its base is the
+	// base of a pull-request version, occasion the number that its round is posted under,
+	// see [findingsPoster.round], and missingOccasion the number of the round that has
+	// the finding of each missing report alone, see [findingsRun.postVerify].
+	verify          bool
+	root            string
+	access          string
+	pushedBase      bool
+	occasion        int
+	missingOccasion int
+	// copyRun and copySpec are the run and its spec, which the copy session used, kept for
+	// [reviewJoinPlan.checkHead] of a Verify session. headLock lets one read of HEAD run at
+	// a time, since the container has a fixed name and the read replaces state/head.
+	copyRun  openedRun
+	copySpec *runSpec
+	headLock headLock
 }
+
+// headLock lets one holder at a time through, and lets a caller that waits stop when its
+// context ends. Its zero value is ready to use.
+type headLock struct {
+	once  sync.Once
+	slots chan struct{}
+}
+
+// acquire waits for the lock, or for the end of ctx, and returns the error of ctx then.
+func (l *headLock) acquire(ctx context.Context) error {
+	l.once.Do(func() { l.slots = make(chan struct{}, 1) })
+	select {
+	case l.slots <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (l *headLock) release() { <-l.slots }
 
 // workspace is the folders of the join, for [reviewJoinSpec].
 func (p *reviewJoinPlan) workspace() reviewWorkspace {
@@ -131,7 +214,7 @@ func planReviewJoin(ctx context.Context, s reviewJoinSetup) (*reviewJoinPlan, er
 	if s.copied {
 		return nil, reviewStop("The run works in a copy of the checkout, so the review did not start", "The review reads the pushed commit from the checkout's git folder")
 	}
-	p := &reviewJoinPlan{home: s.home, artifacts: filepath.Join(checkout.QoryDir(s.root), artifactsDir), project: guard.ProjectPaths()}
+	p := &reviewJoinPlan{home: s.home, artifacts: filepath.Join(checkout.QoryDir(s.root), artifactsDir), res: s.res, workflow: s.workflow, project: guard.ProjectPaths()}
 	var err error
 	if p.commit, p.base, p.source, err = reviewTarget(s.branch, s.cwd); err != nil {
 		return nil, err
@@ -143,12 +226,28 @@ func planReviewJoin(ctx context.Context, s reviewJoinSetup) (*reviewJoinPlan, er
 	if p.client, err = reviewClient(s.run); err != nil {
 		return nil, err
 	}
-	if p.stage, p.round, err = reviewRound(ctx, p.client); err != nil {
+	stage, err := readStage(ctx, p.client, "the review did not start")
+	if err != nil {
 		return nil, err
 	}
-	if err = checkWallUser(s.spec); err != nil {
+	p.stage, p.stageSlug, p.round = stage.id, stage.slug(), stage.round
+	if err := p.readLedger(ctx, s, s.run.System()); err != nil {
 		return nil, err
 	}
+	if err := p.folders(s, true); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// folders makes the folders of the plan, once [checkWallUser] passed: the fresh copy, the
+// empty working folder when work is true, and the reports folder. On an error it removes
+// what it made.
+func (p *reviewJoinPlan) folders(s reviewJoinSetup, work bool) error {
+	if err := checkWallUser(s.spec); err != nil {
+		return err
+	}
+	var err error
 	// The copy, the working folder and the reports folder lie beside the inputs folder in
 	// its temporary folder, each named by the session's number: no mount reaches that
 	// folder, and Forager stops a run that mounts a folder of the run's folder, which the
@@ -156,24 +255,26 @@ func planReviewJoin(ctx context.Context, s reviewJoinSetup) (*reviewJoinPlan, er
 	under := filepath.Dir(s.in)
 	number := strconv.Itoa(s.number)
 	if p.copy, err = reviewcopy.New(filepath.Join(under, "review-copy-"+number)); err != nil {
-		return nil, reviewCopyStop(err)
+		return reviewCopyStop(err)
 	}
-	p.work = filepath.Join(under, "review-work-"+number)
-	if err := os.Mkdir(p.work, 0o555); err != nil {
-		p.remove()
-		return nil, reviewStop("Making the review's working folder failed, so the review did not start", shownError(err))
+	if work {
+		p.work = filepath.Join(under, "review-work-"+number)
+		if err := os.Mkdir(p.work, 0o555); err != nil {
+			p.remove()
+			return reviewStop("Making the review's working folder failed, so the review did not start", shownError(err))
+		}
 	}
 	if p.reports, p.reportsMount, err = newReviewReports(under, s.number); err != nil {
 		p.remove()
-		return nil, err
+		return err
 	}
-	return p, nil
+	return nil
 }
 
 // removeCopy removes the folders that only the join reads: the copy's folder, which the
 // copy session made read-only, and the empty working folder. The reports folder stays,
-// so that the reports outlast the session, until [reviewJoinPlan.remove]; qory reads no
-// report from it.
+// until [reviewJoinPlan.remove]. qory reads the reports when the round ends, before this
+// call.
 func (p *reviewJoinPlan) removeCopy() {
 	if p.copy.Root() != "" {
 		_ = filepath.WalkDir(p.copy.Root(), func(path string, d fs.DirEntry, err error) error {
@@ -198,16 +299,64 @@ func (p *reviewJoinPlan) remove() {
 	}
 }
 
+// readLedger reads the findings of the work item, for a run with findings, and sets the
+// base of the diff to the base that Qory Apiary stores for the run's target, the reviewers
+// of the group, and the repository that [reviewJoinPlan.fetchBase] reads, which is on
+// system. A run with none keeps the run's start as the base.
+func (p *reviewJoinPlan) readLedger(ctx context.Context, s reviewJoinSetup, system string) error {
+	if !s.findings.active() {
+		return nil
+	}
+	p.findings, p.cwd, p.system = s.findings, s.cwd, system
+	for _, r := range s.branch.Repositories {
+		if r.Dir == "." {
+			p.path = r.Path
+		}
+	}
+	p.roles = reviewGroupRoles(s.res, s.workflow)
+	found, err := s.findings.poster.read(ctx, "the review did not start")
+	if err != nil {
+		return err
+	}
+	if err := fullWindow(found, "the review did not start"); err != nil {
+		return err
+	}
+	p.found = found
+	if base := ledgerBase(found, s.findings.target); base != "" {
+		p.base, p.fromLedger = base, true
+	}
+	return nil
+}
+
+// fetchBase makes the base of the diff an object of the checkout's git folder when the
+// base comes from Qory Apiary, or from a pull-request version, and the checkout lacks it,
+// through the run's host proxy and the git that fetched the checkout. The run has no
+// session or setup container when it is called.
+func (p *reviewJoinPlan) fetchBase(ctx context.Context, run openedRun) error {
+	if !p.fromLedger && !p.pushedBase {
+		return nil
+	}
+	h, err := run.HostProxy()
+	if err != nil {
+		return withCause(reviewStop("The host proxy did not start, so the review did not start", shownError(err)), err)
+	}
+	secretmask.Default().AddURLPassword(h.proxy.URL)
+	defer h.close()
+	if err := preparation.FetchCommit(ctx, p.cwd, os.Environ(), p.system, p.path, p.base, h.proxy); err != nil {
+		return withCause(reviewStop("The base commit of the diff was not fetched, so the review did not start", shownError(err)), err)
+	}
+	return nil
+}
+
 // reviewTarget is the pushed head, the base and the git folder of the target repository of
 // the run: the repository of branch whose folder is the working folder cwd. The commit is
 // the repository's [preparation.WorkRepository.Commit], the commit its last push moved the
 // branch to, and the base its Start.
 //
 // A write run has one pushable repository, the target, so the review reads that one: this
-// is the model, not a shortcut.
-// shortcut: the reviewer's diff starts at the run's start, since qory keeps no base of the
-// runs before; replace it when qory has one. The stop on project files starts at
-// [targetProjectBase] instead.
+// is the model, not a shortcut. The base is the commit the run started at;
+// [planReviewJoin] replaces it with the base that Qory Apiary stores for the target. The
+// stop on project files starts at [targetProjectBase] instead.
 func reviewTarget(branch *preparation.WorkBranch, cwd string) (commit, base, source string, err error) {
 	if branch == nil {
 		return "", "", "", reviewStop("The run has no branch, so it has no pushed commit and the review did not start", "")
@@ -321,21 +470,6 @@ func reviewClient(run openedRun) (*runapi.Client, error) {
 	return client, nil
 }
 
-// reviewRound reads the work item again and returns its stage's id and the stage's round.
-// A work item with no stage, no round or no number of rounds, or a round outside 1 to
-// rounds, is an error: no round is invented.
-func reviewRound(ctx context.Context, client *runapi.Client) (stage string, round int, err error) {
-	snapshot, err := client.WorkItem(ctx)
-	if err != nil {
-		return "", 0, withCause(reviewStop("Reading the stage's round failed, so the review did not start", shownError(err)), err)
-	}
-	s := snapshot.Stage
-	if s.ID == nil || s.Round == nil || s.Rounds == nil || *s.Round < 1 || *s.Round > *s.Rounds {
-		return "", 0, reviewStop("The work item's stage has no valid round, so the review did not start", "The work item needs stage.round and stage.rounds with 1 <= round <= rounds")
-	}
-	return *s.ID, *s.Round, nil
-}
-
 // checkWallUser stops a review join whose wall user is not qory's user. The folders of the
 // join belong to qory's user, and the wall's user reads and writes them by its uid, so the
 // uid of wall.user must be qory's; its gid is not compared. [oneUser] stops such a run
@@ -355,12 +489,16 @@ func checkWallUser(spec *runSpec) error {
 // reviewCopyStop is err as a stop of the review join: a [*reviewcopy.Stop] with its cause,
 // the words "so the review did not start" and its detail, as [reviewStop] makes it. Any
 // other error stays as it is.
-func reviewCopyStop(err error) error {
+func reviewCopyStop(err error) error { return reviewCopyStopAt(err, "the review did not start") }
+
+// reviewCopyStopAt is [reviewCopyStop] with what, the words after "so", in place of "the
+// review did not start": what the caller did not do.
+func reviewCopyStopAt(err error, what string) error {
 	var s *reviewcopy.Stop
 	if !errors.As(err, &s) {
 		return err
 	}
-	return reviewStop(s.Cause+", so the review did not start", shownErrorText(s.Detail))
+	return reviewStop(s.Cause+", so "+what, shownErrorText(s.Detail))
 }
 
 // targetProjectBase is the [preparation.WorkRepository.ProjectBase] of the repository of
@@ -385,7 +523,11 @@ func targetProjectBase(branch *preparation.WorkBranch) string {
 // that adds, changes or removes a project file of the runtime stops the review, see
 // [projectFilesStop], before the session starts.
 func (p *reviewJoinPlan) makeCopy(ctx context.Context, run openedRun, spec *runSpec, out io.Writer) error {
-	s, err := p.copy.Session(p.source, p.commit, p.base, p.projectBase, p.project)
+	start := p.copy.Session
+	if p.verify {
+		start = p.copy.SessionWithHead
+	}
+	s, err := start(p.source, p.commit, p.base, p.projectBase, p.project)
 	if err != nil {
 		return reviewCopyStop(err)
 	}
@@ -422,7 +564,108 @@ func (p *reviewJoinPlan) makeCopy(ctx context.Context, run openedRun, spec *runS
 	if len(left) > 0 {
 		fmt.Fprintf(out, "the copy for the reviewers leaves out %d links and submodules of the commit\n", len(left))
 	}
+	if p.verify {
+		// The session writes the checkout, so the commit that its HEAD points to, as the copy
+		// session read it, must be the commit of the copy and the diff.
+		head, err := p.copy.Head()
+		if err != nil {
+			return reviewCopyStop(err)
+		}
+		if head != p.commit {
+			return reviewStop("The checkout's HEAD is not the commit the review reads, so the review did not start",
+				fmt.Sprintf("The checkout's HEAD is %s, and the review reads %s", strconv.Quote(head), p.commit))
+		}
+		p.copyRun, p.copySpec = run, spec
+	}
+	p.changed, p.changedErr = p.copy.DiffPaths()
 	return nil
+}
+
+// headCheckLimit is how long [reviewJoinPlan.checkHead] lets its container run. The check
+// of a verdict has 90 seconds in all, see [runPushChecks.runAPICheck].
+var headCheckLimit = 30 * time.Second
+
+// headMoved is the error of [reviewJoinPlan.checkHead] for a checkout whose HEAD is not
+// the commit that the review read. Its text is the form of [reviewStop].
+type headMoved struct{ error }
+
+func (e headMoved) Unwrap() error { return e.error }
+
+// checkHead reads the HEAD of the Verify session's checkout again, in a container of the
+// run's image from the files of the git folder with no git, as the copy session read it,
+// and stops with a [headMoved] when it is not the commit of the review. Any other failure
+// to read it is a stop too. what is the end of the first line: what the caller did not do.
+//
+// shortcut: after the last read, HEAD stays unchanged only if no process writes the
+// checkout, and the git folder may change between the check of its type and the mount;
+// replace it when no process writes the checkout after the session. A verdict recorded at
+// a check binds the HEAD that was read then, and a later move does not change that
+// verdict; the end of the session reads HEAD again only when it posts the round.
+func (p *reviewJoinPlan) checkHead(ctx context.Context, what string) error {
+	if err := p.headLock.acquire(ctx); err != nil {
+		return err
+	}
+	defer p.headLock.release()
+	// The session writes the checkout: a git folder that it replaced with a link is never
+	// mounted.
+	if info, err := os.Lstat(p.source); err != nil || !info.IsDir() {
+		return reviewStop("The checkout's .git is not a folder any more, so "+what,
+			fmt.Sprintf("The review reads the HEAD from %s", strconv.Quote(p.source)))
+	}
+	s, err := p.copy.HeadSession(p.source)
+	if err != nil {
+		return reviewCopyStopAt(err, what)
+	}
+	// The read replaces state/head, so a read that writes none leaves no earlier commit.
+	if err := p.copy.RemoveHead(); err != nil {
+		var stopped *reviewcopy.Stop
+		if errors.As(err, &stopped) {
+			return reviewStop(stopped.Cause+", so "+what, shownErrorText(stopped.Detail))
+		}
+		return err
+	}
+	var out lastLine
+	c := gitContainerFor(p.copyRun, p.copySpec, p.copySpec.RunID, runcopy.GitSession{Command: s.Command, Args: s.Args, Env: s.Env, Dir: s.Dir},
+		[]wall.Mount{{Path: p.source, ReadOnly: true}, {Path: p.copy.Root()}}, &out)
+	c.Name = "qory-review-head-" + p.copySpec.RunID
+	limited, cancel := context.WithTimeout(ctx, headCheckLimit)
+	defer cancel()
+	code, err := runGitContainer(limited, c)
+	switch {
+	case ctx.Err() != nil:
+		return ctx.Err()
+	case limited.Err() != nil:
+		return reviewStop(fmt.Sprintf("Reading the checkout's HEAD passed its limit of %s, so %s", headCheckLimit, what), "")
+	case err != nil:
+		return reviewStop("The container that reads the checkout's HEAD did not start, so "+what, shownError(err))
+	case code != 0:
+		return headReadStop(code, out.text(), what)
+	}
+	head, err := p.copy.Head()
+	if err != nil {
+		return reviewCopyStopAt(err, what)
+	}
+	if head != p.commit {
+		return headMoved{reviewStop("The checkout's HEAD is not the commit the review read, so "+what,
+			fmt.Sprintf("The checkout's HEAD is %s, and the review read %s", strconv.Quote(head), p.commit))}
+	}
+	return nil
+}
+
+// headReadStop is the stop for a read of the checkout's HEAD that exited with code and
+// whose last line was text. A line of the script, "qory review copy: <reason>", is the
+// cause on line 1, and the exit code is line 2; any other last line follows the exit code.
+func headReadStop(code int, text, what string) error {
+	exited := fmt.Sprintf("Reading the checkout's HEAD exited with %d", code)
+	reason, ok := strings.CutPrefix(text, "qory review copy: ")
+	if ok {
+		reason = shownErrorText(reason)
+	}
+	if !ok || reason == "" {
+		return reviewStop(exited+", so "+what, shownErrorText(text))
+	}
+	first, size := utf8.DecodeRuneInString(reason)
+	return reviewStop(string(unicode.ToUpper(first))+reason[size:]+", so "+what, exited)
 }
 
 // maxShownProjectFiles is the most paths that [projectFilesStop] shows, and
@@ -467,8 +710,9 @@ func projectFilesStop(changed []string, baseRead bool) error {
 // build report is the newest version of the artifact type build-report that the stage
 // wrote, fetched through the run API; the member is left out when there is none.
 //
-// shortcut: no previous_findings, since qory keeps no findings of the rounds before;
-// replace it when qory has them.
+// previous_findings is the file of the findings of the earlier rounds that the group's
+// reviewers raised, with the replies to them; the member is left out when the work item
+// has none.
 func (p *reviewJoinPlan) inputs(ctx context.Context, in string) (reviewSessionInputs, error) {
 	dir := filepath.Join(in, reviewInputsDir)
 	if err := os.Mkdir(dir, 0o755); err != nil {
@@ -479,16 +723,52 @@ func (p *reviewJoinPlan) inputs(ctx context.Context, in string) (reviewSessionIn
 	}
 	suite := filepath.Join(dir, "suite-result.json")
 	diff := filepath.Join(dir, "commit.diff")
-	for _, c := range []struct{ from, to string }{{p.suiteFile, suite}, {p.copy.Diff(), diff}} {
+	files := []struct{ from, to string }{{p.suiteFile, suite}, {p.copy.Diff(), diff}}
+	if p.verify {
+		// A Verify session runs no full suite and writes no build report.
+		suite, files = "", files[1:]
+	}
+	for _, c := range files {
 		if err := copyReadOnly(c.from, c.to); err != nil {
 			return reviewSessionInputs{}, reviewStop(fmt.Sprintf("Copying %s into the review's inputs failed, so the review did not start", strconv.Quote(c.from)), shownError(err))
 		}
+	}
+	previous, err := p.previousFile(dir)
+	if err != nil {
+		return reviewSessionInputs{}, err
+	}
+	if p.verify {
+		return newReviewSessionInputs(p.commit, p.copy.Commit(), diff, p.reports, "", previous, "")
 	}
 	report, err := p.buildReport(ctx, filepath.Join(dir, "build-report"))
 	if err != nil {
 		return reviewSessionInputs{}, err
 	}
-	return newReviewSessionInputs(p.commit, p.copy.Commit(), diff, p.reports, suite, "", report)
+	return newReviewSessionInputs(p.commit, p.copy.Commit(), diff, p.reports, suite, previous, report)
+}
+
+// previousFile writes previous_findings into dir, read-only, and returns its path; "" when
+// the run has no findings or the group has none from the rounds before.
+func (p *reviewJoinPlan) previousFile(dir string) (string, error) {
+	if p.findings == nil {
+		return "", nil
+	}
+	data, err := previousFindings(p.round, p.stageSlug, p.roles, p.found)
+	if err != nil {
+		return "", reviewStop("The findings of the work item do not pass qory's checks, so the review did not start", shownError(err))
+	}
+	var file findingsFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return "", err
+	}
+	if len(file.Findings) == 0 {
+		return "", nil
+	}
+	path := filepath.Join(dir, openFindingsFile)
+	if err := os.WriteFile(path, data, 0o444); err != nil {
+		return "", reviewStop(fmt.Sprintf("Writing %s in the review's inputs failed, so the review did not start", strconv.Quote(path)), shownError(err))
+	}
+	return path, nil
 }
 
 // reviewModesStop is err, the error of a change of a mode of a folder or file of the
@@ -522,21 +802,7 @@ func (p *reviewJoinPlan) buildReport(ctx context.Context, dir string) (string, e
 	if err != nil {
 		return "", withCause(reviewStop("Reading the build report failed, so the review did not start", shownError(err)), err)
 	}
-	var found *runapi.Version
-	for _, a := range index.Artifacts {
-		if a.Type != "build-report" {
-			continue
-		}
-		for i := range a.Versions {
-			v := &a.Versions[i]
-			if v.Cancelled || v.Withdrawn || v.StageID == nil || *v.StageID != p.stage {
-				continue
-			}
-			if found == nil || v.At > found.At || v.At == found.At && v.Number > found.Number {
-				found = v
-			}
-		}
-	}
+	found := newestOfType(index, "build-report", p.stage)
 	if found == nil {
 		return "", nil
 	}
@@ -580,18 +846,18 @@ func (p *reviewJoinPlan) buildReport(ctx context.Context, dir string) (string, e
 // reports folder keeps the rules of [checkReviewReports] against the mounts and against
 // Written.
 func (p *reviewJoinPlan) check(join session.SessionSpec) error {
+	if p.verify {
+		return p.checkVerify(join)
+	}
 	if !join.WorkspaceReadOnly || join.Dir != p.work {
 		return reviewStop("The review's working folder is not the empty folder qory made, so the review did not start",
 			fmt.Sprintf("The working folder is %s", strconv.Quote(join.Dir)))
 	}
-	if err := checkReviewReports(p.reports, p.work, p.artifacts, p.home, join.Mounts, os.Geteuid()); err != nil {
+	if err := checkReviewReports(p.reports, p.work, p.artifacts, p.home, join.Mounts, os.Geteuid(), p.access); err != nil {
 		return err
 	}
-	for _, w := range join.Written {
-		if session.Overlap(w, p.reports) == "contains" {
-			return reviewStop("The review's reports folder lies in a folder that the session can write, so the review did not start",
-				fmt.Sprintf("The session can write %s, which contains %s", strconv.Quote(w), strconv.Quote(p.reports)))
-		}
+	if err := p.checkWritten(join.Written); err != nil {
+		return err
 	}
 	readOnly := map[string]int{}
 	for _, m := range join.Mounts {
@@ -613,4 +879,38 @@ func (p *reviewJoinPlan) check(join session.SessionSpec) error {
 			fmt.Sprintf("The copy is %s and the reports folder is %s", strconv.Quote(p.copy.Commit()), strconv.Quote(p.reports)))
 	}
 	return nil
+}
+
+// checkWritten stops a join whose places that it may write, written, contain the reports
+// folder.
+func (p *reviewJoinPlan) checkWritten(written []string) error {
+	for _, w := range written {
+		if session.Overlap(w, p.reports) == "contains" {
+			return reviewStop("The review's reports folder lies in a folder that the session can write, so the review did not start",
+				fmt.Sprintf("The session can write %s, which contains %s", strconv.Quote(w), strconv.Quote(p.reports)))
+		}
+	}
+	return nil
+}
+
+// newestOfType is the newest version of the artifacts of the type typ that the stage
+// wrote, leaving out a cancelled version and a withdrawal: the one with the latest time,
+// then the highest number. It is nil when no version qualifies.
+func newestOfType(index *runapi.Index, typ, stage string) *runapi.Version {
+	var found *runapi.Version
+	for _, a := range index.Artifacts {
+		if a.Type != typ {
+			continue
+		}
+		for i := range a.Versions {
+			v := &a.Versions[i]
+			if v.Cancelled || v.Withdrawn || v.StageID == nil || *v.StageID != stage {
+				continue
+			}
+			if found == nil || v.At > found.At || v.At == found.At && v.Number > found.Number {
+				found = v
+			}
+		}
+	}
+	return found
 }

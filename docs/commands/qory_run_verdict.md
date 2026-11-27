@@ -15,6 +15,10 @@ run_again may have fix, one line of 1 to 500 characters on how a person fixes th
 point. qory checks the file against contracts/harness/v1/verdict.schema.json before it
 sends or keeps anything.
 
+changes-requested takes --points too, a file in the same form with 1 to 20 points, each
+with the action run_again: what is wrong or missing for the next round. passed takes no
+--points.
+
 Any verdict may propose a track for the work item. Pass --track with the id of a track that
 the gate of the run's stage offers, such as small-change, and --track-reason with the
 reason, one sentence on one line of 1 to 300 characters. Pass both or neither.
@@ -39,6 +43,7 @@ qory run verdict passed|changes-requested|escalate [flags]
 ```
   qory run verdict passed
   qory run verdict passed --track small-change --track-reason "The change touches one file."
+  qory run verdict changes-requested --points points.json
   qory run verdict escalate --points points.json
 ```
 
@@ -46,7 +51,7 @@ qory run verdict passed|changes-requested|escalate [flags]
 
 ```
   -h, --help                  help for verdict
-      --points string         read the points of escalate, a JSON array, from this file
+      --points string         read the points of escalate or changes-requested, a JSON array, from this file
       --track string          propose the track with this id, one that the gate of the run's stage offers; pass it with --track-reason
       --track-reason string   give the reason for --track, one sentence on one line of 1 to 300 characters; pass it with --track
 ```

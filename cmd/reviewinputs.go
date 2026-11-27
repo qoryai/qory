@@ -38,8 +38,8 @@ type reviewSession struct {
 	// left out for a session at write-no-push access, such as verify-a-ticket, which runs
 	// no full suite.
 	SuiteResult string `json:"suite_result,omitempty"`
-	// PreviousFindings is the absolute path of open-findings.json of the round before,
-	// left out in every round, since qory keeps no findings of the rounds before.
+	// PreviousFindings is the absolute path of the file with the findings that the group's
+	// reviewers raised in the rounds before, left out when the work item has none.
 	PreviousFindings string `json:"previous_findings,omitempty"`
 	// BuildReport is the absolute path of the report of the implement-changes session,
 	// left out when there is none.

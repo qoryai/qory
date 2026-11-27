@@ -150,6 +150,7 @@ func Check(document []byte) error {
 
 // Points reads data, a JSON array of the points of an escalation for qory run verdict,
 // and checks it against the schema and [commandAction]. The error starts with the fix.
+// A changes-requested verdict takes run_again points alone, which its caller checks.
 // An error about one point contains the point's number, from 1, such as "Write each
 // point as {text, action}: point 2 has no action." Points does not check that a
 // question is open.

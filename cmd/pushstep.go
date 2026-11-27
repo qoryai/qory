@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/qoryai/forager/accesskey"
 	"github.com/qoryai/forager/event"
 	"github.com/qoryai/forager/session"
 	"github.com/qoryai/integrations/contracts"
@@ -627,12 +628,17 @@ func noResponse(err error) bool {
 }
 
 // retryAfter is the wait after err: its Retry-After, 1 second with none, at most
-// [maxSubmissionWait].
+// [maxSubmissionWait]. The Retry-After is the one of a run API error, or of a refusal on
+// the gateway's link.
 func retryAfter(err error) time.Duration {
 	wait := time.Second
 	var apiError *runapi.Error
-	if errors.As(err, &apiError) && apiError.RetryAfter > 0 {
+	var refusal *accesskey.Refusal
+	switch {
+	case errors.As(err, &apiError) && apiError.RetryAfter > 0:
 		wait = time.Duration(apiError.RetryAfter) * time.Second
+	case errors.As(err, &refusal) && refusal.RetryAfter > 0:
+		wait = refusal.RetryAfter
 	}
 	return min(wait, maxSubmissionWait)
 }

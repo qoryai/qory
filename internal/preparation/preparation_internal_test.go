@@ -1205,3 +1205,112 @@ func configValue(value string) string {
 func smudge(marker, word string) string {
 	return "sh -c 'echo " + word + " >> \"" + marker + "\"; cat'"
 }
+
+// TestFetchCommitFetchesAnEarlierCommitOfTheRepositoryAtDepthOne is a working folder at
+// the second commit of a repository, fetched at depth one: FetchCommit makes the first
+// commit an object of the folder, fetches nothing when the commit is there, leaves HEAD
+// where it is, and returns an error for a value that is not a commit id and for a commit
+// that the remote does not have.
+func TestFetchCommitFetchesAnEarlierCommitOfTheRepositoryAtDepthOne(t *testing.T) {
+	needGit(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "trunk", nil)
+	dir := emptyFolder(t)
+	if _, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop")); err != nil {
+		t.Fatal(err)
+	}
+	head := run(t, dir, "rev-parse", "HEAD")
+	first := run(t, filepath.Join(base, "acme", "shop.git"), "rev-parse", "trunk~1")
+	if _, err := exec.Command("git", "-C", dir, "cat-file", "-e", first+"^{commit}").CombinedOutput(); err == nil {
+		t.Fatalf("the folder has %s before the fetch", first)
+	}
+	fetch := func(commit string) error {
+		return FetchCommit(context.Background(), dir, os.Environ(), "git.example.com", "acme/shop", commit, testProxy)
+	}
+	if err := fetch(first); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(t, dir, "cat-file", "-t", first); got != "commit" {
+		t.Errorf("%s is a %s, want a commit", first, got)
+	}
+	if got := run(t, dir, "rev-parse", "HEAD"); got != head {
+		t.Errorf("HEAD is %s, want %s", got, head)
+	}
+	// With the commit in the folder, no remote is reached: the repository is gone.
+	if err := os.RemoveAll(filepath.Join(base, "acme", "shop.git")); err != nil {
+		t.Fatal(err)
+	}
+	if err := fetch(first); err != nil {
+		t.Errorf("a commit that the folder has was fetched again: %v", err)
+	}
+	if err := fetch("--upload-pack=x"); err == nil || !strings.Contains(err.Error(), "is not a commit id") {
+		t.Errorf("error %v, want a refusal of a value that is no commit id", err)
+	}
+	if err := fetch(strings.Repeat("a", 40)); err == nil {
+		t.Error("a commit that the remote does not have was fetched")
+	}
+}
+
+// TestFetchCommitRunsGitAsThePushStepDoes runs FetchCommit with a program first on the
+// PATH that writes its arguments to a file and runs git: the fetch has the options of
+// every git of the push step. A folder whose configuration has a remote key that an
+// agent wrote stops FetchCommit before it reads or fetches the commit.
+func TestFetchCommitRunsGitAsThePushStepDoes(t *testing.T) {
+	needGit(t)
+	base := t.TempDir()
+	remote(t, base, "acme/shop", "trunk", nil)
+	dir := emptyFolder(t)
+	if _, err := prepare(context.Background(), dir, env("git.example.com", "acme/shop")); err != nil {
+		t.Fatal(err)
+	}
+	first := run(t, filepath.Join(base, "acme", "shop.git"), "rev-parse", "trunk~1")
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	calls := filepath.Join(bin, "calls")
+	write(t, filepath.Join(bin, "git"), "#!/bin/sh\necho \"$*\" >> "+shellQuote(calls)+"\nexec "+shellQuote(git)+" \"$@\"\n")
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(filepath.ListSeparator)+os.Getenv("PATH"))
+	fetch := func() error {
+		return FetchCommit(context.Background(), dir, os.Environ(), "git.example.com", "acme/shop", first, testProxy)
+	}
+	if err := fetch(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fetches int
+	for _, line := range strings.Split(string(got), "\n") {
+		if !strings.Contains(line, " fetch ") {
+			continue
+		}
+		fetches++
+		if !strings.Contains(line, "-c gc.auto=0 -c maintenance.auto=false") {
+			t.Errorf("the fetch lacks the options of the push step: %s", line)
+		}
+	}
+	if fetches != 1 {
+		t.Errorf("%d fetches in:\n%s", fetches, got)
+	}
+
+	run(t, dir, "config", "remote.origin.proxy", "http://proxy.example.com")
+	if err := os.Remove(calls); err != nil {
+		t.Fatal(err)
+	}
+	other := strings.Repeat("b", 40)
+	err = FetchCommit(context.Background(), dir, os.Environ(), "git.example.com", "acme/shop", other, testProxy)
+	if err == nil || !strings.Contains(err.Error(), "so qory fetched nothing") {
+		t.Errorf("error %v, want a stop of the check of the folder", err)
+	}
+	// The check itself runs git; no git reads the commit or fetches it.
+	got, _ = os.ReadFile(calls)
+	if strings.Contains(string(got), "rev-parse --verify") || strings.Contains(string(got), " fetch ") {
+		t.Errorf("git read or fetched the commit after the check failed:\n%s", got)
+	}
+}

@@ -44,11 +44,31 @@ func TestReadOutputJoinsTheChunksOfTheStep(t *testing.T) {
 func TestReadOutputKeepsTheLastBytesOfALongOutput(t *testing.T) {
 	var lines []string
 	for i := 0; i < 5; i++ {
-		lines = append(lines, logLine(2, strings.Repeat(string(rune('a'+i)), MaxOutputBytes)))
+		lines = append(lines, logLine(2, strings.Repeat(string(rune('a'+i)), MaxOutputBytes-1)+"\n"))
 	}
 	got := ReadOutput(writeEventsFile(t, lines...), 2)
-	if len(got) != MaxOutputBytes || got[0] != 'e' || got[len(got)-1] != 'e' {
-		t.Errorf("ReadOutput has %d bytes from %q to %q, want %d bytes of the last chunk", len(got), got[0], got[len(got)-1], MaxOutputBytes)
+	if len(got) != MaxOutputBytes || got[0] != 'e' || got[len(got)-1] != '\n' {
+		t.Errorf("ReadOutput has %d bytes, want the %d bytes of the last chunk", len(got), MaxOutputBytes)
+	}
+}
+
+func TestReadOutputStartsAtALineWhenTheCapCutsALine(t *testing.T) {
+	// The cap cuts inside the line of c, in the middle of the read and at its end.
+	var lines []string
+	for _, text := range []string{"a\n", strings.Repeat("b", MaxOutputBytes) + "\n", strings.Repeat("c", MaxOutputBytes) + "\n", "d\n", "e\n"} {
+		lines = append(lines, logLine(2, text))
+	}
+	if got := string(ReadOutput(writeEventsFile(t, lines...), 2)); got != "d\ne\n" {
+		t.Errorf("ReadOutput = %q, want the lines after the cut line", got[max(0, len(got)-10):])
+	}
+	// A line that is cut in the middle of the read goes on in the next chunk.
+	long := logLine(2, strings.Repeat("x", 3*MaxOutputBytes))
+	if got := string(ReadOutput(writeEventsFile(t, long, logLine(2, "end of the line\nlast\n")), 2)); got != "last\n" {
+		t.Errorf("ReadOutput = %q, want the line after the one that the cap cut", got)
+	}
+	// One line of more than the cap has no line break to start at.
+	if got := string(ReadOutput(writeEventsFile(t, logLine(2, strings.Repeat("x", 3*MaxOutputBytes))), 2)); got != NoTextLine {
+		t.Errorf("ReadOutput of one long line = %q, want %q", got, NoTextLine)
 	}
 }
 

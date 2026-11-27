@@ -54,6 +54,12 @@ func noReviewGuard(runtime string) error {
 	return reviewStop(fmt.Sprintf("qory has no argument that limits a review session's tools on %s, so the review did not start", runtime), "")
 }
 
+// noVerifyGuard is the stop of a Verify session on runtime, a [render.SettingsInliner]
+// with no [render.VerifyGuard], see [verifyFoldersOf].
+func noVerifyGuard(runtime string) error {
+	return reviewStop(fmt.Sprintf("Run this workflow on another runtime: qory has no Verify settings for %s, so the review did not start", runtime), "")
+}
+
 // reviewWorkspace is the folders that a review join reads and writes in place of the
 // run's checkout: work, the empty folder that is the session's working folder, commit,
 // the commit folder of the fresh copy, and reports, the writable mount of the session's

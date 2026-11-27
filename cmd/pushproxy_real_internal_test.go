@@ -243,6 +243,8 @@ type realControl struct {
 	srv       *httptest.Server
 	accessKey *accesskey.Key
 	signer    *accesskey.Key
+	// findings, when set, serves the findings of the run API in place of the receiver.
+	findings http.HandlerFunc
 }
 
 func startRealControl(t *testing.T) *realControl {
@@ -290,6 +292,10 @@ func startRealControlWith(t *testing.T, document string) *realControl {
 	c.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == realSecrets {
 			c.answerSecrets(w, r)
+			return
+		}
+		if c.findings != nil && strings.HasSuffix(r.URL.Path, "/findings") {
+			c.findings(w, r)
 			return
 		}
 		handler.ServeHTTP(w, r)

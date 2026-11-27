@@ -18,6 +18,7 @@ import (
 	"github.com/qoryai/qory/internal/exports"
 	"github.com/qoryai/qory/internal/preparation"
 	"github.com/qoryai/qory/internal/provisioner"
+	"github.com/qoryai/qory/internal/pushcheck"
 	"github.com/qoryai/qory/internal/render"
 	"github.com/qoryai/qory/internal/runapi"
 )
@@ -48,7 +49,7 @@ const (
 // The words of the outputs of a session. Line 1 is the fix, then the cause; a type is cut
 // as [provisioner.ShownType] cuts it.
 const (
-	textOutputHasMember = "Remove %s from the %s output: qory fills it at the push."
+	textOutputHasMember = pushcheck.TextFilledMember
 	textOutputBroken    = "Fix the %s output: it breaks its schema at %s."
 	textOutputNotJSON   = "Write the %s output as one JSON object: the file is not one."
 	textOutputUnread    = "Fix the %s output so that qory can read it.\n  %s"
@@ -346,6 +347,25 @@ func marksCommits(t exports.ProcessType) bool {
 		}
 	}
 	return false
+}
+
+// requiresCommits reports whether t marks a member with [fillCommits] and lists each such
+// member in the root required list of its schema. A session cannot set a member that qory
+// fills, but it can leave out an optional one, so only a required member shows that qory
+// filled the commits of a version.
+func requiresCommits(t exports.ProcessType) bool {
+	var root struct {
+		Required []string `json:"required,case:strict"`
+	}
+	if !marksCommits(t) || json.Unmarshal(t.Schema, &root) != nil {
+		return false
+	}
+	for name, mark := range t.Marks {
+		if mark == fillCommits && !slices.Contains(root.Required, name) {
+			return false
+		}
+	}
+	return true
 }
 
 // outputName is the name of the artifact that a version of the type t goes to: for a delivered
